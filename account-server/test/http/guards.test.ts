@@ -263,12 +263,19 @@ describe('guards', () => {
 		}
 	});
 
+	// 上限は時計に合わせた区切りごとに数えるので (wrangler.jsonc の ratelimits)、送る途中で区切りをまたぐと
+	// 上限に届かないことがある。またいでも片側で上限 (いちばん大きい 10) を超えるよう、その2倍より多く送る。
+	async function sendUntilLimited(send: () => Promise<Response>): Promise<number[]> {
+		const statuses: number[] = [];
+		for (let n = 0; n < 21 && !statuses.includes(429); n++) statuses.push((await send()).status);
+		return statuses;
+	}
+
 	it('limits each sender', async () => {
 		vi.spyOn(console, 'log').mockImplementation(() => {});
 		for (const [i, entry] of guarded('limit-ip').entries()) {
 			const ip = `198.51.100.${i + 1}`;
-			const statuses: number[] = [];
-			for (let n = 0; n < 12; n++) statuses.push((await entry.send({ ip })).status);
+			const statuses = await sendUntilLimited(() => entry.send({ ip }));
 			expect(statuses, entry.route).toContain(429);
 			expect(statuses[0], entry.route).not.toBe(429);
 			// ほかの送り主は止めない。
@@ -281,8 +288,7 @@ describe('guards', () => {
 		const other = await signIn('guard-limit-other@example.com');
 		for (const entry of guarded('limit-account')) {
 			// 送り主 (IP) は毎回変わる。
-			const statuses: number[] = [];
-			for (let n = 0; n < 11; n++) statuses.push((await entry.send({ cookie })).status);
+			const statuses = await sendUntilLimited(() => entry.send({ cookie }));
 			expect(statuses, entry.route).toContain(429);
 			expect(statuses[0], entry.route).not.toBe(429);
 			expect((await entry.send({ cookie: other.cookie })).status, entry.route).not.toBe(429);

@@ -2535,7 +2535,7 @@ fn resume_hotkey_after_menu(app: &AppHandle) {
     // 対になる開く通知を受けていない閉じる通知（観測を始める前に開いていたメニューなど）は数えない
     let Ok(depth) = state
         .menu_depth
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |depth| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |depth| {
             depth.checked_sub(1)
         })
     else {
