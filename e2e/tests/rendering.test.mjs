@@ -456,9 +456,9 @@ test.describe('描かれ方', () => {
 			{ label: '第三者のソフトウェアのウィンドウ' }
 		);
 		await client.switchToWindow(licensesHandle);
-		await client.$('details').waitForDisplayed({ timeout: 5000 });
-		// 1件開いて、本文の見え方も撮る
-		await client.$('details summary').click();
+		// パッケージごとに details が並ぶ。1件目を開いて、本文の見え方も撮る
+		await client.$('details', { strict: false }).waitForDisplayed({ timeout: 5000 });
+		await client.$('details summary', { strict: false }).click();
 		try {
 			await inspect(client, 'licenses', { hwnd: licensesHwnd, minSize: LICENSES_MIN_SIZE });
 		} catch (error) {
