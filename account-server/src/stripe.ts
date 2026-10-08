@@ -1,0 +1,283 @@
+/**
+ * Stripe での AI の残高の販売 (→ docs/account-server.md「購入」)。
+ * SDK は使わず、要る3つ (Checkout Session を作る・取り直す・webhook の署名を確かめる) だけを fetch と Web Crypto で書く。
+ */
+
+/** 送られてから受け付けるまでの猶予。古い webhook を送り直されても通さないように (Stripe の SDK の既定と同じ)。 */
+const WEBHOOK_TOLERANCE = 300;
+
+/** 同じ Stripe のアカウントで売るほかの製品の webhook と見分ける印。Checkout Session の metadata に付ける。 */
+export const PRODUCT = 'mawok-ai';
+
+/** Stripe が断った頼み。`status` が 409 なら、同じ Idempotency-Key の頼みを Stripe が処理している最中。 */
+export class StripeError extends Error {
+	constructor(
+		readonly status: number,
+		body: string
+	) {
+		super(`Stripe responded ${status}: ${body}`);
+	}
+}
+
+export type StripeConfig = {
+	secretKey: string;
+	webhookSecret: string;
+	creditsPriceId: string;
+	taxRateId: string;
+};
+
+/** 秘密の値が3つと税率がそろったときだけ売る。手元で動かすときは無くてよい。 */
+export function stripeConfig(env: Env): StripeConfig | undefined {
+	const {
+		STRIPE_SECRET_KEY,
+		STRIPE_WEBHOOK_SECRET,
+		STRIPE_AI_CREDITS_PRICE_ID,
+		STRIPE_TAX_RATE_ID
+	} = env;
+	if (
+		!STRIPE_SECRET_KEY ||
+		!STRIPE_WEBHOOK_SECRET ||
+		!STRIPE_AI_CREDITS_PRICE_ID ||
+		!STRIPE_TAX_RATE_ID
+	) {
+		return undefined;
+	}
+	return {
+		secretKey: STRIPE_SECRET_KEY,
+		webhookSecret: STRIPE_WEBHOOK_SECRET,
+		creditsPriceId: STRIPE_AI_CREDITS_PRICE_ID,
+		taxRateId: STRIPE_TAX_RATE_ID
+	};
+}
+
+/**
+ * 日本からの買い手には直接、ほかの国からの買い手には Managed Payments で売る。
+ * 国はアクセス元の IP で決める。分からなければ MP にする (MP は日本の買い手にも売れる)。
+ */
+export function usesManagedPayments(country: string | undefined): boolean {
+	return country !== 'JP';
+}
+
+/**
+ * Sign in with Apple の転送用アドレスのドメイン。2026 年の後半から新しいアドレスは private.icloud.com で出て、
+ * 前からのアドレスも使い続けられる (Apple Developer News「Update: New domain for Sign in with Apple」2026-08-24)。
+ */
+const APPLE_RELAY_DOMAINS = ['privaterelay.appleid.com', 'private.icloud.com'];
+
+/** 明細に出す、この製品の表記 (アカウントの接頭辞に続く)。英字とカナは10文字、漢字は9文字まで。 */
+const STATEMENT_SUFFIX = { latin: 'MAWOK', kanji: 'Mawok', kana: 'マオック' };
+
+/**
+ * 残高を買う Checkout Session を作る。`expiresAt` (UNIX 秒) は Stripe の決まりで30分以上先。
+ * 同じ `idempotencyKey` で頼み直すと、Stripe は最初に作った Session を返す (24時間まで)。
+ */
+export async function createCheckoutSession(
+	config: StripeConfig,
+	{
+		accountId,
+		email,
+		lang,
+		successUrl,
+		cancelUrl,
+		expiresAt,
+		submitMessage,
+		managedPayments,
+		buyerCountry,
+		idempotencyKey
+	}: {
+		accountId: string;
+		email: string;
+		lang: string;
+		successUrl: string;
+		cancelUrl: string;
+		expiresAt: number;
+		/** 支払いのボタンの下に出す文言。MP の Session では送れないので、国内の分だけ渡す。 */
+		submitMessage?: string;
+		managedPayments: boolean;
+		/** 買ったときのアクセス元の国。台帳に残すだけで、振り分けのほかには使わない。 */
+		buyerCountry?: string;
+		idempotencyKey: string;
+	}
+): Promise<{ url: string }> {
+	const params = new URLSearchParams({
+		mode: 'payment',
+		'line_items[0][price]': config.creditsPriceId,
+		'line_items[0][quantity]': '1',
+		client_reference_id: accountId,
+		'metadata[product]': PRODUCT,
+		locale: lang,
+		success_url: successUrl,
+		cancel_url: cancelUrl,
+		expires_at: String(expiresAt),
+		// 指定しないとアカウントの既定 (MP が有効) になるので、国内の分も明示する。
+		'managed_payments[enabled]': String(managedPayments)
+	});
+	// MP の Session では、払い方・税・明細の表記・支払いの画面の文言を Stripe が決め、指定すると断られる。
+	if (!managedPayments) {
+		for (const [key, value] of Object.entries({
+			// カードだけにする。後から払う方法 (コンビニ払いなど) は入金まで日がかかり、戻り先の画面で待ち切れない。
+			'payment_method_types[0]': 'card',
+			// 領収書を適格簡易請求書にするための、税率と税額 (税込み 10%)。
+			'line_items[0][tax_rates][0]': config.taxRateId,
+			'payment_intent_data[statement_descriptor_suffix]': STATEMENT_SUFFIX.latin,
+			'payment_method_options[card][statement_descriptor_suffix_kanji]': STATEMENT_SUFFIX.kanji,
+			'payment_method_options[card][statement_descriptor_suffix_kana]': STATEMENT_SUFFIX.kana
+		})) {
+			params.set(key, value);
+		}
+	}
+	if (buyerCountry) params.set('metadata[buyer_country]', buyerCountry);
+	// Checkout は渡したメールを直させない。Apple の転送用アドレスには、登録していない Stripe からの領収書が届かないので、
+	// 渡さずに支払いの画面で入れてもらう。
+	if (!APPLE_RELAY_DOMAINS.some((domain) => email.endsWith(`@${domain}`))) {
+		params.set('customer_email', email);
+	}
+	// 特定商取引法 12条の6 の最終確認画面に要る、引き渡しと返金の扱い。Markdown のリンクを書ける。
+	// MP の分は、同じ事項を買う画面 (→ src/pages.ts の confirmPage) にだけ出す。
+	if (submitMessage) params.set('custom_text[submit][message]', submitMessage);
+	const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+		method: 'POST',
+		headers: {
+			authorization: `Bearer ${config.secretKey}`,
+			'idempotency-key': idempotencyKey
+		},
+		body: params
+	});
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	return res.json<{ url: string }>();
+}
+
+/** 付けてよいと確かめた支払い。台帳に残す。 */
+type Purchase = {
+	sessionId: string;
+	accountId: string;
+	paymentIntentId: string;
+	/** 払われた額と通貨 (Price のもの。最小の単位で、円ならそのまま)。 */
+	amount: number;
+	currency: string;
+	managedPayments: boolean;
+	/** カードで払ったときの発行国。振り分けや返金には使わない。 */
+	cardCountry: string | null;
+	/** 買ったときのアクセス元の国。 */
+	buyerCountry: string | null;
+	/**
+	 * 国内の取引か。消費税の課税売上を数えるのに使い、アカウントを消しても残す。
+	 * 国は、買い手の住所の国、無ければカードの発行国で見る。どちらも無ければ、アクセス元の国で見る。
+	 */
+	domestic: boolean;
+};
+
+type CheckoutSession = {
+	id: string;
+	client_reference_id: string | null;
+	payment_status: string;
+	currency: string;
+	amount_total: number | null;
+	metadata: Record<string, string> | null;
+	managed_payments: { enabled: boolean } | null;
+	customer_details: { address: { country: string | null } | null } | null;
+	line_items: {
+		data: {
+			quantity: number | null;
+			price: { id: string; unit_amount: number | null; currency: string } | null;
+		}[];
+	};
+	payment_intent: {
+		id: string;
+		latest_charge: { payment_method_details: { card?: { country: string | null } } | null } | null;
+	} | null;
+};
+
+/**
+ * 知らせの本文は信じず、Checkout Session を Stripe から取り直して、付けてよい支払いかを確かめる。
+ * この製品のものでない・払われていない・中身が違うときは `undefined`。
+ * 額は Price の額のまま (税込み) で、Adaptive Pricing で買い手の通貨で払っても Session の額と通貨は Price のまま。
+ */
+export async function confirmPurchase(
+	config: StripeConfig,
+	sessionId: string
+): Promise<Purchase | undefined> {
+	const query = new URLSearchParams([
+		['expand[]', 'line_items'],
+		['expand[]', 'payment_intent.latest_charge']
+	]);
+	const res = await fetch(
+		`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}?${query}`,
+		{ headers: { authorization: `Bearer ${config.secretKey}` } }
+	);
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	const session = await res.json<CheckoutSession>();
+	if (session.metadata?.product !== PRODUCT || session.payment_status !== 'paid') return undefined;
+	const items = session.line_items.data;
+	const price = items[0]?.price;
+	if (
+		!session.client_reference_id ||
+		!session.payment_intent ||
+		items.length !== 1 ||
+		items[0].quantity !== 1 ||
+		price?.id !== config.creditsPriceId ||
+		session.currency !== price.currency ||
+		session.amount_total === null ||
+		session.amount_total !== price.unit_amount
+	) {
+		// 払われたのに付けられない。Price の設定の誤りなどで起きうるので、手で調べられるよう残す (`wrangler tail`)。
+		console.error('Paid checkout does not match the AI credits price', {
+			session: session.id,
+			currency: session.currency,
+			amountTotal: session.amount_total,
+			items: items.map((item) => ({ price: item.price, quantity: item.quantity }))
+		});
+		return undefined;
+	}
+	const cardCountry =
+		session.payment_intent.latest_charge?.payment_method_details?.card?.country ?? null;
+	const buyerCountry = session.metadata?.buyer_country ?? null;
+	const country = session.customer_details?.address?.country || cardCountry || buyerCountry;
+	return {
+		sessionId: session.id,
+		accountId: session.client_reference_id,
+		paymentIntentId: session.payment_intent.id,
+		amount: session.amount_total,
+		currency: session.currency,
+		managedPayments: session.managed_payments?.enabled === true,
+		cardCountry,
+		buyerCountry,
+		domestic: country === 'JP'
+	};
+}
+
+/**
+ * `Stripe-Signature: t=<秒>,v1=<署名>[,v1=...]` を確かめる。署名は `<秒>.<本文>` の HMAC-SHA256。
+ * 本文は受け取ったままのバイト列で確かめる (JSON を読み直すと並びが変わって通らない)。
+ */
+export async function verifyWebhook(
+	config: StripeConfig,
+	body: string,
+	header: string | undefined,
+	nowSeconds: number
+): Promise<boolean> {
+	const parts = (header ?? '').split(',').map((part) => part.trim().split('='));
+	const timestamp = parts.find(([k]) => k === 't')?.[1];
+	const signatures = parts.filter(([k]) => k === 'v1').map(([, v]) => v);
+	if (!timestamp || signatures.length === 0) return false;
+	if (Math.abs(nowSeconds - Number(timestamp)) > WEBHOOK_TOLERANCE) return false;
+	const key = await crypto.subtle.importKey(
+		'raw',
+		new TextEncoder().encode(config.webhookSecret),
+		{ name: 'HMAC', hash: 'SHA-256' },
+		false,
+		['verify']
+	);
+	const signed = new TextEncoder().encode(`${timestamp}.${body}`);
+	for (const signature of signatures) {
+		const bytes = hexToBytes(signature);
+		// 比べるのは verify に任せる (中で時間の揃った比較をする)。
+		if (bytes && (await crypto.subtle.verify('HMAC', key, bytes, signed))) return true;
+	}
+	return false;
+}
+
+function hexToBytes(hex: string): Uint8Array | undefined {
+	if (!/^(?:[0-9a-f]{2})+$/.test(hex)) return undefined;
+	return Uint8Array.from(hex.match(/../g)!, (b) => parseInt(b, 16));
+}

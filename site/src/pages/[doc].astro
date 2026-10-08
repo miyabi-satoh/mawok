@@ -1,0 +1,21 @@
+---
+import { getCollection, render } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import Breadcrumb from '../components/Breadcrumb.astro';
+
+export async function getStaticPaths() {
+  const legal = await getCollection('legal');
+  return legal.map((entry) => ({ params: { doc: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+---
+
+<Base title={`${entry.data.title} | Mawok`}>
+  <Breadcrumb items={[{ label: 'Mawok', href: '/' }, { label: entry.data.title }]} />
+  <h1>{entry.data.title}</h1>
+  <p class="meta">最終改定日: {entry.data.updated.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })}</p>
+  <Content />
+  <p><a href="/">Mawok の紹介へ戻る</a></p>
+</Base>

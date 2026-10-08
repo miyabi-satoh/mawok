@@ -1,0 +1,70 @@
+name: CI
+
+# PR ごとに `just ci` を流し、通ることを main へのマージの条件にする (ブランチの保護の必須のチェック)。
+# スカッシュマージ後の main への push では流さない。pull_request は main の先端とのマージ結果に対して走り、
+# マージの前に main へ追いつくことも保護で求めるので、同じ内容をもう一度確かめても情報が増えない。
+on:
+  # paths-ignore で文書だけの PR を飛ばさない。必須のチェックが走らないと、その PR はマージできなくなる。
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    # OS ごとに作りを分けたコード (#[cfg(windows)]・#[cfg(target_os = "macos")]) は、その OS の clippy でしか見られない
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # licenses-check が使う。版は DEVELOPMENT.md のセットアップと揃える。
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.2
+
+      - uses: extractions/setup-just@v4
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            account-server/pnpm-lock.yaml
+            site/pnpm-lock.yaml
+
+      # Windows の既定の pwsh は途中のコマンドが落ちても止まらないので、bash で流す
+      - name: Install dependencies
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir account-server install --frozen-lockfile
+          pnpm --dir site install --frozen-lockfile
+
+      # 画面の部品テスト (vitest の browser モード) が chromium で動くため。
+      - name: Install Playwright browser (chromium)
+        run: pnpm exec playwright install chromium
+
+      - name: Run CI checks
+        run: just ci

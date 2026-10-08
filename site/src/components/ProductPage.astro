@@ -1,0 +1,280 @@
+---
+import { getCollection, getEntry, render } from 'astro:content';
+import ComingSoon from './ComingSoon.astro';
+import ProductShots from './ProductShots.astro';
+
+const product = (await getEntry('product', 'index'))!;
+const { Content } = await render(product);
+const legalOrder = ['terms', 'privacy', 'tokushoho'];
+const legal = (await getCollection('legal')).sort((a, b) => legalOrder.indexOf(a.id) - legalOrder.indexOf(b.id));
+---
+
+<div class="product-page" style={`--c: ${product.data.color}`}>
+  <section class="hero" aria-labelledby="product-name">
+    <div class="hero-inner">
+      <div class="hero-text">
+        <h1 id="product-name" style={`--len: ${product.data.name.length}`}>{product.data.name}</h1>
+        <p class="tagline">{product.data.tagline}</p>
+        {product.data.lead.trim().split('\n').map((line) => <p class="hero-lead">{line}</p>)}
+        <ul class="badges">
+          {product.data.badges.map((badge) => <li>{badge}</li>)}
+        </ul>
+        <p class="hero-action">
+          <a class="cta" href="#download">ダウンロード（準備中）</a>
+        </p>
+      </div>
+      <ProductShots shots={product.data.hero} />
+    </div>
+  </section>
+
+  <div class="page page-body">
+    <div class="body">
+      <Content />
+      <ComingSoon />
+      <h2 id="legal">規約</h2>
+      <ul>
+        {
+          legal.map((entry) => (
+            <li>
+              <a href={`/${entry.id}/`}>{entry.data.title}</a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </div>
+</div>
+
+<style is:global>
+  /* 冒頭は、プロダクトの色の帯に、名前を大きく、画面の画像を重ねて出す。
+     スクロールすると、奥の画像ほど速く動いて、奥行きが出る（動きを減らす設定では止める） */
+  .product-page {
+    --accent: var(--c);
+    overflow-x: clip;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .product-page {
+      --accent: color-mix(in oklab, var(--c), white 45%);
+    }
+  }
+
+  .product-page .hero {
+    background: var(--c);
+    color: #fff;
+    padding: 1.5rem 0 3rem;
+  }
+
+  /* 幅はトップの帯・サイトの頭と同じ（余白を含めて 72rem） */
+  .hero-inner {
+    padding: 0 1rem;
+    display: grid;
+    gap: 2.5rem;
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+
+  .hero-text {
+    container-type: inline-size;
+  }
+
+  .hero h1 {
+    margin: 1.5rem 0 0.75rem;
+    color: #fff;
+    font-family: 'M PLUS 1 Variable', sans-serif;
+    /* 名前を1行に収める。列の幅と文字数から、はみ出さない大きさに下げる */
+    font-size: min(clamp(3rem, 11vw, 6.5rem), calc(160cqi / var(--len)));
+    white-space: nowrap;
+    font-weight: 850;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+
+  .hero .tagline {
+    margin: 0 0 1.5rem;
+    font-family: 'M PLUS 1 Variable', sans-serif;
+    font-size: clamp(1.25rem, 3.2vw, 1.75rem);
+    font-weight: 700;
+    line-height: 1.45;
+    word-break: auto-phrase;
+  }
+
+  .hero-lead {
+    margin: 0 0 0.5rem;
+    max-width: 34em;
+    color: rgb(255 255 255 / 0.9);
+  }
+
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 1.5rem 0 2rem;
+    padding: 0;
+    list-style: none;
+    font-size: 0.9375rem;
+  }
+
+  .badges li {
+    margin: 0;
+    padding: 0.2rem 0.85rem;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.16);
+  }
+
+  .hero-action {
+    margin: 0;
+  }
+
+  .cta {
+    display: inline-block;
+    padding: 0.75rem 1.75rem;
+    border-radius: 0.5rem;
+    background: #fff;
+    color: var(--c);
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .cta:hover {
+    text-decoration: underline;
+  }
+
+  .hero .cta:focus-visible {
+    outline-color: #fff;
+    outline-offset: 3px;
+  }
+
+  @media (min-width: 56rem) {
+    .product-page .hero {
+      padding: 2rem 0 4rem;
+    }
+
+    .hero-inner {
+      padding: 0 1.5rem;
+      grid-template-columns: 1.05fr 1fr;
+      align-items: center;
+    }
+  }
+
+  /* 本文 */
+  .page-body {
+    padding-top: 2.5rem;
+  }
+
+  /* 読み物の本文の幅 (styles/global.css の .reading と同じ) */
+  .page-body > .body {
+    max-width: 44rem;
+  }
+
+  .product-page .block > h2,
+  .product-page #download,
+  .product-page #legal {
+    font-family: 'M PLUS 1 Variable', sans-serif;
+    font-size: clamp(1.625rem, 4vw, 2.125rem);
+    font-weight: 800;
+    line-height: 1.3;
+    margin: 4.5rem 0 1.25rem;
+  }
+
+  .product-page .block > h2::after {
+    content: '';
+    display: block;
+    width: 3rem;
+    height: 0.3rem;
+    margin-top: 0.6rem;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  /* 「**ラベル**: 説明」の箇条書きは、ラベルを大きくして2列に並べる */
+  .product-page .block ul:has(> li > strong:first-child) {
+    display: grid;
+    gap: 1.75rem 2rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .product-page .block ul:has(> li > strong:first-child) > li {
+    margin: 0;
+    padding-top: 0.75rem;
+    border-top: 3px solid var(--accent);
+    line-height: 1.7;
+  }
+
+  .product-page .block ul:has(> li > strong:first-child) > li > strong:first-child {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-family: 'M PLUS 1 Variable', sans-serif;
+    font-size: 1.1875rem;
+    font-weight: 800;
+    color: var(--ink-strong);
+  }
+
+  @media (min-width: 40rem) {
+    .product-page .block ul:has(> li > strong:first-child) {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  /* 画面の節。文と画像の組を並べる。広い画面では、画像が止まったまま文が流れ、次の組の画像に入れ替わる */
+  .step {
+    margin: 0 0 2.5rem;
+  }
+
+  .step-shot p {
+    margin: 0;
+  }
+
+  .step-shot img {
+    border-radius: 0.75rem;
+    box-shadow: 0 1rem 2.5rem -1rem rgb(0 0 0 / 0.45);
+  }
+
+  @media (min-width: 48rem) {
+    .step {
+      display: grid;
+      grid-template-columns: 1fr 1.35fr;
+      gap: 2rem;
+      min-height: 75vh;
+      margin: 0;
+    }
+
+    /* 文も画像と一緒に止め、組ごとに1枚のスライドのように入れ替える */
+    .step-text {
+      position: sticky;
+      top: 40vh;
+      align-self: start;
+      margin-top: 32vh;
+      font-size: 1.125rem;
+    }
+
+    .step-shot {
+      position: sticky;
+      top: 8vh;
+      align-self: start;
+      padding: 2rem 0;
+    }
+
+    .step-shot img {
+      max-height: 76vh;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .step-shot img {
+        animation: step-in linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 80%;
+      }
+
+      @keyframes step-in {
+        from {
+          opacity: 0;
+          transform: translateY(3rem) scale(0.92) rotate(-2deg);
+        }
+      }
+    }
+  }
+</style>

@@ -1,0 +1,11 @@
+{
+	"name": "mawok-e2e",
+	"private": true,
+	"version": "0.0.0",
+	"description": "Mawok の Windows 向け E2E テスト (tauri-driver + WebdriverIO)。just e2e から実行する。",
+	"type": "module",
+	"devDependencies": {
+		"smol-toml": "^1.9.0",
+		"webdriverio": "^9.32.0"
+	}
+}

@@ -1,0 +1,79 @@
+---
+import '@fontsource/biz-udpgothic/400.css';
+import '@fontsource/biz-udpgothic/700.css';
+import '@fontsource-variable/m-plus-1/wght.css';
+import '../styles/global.css';
+import Lightbox from '../components/Lightbox.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** 検索結果に出さない (404 など) */
+  noindex?: boolean;
+  /** 本文の幅で包まず、画面の端まで使う (紹介)。サイトの頭と足の幅は、どのページも同じ */
+  wide?: boolean;
+}
+
+const { title, description, noindex = false, wide = false } = Astro.props;
+const url = new URL(Astro.url.pathname, Astro.site);
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    {description && <meta name="description" content={description} />}
+    {noindex && <meta name="robots" content="noindex" />}
+    <link rel="canonical" href={url} />
+    <meta property="og:site_name" content="Mawok" />
+    <meta property="og:title" content={title} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={url} />
+    {description && <meta property="og:description" content={description} />}
+    <meta name="twitter:card" content="summary" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <a class="site-name" href="/">
+          <img class="site-icon" src="/icon.png" alt="" width="28" height="28" />
+          Mawok
+        </a>
+        <nav class="site-nav" aria-label="サイト">
+          <ul>
+            <li><a href="/pricing/">料金</a></li>
+            <!-- クレジットの確かめ・登録した PC の管理 (窓口。account-server/ が受ける) -->
+            <li><a href="/account/">アカウント</a></li>
+          </ul>
+        </nav>
+      </header>
+    </div>
+    {
+      wide ? (
+        <main class="wide">
+          <slot />
+        </main>
+      ) : (
+        <div class="page">
+          <main class="reading">
+            <slot />
+          </main>
+        </div>
+      )
+    }
+    <div class="page">
+      <footer class="site-footer">
+        <ul>
+          <li><a href="/terms/">利用規約</a></li>
+          <li><a href="/privacy/">プライバシーポリシー</a></li>
+          <li><a href="/tokushoho/">特定商取引法に基づく表記</a></li>
+          <li><a href="https://amiiby.com/about/">運営者・問い合わせ</a></li>
+        </ul>
+        <p><a href="https://amiiby.com/">amiiby</a> © miyabi-satoh</p>
+      </footer>
+    </div>
+    <Lightbox />
+  </body>
+</html>

@@ -1,0 +1,55 @@
+# 配布物に入る Rust の依存のライセンス表示を作る cargo-about の設定 (→ docs/third-party-licenses.md「第三者のソフトウェア」)。
+# `just licenses` から使う。ここに無いライセンスの依存が入ると生成が止まるので、そのときは中身を確かめてから足す。
+accepted = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+# 配るのは macOS (Apple シリコン) と Windows の2つ。
+targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# mawok 自身は表示しない。
+private = { ignore = true }
+
+# 条文のファイルを同梱しているのに、cargo-about が読み取れずに SPDX のひな形 (著作権者が空欄) を出すクレート。
+# ファイルを指して読ませる。checksum は同梱のファイルの SHA-256 で、版が変わって中身が変わると一致しなくなり、
+# ひな形に戻る。そのときは scripts/generate-rust-licenses.mjs の検査が生成を止めるので、中身を確かめて直す。
+# ファイルを同梱していないクレートは、ここでは直せない (取りに行くとネットが要る) ので、
+# src-tauri/license-texts/ に置いた条文で差し替える (→ scripts/generate-rust-licenses.mjs の OVERRIDES)。
+[dpi.clarify]
+license = "Apache-2.0 AND MIT"
+
+[[dpi.clarify.files]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a"
+
+# dpi が同梱している、rust-lang/libm に由来する部分の条文と著作権表示。
+[[dpi.clarify.files]]
+path = "LICENSE-LIBM-MIT"
+license = "MIT"
+checksum = "9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997"
+
+[curve25519-dalek.clarify]
+license = "BSD-3-Clause"
+
+[[curve25519-dalek.clarify.files]]
+path = "LICENSE"
+checksum = "cca0bd3c4fcdba74145ef9d49c62337e2c9fbf9368288f11d0547f1b0273219f"
+
+# Mac 版の更新（tauri-plugin-updater）が署名を確かめるのに使う。条文には、rust-crypto に由来する部分の ISC の著作権表示も含む
+[minisign-verify.clarify]
+license = "MIT"
+
+[[minisign-verify.clarify.files]]
+path = "LICENSE"
+checksum = "42c8695fbc468866d9756be99af0ba4e37d733f8daa3c8827c8d80b8bec1b2f9"

@@ -1,0 +1,6 @@
+# ts-rs が画面 (TS) 向けの型を書き出す先 (リポジトリの直下からの相対)。cargo test のたびに書き直す。
+# src-tauri からも直下からも cargo が見つけられるよう、ここに置く
+[env]
+TS_RS_EXPORT_DIR = { value = "src/lib/bindings", relative = true }
+# u64 などを bigint でなく number にする (画面に渡す値は number に収まる)
+TS_RS_LARGE_INT = "number"

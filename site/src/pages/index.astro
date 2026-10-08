@@ -1,0 +1,11 @@
+---
+import { getEntry } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import ProductPage from '../components/ProductPage.astro';
+
+const { data } = (await getEntry('product', 'index'))!;
+---
+
+<Base title={`${data.name} - ${data.tagline.replace(/。$/, '')}`} description={data.description} wide>
+  <ProductPage />
+</Base>

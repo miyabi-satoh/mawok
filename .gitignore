@@ -1,0 +1,27 @@
+.DS_Store
+node_modules/
+dist/
+# 紹介と規約類 (site/) の Astro が作るもの
+.astro/
+/build
+/.svelte-kit
+/package
+target/
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+# Paraglide
+src/lib/paraglide
+project.inlang/cache/
+
+# 画面の部品テストが失敗したときに残る記録
+__screenshots__/
+.vitest/
+
+# E2E (Windows): WebView2 のバージョンに合わせて msedgedriver-tool で用意するローカルバイナリ。詳細は e2e/README.md
+/msedgedriver.exe
+
+# 手元だけの設定 (Claude Code の settings.local.json など)
+*.local.*

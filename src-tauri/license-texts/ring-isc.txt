@@ -1,0 +1,57 @@
+Copyright 2015-2025 Brian Smith.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+Copyright notices in the source files of ring that are licensed under the ISC license above:
+
+Copyright 2015 Brian Smith.
+Copyright 2015-2016 Brian Smith.
+Copyright 2015-2017 Brian Smith.
+Copyright 2015-2019 Brian Smith.
+Copyright 2015-2021 Brian Smith.
+Copyright 2015-2022 Brian Smith.
+Copyright 2015-2023 Brian Smith.
+Copyright 2015-2024 Brian Smith.
+Copyright 2015-2025 Brian Smith.
+Copyright 2016 Brian Smith.
+Copyright 2016-2017 Brian Smith.
+Copyright 2016-2019 Brian Smith.
+Copyright 2016-2021 Brian Smith.
+Copyright 2016-2023 Brian Smith.
+Copyright 2016-2024 Brian Smith.
+Copyright 2016-2025 Brian Smith.
+Copyright 2017 Brian Smith.
+Copyright 2017-2023 Brian Smith.
+Copyright 2017-2025 Brian Smith.
+Copyright 2018 Brian Smith.
+Copyright 2018-2024 Brian Smith.
+Copyright 2018-2025 Brian Smith.
+Copyright 2019-2024 Brian Smith.
+Copyright 2019-2025 Brian Smith.
+Copyright 2020 Brian Smith.
+Copyright 2020-2024 Brian Smith.
+Copyright 2021 Brian Smith.
+Copyright 2022 Brian Smith.
+Copyright 2023 Brian Smith.
+Copyright 2024 Brian Smith.
+Copyright 2024-2025 Brian Smith.
+Copyright 2025 Brian Smith.
+Copyright 2016 David Judd.
+Copyright (c) 2014, 2015, Google Inc.
+Copyright (c) 2014, Google Inc.
+Copyright (c) 2015, Google Inc.
+Copyright (c) 2016, Google Inc.
+Copyright (c) 2019, Google Inc.
+Copyright (c) 2014, Intel Corporation.
+Copyright 2016 Simon Sapin.
+Copyright 2018 Trent Clarke.

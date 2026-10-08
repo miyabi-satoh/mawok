@@ -1,0 +1,23 @@
+---
+// 上の階層へ戻る道。最後の項目は今いるページ（href なし）。記事のように今のページを出さないときは、href のある項目だけを渡す
+interface Item {
+  label: string;
+  href?: string;
+}
+
+interface Props {
+  items: Item[];
+}
+
+const { items } = Astro.props;
+---
+
+<nav class="breadcrumb" aria-label="パンくず">
+  <ol>
+    {
+      items.map((item) => (
+        <li>{item.href ? <a href={item.href}>{item.label}</a> : <span aria-current="page">{item.label}</span>}</li>
+      ))
+    }
+  </ol>
+</nav>

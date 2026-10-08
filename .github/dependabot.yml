@@ -1,0 +1,82 @@
+version: 2
+
+# 各エコシステムの定期バージョン更新を、置き場所ごとに1本の PR にまとめる。個別の PR だと
+# レビューの手間が依存の数だけ増えるため。間隔を monthly にしているのも同じ理由。
+# まとめるのは minor / patch のみ。major は破壊的変更を含みうるので、個別の PR のままにする。
+# security update は groups の対象外 (applies-to の既定値が version-updates のため) で、
+# advisory を起点に依存ごとに PR が作られる。
+updates:
+  - package-ecosystem: 'cargo'
+    directory: '/src-tauri'
+    schedule:
+      interval: 'monthly'
+    # Tauri（wry・notify-rust）が使うのと同じ版に揃えている crate。Tauri より先に上げると型が合わなくなるので、
+    # Tauri が上がって scripts/check-pinned-deps.mjs が落ちたときに手で上げる。
+    # 0.x の 0.38 → 0.39 は minor として扱われ、semver-major の指定では止まらないので、版を問わず外す
+    ignore:
+      - dependency-name: 'webview2-com'
+      - dependency-name: 'windows-core'
+      - dependency-name: 'tauri-winrt-notification'
+      # snow・spake2 が使う版に揃え、暗号の crate を2版ずつ入れない。両方が新しい版に移ったら手で上げる
+      - dependency-name: 'sha2'
+      # Tauri は 2.11 に留めている (理由は src-tauri/Cargo.toml の tauri のコメント)。プラグインの新しい minor も
+      # 新しい Tauri を求めるので、まとめて minor を止める。混ざると、まとめた PR のほかの更新まで入れられなくなる
+      - dependency-name: 'tauri'
+        update-types: ['version-update:semver-minor']
+      - dependency-name: 'tauri-*'
+        update-types: ['version-update:semver-minor']
+    groups:
+      cargo-minor-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'monthly'
+    # 型を、使っている Node の版に揃える
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # Rust 側の Tauri と同じ minor に揃える (Rust 側は 2.11 に留めている)
+      - dependency-name: '@tauri-apps/*'
+        update-types: ['version-update:semver-minor']
+    groups:
+      npm-minor-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: 'npm'
+    directory: '/account-server'
+    schedule:
+      interval: 'monthly'
+    groups:
+      account-server-minor-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: 'npm'
+    directory: '/site'
+    schedule:
+      interval: 'monthly'
+    groups:
+      site-minor-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: 'npm'
+    directory: '/e2e'
+    schedule:
+      interval: 'monthly'
+    groups:
+      e2e-minor-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'monthly'
+    groups:
+      github-actions:
+        patterns: ['*']

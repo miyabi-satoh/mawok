@@ -1,0 +1,16 @@
+# 手元で動かすときの秘密の値。.dev.vars に写して使う。テストもこの値を使う。
+# 手元で中継を試すときだけ、.dev.vars に自分の Gemini のキーを書く (テストは fetch を差し替えるので送らない)。
+GEMINI_API_KEY=dummy
+# 値付けの値 (→ src/pricing.ts)。本番の値とは違う、手元とテストだけの値。
+PURCHASE_GRANT_MILLI_YEN=100000
+FREE_GRANT_MILLI_YEN=20000
+FREE_MONTHLY_CAP_YEN=1000
+USD_JPY=100
+INPUT_USD_PER_MTOK=1
+OUTPUT_USD_PER_MTOK=4
+
+# Stripe で買う流れを手元で試すときだけ、サンドボックスの値を .dev.vars に書く。
+# webhook は `stripe listen --forward-to 127.0.0.1:8787/v1/stripe/webhook` で手元へ回し、出た whsec_ を使う。
+# STRIPE_SECRET_KEY=
+# STRIPE_WEBHOOK_SECRET=
+# STRIPE_AI_CREDITS_PRICE_ID=

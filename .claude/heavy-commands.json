@@ -1,0 +1,18 @@
+{
+	"defaults": true,
+	"heavy": [
+		"just ci",
+		"just test",
+		"just check",
+		"just lint",
+		"just bundle",
+		"just e2e",
+		"just licenses",
+		"just licenses-check",
+		"just icons",
+		{ "regex": "^(pnpm|npm|yarn)( run)? (lint|check|vitest|svelte-check|tauri|dev)\\b" },
+		{ "regex": "^(npx|pnpx|pnpm (exec|dlx)) (tauri|vitest|svelte-check|vite)\\b" },
+		{ "regex": "^node( -\\S+)* (\\S*[/\\\\])?run\\.mjs\\b" },
+		{ "regex": "^node( -\\S+)* --test\\b" }
+	]
+}

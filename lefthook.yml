@@ -1,0 +1,6 @@
+# push の前に、すぐ終わる整形の検査だけを流す。CI (GitHub Actions) で落ちる理由のうち、いちばん多い整形の崩れを
+# 手元で先に止めるため。全部の検査 (`just ci`) は CI が PR ごとに macOS と Windows で流し、通ることをマージの条件にしている。
+pre-push:
+  commands:
+    fmt-check:
+      run: just fmt-check

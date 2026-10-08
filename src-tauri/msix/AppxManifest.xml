@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mawok の MSIX のマニフェスト (→ docs/platform.md「Windows の MSIX 版」)。
+  `just msix` (scripts/msix.mjs) が {{NAME}}・{{PUBLISHER}}・{{PUBLISHER_DISPLAY_NAME}}・{{VERSION}} を埋め、
+  exe とロゴを並べて makeappx に渡す。
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop desktop2 rescap">
+
+  <!-- Publisher は署名に使う証明書の Subject と一致させる。 -->
+  <Identity Name="{{NAME}}" Publisher="{{PUBLISHER}}" Version="{{VERSION}}" ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Mawok</DisplayName>
+    <PublisherDisplayName>{{PUBLISHER_DISPLAY_NAME}}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ja-JP" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Mawok" Executable="mawok.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Mawok"
+        Description="Mawok"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- ログイン時の起動。登録するかはアプリが設定に合わせて決める (StartupTask の RequestEnableAsync) ので、既定では無効にしておく。 -->
+        <desktop:Extension Category="windows.startupTask" Executable="mawok.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="Mawok" Enabled="false" DisplayName="Mawok" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Extensions>
+    <!-- 機器の間の送受信の受け口 (TCP で下書きを受け、UDP で互いを見つける)。Windows 11 は新しいネットワークを既定でパブリックにするので、
+         パブリックも許可する (EXE 版で初回のダイアログの「許可」を押したときと同じ)。下書きは Noise の握手で組み合わせた機器に限り、組み合わせはコードを出している間だけ受け付ける。
+         入れた場所は版ごとに変わるので、初めて待ち受けたときのダイアログで exe のパスに作る規則には頼らない。 -->
+    <desktop2:Extension Category="windows.firewallRules">
+      <desktop2:FirewallRules Executable="mawok.exe">
+        <desktop2:Rule Direction="in" IPProtocol="TCP" Profile="all" />
+        <desktop2:Rule Direction="in" IPProtocol="UDP" Profile="all" />
+      </desktop2:FirewallRules>
+    </desktop2:Extension>
+  </Extensions>
+
+  <Capabilities>
+    <!-- 機器の間の送受信 (同じネットワークの中だけ)。受信の規則は上の windows.firewallRules で決めるので、
+         internetClientServer は付けない (付けると、別に受信規則が足されるため)。 -->
+    <Capability Name="privateNetworkClientServer" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

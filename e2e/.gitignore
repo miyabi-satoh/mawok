@@ -1,0 +1,10 @@
+node_modules/
+.config-backup.json
+.autostart-backup.json
+.e2e.lock
+.macos-backup/
+screenshots/
+.apps-theme-backup.json
+.msix-held.json
+.msix-original.json
+.msix-localcache/

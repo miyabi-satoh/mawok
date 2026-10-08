@@ -1,0 +1,330 @@
+/* 読み物として読みやすいことを優先する。飾りは足さない */
+
+:root {
+  --paper: #f6f7f9;
+  --ink: #1d2126;
+  /* 見出しとサイト名。ライトでは本文と同じ */
+  --ink-strong: #1d2126;
+  --muted: #58616c;
+  --rule: #d6dbe1;
+  --link: #2c5a88;
+  --notice: #f0e6cc;
+  --notice-edge: #b88a1f;
+  --code-bg: #eceff3;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #15181c;
+    /* 暗い背景で本文が眩しくならないよう、本文はコントラスト比 10.6 に抑え（Astro・Svelte のドキュメント並み）、
+       見出しだけ明るく残して強弱をつける */
+    --ink: #c4c8ce;
+    --ink-strong: #e4e7eb;
+    --muted: #8e97a1;
+    --rule: #2d333a;
+    --link: #82a8d0;
+    --notice: #2d2716;
+    --notice-edge: #c9a24a;
+    --code-bg: #20252b;
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'BIZ UDPGothic', 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.85;
+  font-kerning: normal;
+  font-feature-settings: 'palt' 0;
+  line-break: strict;
+  overflow-wrap: anywhere;
+}
+
+.page {
+  /* サイトの頭と足、トップと紹介の帯の中身は、どのページもこの幅にそろえる（ページを移っても頭の見た目が変わらないように） */
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+@media (min-width: 56rem) {
+  .page {
+    padding: 0 1.5rem;
+  }
+}
+
+/* 読み物の本文は 44rem（17px で1行に約41字）。頭の左端に合わせて置く */
+.reading > * {
+  max-width: 44rem;
+}
+
+/* サイトの頭と足 */
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  /* サイト名はアイコンを抱えたフレックスなので、baseline 揃えだと箱の下端が
+     ベースラインとみなされ、ナビが 10px ほど下へずれる */
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+  padding: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.site-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-strong);
+  text-decoration: none;
+}
+
+/* ファビコンと同じ絵。サイト名の文字と高さをそろえる */
+.site-icon {
+  display: block;
+  width: 1.4em;
+  height: 1.4em;
+}
+
+.site-nav ul,
+.site-footer ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-nav li,
+.site-footer li {
+  margin: 0;
+}
+
+.site-footer {
+  margin-top: 4rem;
+  padding: 1.5rem 0 2.5rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.site-footer p {
+  margin: 0.75rem 0 0;
+}
+
+main {
+  padding-top: 2rem;
+}
+
+/* 本文 */
+
+h1,
+h2,
+h3 {
+  line-height: 1.4;
+  font-family: 'M PLUS 1 Variable', 'BIZ UDPGothic', sans-serif;
+  font-weight: 800;
+  color: var(--ink-strong);
+  /* 見出しは文節の切れ目で折り返す（対応していないブラウザでは、ふつうの折り返し） */
+  word-break: auto-phrase;
+}
+
+h1 {
+  font-size: 1.75rem;
+  margin: 0 0 1.5rem;
+}
+
+h2 {
+  font-size: 1.3125rem;
+  margin: 2.75rem 0 0.75rem;
+}
+
+h3 {
+  font-size: 1.0625rem;
+  margin: 2rem 0 0.5rem;
+}
+
+p,
+ul,
+ol,
+dl,
+table {
+  margin: 0 0 1.25rem;
+}
+
+ul,
+ol {
+  padding-left: 1.5em;
+}
+
+li + li {
+  margin-top: 0.25rem;
+}
+
+a {
+  color: var(--link);
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+code {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--code-bg);
+}
+
+pre {
+  overflow-x: auto;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  background: var(--code-bg);
+  line-height: 1.6;
+}
+
+pre code {
+  padding: 0;
+  background: none;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 本文の画像。縦長のスマホの画面を全幅で出すと大きすぎるので、高さに上限を付けて、縦横比のまま縮める。
+   縮めた画像は Lightbox で拡大できる */
+main img {
+  width: auto;
+  max-height: min(36rem, 80vh);
+}
+
+/* 画像だけの段落は中央に置く（縮めた縦長の画像が左に寄って空かないように） */
+main p:has(> img:only-child) {
+  text-align: center;
+}
+
+/* 表は横に送れる領域で包まれている（src/lib/hast-prose.ts） */
+.table-scroll {
+  overflow-x: auto;
+  margin: 0 0 1.25rem;
+}
+
+.table-scroll table {
+  margin: 0;
+}
+
+table {
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+th,
+td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.meta {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+/* 知らせの枠（Coming Soon など） */
+.notice {
+  margin: 2.5rem 0;
+  padding: 1rem 1.25rem;
+  border-left: 4px solid var(--notice-edge);
+  background: var(--notice);
+}
+
+.notice > :first-child {
+  margin-top: 0;
+}
+
+.notice > :last-child {
+  margin-bottom: 0;
+}
+
+.breadcrumb {
+  font-size: 0.875rem;
+  margin: 0 0 1rem;
+}
+
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.breadcrumb li {
+  margin: 0;
+  color: var(--muted);
+}
+
+.breadcrumb li + li::before {
+  content: '›';
+  margin-right: 0.5rem;
+}
+
+video,
+iframe {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 0 1.25rem;
+}
+
+kbd {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.875em;
+}
+
+/* 画面の端まで使うページ（紹介）。帯をサイトの頭のすぐ下から始める */
+main.wide {
+  padding-top: 0;
+}
+
+main.wide + .page .site-footer {
+  margin-top: 5rem;
+}

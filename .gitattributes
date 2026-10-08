@@ -1,0 +1,3 @@
+# どの OS で checkout しても改行を LF に揃える。Windows で CRLF になると、Prettier の整形の検査 (既定は LF) が落ちる。
+# バイナリは git の自動判定に任せる。
+* text=auto eol=lf

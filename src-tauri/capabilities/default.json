@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the draft, settings, licenses and manual windows",
+  "windows": ["main", "settings", "licenses", "manual"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "log:default"]
+}

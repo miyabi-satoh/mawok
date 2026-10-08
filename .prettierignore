@@ -1,0 +1,37 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+
+# Miscellaneous
+/static/
+
+# shadcn-svelte が生成するコンポーネント (registry からの取得物なので対象外)
+/src/lib/components/ui/
+
+# Rust 側の ts-rs と bindings.rs が生成する型・定数
+/src/lib/bindings/
+
+# inlang CLI が生成する付随ファイル (settings.json 以外は project.inlang/.gitignore で
+# git管理対象外にしているが、prettier はネストした .gitignore までは辿らないため明示する)
+/project.inlang/
+
+# Rust 側 (cargo fmt で整形する。gen/ は Tauri が生成し、設定の JSON も Tauri CLI の書式に任せる)
+/src-tauri/
+
+# 文書 (日本語の文書は文の途中で改行しない書き方に揃えており、表の桁揃えなども手で管理する)
+*.md
+
+# Claude Code の個人の設定 (git からは各自のグローバルの ignore で外すが、prettier はそれを読まない。書式は Claude Code に任せる)
+/.claude/settings.local.json
+
+# CodeGraph の索引 (作っては消す一時ファイルを読みにいき、消えた瞬間に当たると落ちる)
+/.codegraph/
+
+# 窓口 (account-server/) は自分の設定で検査する (→ just account-server-check)
+/account-server/
+
+# 紹介と規約類 (site/) は自分の設定で検査する (→ just site-check)
+/site/

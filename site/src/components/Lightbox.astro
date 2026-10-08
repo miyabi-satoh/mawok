@@ -1,0 +1,112 @@
+---
+// 本文の画像をクリックで大きく出す。縮んで表示されている画像だけが対象
+---
+
+<dialog class="lightbox" aria-label="拡大した画像">
+  <img alt="" />
+</dialog>
+
+<script>
+  const dialog = document.querySelector<HTMLDialogElement>('dialog.lightbox')!;
+  const big = dialog.querySelector('img')!;
+
+  // srcset があれば、いちばん大きい候補を出す
+  function largest(img: HTMLImageElement) {
+    let best = img.currentSrc || img.src;
+    let max = 0;
+    for (const part of img.srcset.split(',')) {
+      const [url, w] = part.trim().split(/\s+/);
+      const n = parseFloat(w ?? '');
+      if (url && n > max) {
+        max = n;
+        best = url;
+      }
+    }
+    return best;
+  }
+
+  // リンクの中の画像はリンクを優先する
+  const candidates = [...document.querySelectorAll<HTMLImageElement>('main img')].filter(
+    (img) => !img.closest('a, dialog'),
+  );
+
+  function mark(img: HTMLImageElement) {
+    const on = img.naturalWidth > img.clientWidth + 16;
+    img.classList.toggle('zoomable', on);
+    if (on) {
+      img.tabIndex = 0;
+      img.setAttribute('role', 'button');
+      img.setAttribute('aria-label', img.alt ? `拡大: ${img.alt}` : '画像を拡大');
+    } else {
+      img.removeAttribute('tabindex');
+      img.removeAttribute('role');
+      img.removeAttribute('aria-label');
+    }
+  }
+
+  function open(img: HTMLImageElement) {
+    big.src = largest(img);
+    big.alt = img.alt;
+    dialog.showModal();
+  }
+
+  for (const img of candidates) {
+    if (img.complete) mark(img);
+    else img.addEventListener('load', () => mark(img), { once: true });
+    img.addEventListener('click', () => img.classList.contains('zoomable') && open(img));
+    img.addEventListener('keydown', (e) => {
+      if (img.classList.contains('zoomable') && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        open(img);
+      }
+    });
+  }
+
+  // 画面の幅が変わると、縮んでいるかどうかも変わる
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  addEventListener('resize', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => candidates.forEach((img) => img.complete && mark(img)), 200);
+  });
+
+  // どこをクリックしても閉じる（Esc は dialog が閉じる）
+  dialog.addEventListener('click', () => dialog.close());
+</script>
+
+<style>
+  :global(img.zoomable) {
+    cursor: zoom-in;
+  }
+
+  :global(html:has(dialog.lightbox[open])) {
+    overflow: hidden;
+  }
+
+  .lightbox {
+    width: 100vw;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 1rem;
+    border: 0;
+    background: transparent;
+    cursor: zoom-out;
+  }
+
+  .lightbox[open] {
+    display: grid;
+    place-items: center;
+  }
+
+  .lightbox::backdrop {
+    background: rgb(0 0 0 / 0.85);
+  }
+
+  .lightbox img {
+    max-width: 100%;
+    max-height: calc(100dvh - 2rem);
+    width: auto;
+    height: auto;
+  }
+</style>

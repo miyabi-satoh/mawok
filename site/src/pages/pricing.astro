@@ -1,0 +1,126 @@
+---
+import { getEntry } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import Breadcrumb from '../components/Breadcrumb.astro';
+
+const { data } = (await getEntry('product', 'index'))!;
+---
+
+<Base title="料金 | Mawok" description="Mawok の AI アクションは、キーが無くてもアカウントのクレジットで使えます。クレジットは 300 円（税込み）で買い足せます。">
+  <Breadcrumb items={[{ label: 'Mawok', href: '/' }, { label: '料金' }]} />
+  <div class="pricing" style={`--c: ${data.color}`}>
+    <h1>料金</h1>
+    <p class="lead">Mawok は無料で使えます。AI アクションをキーなしで使うときは、アカウントのクレジットを買い足します。</p>
+
+    <section class="plan" aria-labelledby="credit-title">
+      <h2 id="credit-title">AI アクションのクレジット</h2>
+      <p class="price"><span class="amount">300&nbsp;円</span><span class="per">（税込み）</span></p>
+      <ul class="features">
+        <li>API キーなしで <code>@ai</code> を使える</li>
+        <li>有効期限なし</li>
+        <li>新しいアカウントでは無料分から試せる</li>
+      </ul>
+      <a class="buy" href="/account/buy?lang=ja">買い足す</a>
+    </section>
+
+    <h2>お申し込みの前に</h2>
+    <dl class="terms">
+      <dt>価格</dt>
+      <dd>AI アクションのクレジット 300&nbsp;円（税込み）。</dd>
+      <dt>支払い</dt>
+      <dd>申し込んだときに 1&nbsp;回だけ払います。自動の更新はありません。日本の外から後払いの払い方を選んだときは、その払い方の定める時期に払います。</dd>
+      <dt>使い始め</dt>
+      <dd>支払いが済むとすぐ、Mawok のアカウントにクレジットが付きます。</dd>
+      <dt>返金</dt>
+      <dd>
+        購入後の返金は原則としてできません。新しいアカウントの無料分で試してから申し込めます。二重の請求など、こちらの誤りによるものは返金します。日本の外からの購入は、購入から 60&nbsp;日以内は Link の返金ポリシーが優先します。
+      </dd>
+    </dl>
+    <p>詳しくは<a href="/tokushoho/">特定商取引法に基づく表記</a>をご覧ください。</p>
+  </div>
+</Base>
+
+<style>
+  .pricing {
+    --accent: var(--c);
+    max-width: 44rem;
+    word-break: auto-phrase;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .pricing {
+      --accent: color-mix(in oklab, var(--c), white 45%);
+    }
+  }
+
+  .plan {
+    display: flex;
+    flex-direction: column;
+    margin: 2rem 0 2.5rem;
+    padding: 1.5rem;
+    border: 2px solid var(--accent);
+    border-radius: 0.75rem;
+  }
+
+  .plan h2,
+  .price {
+    margin-top: 0;
+  }
+
+  .price {
+    color: var(--ink-strong);
+  }
+
+  .amount {
+    font-family: 'M PLUS 1 Variable', 'BIZ UDPGothic', sans-serif;
+    font-size: 2rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .per {
+    margin-left: 0.25rem;
+    color: var(--muted);
+  }
+
+  .features {
+    margin: 1rem 0 1.5rem;
+    font-size: 0.9375rem;
+  }
+
+  .buy {
+    display: block;
+    margin-top: auto;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    background: var(--accent);
+    color: var(--paper);
+    font-weight: 700;
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .buy:hover {
+    text-decoration: underline;
+  }
+
+  .terms {
+    display: grid;
+    gap: 0.25rem 1.5rem;
+  }
+
+  @media (min-width: 40rem) {
+    .terms {
+      grid-template-columns: max-content 1fr;
+    }
+  }
+
+  .terms dt {
+    font-weight: 700;
+    color: var(--ink-strong);
+  }
+
+  .terms dd {
+    margin: 0 0 0.75rem;
+  }
+</style>

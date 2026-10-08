@@ -1,0 +1,114 @@
+[package]
+name = "mawok"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+# アプリなので crates.io には出さない。cargo-about もこれを見て、mawok 自身をライセンス表示から外す
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "mawok_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# 2.12 (tray-icon 0.25 以降) は、メニューバーのアイコンにメニューをマウスで押したときだけ付けるので、
+# VoiceOver などのアクセシビリティの「押す」操作ではメニューが開かない。上流が直すまで 2.11 に留める
+tauri = { version = "~2.11", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+# 設定ファイル（config.rs）。手で書いたコメントや並びを残したまま、変わった値だけを書き換えるため。0.x なのでマイナー版で固定する
+toml_edit = "0.25.15"
+tauri-plugin-global-shortcut = "2.3.2"
+# 文字列しか書かないので、画像を扱う既定の feature は要らない
+arboard = { version = "3.6.1", default-features = false }
+# 下書きが隠れている間に終わったアクションを知らせる（lib.rs の notify_action_finished）
+tauri-plugin-notification = "2.4.0"
+tauri-plugin-window-state = "2.4.1"
+sys-locale = "0.3.2"
+log = "0.4.34"
+tauri-plugin-log = "2.9.2"
+spake2 = "0.4.0"
+snow = "0.10.0"
+if-addrs = "0.15.0"
+getrandom = "0.4.3"
+# コマンドのアクションの文字コード（command.rs の encode_input・decode_output）。UTF-16 へ書き出す口は持たないので、そこだけ自前で書く
+encoding_rs = "0.8.41"
+# AI のアクション（ai.rs）で AI サービスとやり取りする JSON
+serde_json = "1.0.151"
+# AI のアクションで使う AI サービスのキーを OS の資格情報管理に置く（secrets.rs）。
+# keyring 4.x の既定（v1）は Linux のストアも抱えるので、keyring-core と OS ごとのストア（下の target の依存）を直接使う
+keyring-core = "1.0.0"
+# AI のアクション（ai.rs）で AI サービスを呼ぶ。TLS は rustls にし、暗号の実装は ring を選ぶ（rustls の既定の aws-lc-rs は、Windows のビルドに NASM などが要るため。
+# ring は snow がすでに使っていて、Windows でもビルドできている）。証明書は OS の証明書ストアで確かめる（rustls-platform-verifier）。
+# プロキシは OS の設定に従う（system-proxy）。HTTP/2 は1回の問い合わせには要らないので入れない
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "system-proxy"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+# 置き換え辞書を、1つに見える文字（書記素）の途中で当てないため（text.rs）。Tauri の依存でもともと入っている
+unicode-segmentation = "1.13.3"
+# コマンドのアクション（command.rs）で、シェルを起動して標準入出力をやり取りする。Mawok のアカウントと結ぶとき、
+# 窓口から戻るブラウザを 127.0.0.1 で待ち受ける（lib.rs の start_mawok_sign_in）。Tauri の依存でもともと入っている
+tokio = { version = "1.53.1", features = ["process", "io-util", "time", "macros", "net", "rt", "sync"] }
+# Mawok のアカウントと結ぶ申し込みの、検証用の値のハッシュ（account.rs の LinkRequest）。snow・spake2 の依存でもともと入っている
+sha2 = "0.10.9"
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# デバッグ情報を行番号だけにして、target の肥大を抑える。
+# バックトレースのファイル名と行番号は残るので、ログから追う分には困らない
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+# トレイのメニューを開いている間を知るため（menu_tracking.rs）と、テキストウィンドウの見た目と Space の扱いを読み書きするため（focus.rs）。Tauri（tray-icon）が使うのと同じ版に揃える
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+objc2-foundation = { version = "0.3.2", features = ["NSError", "NSNotification", "NSOperation", "NSString", "block2"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSMenu", "NSResponder", "NSWindow"] }
+# AI サービスのキーを、ログインのキーチェーンに置く（secrets.rs）
+apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+# コマンドのアクションを、子プロセスごと止める（command.rs）
+libc = "0.2.189"
+# ログイン時の起動を、ログイン項目（SMAppService）に登録する（autostart.rs）
+objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
+# 新しい版を確かめて入れ替える（updater.rs）。Windows は Microsoft Store が更新を受け持つので入れない（→ docs/platform.md「Mac 版の更新」）。
+# 2.13 は tauri ^2.12 が要るので 2.12 に留める
+tauri-plugin-updater = "~2.12.0"
+# テキストウィンドウを、アプリを前面にしないパネルにする（focus.rs）
+tauri-nspanel = "2.1.1"
+
+# ログイン時の起動（autostart.rs）。macOS はログイン項目（SMAppService）を直接使う
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri-plugin-autostart = "2.5.1"
+# 多重起動を防ぐ。macOS は開き直しを OS が既存のインスタンスへ知らせるので、lib.rs の lock_single_instance で2つ目を止めるだけにする
+tauri-plugin-single-instance = "2.4.4"
+
+[target."cfg(windows)".dependencies]
+# Win32_System_JobObjects・Win32_Security・Win32_System_Threading・Win32_Globalization は、コマンドのアクション（command.rs）で子プロセスごと止め、標準エラーを読むため
+# ApplicationModel・Win32_Storage_Packaging_Appx は、MSIX 版かを見分けて（package.rs）、ログイン時の起動を StartupTask で行うため（autostart.rs）
+windows = { version = "0.62.2", features = ["ApplicationModel", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Storage_Packaging_Appx", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+# WebView2 のイベントを受け取るため。Tauri（wry）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
+webview2-com = "0.38.2"
+windows-core = "0.61.2"
+# MSIX 版の通知を、パッケージの AUMID を差出人にして出す（lib.rs の notify_action_finished）。tauri-plugin-notification が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
+tauri-winrt-notification = "0.7.3"
+# AI サービスのキーを、資格情報マネージャーに置く（secrets.rs）。検索は使わないので、正規表現の依存を持ち込まない
+windows-native-keyring-store = { version = "1.1.0", default-features = false }
+
+[dev-dependencies]
+# 画面 (TS) に渡す型を Rust から書き出す。cargo test で src/lib/bindings/ に出力する
+ts-rs = "12"

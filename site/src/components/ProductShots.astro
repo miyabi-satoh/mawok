@@ -1,0 +1,151 @@
+---
+// 画面の画像を重ねて出す（紹介の冒頭）。1枚目を手前の真ん中に、2枚目からは奥に左右へ傾けて置く。
+// スクロールに合わせて、奥の画像ほど速く動いて奥行きが出る。動きを減らす設定では止める
+//   page: ページの冒頭に置く。読み込みで一度だけ上がってきて、ページの最初の1画面分のスクロールで動く
+//   band: 途中に置く。画面に入ってから出るまでのスクロールで動く
+import { Image } from 'astro:assets';
+import type { ImageMetadata } from 'astro';
+
+interface Props {
+  shots: { src: ImageMetadata; alt: string }[];
+  mode?: 'page' | 'band';
+}
+
+const { shots, mode = 'page' } = Astro.props;
+const [front, ...back] = shots;
+const loading = mode === 'page' ? 'eager' : 'lazy';
+---
+
+<div class:list={['shots', mode]}>
+  {
+    back.map((shot, i) => (
+      <div class={`shot back back-${i + 1}`}>
+        <Image src={shot.src} alt="" widths={[320, 640]} sizes="(min-width: 56rem) 18rem, 45vw" loading={loading} />
+      </div>
+    ))
+  }
+  <div class="shot front">
+    <Image
+      src={front.src}
+      alt={front.alt}
+      widths={[400, 800, 1200]}
+      sizes="(min-width: 56rem) 28rem, 80vw"
+      loading={loading}
+      fetchpriority={mode === 'page' ? 'high' : undefined}
+    />
+  </div>
+</div>
+
+<style>
+  .shots {
+    display: grid;
+    place-items: center;
+    min-height: min(34rem, 70vh);
+  }
+
+  .shot {
+    grid-area: 1 / 1;
+    display: grid;
+    place-items: center;
+    width: min(80%, 28rem);
+  }
+
+  .shot.back {
+    width: min(55%, 18rem);
+  }
+
+  .shot.back-1 {
+    translate: -62% 8%;
+    rotate: -8deg;
+  }
+
+  .shot.back-2 {
+    translate: 62% -4%;
+    rotate: 7deg;
+  }
+
+  .shot img {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: min(32rem, 64vh);
+    border-radius: 1rem;
+    box-shadow: 0 1.5rem 3rem -0.75rem rgb(0 0 0 / 0.5);
+  }
+
+  .shot.back img {
+    max-height: min(24rem, 48vh);
+    filter: brightness(0.9);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    /* 読み込んだときに一度だけ、下から上がってくる */
+    .page .shot {
+      animation: rise 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    .page .back-1 {
+      animation-delay: 0.15s;
+    }
+
+    .page .back-2 {
+      animation-delay: 0.3s;
+    }
+
+    @keyframes rise {
+      from {
+        opacity: 0;
+        transform: translateY(4rem);
+      }
+    }
+
+    @supports (animation-timeline: scroll()) {
+      .shot img {
+        animation: drift linear both;
+      }
+
+      .page .shot img {
+        animation-timeline: scroll(root);
+        animation-range: 0 100vh;
+      }
+
+      .band .shot img {
+        animation-timeline: view();
+        animation-range: cover 0% cover 100%;
+      }
+
+      /* 帯では、画面に入る前は下に控えていて、通り過ぎるにつれて上へ抜けていく */
+      .band .shot img {
+        --from: 4rem;
+      }
+
+      .band .back img {
+        --from: 10rem;
+      }
+
+      .front img {
+        --drift: -2.5rem;
+      }
+
+      .back-1 img {
+        --drift: -9rem;
+        --turn: -5deg;
+      }
+
+      .back-2 img {
+        --drift: -6rem;
+        --turn: 5deg;
+      }
+
+      @keyframes drift {
+        from {
+          transform: translateY(var(--from, 0));
+        }
+        to {
+          transform: translateY(var(--drift, 0)) rotate(var(--turn, 0deg));
+        }
+      }
+    }
+  }
+</style>
