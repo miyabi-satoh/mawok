@@ -5,11 +5,14 @@ name: CI
 # マージの前に main へ追いつくことも保護で求めるので、同じ内容をもう一度確かめても情報が増えない。
 on:
   # paths-ignore で文書だけの PR を飛ばさない。必須のチェックが走らないと、その PR はマージできなくなる。
+  # 文書だけの PR は、ジョブを起動したうえで中の重い手順を飛ばす (下の changes)。
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+  # paths-filter が PR の変わったファイルを API で取る
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -26,26 +29,52 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # ルートの prettier は .md を見ないので、just ci が読む .md (使い方の窓のマニュアル・紹介サイトの文章・.md も整形を見る窓口) のほかは、変わっても just ci の結果が変わらない。
+      - uses: dorny/paths-filter@v4
+        id: changes
+        if: github.event_name == 'pull_request'
+        with:
+          predicate-quantifier: some-with-excludes
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+            read_md:
+              - 'docs/manual/**'
+              - 'site/**'
+              - 'account-server/**'
+
+      - name: Decide whether to run the checks
+        id: scope
+        shell: bash
+        run: echo "run=${{ github.event_name != 'pull_request' || steps.changes.outputs.code == 'true' || steps.changes.outputs.read_md == 'true' }}" >> "$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.run == 'true'
         with:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.run == 'true'
         with:
           workspaces: src-tauri
 
       # licenses-check が使う。版は DEVELOPMENT.md のセットアップと揃える。
       - uses: taiki-e/install-action@v2
+        if: steps.scope.outputs.run == 'true'
         with:
           tool: cargo-about@0.9.2
 
       - uses: extractions/setup-just@v4
+        if: steps.scope.outputs.run == 'true'
 
       - uses: pnpm/action-setup@v6
+        if: steps.scope.outputs.run == 'true'
         with:
           package_json_file: package.json
 
       - uses: actions/setup-node@v7
+        if: steps.scope.outputs.run == 'true'
         with:
           node-version: 24
           cache: pnpm
@@ -56,6 +85,7 @@ jobs:
 
       # Windows の既定の pwsh は途中のコマンドが落ちても止まらないので、bash で流す
       - name: Install dependencies
+        if: steps.scope.outputs.run == 'true'
         shell: bash
         run: |
           pnpm install --frozen-lockfile
@@ -64,7 +94,9 @@ jobs:
 
       # 画面の部品テスト (vitest の browser モード) が chromium で動くため。
       - name: Install Playwright browser (chromium)
+        if: steps.scope.outputs.run == 'true'
         run: pnpm exec playwright install chromium
 
       - name: Run CI checks
+        if: steps.scope.outputs.run == 'true'
         run: just ci
