@@ -5,7 +5,7 @@ import ProductShots from './ProductShots.astro';
 
 const product = (await getEntry('product', 'index'))!;
 const { Content } = await render(product);
-const legalOrder = ['terms', 'privacy', 'tokushoho'];
+const legalOrder = ['terms', 'privacy'];
 const legal = (await getCollection('legal')).sort((a, b) => legalOrder.indexOf(a.id) - legalOrder.indexOf(b.id));
 ---
 
@@ -40,6 +40,9 @@ const legal = (await getCollection('legal')).sort((a, b) => legalOrder.indexOf(a
             </li>
           ))
         }
+        <li>
+          <a href="https://amiiby.com/tokushoho/">特定商取引法に基づく表記</a>
+        </li>
       </ul>
     </div>
   </div>

@@ -2,13 +2,14 @@ import { html } from 'hono/html';
 import type { HtmlEscapedString } from 'hono/utils/html';
 import { messages, type Lang } from './i18n';
 import type { Balance } from './credits';
-import { ACCOUNT, ACCOUNT_HOME, PRICING_PATH } from './util';
+import { ACCOUNT, ACCOUNT_HOME, PRICING_PATH, PURCHASE_CONDITIONS } from './util';
 
-/** 規約類のパス (同じ Worker の静的アセットで出す。→ docs/account-server.md「作り」)。 */
+/** 規約類の置き場。利用規約とプライバシーポリシーは同じ Worker の静的アセットで出す (→ docs/account-server.md「作り」)。
+ * 特商法の表記は amiiby.com の全製品に共通のページで、価格などの条件は料金ページの PURCHASE_CONDITIONS に書く。 */
 export const LEGAL_PAGES = {
 	terms: '/terms/',
 	privacy: '/privacy/',
-	tokushoho: '/tokushoho/'
+	tokushoho: 'https://amiiby.com/tokushoho/'
 } as const;
 
 type Body = HtmlEscapedString | Promise<HtmlEscapedString>;
@@ -198,15 +199,22 @@ function page(lang: Lang, title: string, body: Body) {
 		</html>`;
 }
 
-/** 文言の `{terms}` などを、その規約類へのリンクにする。 */
+/** 同意の文言から指せるページ。購入で同意するのは、共通の特商法の表記でなく Mawok の購入の条件。 */
+const CONSENT_LINKS = {
+	terms: LEGAL_PAGES.terms,
+	privacy: LEGAL_PAGES.privacy,
+	conditions: PURCHASE_CONDITIONS
+};
+
+/** 文言の `{terms}` などを、そのページへのリンクにする。 */
 function withLegalLinks(lang: Lang, text: string) {
 	const t = messages[lang];
 	return text
-		.split(/\{(terms|privacy|tokushoho)\}/)
+		.split(/\{(terms|privacy|conditions)\}/)
 		.map((part, i) =>
 			i % 2 === 1
-				? html`<a href="${LEGAL_PAGES[part as keyof typeof LEGAL_PAGES]}"
-						>${t[part as keyof typeof LEGAL_PAGES]}</a
+				? html`<a href="${CONSENT_LINKS[part as keyof typeof CONSENT_LINKS]}"
+						>${t[part as keyof typeof CONSENT_LINKS]}</a
 					>`
 				: part
 		);
@@ -378,7 +386,7 @@ export function confirmPage(lang: Lang, email: string, region: SaleRegion) {
 		[t.confirmPriceLabel, t.confirmPrice],
 		[t.confirmPaymentLabel, t.confirmPayment[region]],
 		[t.confirmDeliveryLabel, t.confirmDelivery],
-		[t.confirmRefundLabel, t.confirmRefund[region](LEGAL_PAGES.tokushoho)]
+		[t.confirmRefundLabel, t.confirmRefund[region](PURCHASE_CONDITIONS)]
 	];
 	return page(
 		lang,
