@@ -57,6 +57,7 @@ impl Debounce {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
 
     const DELAY: Duration = Duration::from_millis(100);
 
@@ -77,6 +78,17 @@ mod tests {
         (count, make)
     }
 
+    /// `expected` 回呼ばれるまで待ち、余分に呼ばれないかを少し見てから回数を返す。
+    /// CI のマシンでは sleep が大きくずれるので、決まった時間だけ待って数えると揺れる
+    fn settled(count: &AtomicUsize, expected: usize) -> usize {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while count.load(Ordering::SeqCst) < expected && Instant::now() < deadline {
+            thread::sleep(DELAY / 10);
+        }
+        thread::sleep(DELAY * 3);
+        count.load(Ordering::SeqCst)
+    }
+
     #[test]
     fn runs_once_for_a_burst() {
         let debounce = Debounce::default();
@@ -84,8 +96,7 @@ mod tests {
         for _ in 0..20 {
             debounce.trigger(DELAY, make());
         }
-        thread::sleep(DELAY * 4);
-        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(settled(&count, 1), 1);
     }
 
     #[test]
@@ -107,22 +118,28 @@ mod tests {
         for sender in senders {
             sender.join().unwrap();
         }
-        thread::sleep(DELAY * 4);
-        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(settled(&count, 1), 1);
     }
 
     #[test]
     fn waits_again_when_touched() {
+        // 触るのが、最初の待ちを終える前であるように、待つ時間を長く取る
+        let delay = Duration::from_secs(1);
         let debounce = Debounce::default();
-        let (count, make) = counter();
-        debounce.trigger(DELAY, make());
-        thread::sleep(DELAY / 2);
+        let ran = Arc::new(Mutex::new(None));
+        {
+            let ran = Arc::clone(&ran);
+            debounce.trigger(delay, move || *ran.lock().unwrap() = Some(Instant::now()));
+        }
+        thread::sleep(delay / 5);
+        let touched = Instant::now();
         debounce.touch();
-        // 最初の知らせからは待つ時間を過ぎたが、触ってからはまだ
-        thread::sleep(DELAY * 7 / 10);
-        assert_eq!(count.load(Ordering::SeqCst), 0);
-        thread::sleep(DELAY * 3);
-        assert_eq!(count.load(Ordering::SeqCst), 1);
+        let deadline = touched + Duration::from_secs(10);
+        while ran.lock().unwrap().is_none() && Instant::now() < deadline {
+            thread::sleep(DELAY / 10);
+        }
+        let ran = ran.lock().unwrap().expect("呼ばれなかった");
+        assert!(ran >= touched + delay);
     }
 
     #[test]
@@ -130,9 +147,8 @@ mod tests {
         let debounce = Debounce::default();
         let (count, make) = counter();
         debounce.trigger(DELAY, make());
-        thread::sleep(DELAY * 3);
+        assert_eq!(settled(&count, 1), 1);
         debounce.trigger(DELAY, make());
-        thread::sleep(DELAY * 3);
-        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(settled(&count, 2), 2);
     }
 }
