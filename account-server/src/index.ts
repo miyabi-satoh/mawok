@@ -20,7 +20,6 @@ import {
 	confirmPage,
 	confirmSignInPage,
 	homePage,
-	LEGAL_PAGES,
 	mailSentPage,
 	messagePage,
 	signInPage,
@@ -50,6 +49,7 @@ import {
 	safeNext,
 	ACCOUNT,
 	ACCOUNT_HOME,
+	PURCHASE_CONDITIONS,
 	sha256Hex
 } from './util';
 
@@ -788,7 +788,7 @@ accountApp.post('/buy', async (c) => {
 			expiresAt: checkout.expires_at,
 			submitMessage: managedPayments
 				? undefined
-				: messages[checkout.lang].checkoutNote(`${origin}${LEGAL_PAGES.tokushoho}`),
+				: messages[checkout.lang].checkoutNote(`${origin}${PURCHASE_CONDITIONS}`),
 			managedPayments,
 			buyerCountry: checkout.buyer_country ?? undefined,
 			idempotencyKey: `mawok-checkout-${checkout.id}`

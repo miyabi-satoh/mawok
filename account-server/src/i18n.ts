@@ -106,16 +106,16 @@ const ja = {
 	confirmDelivery: '支払いが済むとすぐ、このアカウントにクレジットが付きます。',
 	confirmRefundLabel: '返金',
 	confirmRefund: {
-		domestic: (tokushoho: string) =>
-			`購入後の返金は、原則としてできません。例外は[特定商取引法に基づく表記](${tokushoho})のとおりです。`,
-		overseas: (tokushoho: string) =>
-			`購入後の返金は、原則としてできません。例外は[特定商取引法に基づく表記](${tokushoho})のとおりです。ただし Link が代わりに売った購入は、購入から60 日以内は [Link の返金ポリシー](${LINK_REFUND_POLICY})が優先し、Link が返金することがあります。`
-	} as Record<SaleRegion, (tokushoho: string) => string>,
+		domestic: (conditions: string) =>
+			`購入後の返金は、原則としてできません。例外は[購入の条件](${conditions})のとおりです。`,
+		overseas: (conditions: string) =>
+			`購入後の返金は、原則としてできません。例外は[購入の条件](${conditions})のとおりです。ただし Link が代わりに売った購入は、購入から60 日以内は [Link の返金ポリシー](${LINK_REFUND_POLICY})が優先し、Link が返金することがあります。`
+	} as Record<SaleRegion, (conditions: string) => string>,
 	buyConsent: '{terms}・{privacy}・{tokushoho}に同意のうえ、進んでください。',
 	confirmButton: '申し込みを確定して支払いへ',
 	backToPricing: '料金ページへ戻る',
-	checkoutNote: (tokushoho: string) =>
-		`支払いが済むとすぐ、Mawok のアカウントにクレジットが付きます。購入後の返金は、原則としてできません。詳しくは[特定商取引法に基づく表記](${tokushoho})をご覧ください。`,
+	checkoutNote: (conditions: string) =>
+		`支払いが済むとすぐ、Mawok のアカウントにクレジットが付きます。購入後の返金は、原則としてできません。詳しくは[購入の条件](${conditions})をご覧ください。`,
 	notForSale: 'いまはクレジットを買えません。',
 	buyBusy: '支払いの画面を用意しています。少ししてから、もう一度押してください。',
 	checkingPurchase: '支払いを確かめています。このままお待ちください。',
@@ -204,16 +204,16 @@ const en: typeof ja = {
 	confirmDelivery: 'The credit is added to this account as soon as the payment is complete.',
 	confirmRefundLabel: 'Refunds',
 	confirmRefund: {
-		domestic: (tokushoho: string) =>
-			`Purchases are generally non-refundable. For exceptions, see the [Specified Commercial Transactions Act notice](${tokushoho}).`,
-		overseas: (tokushoho: string) =>
-			`Purchases are generally non-refundable. For exceptions, see the [Specified Commercial Transactions Act notice](${tokushoho}). For a purchase sold through Link, however, [Link's refund policy](${LINK_REFUND_POLICY}) takes precedence within 60 days of purchase, and Link may issue a refund.`
+		domestic: (conditions: string) =>
+			`Purchases are generally non-refundable. For exceptions, see the [purchase conditions](${conditions}).`,
+		overseas: (conditions: string) =>
+			`Purchases are generally non-refundable. For exceptions, see the [purchase conditions](${conditions}). For a purchase sold through Link, however, [Link's refund policy](${LINK_REFUND_POLICY}) takes precedence within 60 days of purchase, and Link may issue a refund.`
 	},
 	buyConsent: 'By continuing, you agree to the {terms}, the {privacy}, and the {tokushoho}.',
 	confirmButton: 'Confirm and continue to payment',
 	backToPricing: 'Back to pricing',
-	checkoutNote: (tokushoho: string) =>
-		`The credit is added to your Mawok account as soon as the payment is complete. Purchases are generally non-refundable. For details, see the [Specified Commercial Transactions Act notice](${tokushoho}).`,
+	checkoutNote: (conditions: string) =>
+		`The credit is added to your Mawok account as soon as the payment is complete. Purchases are generally non-refundable. For details, see the [purchase conditions](${conditions}).`,
 	notForSale: 'AI action credit is not available for purchase right now.',
 	buyBusy: 'Preparing the payment page. Please try again in a moment.',
 	checkingPurchase: 'Confirming your payment. Please wait.',
