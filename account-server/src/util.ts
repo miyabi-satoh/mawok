@@ -65,7 +65,7 @@ export function jwtClaims<T>(jwt: string | undefined): T | undefined {
 export const ACCOUNT = '/account';
 /** 公開の料金ページ (site/src/pages/pricing.astro)。 */
 export const PRICING_PATH = '/pricing/';
-/** 料金ページの「購入の条件」。特商法の表記のうち、価格・支払い・返金などの Mawok の条件を書く所。 */
+/** 料金ページの「購入の条件」。特商法の表記のうち、価格・動作環境と Mawok に限った定めを書く所。 */
 export const PURCHASE_CONDITIONS = `${PRICING_PATH}#conditions`;
 /** アカウントの画面。 */
 export const ACCOUNT_HOME = `${ACCOUNT}/`;
