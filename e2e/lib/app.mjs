@@ -20,7 +20,7 @@ export const OTHER_HOTKEY = 'CommandOrControl+Shift+KeyJ';
 /**
  * Mawok を起動して WebDriver セッションに繋ぐ。
  *
- * `wdio:enforceWebDriverClassic: true` が必須: WebdriverIO 9 は既定で BiDi セッションを張るが、
+ * `wdio:enforceWebDriverClassic: true` が必須: WebdriverIO は既定で BiDi セッションを張るが、
  * このアプリでは BiDi 経由だと about:blank のまま何もしていない別 webview に繋がってしまい、
  * 実際の下書きウィンドウ (http://tauri.localhost/) の内容にも `invoke` にも到達できない
  * (`Origin header is not a valid URL` で拒否される)。classic WebDriver に強制すると解消する。
