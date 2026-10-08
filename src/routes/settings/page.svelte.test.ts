@@ -465,7 +465,20 @@ describe('設定画面の定型文', () => {
 
 		await userEvent.keyboard('{Escape}');
 
+		await expect.element(screen.getByRole('menu')).not.toBeInTheDocument();
 		expect(callsOf(invoked, 'close_settings_window')).toHaveLength(0);
+	});
+
+	it('メニューを Esc で閉じた直後の次の Esc では、設定ウィンドウを閉じる', async () => {
+		settings.current = { ...view(), snippets: [{ name: 'A', body: 'a' }] };
+		const screen = await renderAt(m.settings_category_snippets);
+		await screen.getByRole('button', { name: m.settings_row_menu({ name: 'A' }) }).click();
+		await expect.element(screen.getByRole('menu')).toBeVisible();
+
+		await userEvent.keyboard('{Escape}');
+		await userEvent.keyboard('{Escape}');
+
+		expect(callsOf(invoked, 'close_settings_window')).toHaveLength(1);
 	});
 
 	it('メニューを開いたままでも、Cmd+W では設定ウィンドウを閉じる', async () => {

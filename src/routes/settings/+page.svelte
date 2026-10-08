@@ -449,9 +449,10 @@
 		const platform = settings.current?.platform;
 		// AI の了解のダイアログを出している間は、Esc で設定画面を閉じない
 		if (document.querySelector('[role="alertdialog"]')) return;
-		// 行の「…」メニューを開いている間の Esc は、メニューを閉じる操作なので、設定画面は閉じない。
-		// フォーカスで見ると、開いた直後のまだメニューに移っていない間の Esc で設定画面が閉じる
-		if (event.key === 'Escape' && document.querySelector('[role="menu"]')) return;
+		// 行の「…」メニューなど、開いている部品が受け持った Esc（bits-ui が preventDefault する）では、設定画面は閉じない。
+		// フォーカスの位置では、開いた直後のまだメニューに移っていない間を見分けられず、
+		// DOM の有無では、閉じるアニメーションの間の次の Esc まで止めてしまう
+		if (event.key === 'Escape' && event.defaultPrevented) return;
 		if (platform && isCloseWindowKey(event, platform)) {
 			event.preventDefault();
 			invoke('close_settings_window');
