@@ -449,14 +449,9 @@
 		const platform = settings.current?.platform;
 		// AI の了解のダイアログを出している間は、Esc で設定画面を閉じない
 		if (document.querySelector('[role="alertdialog"]')) return;
-		// 行の「…」メニューの中の Esc は、メニューを閉じる操作なので、設定画面は閉じない
-		if (
-			event.key === 'Escape' &&
-			event.target instanceof Element &&
-			event.target.closest('[role="menu"]')
-		) {
-			return;
-		}
+		// 行の「…」メニューを開いている間の Esc は、メニューを閉じる操作なので、設定画面は閉じない。
+		// フォーカスで見ると、開いた直後のまだメニューに移っていない間の Esc で設定画面が閉じる
+		if (event.key === 'Escape' && document.querySelector('[role="menu"]')) return;
 		if (platform && isCloseWindowKey(event, platform)) {
 			event.preventDefault();
 			invoke('close_settings_window');

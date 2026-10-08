@@ -456,6 +456,18 @@ describe('設定画面の定型文', () => {
 		expect(callsOf(invoked, 'close_settings_window')).toHaveLength(0);
 	});
 
+	it('メニューを開いた直後、フォーカスがまだメニューに移っていなくても、Esc で設定ウィンドウを閉じない', async () => {
+		settings.current = { ...view(), snippets: [{ name: 'A', body: 'a' }] };
+		const screen = await renderAt(m.settings_category_snippets);
+		await screen.getByRole('button', { name: m.settings_row_menu({ name: 'A' }) }).click();
+		await expect.element(screen.getByRole('menu')).toBeVisible();
+		(document.activeElement as HTMLElement | null)?.blur();
+
+		await userEvent.keyboard('{Escape}');
+
+		expect(callsOf(invoked, 'close_settings_window')).toHaveLength(0);
+	});
+
 	it('メニューを開いたままでも、Cmd+W では設定ウィンドウを閉じる', async () => {
 		settings.current = { ...view(), platform: 'macos', snippets: [{ name: 'A', body: 'a' }] };
 		const screen = await renderAt(m.settings_category_snippets);
