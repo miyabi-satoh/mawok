@@ -111,7 +111,7 @@ const ja = {
 		overseas: (conditions: string) =>
 			`購入後の返金は、原則としてできません。例外は[購入の条件](${conditions})のとおりです。ただし Link が代わりに売った購入は、購入から60 日以内は [Link の返金ポリシー](${LINK_REFUND_POLICY})が優先し、Link が返金することがあります。`
 	} as Record<SaleRegion, (conditions: string) => string>,
-	buyConsent: '{terms}・{privacy}・{tokushoho}に同意のうえ、進んでください。',
+	buyConsent: '{terms}・{privacy}・{conditions}に同意のうえ、進んでください。',
 	confirmButton: '申し込みを確定して支払いへ',
 	backToPricing: '料金ページへ戻る',
 	checkoutNote: (conditions: string) =>
@@ -137,6 +137,7 @@ const ja = {
 	terms: '利用規約',
 	privacy: 'プライバシーポリシー',
 	tokushoho: '特定商取引法に基づく表記',
+	conditions: '購入の条件',
 	mailSubject: 'Mawok にサインイン',
 	mailBody: (link: string, minutes: number, linking: boolean) =>
 		[
@@ -209,7 +210,7 @@ const en: typeof ja = {
 		overseas: (conditions: string) =>
 			`Purchases are generally non-refundable. For exceptions, see the [purchase conditions](${conditions}). For a purchase sold through Link, however, [Link's refund policy](${LINK_REFUND_POLICY}) takes precedence within 60 days of purchase, and Link may issue a refund.`
 	},
-	buyConsent: 'By continuing, you agree to the {terms}, the {privacy}, and the {tokushoho}.',
+	buyConsent: 'By continuing, you agree to the {terms}, the {privacy}, and the {conditions}.',
 	confirmButton: 'Confirm and continue to payment',
 	backToPricing: 'Back to pricing',
 	checkoutNote: (conditions: string) =>
@@ -235,6 +236,7 @@ const en: typeof ja = {
 	terms: 'Terms of Use',
 	privacy: 'Privacy Policy',
 	tokushoho: 'Specified Commercial Transactions Act notice',
+	conditions: 'purchase conditions',
 	mailSubject: 'Sign in to Mawok',
 	mailBody: (link: string, minutes: number, linking: boolean) =>
 		[

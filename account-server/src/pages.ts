@@ -199,15 +199,22 @@ function page(lang: Lang, title: string, body: Body) {
 		</html>`;
 }
 
-/** 文言の `{terms}` などを、その規約類へのリンクにする。 */
+/** 同意の文言から指せるページ。購入で同意するのは、共通の特商法の表記でなく Mawok の購入の条件。 */
+const CONSENT_LINKS = {
+	terms: LEGAL_PAGES.terms,
+	privacy: LEGAL_PAGES.privacy,
+	conditions: PURCHASE_CONDITIONS
+};
+
+/** 文言の `{terms}` などを、そのページへのリンクにする。 */
 function withLegalLinks(lang: Lang, text: string) {
 	const t = messages[lang];
 	return text
-		.split(/\{(terms|privacy|tokushoho)\}/)
+		.split(/\{(terms|privacy|conditions)\}/)
 		.map((part, i) =>
 			i % 2 === 1
-				? html`<a href="${LEGAL_PAGES[part as keyof typeof LEGAL_PAGES]}"
-						>${t[part as keyof typeof LEGAL_PAGES]}</a
+				? html`<a href="${CONSENT_LINKS[part as keyof typeof CONSENT_LINKS]}"
+						>${t[part as keyof typeof CONSENT_LINKS]}</a
 					>`
 				: part
 		);
