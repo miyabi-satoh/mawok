@@ -2,7 +2,7 @@ import { defineCollection } from 'astro:content';
 import { glob } from 'astro/loaders';
 import { z } from 'astro/zod';
 
-// 紹介 (index.md) と、規約類 (terms.md・privacy.md)。特商法の表記は amiiby.com の共通のページに置き、価格などの条件は料金のページ (pages/pricing.astro) に書く。
+// 紹介 (index.md) と、規約類 (terms.md・privacy.md)。特商法の表記は amiiby.com の共通のページに置き、価格・動作環境と Mawok に限った定めは料金のページ (pages/pricing.astro) に書く。
 // 書き方の決まりは amiiby-site の docs/product-content.md に合わせる。
 
 const product = defineCollection({

@@ -58,7 +58,7 @@ describe('buying credit', () => {
 			`${ORIGIN}/account/buy/done?next=%2Faccount%2F&lang=ja&session_id={CHECKOUT_SESSION_ID}`
 		);
 		expect(sent.get('cancel_url')).toBe(`${ORIGIN}/account/buy?lang=ja`);
-		expect(sent.get('custom_text[submit][message]')).toContain(`${ORIGIN}/pricing/#conditions`);
+		expect(sent.get('custom_text[submit][message]')).toContain('https://amiiby.com/tokushoho/');
 		expect(new Headers(init!.headers).get('idempotency-key')).toMatch(/^mawok-checkout-/);
 	});
 
@@ -74,6 +74,7 @@ describe('buying credit', () => {
 		expect(confirmation).toContain('300 円（税込み）');
 		expect(confirmation).toContain('自動の更新はありません');
 		expect(confirmation).toContain('返金');
+		expect(confirmation).toContain('href="https://amiiby.com/tokushoho/"');
 		expect(confirmation).toContain('href="/pricing/#conditions"');
 		expect(confirmation).toContain('action="/account/buy"');
 		expect(confirmation.indexOf('返金')).toBeLessThan(
