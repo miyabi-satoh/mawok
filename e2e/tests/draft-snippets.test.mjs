@@ -280,7 +280,8 @@ test.describe('定型文', () => {
 			assert.match(rows.at(-1), /おつかれさま/);
 
 			// ほかの行を開いて名前を1文字直しても、足した行は消えない (設定画面が古い並びで保存し直さない)
-			await client.$(`[role="tabpanel"]:not([hidden]) ${ROW_TOGGLE}`).click();
+			const [firstRow] = await client.$$(`[role="tabpanel"]:not([hidden]) ${ROW_TOGGLE}`);
+			await firstRow.click();
 			const name = await client.$(
 				'[role="tabpanel"]:not([hidden]) input[aria-label="定型文の名前"]'
 			);

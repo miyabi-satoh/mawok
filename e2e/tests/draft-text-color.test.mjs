@@ -118,7 +118,11 @@ test.describe('下書きの文字色', () => {
 		try {
 			const draftHandle = await openDraftAppearanceSettings();
 			const settingsHwnd = await findVisibleMawokWindow(SETTINGS_TITLE);
-			await clickElement(client, settingsHwnd, await client.$('input[type="color"]'));
+			await clickElement(
+				client,
+				settingsHwnd,
+				await client.$('input[type="color"][aria-label="ライトの文字色を選ぶ"]')
+			);
 			// ポップアップが出てフォーカスが移るまで待つ (出たことは UI Automation からは見えない)
 			await new Promise((resolve) => setTimeout(resolve, 800));
 			// R・G・B の欄は 10 進で打つ。0x12・0x34・0x56
