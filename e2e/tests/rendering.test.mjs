@@ -376,7 +376,7 @@ test.describe('描かれ方', () => {
 		await invokeApp(client, 'open_settings_window');
 		const { settingsHandle, settingsHwnd } = await waitSettingsWindow(client, draftHandle);
 		await client.switchToWindow(settingsHandle);
-		await client.$('[role="tab"]').waitForDisplayed({ timeout: 5000 });
+		await client.$('[role="tab"][aria-selected="true"]').waitForDisplayed({ timeout: 5000 });
 		const values = await client.execute(() =>
 			[...document.querySelectorAll('[role="tab"]')].map((tab) => tab.dataset.value)
 		);

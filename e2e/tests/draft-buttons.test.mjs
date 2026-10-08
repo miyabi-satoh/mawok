@@ -162,7 +162,9 @@ test.describe('下書きのボタン', () => {
 			(palette) => palette.open && palette.options.length === 2,
 			{ label: '定型文の一覧' }
 		);
-		await clickElement(client, await getDraftWindowHandle(), await client.$('[role="option"]'));
+		// 1件目が定型文で、末尾は「テキストを定型文に登録」
+		const [snippet] = await client.$$('[role="option"]');
+		await clickElement(client, await getDraftWindowHandle(), snippet);
 		await waitFor(
 			() => readDraft(client),
 			(draft) => draft.value === 'あいABCう',
