@@ -16,7 +16,7 @@
 		"deploy": "pnpm --dir ../site run build && wrangler deploy"
 	},
 	"dependencies": {
-		"hono": "^4.13.9"
+		"hono": "^4.13.13"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.22.0",
