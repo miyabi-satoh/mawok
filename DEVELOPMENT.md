@@ -13,7 +13,7 @@
 - `messages/`: 画面の文言（Paraglide JS）
 - `src-tauri/`: 常駐、ホットキー、クリップボード、フォーカス復帰などのネイティブ側（Rust）。トレイメニューとエラーの文言は `src-tauri/src/i18n.rs` で翻訳する。
 - `src-tauri/assets/`: アイコンの元の SVG。アプリのアイコン、タスクトレイ用、macOS のメニューバー用（モノクロ）がある。変えたら `just icons` で `src-tauri/icons/` を作り直す。
-- `e2e/`: Windows 向けの E2E テスト（`tauri-driver` + WebdriverIO）と、macOS の自動の確認（`e2e/macos/`。アクセシビリティで動かす）。依存はここだけ別に持つので、`pnpm install --ignore-workspace` で入れる。
+- `e2e/`: Windows 向けの E2E テスト（`tauri-driver` + WebdriverIO）と、macOS の自動の確認（`e2e/macos/`。アクセシビリティで動かす）。依存はここだけ別に持つので、`e2e/` で `pnpm install` を流して入れる。
 
 技術の説明:
 

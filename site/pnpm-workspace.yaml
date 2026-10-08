@@ -1,3 +1,5 @@
 allowBuilds:
   esbuild: true
   sharp: false
+minimumReleaseAge: 1440
+minimumReleaseAgeExcludePrune: true
