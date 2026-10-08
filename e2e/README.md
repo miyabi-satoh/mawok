@@ -43,11 +43,8 @@ tauri-driver は各テストファイルの `before` フックが自分で起動
 
 ```
 cd e2e
-pnpm install --ignore-workspace
+pnpm install
 ```
-
-(リポジトリ直下に `pnpm-workspace.yaml` があるため、`--ignore-workspace` を付けないと
-ルート側の install に巻き込まれて `e2e/package.json` の依存が入らない)
 
 ## 描かれ方と画面の撮影
 
