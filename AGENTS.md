@@ -90,7 +90,7 @@ Codex は依頼文にあることしか知らないので、依頼文に次を�
 ## マージまでの基本フロー
 
 1. 変更をコミット。
-2. `/code-review` と Codex レビュー (レビューを依頼する側だけの手順)。順番と、直しをどちらで確かめるかは `codex-review` skill の「0. 投げる前に」に従う。指摘があれば修正コミットを重ね、両方で「指摘なし」になるまで再レビューを繰り返す。レビュー中は push せず、このループを PR 作成前に完結させる。
+2. 二重のレビュー (Claude Code の CLAUDE.md「レビュー」、順番は `codex-review` skill「0. 投げる前に」)。実機の確認を受けた直しも、レビューに出してから積む。指摘があれば修正コミットを重ね、指摘が無くなるまで繰り返す。レビュー中は push せず、このループを PR 作成前に完結させる。
 3. プッシュして PR 作成。push 時、lefthook の pre-push フック (→ `just hooks-install`) が整形 (`just fmt-check`) を確かめる。PR を作ると、GitHub Actions の CI が macOS と Windows で `just ci` を流す。OS で分けたコード (`#[cfg(windows)]` だけでなく `#[cfg(target_os = "macos")]` も) の動きを変えた場合と、ユーザーに見える変更 (画面・動き・文言) を含む場合は、push した後、PR をマージする前に、もう片方の OS での E2E・確認を頼む。テストや文書だけの変更では頼まない。PR 作成後に積んでよいのは、4.〜6. のループで必要になったコミットだけ。
 4. CI の結果を `gh pr checks <番号> --watch` で待つ。落ちたら直してコミットを重ね、3. (プッシュ) へ戻る。
 5. `git fetch` し、`git rev-list --count HEAD..origin/main` を確認する。1 以上なら main を取り込んで 3. へ戻る。main のブランチの保護が、CI の通過と main に追いついていることをマージの条件にしている。
