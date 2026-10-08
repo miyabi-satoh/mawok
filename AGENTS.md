@@ -2,7 +2,6 @@
 
 ## プロジェクトルール
 
-- main にマージされるコードは Codex レビュー通過済みであること。
 - `.codegraph/codegraph.db` があるなら、コードの構造を横断的に調べる場面 (呼び出し元・呼び出し先、影響範囲など) では grep/Read より先に CodeGraph (`codegraph explore`・`codegraph_explore` MCP ツール) を使う。
 - 開発の手順は [DEVELOPMENT.md](DEVELOPMENT.md)、コードだけでは分からない技術の説明は `docs/<テーマ>.md`。
 - コミット・PR 本文・issue は公開されるものとして書く (`public-repo-writing` skill)。
@@ -76,26 +75,16 @@
 
 ## Codex レビューの依頼
 
-`codex-review` skill の手順で、Herdr のペインから `codex exec` を1回ずつ実行して依頼する。Codex プラグインの `codex:codex-rescue` は使わない。
-Codex は依頼文にあることしか知らないので、依頼文に次を自分で書く。
-
-- レビュー対象 (ブランチなら `git diff origin/main...HEAD` のように比較基準まで。作業ツリーならその旨) と、対象外の生成物 (`src/lib/components/ui/**`・ロックファイル・`src-tauri/icons/**`・`src-tauri/gen/**`)
-- 見てほしい観点 (→「レビューの観点」)
-- コマンドの扱い (git・grep・ファイルの閲覧は可、ビルド・テスト・スクリプトの実行は不可、ファイルは編集しない)。「コマンドを実行しない」とだけ書くと、`git show` まで控える
-- 指摘は actionable なものだけ、なければ「指摘なし」とだけ返すこと
-
-指摘の反映はレビュー依頼元の仕事。
-再レビューは、同じ Codex のセッションに `resume` で続けると、対象と経緯を書き直さずに済む。
+`codex-review` skill の手順で依頼する。依頼文で対象から外す生成物は `src/lib/components/ui/**`・ロックファイル・`src-tauri/icons/**`・`src-tauri/gen/**`。
 
 ## マージまでの基本フロー
 
-1. 変更をコミット。
-2. 二重のレビュー (Claude Code の CLAUDE.md「レビュー」、順番は `codex-review` skill「0. 投げる前に」)。実機の確認を受けた直しも、レビューに出してから積む。指摘があれば修正コミットを重ね、指摘が無くなるまで繰り返す。レビュー中は push せず、このループを PR 作成前に完結させる。
-3. プッシュして PR 作成。push 時、lefthook の pre-push フック (→ `just hooks-install`) が整形 (`just fmt-check`) を確かめる。PR を作ると、GitHub Actions の CI が macOS と Windows で `just ci` を流す。OS で分けたコード (`#[cfg(windows)]` だけでなく `#[cfg(target_os = "macos")]` も) の動きを変えた場合と、ユーザーに見える変更 (画面・動き・文言) を含む場合は、push した後、PR をマージする前に、もう片方の OS での E2E・確認を頼む。テストや文書だけの変更では頼まない。PR 作成後に積んでよいのは、4.〜6. のループで必要になったコミットだけ。
-4. CI の結果を `gh pr checks <番号> --watch` で待つ。落ちたら直してコミットを重ね、3. (プッシュ) へ戻る。
-5. `git fetch` し、`git rev-list --count HEAD..origin/main` を確認する。1 以上なら main を取り込んで 3. へ戻る。main のブランチの保護が、CI の通過と main に追いついていることをマージの条件にしている。
-6. 5. でコードが変わっていたら、その差分を Codex に再レビューさせる。指摘があれば修正コミットを重ねて 3. へ戻る。衝突なく main を取り込めた場合は不要。
-7. CI が通り、コミットが増えなくなったら、ユーザーに確認を取らずスカッシュマージする。
+共通の指示の「git の運用」の流れに、このリポジトリでは次を足す。
+
+- 実機の確認を受けた直しも、二重のレビューに出してから積む。
+- push のとき、lefthook の pre-push フック (→ `just hooks-install`) が整形 (`just fmt-check`) を確かめる。
+- PR を作ると、GitHub Actions の CI が macOS と Windows で `just ci` を流す。
+- OS で分けたコード (`#[cfg(windows)]` だけでなく `#[cfg(target_os = "macos")]` も) の動きを変えた場合と、ユーザーに見える変更 (画面・動き・文言) を含む場合は、push した後、PR をマージする前に、もう片方の OS での E2E・確認を頼む。テストや文書だけの変更では頼まない。
 
 ## 文体
 
