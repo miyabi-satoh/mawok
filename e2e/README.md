@@ -94,7 +94,7 @@ just msix-check msix        # msix/msix.test.mjs だけ
   エラーで言われたときだけ (その場合も、config.toml の今の中身を確かめてから)。
 - **クリップボードは実機の OS のものを使う**: サンドボックス化されていないので、テスト実行中は
   実際のクリップボードの中身が書き換わる。並行して手作業しながら回さないこと。
-- **BiDi を無効化する**: WebdriverIO 9 は既定で BiDi セッションを張るが、このアプリでは
+- **BiDi を無効化する**: WebdriverIO は既定で BiDi セッションを張るが、このアプリでは
   BiDi 経由だと about:blank のまま何も表示していない別 webview に繋がってしまい、実際の
   ウィンドウの内容にも `invoke` にも届かない (`Origin header is not a valid URL` で拒否される)。
   `capabilities` に `'wdio:enforceWebDriverClassic': true` を必ず入れる (`lib/app.mjs` 参照)。
