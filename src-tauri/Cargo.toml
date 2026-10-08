@@ -1,8 +1,6 @@
 [package]
 name = "mawok"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
 edition = "2021"
 # アプリなので crates.io には出さない。cargo-about もこれを見て、mawok 自身をライセンス表示から外す
 publish = false
