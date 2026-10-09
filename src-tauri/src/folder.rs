@@ -34,11 +34,7 @@ impl FolderError {
 /// 空ならホーム、`~` で始まればホームから、相対パスなら今のフォルダーから（今のフォルダーが消えていればホームから）。
 /// 前後の `"` を外し、`..` は文字の上で解いてシンボリックリンクは解かない（docs/actions.md「作業フォルダー」）
 pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, FolderError> {
-    let trimmed = input.trim();
-    let input = trimmed
-        .strip_prefix('"')
-        .and_then(|rest| rest.strip_suffix('"'))
-        .unwrap_or(trimmed);
+    let input = unquote(input);
     let resolved = if input.is_empty() || input == "~" {
         home.to_path_buf()
     } else {
@@ -49,6 +45,15 @@ pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, Fold
         Ok(metadata) if !metadata.is_dir() => Err(FolderError::NotAFolder),
         Ok(_) => Ok(resolved),
     }
+}
+
+/// 前後の空白と、エクスプローラーの「パスのコピー」が付ける前後の `"` を外す（resolve と complete で共通）
+fn unquote(input: &str) -> &str {
+    let trimmed = input.trim();
+    trimmed
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(trimmed)
 }
 
 /// 打たれたパスを、`~` と今のフォルダーから見た絶対パスにする（resolve と complete で共通）。
@@ -89,14 +94,11 @@ pub struct FolderCompletion {
 }
 
 /// 打ちかけのパスの最後の名前を、当てはまるフォルダーの名前で補う（docs/actions.md「作業フォルダー」）。
-/// 大文字と小文字は区別せずに拾う。1つなら実際の名前と区切りに置き換え（大文字と小文字を区別するファイルシステムでも移れるように）、
-/// 2つ以上なら打った所を残して共通する所まで補い、候補を返す。
-/// `.` で始まるフォルダーは、`.` を打ったときだけ候補にする
+/// 大文字と小文字は区別せずに拾い、補った所は実際の名前の書き方にする（大文字と小文字を区別するファイルシステムでも移れるように）。
+/// 1つなら名前と区切りまで、2つ以上なら共通する所まで補い、候補を返す。
+/// 隠したフォルダー（`.` で始まる名前と、Windows の隠し・システムの属性）は、`.` を打ったときか、ほかに当てはまるものが無いときだけ候補にする
 pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
-    let trimmed = input.trim_start();
-    let input = trimmed
-        .strip_prefix('"')
-        .map_or(trimmed, |rest| rest.strip_suffix('"').unwrap_or(rest));
+    let input = unquote(input);
     let unchanged = || FolderCompletion {
         input: input.to_string(),
         candidates: Vec::new(),
@@ -119,17 +121,30 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
         return unchanged();
     };
     let lowered = prefix.to_lowercase();
-    let mut names: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok()?;
-            if name.starts_with('.') && !prefix.starts_with('.') {
-                return None;
-            }
-            // シンボリックリンクの先がフォルダーなら候補にする（移るときもリンクのまま移れる）
-            (name.to_lowercase().starts_with(&lowered) && entry.path().is_dir()).then_some(name)
-        })
-        .collect();
+    let mut visible = Vec::new();
+    let mut hidden = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if !name.to_lowercase().starts_with(&lowered) {
+            continue;
+        }
+        // 名前の一覧と一緒に返る種類で見て、フォルダーの数だけ stat しない。
+        // シンボリックリンクだけは先を見て、フォルダーなら候補にする（移るときもリンクのまま移れる）
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !(file_type.is_dir() || file_type.is_symlink() && entry.path().is_dir()) {
+            continue;
+        }
+        if is_hidden(&name, &entry) && !prefix.starts_with('.') {
+            hidden.push(name);
+        } else {
+            visible.push(name);
+        }
+    }
+    let mut names = if visible.is_empty() { hidden } else { visible };
     names.sort_by_cached_key(|name| name.to_lowercase());
     match names.as_slice() {
         [] => unchanged(),
@@ -138,18 +153,43 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
             ..unchanged()
         },
         _ => FolderCompletion {
-            // 打った所は打ったとおりに残し、その先だけを最初の名前の書き方で足す
-            input: format!(
-                "{folder_part}{prefix}{}",
-                common_prefix(&names)
-                    .chars()
-                    .skip(prefix.chars().count())
-                    .collect::<String>()
-            ),
+            input: format!("{folder_part}{}", completed_part(&names, prefix)),
             total: names.len() as u32,
             candidates: names.into_iter().take(CANDIDATE_LIMIT).collect(),
         },
     }
+}
+
+/// 2つ以上の名前で補った後の、最後の名前の部分。打った所は、候補どうしで書き方が揃っていればそれに合わせ、
+/// 揃っていなければ（`desktop` と `Documents` に `D` など）打ったとおりに残す
+fn completed_part(names: &[String], prefix: &str) -> String {
+    let common = common_prefix(names);
+    let typed = prefix.chars().count();
+    let head: String = common.chars().take(typed).collect();
+    if names.iter().all(|name| name.starts_with(&head)) {
+        common.to_string()
+    } else {
+        prefix.chars().chain(common.chars().skip(typed)).collect()
+    }
+}
+
+/// 隠したフォルダーか。`.` で始まる名前と、Windows の隠し・システムの属性（エクスプローラーが既定で出さないもの）
+fn is_hidden(name: &str, entry: &std::fs::DirEntry) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_HIDDEN と FILE_ATTRIBUTE_SYSTEM
+        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+        if entry
+            .metadata()
+            .is_ok_and(|metadata| metadata.file_attributes() & HIDDEN_OR_SYSTEM != 0)
+        {
+            return true;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = entry;
+    name.starts_with('.')
 }
 
 /// 名前に共通する頭の部分。大文字と小文字は区別せず、最初の名前の書き方で返す
@@ -354,11 +394,12 @@ mod tests {
     #[test]
     fn completes_the_common_part_of_several_matches_ignoring_case() {
         let d = completion_dirs("complete-several");
-        // 打った所は打ったとおりに残す。ファイルの Docs.txt は候補にしない
+        // 候補どうしで書き方が揃っていれば、打った所も合わせる。ファイルの Docs.txt は候補にしない
         let completion = complete(&d.home, &d.home, "docu");
-        assert_eq!(completion.input, "documents");
+        assert_eq!(completion.input, "Documents");
         assert_eq!(completion.candidates, ["Documents", "Documents-old"]);
         assert_eq!(completion.total, 2);
+        // 揃っていなければ、打ったとおりに残す
         let completion = complete(&d.home, &d.home, "D");
         assert_eq!(completion.input, "D");
         assert_eq!(
@@ -374,6 +415,12 @@ mod tests {
             .candidates
             .contains(&".config".to_string()));
         assert_eq!(complete(&d.home, &d.home, ".c").input, sep(".config/"));
+        // ほかに当てはまるものが無ければ候補にする
+        fs::create_dir_all(d.home.join("only-hidden/.git")).unwrap();
+        assert_eq!(
+            complete(&d.home, &d.home, "only-hidden/").input,
+            sep("only-hidden/.git/")
+        );
     }
 
     #[test]

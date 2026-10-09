@@ -34,20 +34,30 @@
 	let candidates = $state<string[]>([]);
 	let total = $state(0);
 	let inputElement: HTMLInputElement | undefined;
+	// 打つ・Enter・Tab のたびに進める。補いを待つ間に進んでいたら、古いパスの補いで上書きしない
+	let edits = 0;
+
+	function clearCandidates() {
+		edits += 1;
+		candidates = [];
+		total = 0;
+	}
 
 	async function submit() {
 		if (submitting) return;
 		submitting = true;
+		clearCandidates();
 		error = (await onsubmit(input)) ?? '';
 		submitting = false;
 	}
 
 	async function complete() {
-		const requested = input;
-		const completion = await oncomplete(requested);
-		// 待つ間に打ち直していたら、古いパスの補いで上書きしない
-		if (!completion || input !== requested) return;
+		edits += 1;
+		const requested = edits;
+		const completion = await oncomplete(input);
+		if (!completion || edits !== requested) return;
 		input = completion.input;
+		error = '';
 		candidates = completion.candidates;
 		total = completion.total;
 		await tick();
@@ -93,7 +103,7 @@
 			bind:value={input}
 			oninput={() => {
 				error = '';
-				candidates = [];
+				clearCandidates();
 			}}
 			onkeydown={onKeydown}
 			bind:this={inputElement}
@@ -103,8 +113,15 @@
 			}}
 		/>
 	</div>
-	{#if candidates.length > 0}
-		<div class="min-h-0 overflow-y-auto border-t px-3 py-2 text-sm text-muted-foreground">
+	<!-- Tab を押してもフォーカスは欄から動かないので、候補が出たことを読み上げで知らせる。読み上げは、前からある領域の中身が変わったときに働くので、領域はいつも置く -->
+	<div
+		aria-live="polite"
+		class={[
+			'min-h-0 overflow-y-auto text-sm text-muted-foreground',
+			candidates.length > 0 && 'border-t px-3 py-2'
+		]}
+	>
+		{#if candidates.length > 0}
 			<ul aria-label={m.folder_candidates()} class="flex flex-wrap gap-x-4 gap-y-1">
 				{#each candidates as name (name)}
 					<li class="min-w-0 break-all">{name}</li>
@@ -113,8 +130,8 @@
 			{#if total > candidates.length}
 				<p class="mt-1">{m.folder_candidates_more({ count: total - candidates.length })}</p>
 			{/if}
-		</div>
-	{/if}
+		{/if}
+	</div>
 	{#if error}
 		<p id="folder-palette-error" role="alert" class="border-t px-3 py-2 text-sm text-destructive">
 			{error}
