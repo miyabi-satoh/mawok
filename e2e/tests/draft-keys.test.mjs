@@ -56,7 +56,7 @@ test.describe('下書きウィンドウのキーの変更', () => {
 		}
 	});
 
-	test('コピーして隠すキーを変えると、そのキーでコピーして隠れ、元のキーでは隠れない。既定に戻すと元のキーで隠れる', async () => {
+	test('「コピーして閉じる」のキーを変えると、そのキーでコピーして閉じ、元のキーでは閉じない。既定に戻すと元のキーで閉じる', async () => {
 		try {
 			await invokeApp(client, 'set_draft_key', { action: 'copy', key: OTHER_COPY_KEY });
 			await waitFor(tryReadConfig, (config) => config?.textWindowKeys?.copy === OTHER_COPY_KEY, {

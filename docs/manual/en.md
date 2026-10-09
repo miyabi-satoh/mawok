@@ -91,12 +91,12 @@ If the text box on the other device is empty, the text goes in as it is; if it h
 | Close without copying | `Esc` |
 | Show text you copied earlier (↑ at the start of the text box, ↓ at the end) | `↑` / `↓` |
 | Previous / next in history (wherever the cursor is) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
-| Open the snippet list and insert one | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
-| Open the action list and run one | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
+| Insert snippet | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
+| Open action list | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
 | Go to folder | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
 | Cancel an action (while it is running) | `Esc` |
-| Send to paired devices | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
-| Choose destinations | {macos:`Cmd+L`}{windows:`Ctrl+L`} |
+| Send | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
+| Choose where to send | {macos:`Cmd+L`}{windows:`Ctrl+L`} |
 | Insert / discard received text | {macos:`Cmd+I` / `Cmd+Shift+Backspace`}{windows:`Ctrl+I` / `Ctrl+Shift+Backspace`} |
 | Open Settings | {macos:`Cmd+,`}{windows:`Ctrl+,`} |
 

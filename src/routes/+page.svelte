@@ -705,7 +705,7 @@
 		received.push(draft);
 	}
 
-	/** 帯の「カーソルの位置に差し込む」。定型文と同じく、取り消しで戻せる形で差し込み、範囲を選んでいたら置き換える */
+	/** 帯の「カーソルの位置に挿入」。定型文と同じく、取り消しで戻せる形で差し込み、範囲を選んでいたら置き換える */
 	function insertReceived() {
 		const draft = received.shift();
 		if (!draft || !textarea) return;

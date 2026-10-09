@@ -95,9 +95,9 @@ test.describe('macOS: ホットキーと下書きのキーの変更', () => {
 		await hideDraft();
 	});
 
-	test('20. の 2.: 「コピーして閉じる」のキーを変えると、そのキーでコピーして隠れ、元のキーでは隠れない', async () => {
+	test('20. の 2.: 「コピーして閉じる」のキーを変えると、そのキーでコピーして閉じ、元のキーでは閉じない', async () => {
 		await openKeySettings();
-		await record('コピーして閉じるのキーを変更', pressNewCopyKey, '⌘D');
+		await record('「コピーして閉じる」のキーを変更', pressNewCopyKey, '⌘D');
 		await closeSettings();
 
 		await setClipboard('before-keys');
@@ -119,14 +119,14 @@ test.describe('macOS: ホットキーと下書きのキーの変更', () => {
 		await openKeySettings();
 		// 既定のままだと「既定に戻す」は押せず、押しても何も起きないまま通ってしまう
 		assert.match(
-			await elementName(SETTINGS_TITLE, 'AXButton', 'コピーして閉じるのキーを変更'),
+			await elementName(SETTINGS_TITLE, 'AXButton', '「コピーして閉じる」のキーを変更'),
 			/（今は ⌘D）/,
 			'既定でないキーから始める'
 		);
-		await pressInSettings('AXButton', 'コピーして閉じるのキーを変更');
+		await pressInSettings('AXButton', '「コピーして閉じる」のキーを変更');
 		await pressInSettings('AXButton', '既定に戻す');
 		await waitFor(
-			() => elementName(SETTINGS_TITLE, 'AXButton', 'コピーして閉じるのキーを変更'),
+			() => elementName(SETTINGS_TITLE, 'AXButton', '「コピーして閉じる」のキーを変更'),
 			(name) => name?.includes('（今は ⌘Enter）'),
 			{ label: '「コピーして閉じる」が既定に戻る' }
 		);

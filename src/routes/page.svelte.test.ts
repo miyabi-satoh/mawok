@@ -1935,7 +1935,7 @@ describe('アクション', () => {
 		expect(call.args.text).toBe('');
 	});
 
-	it('出し方が「差し込む」なら、範囲を選んでいればその後ろに、なければカーソルの位置に結果を入れる', async () => {
+	it('出し方が「挿入」なら、範囲を選んでいればその後ろに、なければカーソルの位置に結果を入れる', async () => {
 		settings.current = {
 			...settings.current!,
 			actions: [

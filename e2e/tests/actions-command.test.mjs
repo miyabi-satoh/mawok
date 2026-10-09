@@ -404,7 +404,7 @@ test.describe('コマンドのアクション', () => {
 		await typeIntoDraft(client, 'abcdef');
 		await setDraftCaret(client, 3);
 		await runAction(client, '日付');
-		await waitDraftValue(client, `abc${date}def`, 'カーソルの位置に差し込む');
+		await waitDraftValue(client, `abc${date}def`, 'カーソルの位置に挿入');
 
 		await setDraftValue(client, 'abcdef');
 		await setDraftCaret(client, 1, 3);
