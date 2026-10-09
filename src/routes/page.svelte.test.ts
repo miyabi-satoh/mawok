@@ -2412,6 +2412,10 @@ describe('作業フォルダー', () => {
 		await userEvent.keyboard('{ArrowRight}');
 		await expect.element(input).toHaveValue('~/notes/wo');
 		await expect.element(screen.getByTestId('folder-suggestion')).toBeInTheDocument();
+		await userEvent.keyboard('{Home}');
+		await expect.element(screen.getByTestId('folder-suggestion')).not.toBeInTheDocument();
+		await userEvent.keyboard('{End}');
+		await expect.element(screen.getByTestId('folder-suggestion')).toBeInTheDocument();
 		// 受け入れると、打った所も実際の名前の書き方になる
 		await userEvent.keyboard('{ArrowRight}');
 		await expect.element(input).toHaveValue('~/notes/Work/');
