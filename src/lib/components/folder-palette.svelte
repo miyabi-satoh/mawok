@@ -3,7 +3,6 @@
 	import { tick } from 'svelte';
 	import type { FolderCompletion } from '$lib/bindings/FolderCompletion';
 	import PaletteFrame from '$lib/components/palette-frame.svelte';
-	import { Button } from '$lib/components/ui/button';
 	import { stepSelection, suggestionSuffix } from '$lib/folder-completion';
 	import { hasNoModifiers, isImeKey, toDraftKey, type Platform } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
@@ -22,14 +21,12 @@
 		toggleKey: string;
 		/** 打ったパスへ移る。移れなければ、欄の下に出す文言を返す */
 		onsubmit: (input: string) => Promise<string | null>;
-		/** OS のフォルダーを選ぶ画面で選んで移る。移れなければ、欄の下に出す文言を返す */
-		onpick: () => Promise<string | null>;
 		/** 打ちかけのパスを補う。補えなければ null */
 		oncomplete: (input: string) => Promise<FolderCompletion | null>;
 		onclose: () => void;
 	};
 
-	let { current, platform, toggleKey, onsubmit, onpick, oncomplete, onclose }: Props = $props();
+	let { current, platform, toggleKey, onsubmit, oncomplete, onclose }: Props = $props();
 
 	// 出すたびに部品ごと作り直すので、開いたときのフォルダーから始まる
 	// svelte-ignore state_referenced_locally
@@ -82,15 +79,6 @@
 		clearCandidates();
 		error = (await onsubmit(input)) ?? '';
 		submitting = false;
-	}
-
-	async function pick() {
-		if (submitting) return;
-		submitting = true;
-		clearCandidates();
-		error = (await onpick()) ?? '';
-		submitting = false;
-		inputElement?.focus();
 	}
 
 	async function complete() {
@@ -254,10 +242,6 @@
 				</div>
 			{/if}
 		</div>
-		<!-- マウスで使う人の入口。OS のフォルダーを選ぶ画面を、今のフォルダーから開く -->
-		<Button variant="ghost" size="xs" class="shrink-0" disabled={submitting} onclick={pick}>
-			{m.folder_pick()}
-		</Button>
 	</div>
 	<!--
 		Tab を押してもフォーカスは欄から動かないので、候補が出たことを読み上げで知らせる。一覧ごと読むと長いので、件数だけを読む。

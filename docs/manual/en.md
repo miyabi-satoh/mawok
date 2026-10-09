@@ -50,7 +50,9 @@ Add actions under "Actions" in Settings.
 - If a command is not found, write its full path.
 :::
 
-Commands run in your home folder. To run them in another folder, press {macos:`Cmd+D`}{windows:`Ctrl+D`} or the folder button at the bottom, type the path, and press `Enter`. Select "Choose..." in the box to pick a folder in a window instead.
+Commands run in your home folder. The folder button at the bottom left shows the current folder. To run commands in another folder, select the button, then choose a recent folder or "Choose Folder...".
+
+From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and press `Enter`.
 
 - A relative path starts from the current folder.
 - Type the start of a folder name and press `Tab` to complete it. If several folders match, they appear below the box. Press `Tab` again to go through them. Press `Enter` to choose the selected folder, then press `Enter` again to move there.

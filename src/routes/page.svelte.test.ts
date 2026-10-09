@@ -2274,15 +2274,23 @@ describe('書きかけのあるなしを知らせる', () => {
 
 describe('作業フォルダー', () => {
 	let changeResult: () => Promise<unknown>;
-	let pickResult: () => Promise<unknown>;
+	let menuResult: unknown;
 
 	beforeEach(() => {
 		changeResult = () => Promise.resolve(undefined);
-		pickResult = () => Promise.resolve(true);
+		menuResult = {
+			current: { name: 'notes', display: '~/notes', path: '/home/notes' },
+			atHome: false,
+			recent: [
+				{ name: 'notes', display: '~/notes', path: '/home/notes' },
+				{ name: 'work', display: '~/work', path: '/home/work' }
+			]
+		};
 		invoked.mockImplementation((command, args) => {
 			if (command === 'current_folder') return Promise.resolve('~/notes');
 			if (command === 'change_folder') return changeResult();
-			if (command === 'pick_folder') return pickResult();
+			if (command === 'pick_folder') return Promise.resolve(true);
+			if (command === 'folder_menu') return Promise.resolve(menuResult);
 			if (command === 'complete_folder') {
 				const { input } = args as { input: string };
 				if (input === '~/notes/d')
@@ -2425,20 +2433,34 @@ describe('作業フォルダー', () => {
 		await expect.element(screen.getByTestId('folder-suggestion')).not.toBeInTheDocument();
 	});
 
-	it('下のボタンで欄を出し、「選ぶ...」で選んだら閉じる。選ばずに閉じたら欄に戻る', async () => {
+	it('左下のボタンに今のフォルダーを出し、メニューで最近のフォルダーへ移るか、選ぶ画面を開く', async () => {
 		const screen = await render(Page);
-		await screen.getByRole('button', { name: m.draft_folder() }).click();
-		const input = screen.getByRole('combobox', { name: m.folder_input() });
-		await expect.element(input).toHaveFocus();
+		const button = screen.getByRole('button', { name: m.folder_button({ path: '~/notes' }) });
+		await expect.element(button).toHaveTextContent('notes');
 
-		pickResult = () => Promise.resolve(false);
-		await screen.getByRole('button', { name: m.folder_pick() }).click();
-		await expect.element(input).toHaveFocus();
-		expect(commandsCalled()).toContain('pick_folder');
+		await button.click();
+		await screen.getByRole('menuitem', { name: /work/ }).click();
+		await vi.waitFor(() =>
+			expect(callsOf(invoked, 'change_folder').at(-1)?.[1]).toEqual({ input: '/home/work' })
+		);
 
-		pickResult = () => Promise.resolve(true);
-		await screen.getByRole('button', { name: m.folder_pick() }).click();
-		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
+		await button.click();
+		await screen.getByRole('menuitem', { name: m.folder_menu_pick() }).click();
+		await vi.waitFor(() => expect(commandsCalled()).toContain('pick_folder'));
+	});
+
+	it('ホームにいて最近のフォルダーが無ければ、ボタンですぐ選ぶ画面を開く', async () => {
+		menuResult = {
+			current: { name: 'someone', display: '~', path: '/home' },
+			atHome: true,
+			recent: []
+		};
+		const screen = await render(Page);
+		const button = screen.getByRole('button', { name: m.folder_button({ path: '~' }) });
+		await expect.element(button).toHaveTextContent(m.folder_home());
+		await button.click();
+		await vi.waitFor(() => expect(commandsCalled()).toContain('pick_folder'));
+		await expect.element(screen.getByRole('menu')).not.toBeInTheDocument();
 	});
 
 	it('Esc とキーのもう一押しで、移らずに閉じる', async () => {

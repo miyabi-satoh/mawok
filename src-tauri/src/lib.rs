@@ -130,6 +130,8 @@ struct ActionState {
     client: OnceLock<reqwest::Client>,
     /// テキストウィンドウで移った作業フォルダー。None ならホームフォルダー（folder.rs）
     folder: Mutex<Option<PathBuf>>,
+    /// 最近移ったフォルダー（folder.rs の remember）。最初に使うときにファイルから読む
+    recent_folders: Mutex<Option<Vec<PathBuf>>>,
     /// アクションに振った番号の最大。起動中ずっと増やすので、窓を読み込み直しても番号は戻らない
     last_request: AtomicU64,
     /// 走っているアクションと、取り消した番号
@@ -2045,6 +2047,7 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
     } else {
         format!("{APP_NAME} — {}", folder::display(&resolved, &home))
     };
+    remember_folder(&app, &resolved, &home);
     *state.folder.lock().unwrap() = (resolved != home).then_some(resolved);
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         if let Err(error) = window.set_title(&title) {
@@ -2053,6 +2056,53 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
     }
     info!("changed the working folder");
     Ok(())
+}
+
+fn recent_folders_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_local_data_dir()
+        .ok()
+        .map(|dir| dir.join(folder::RECENT_FILE_NAME))
+}
+
+/// 最近のフォルダーを、まだ読んでいなければファイルから読んでから渡す
+fn with_recent_folders<T>(app: &AppHandle, f: impl FnOnce(&mut Vec<PathBuf>) -> T) -> T {
+    let state = app.state::<ActionState>();
+    let mut recent = state.recent_folders.lock().unwrap();
+    let recent = recent.get_or_insert_with(|| {
+        recent_folders_path(app)
+            .map(|path| folder::load_recent(&path))
+            .unwrap_or_default()
+    });
+    f(recent)
+}
+
+/// 移った先を最近のフォルダーに入れて書く。書けなくても移るのは止めない（次に覚え直せる）
+fn remember_folder(app: &AppHandle, folder: &std::path::Path, home: &std::path::Path) {
+    let recent = with_recent_folders(app, |recent| {
+        folder::remember(recent, folder, home);
+        recent.clone()
+    });
+    if let Some(path) = recent_folders_path(app) {
+        if let Err(error) = folder::save_recent(&path, &recent) {
+            warn!("couldn't save the recent folders: {error}");
+        }
+    }
+}
+
+/// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの（folder.rs の menu）
+#[tauri::command]
+fn folder_menu(app: AppHandle) -> Result<folder::FolderMenu, String> {
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    let current = app
+        .state::<ActionState>()
+        .folder
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| home.clone());
+    let recent = with_recent_folders(&app, |recent| recent.clone());
+    Ok(folder::menu(&current, &home, &recent))
 }
 
 /// 欄に打ちかけのパスを、今の作業フォルダーから見て補う（folder.rs の complete）。
@@ -3417,6 +3467,7 @@ pub fn run() {
             run_action,
             change_folder,
             complete_folder,
+            folder_menu,
             pick_folder,
             current_folder,
             begin_action,
