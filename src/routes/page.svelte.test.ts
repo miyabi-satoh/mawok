@@ -2444,13 +2444,26 @@ describe('作業フォルダー', () => {
 		await userEvent.keyboard('{Escape}');
 		await expect.element(screen.getByRole('textbox', { name: m.draft_label() })).toHaveFocus();
 
+		// 移ると最近のフォルダーの順が入れ替わる。並べ直しても、入力欄にフォーカスを戻す
 		await button.click();
+		menuResult = {
+			current: { name: 'work', display: '~/work', path: '/home/work' },
+			atHome: false,
+			recent: [
+				{ name: 'work', display: '~/work', path: '/home/work' },
+				{ name: 'notes', display: '~/notes', path: '/home/notes' }
+			]
+		};
 		await screen.getByRole('menuitem', { name: /work/ }).click();
 		await vi.waitFor(() =>
 			expect(callsOf(invoked, 'change_folder').at(-1)?.[1]).toEqual({ input: '/home/work' })
 		);
+		const workButton = screen.getByRole('button', { name: m.folder_button({ path: '~/work' }) });
+		await expect.element(workButton).toBeInTheDocument();
+		await expect.element(screen.getByRole('menu')).not.toBeInTheDocument();
+		await expect.element(screen.getByRole('textbox', { name: m.draft_label() })).toHaveFocus();
 
-		await button.click();
+		await workButton.click();
 		await screen.getByRole('menuitem', { name: m.folder_menu_pick() }).click();
 		await vi.waitFor(() => expect(commandsCalled()).toContain('pick_folder'));
 	});

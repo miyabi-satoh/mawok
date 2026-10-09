@@ -75,7 +75,8 @@
 			{#if menu.recent.length > 0}
 				<DropdownMenu.Group>
 					<DropdownMenu.Label>{m.folder_menu_recent()}</DropdownMenu.Label>
-					{#each menu.recent as folder (folder.path)}
+					<!-- key はパスでなく位置にする。移ると並びが入れ替わり、閉じかけのメニューの行が動くと、メニューがフォーカスを取り返したまま消え、下書きに戻したフォーカスが外れる -->
+					{#each menu.recent as folder, index (index)}
 						{@const current = folder.path === menu.current.path}
 						<DropdownMenu.Item onSelect={() => !current && onchange(folder.path)}>
 							<CheckIcon class={current ? '' : 'invisible'} />
