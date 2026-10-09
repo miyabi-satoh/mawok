@@ -965,7 +965,7 @@
 		フォーカスがボタンに移ると Esc や Cmd+Enter が効かなくなる
 	-->
 	<!--
-		上の並び。履歴の前・次を左にまとめ、道具を右に寄せる（ブラウザや Finder のツールバーと同じ並び）。
+		上の並び。履歴の前・次を左にまとめ、道具を右に寄せる（ブラウザや Finder のツールバーと同じ並び）。設定は、ツールバーの慣れた位置の右端に置く。
 		前・次は、覚えている履歴がなければ使えないので出さない。
 		列が狭いとき（最小の幅の近く）は、定型文とアクションをアイコンだけにする
 	-->
@@ -1015,17 +1015,6 @@
 				<Button
 					tabindex={-1}
 					variant="ghost"
-					size="icon-sm"
-					aria-label={m.draft_settings()}
-					title={keyHint(m.draft_settings_hint(), keys.settings, platform)}
-					disabled={running !== null}
-					onclick={() => invoke('open_settings_window')}
-				>
-					<SettingsIcon />
-				</Button>
-				<Button
-					tabindex={-1}
-					variant="ghost"
 					size="sm"
 					title={keyHint(m.draft_snippets_hint(), keys.snippets, platform)}
 					disabled={sending || running !== null}
@@ -1044,6 +1033,17 @@
 				>
 					<SparklesIcon data-icon="inline-start" />
 					<span class="@max-[30rem]:sr-only">{m.draft_actions()}</span>
+				</Button>
+				<Button
+					tabindex={-1}
+					variant="ghost"
+					size="icon-sm"
+					aria-label={m.draft_settings()}
+					title={keyHint(m.draft_settings_hint(), keys.settings, platform)}
+					disabled={running !== null}
+					onclick={() => invoke('open_settings_window')}
+				>
+					<SettingsIcon />
 				</Button>
 			</div>
 		</div>

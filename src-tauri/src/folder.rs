@@ -281,17 +281,21 @@ fn item(path: &Path, home: &Path) -> FolderItem {
     }
 }
 
-/// フォルダーのボタンとメニューに出すものを作る
+/// フォルダーのボタンとメニューに出すものを作る。最近のフォルダーがまだあるかは確かめない。
+/// つながらないネットワークのフォルダーがあると、確かめ終わるまでボタンが出ないため。消えたものは、選んで移れなかったときに外す（forget）
 pub fn menu(current: &Path, home: &Path, recent: &[PathBuf]) -> FolderMenu {
     FolderMenu {
         current: item(current, home),
         at_home: current == home,
-        recent: recent
-            .iter()
-            .filter(|folder| folder.is_dir())
-            .map(|folder| item(folder, home))
-            .collect(),
+        recent: recent.iter().map(|folder| item(folder, home)).collect(),
     }
+}
+
+/// 移れなかったフォルダーを、最近のフォルダーから外す。外したら true
+pub fn forget(recent: &mut Vec<PathBuf>, folder: &Path) -> bool {
+    let before = recent.len();
+    recent.retain(|known| known != folder);
+    recent.len() != before
 }
 
 /// 移った先を、最近のフォルダーの先頭に入れる。ホームは入れない（メニューの「ホームフォルダーに戻る」で戻れる）
@@ -611,13 +615,18 @@ mod tests {
     }
 
     #[test]
-    fn menu_leaves_out_missing_folders() {
-        let d = Dirs::new("menu");
-        let gone = d.home.join("gone");
-        let menu = menu(&d.work, &d.home, &[gone, d.work.clone()]);
+    fn menu_lists_recent_folders_and_forgets_missing_ones() {
+        let home = Path::new("/home/someone");
+        let work = home.join("work");
+        let gone = home.join("gone");
+        let mut recent = vec![gone.clone(), work.clone()];
+        let menu = menu(&work, home, &recent);
         assert_eq!(menu.current.name, "work");
         assert!(!menu.at_home);
-        assert_eq!(menu.recent, std::slice::from_ref(&menu.current));
+        assert_eq!(menu.recent.len(), 2);
+        assert!(forget(&mut recent, &gone));
+        assert!(!forget(&mut recent, &gone));
+        assert_eq!(recent, [work]);
     }
 
     #[cfg(not(windows))]

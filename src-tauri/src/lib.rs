@@ -2040,6 +2040,10 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
         .unwrap_or_else(|| home.clone());
     let resolved = folder::resolve(&base, &home, &input).map_err(|error| {
         info!("couldn't change the working folder: {}", error.code());
+        // メニューの最近のフォルダーから選んで、消えていたら外す（メニューは、あるかを確かめずに出すため）
+        if error == folder::FolderError::NotFound {
+            forget_folder(&app, std::path::Path::new(input.trim()));
+        }
         error.code().to_string()
     })?;
     let title = if resolved == home {
@@ -2090,10 +2094,23 @@ fn remember_folder(app: &AppHandle, folder: &std::path::Path, home: &std::path::
     }
 }
 
-/// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの（folder.rs の menu）。
-/// 最近のフォルダーがあるかを確かめるので、change_folder と同じく、つながらないネットワークのフォルダーで画面を止めないよう async にする
+/// 移れなかったフォルダーを最近のフォルダーから外して書く
+fn forget_folder(app: &AppHandle, folder: &std::path::Path) {
+    let Some(recent) = with_recent_folders(app, |recent| {
+        folder::forget(recent, folder).then(|| recent.clone())
+    }) else {
+        return;
+    };
+    if let Some(path) = recent_folders_path(app) {
+        if let Err(error) = folder::save_recent(&path, &recent) {
+            warn!("couldn't save the recent folders: {error}");
+        }
+    }
+}
+
+/// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの（folder.rs の menu）
 #[tauri::command]
-async fn folder_menu(app: AppHandle) -> Result<folder::FolderMenu, String> {
+fn folder_menu(app: AppHandle) -> Result<folder::FolderMenu, String> {
     let home = app.path().home_dir().map_err(|error| error.to_string())?;
     let current = app
         .state::<ActionState>()
@@ -2133,14 +2150,9 @@ async fn pick_folder(app: AppHandle) -> Result<bool, String> {
         error!("couldn't find the home folder: {error}");
         folder::FolderError::NotFound.code().to_string()
     })?;
-    let base = app
-        .state::<ActionState>()
-        .folder
-        .lock()
-        .unwrap()
-        .clone()
-        .filter(|folder| folder.is_dir())
-        .unwrap_or(home);
+    // フォルダーがあるかは、ロックを放してから確かめる。つながらないネットワークのフォルダーで、ほかのコマンドを待たせないため
+    let moved_to = app.state::<ActionState>().folder.lock().unwrap().clone();
+    let base = moved_to.filter(|folder| folder.is_dir()).unwrap_or(home);
     let Some(window) = main_window(&app) else {
         return Err("main window not found".to_string());
     };
