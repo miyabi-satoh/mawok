@@ -182,11 +182,11 @@ pub struct PairedDevice {
     pub public_key: String,
     /// 最後に相手へ送れた、または組み合わせたときのアドレス。起動した直後で、相手の名乗りがまだ届いていないときに使う
     pub address: String,
-    /// 送り先にチェックを入れているか。送るキーとボタンは、チェックした機器へ送る
+    /// 送信先にチェックを入れているか。送るキーとボタンは、チェックした機器へ送る
     pub send_to: bool,
 }
 
-/// 項目がない設定ファイル（送り先を選べるようになる前のもの）は、チェックを入れて読む。
+/// 項目がない設定ファイル（送信先を選べるようになる前のもの）は、チェックを入れて読む。
 /// 組み合わせたのは送るためなので、新しく組み合わせた機器もチェックを入れる
 impl Default for PairedDevice {
     fn default() -> Self {
@@ -2392,7 +2392,7 @@ replacements = [
 
     #[test]
     fn keeps_yielded_draft_keys_out_of_the_file() {
-        // ホットキーが送り先の一覧の既定のキーと重なり、起動時に黙って外した
+        // ホットキーが送信先の一覧の既定のキーと重なり、起動時に黙って外した
         let path = temp_path("draft-key-yielded");
         write(&path, "hotkey = \"CommandOrControl+KeyL\"\n");
         let (config, _) = load_or_create(&path);
@@ -2682,7 +2682,7 @@ gemini = 3
 
     #[test]
     fn reads_paired_devices_without_send_to_as_checked() {
-        // 送り先を選べるようになる前の設定ファイルには send_to がない。組み合わせたのは送るためなので、チェックを入れて読む
+        // 送信先を選べるようになる前の設定ファイルには send_to がない。組み合わせたのは送るためなので、チェックを入れて読む
         let path = temp_path("paired-devices");
         write(
             &path,

@@ -82,7 +82,7 @@
 	const pairedDevices = $derived(settings.current?.pairedDevices ?? []);
 	const hasPairedDevice = $derived(pairedDevices.length > 0);
 	const deviceNames = $derived(deviceLabels(pairedDevices));
-	// 送り先の一覧を出しているか
+	// 送信先の一覧を出しているか
 	let targetsOpen = $state(false);
 
 	let text = $state('');
@@ -612,7 +612,7 @@
 
 	/** 組み合わせた機器の下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
 	function send() {
-		// 送り先にチェックした機器がなければ、送らずに一覧を開いて選んでもらう
+		// 送信先にチェックした機器がなければ、送らずに一覧を開いて選んでもらう
 		if (!pairedDevices.some((device) => device.sendTo)) {
 			targetsOpen = true;
 			return;
@@ -620,14 +620,14 @@
 		return hideWith('send_draft', m.send_failed());
 	}
 
-	/** 送り先の一覧を閉じ、入力欄に戻る */
+	/** 送信先の一覧を閉じ、入力欄に戻る */
 	async function closeTargets() {
 		targetsOpen = false;
 		await tick();
 		textarea?.focus();
 	}
 
-	/** 送り先の一覧から送る。チェックが入っていて、つながった機器だけに送る */
+	/** 送信先の一覧から送る。チェックが入っていて、つながった機器だけに送る */
 	async function sendToTargets(publicKeys: string[]) {
 		await closeTargets();
 		return hideWith('send_draft', m.send_failed(), publicKeys);
@@ -635,7 +635,7 @@
 
 	/**
 	 * コピーするか送るかして隠す。隠すのは Rust 側で、渡したら true、空で何もしなかったら false が返る。
-	 * 送るときは、targets（公開鍵）を渡せばその機器へ、渡さなければ送り先にチェックした機器へ送る
+	 * 送るときは、targets（公開鍵）を渡せばその機器へ、渡さなければ送信先にチェックした機器へ送る
 	 */
 	async function hideWith(
 		command: 'commit' | 'send_draft',
@@ -691,10 +691,10 @@
 		}
 	}
 
-	// 書きかけがあったので、差し込むか捨てるかを選ぶまで溜めている下書き。届いた順。起動中だけメモリーに持つ
+	// 書きかけがあったので、挿入か破棄かを選ぶまで溜めている下書き。届いた順。起動中だけメモリーに持つ
 	let received = $state<ReceivedDraft[]>([]);
 
-	/** 入力欄が空ならそのまま入れる。書きかけがあれば溜め、帯で差し込むか捨てるかを選ばせる */
+	/** 入力欄が空ならそのまま入れる。書きかけがあれば溜め、帯で挿入か破棄かを選ばせる */
 	function onReceived(draft: ReceivedDraft) {
 		if (text === '' && received.length === 0) {
 			text = draft.text;
@@ -705,7 +705,7 @@
 		received.push(draft);
 	}
 
-	/** 帯の「カーソルの位置に差し込む」。定型文と同じく、取り消しで戻せる形で差し込み、範囲を選んでいたら置き換える */
+	/** 帯の「カーソルの位置に挿入」。定型文と同じく、取り消しで戻せる形で差し込み、範囲を選んでいたら置き換える */
 	function insertReceived() {
 		const draft = received.shift();
 		if (!draft || !textarea) return;
@@ -731,7 +731,7 @@
 		shownCount++;
 		draftVisible = true;
 		// 一覧を出したまま隠れていたら、出し直したときは入力欄から始める。
-		// 送り先の一覧は、次に開いたときにつながるかを確かめ直す
+		// 送信先の一覧は、次に開いたときにつながるかを確かめ直す
 		snippetsOpen = false;
 		actionsOpen = false;
 		folderOpen = false;
@@ -1149,7 +1149,7 @@
 				/>
 			{/if}
 			{#if hasPairedDevice}
-				<!-- 本体でチェックした機器へ送り、▼で送り先の一覧を開く -->
+				<!-- 本体でチェックした機器へ送り、▼で送信先の一覧を開く -->
 				<div class="ml-auto flex">
 					<Button
 						tabindex={-1}
@@ -1198,7 +1198,7 @@
 	{/if}
 	{#if received.length > 0 && !running}
 		{@const draft = received[0]}
-		<!-- 1件ずつ知らせる。書きかけを消さないよう、差し込むか捨てるかを選ぶまで溜めておく。アクションを実行している間は出さず、終わってから知らせる -->
+		<!-- 1件ずつ知らせる。書きかけを消さないよう、挿入か破棄かを選ぶまで溜めておく。アクションを実行している間は出さず、終わってから知らせる -->
 		<Alert.Root>
 			<SendIcon />
 			<Alert.Title>{m.draft_received({ device: draft.from })}</Alert.Title>

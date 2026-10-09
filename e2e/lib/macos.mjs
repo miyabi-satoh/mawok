@@ -50,6 +50,7 @@ export const KEY = {
 	delete: 51,
 	comma: 43,
 	d: 2,
+	g: 5,
 	j: 38,
 	k: 40,
 	w: 13,

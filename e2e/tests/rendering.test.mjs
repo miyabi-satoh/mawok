@@ -39,7 +39,7 @@ import { waitFor } from '../lib/wait.mjs';
 // 描かれ方。画面の状態ごとに、テーマ (ライト・ダーク) × 言語 (日本語・英語) と、最小の大きさ × 言語で、
 // 重なり・はみ出し・省略・潰れを lib/rendering.mjs で調べ、画面を e2e/screenshots/ に撮る。
 // 撮った画面は人とエージェントが目で見る (バランスや余白の不揃いは機械では決めにくいため)。
-// 状態を作るのに要る設定は config.toml で入れる。送り先の機器は架空のもの (送ると失敗する)。
+// 状態を作るのに要る設定は config.toml で入れる。送信先の機器は架空のもの (送ると失敗する)。
 // アクションは一覧を開いて撮るだけで、選ばない。この機の資格情報管理に本物のキーがあれば、選んだ時点で
 // AI サービスへ送ってしまうため (画面の invoke は差し替えられず、送る手前で止める口もない)。
 // 同じ理由で、アクションに失敗したときの知らせと、届いた下書きの知らせ (相手の機器が要る) は撮らない
@@ -77,7 +77,7 @@ const TEST_CONFIG = {
 		{
 			name: 'MacBook Air',
 			publicKey: 'ab'.repeat(32),
-			// 文書用のアドレス (TEST-NET-1) なので、どこにも繋がらず、つなぐのを待つ間 (3 秒) は「送っています」のまま
+			// 文書用のアドレス (TEST-NET-1) なので、どこにも繋がらず、つなぐのを待つ間 (3 秒) は「送信中…」のまま
 			address: '192.0.2.1',
 			sendTo: true
 		}
@@ -164,7 +164,7 @@ const readSending = (client) =>
 
 /**
  * 送っている最中にする (送っている間は入力欄が readOnly になる)。キーは前面のウィンドウに届かないことがあるので、
- * 送るボタン (送り先の▼とつながった左側) を押す。押す前後に前の送信が終わると新しい送信が始まらないので、
+ * 「送信」ボタン (送信先の▼とつながった左側) を押す。押す前後に前の送信が終わると新しい送信が始まらないので、
  * 送っている最中でなく押せるなら、待つたびに押し直す
  */
 async function startSending(client) {
@@ -283,7 +283,7 @@ test.describe('描かれ方', () => {
 		// 履歴のボタンは、覚えている履歴があるときだけ出る
 		await typeIntoDraft(client, '履歴に残す下書き');
 		await hideDraft(client);
-		await waitDraftHidden('コピーして隠れる');
+		await waitDraftHidden('コピーして閉じる');
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, DRAFT_TEXT);
 		await inspectDraft(client, 'text', { check: () => findHighlightProblems(client) });
@@ -329,13 +329,13 @@ test.describe('描かれ方', () => {
 		});
 	});
 
-	test('下書き: アクションの一覧', async () => {
+	test('下書き: アクション一覧', async () => {
 		await focusDraft(client);
 		await openPaletteWith(client, VK.K);
 		await inspectDraft(client, 'actions', { overlays: ['[role="dialog"]'] });
 	});
 
-	test('下書き: 送り先の一覧', async () => {
+	test('下書き: 送信先の一覧', async () => {
 		await focusDraft(client);
 		await openPaletteWith(client, VK.L);
 		await inspectDraft(client, 'send-targets', { overlays: ['[role="dialog"]'] });

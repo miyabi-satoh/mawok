@@ -259,8 +259,7 @@ test.describe('定型文', () => {
 			const palette = await waitFor(
 				() => readSnippetPalette(client),
 				// 項目には、登録する本文の頭が添えてある
-				(current) =>
-					current.options.at(-1)?.startsWith('選んだ範囲を「ねぎらい」として定型文に登録'),
+				(current) => current.options.at(-1)?.startsWith('選択範囲を「ねぎらい」として定型文に登録'),
 				{ label: '名前を付けて登録する項目' }
 			);
 			assert.equal(palette.options.length, 1, JSON.stringify(palette.options));

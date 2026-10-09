@@ -7,7 +7,7 @@ When voice input cannot type directly into an app, or when it is easy to forget 
 
 1. Press {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} to bring up the text window.
 2. Type. Enter adds a line break.
-3. Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} to copy and hide the text window, then paste it in the app you returned to.
+3. Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} to copy and close the text window, then paste it in the app you returned to.
 
 You can also insert snippets, rewrite the text with commands or AI (actions), and send text to your other devices.
 Mawok stays in the {macos:menu bar}{windows:system tray} and starts automatically when you log in (you can turn this off under "General" in Settings).
@@ -64,9 +64,9 @@ From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and p
 
 1. Under "Actions" in Settings, choose a service under "AI service".
 2. If you choose Mawok, select "Sign in", sign in on the page that opens, then click "Link this PC". For another service, enter its API key.
-3. Read the explanation of what is sent, then select "Got it".
+3. Read the explanation of what is sent, then select "Agree".
 
-When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy more" on the same screen to open the purchase page in your browser.
+When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy credits" on the same screen to open the purchase page in your browser.
 
 ## Send to other devices
 
@@ -86,17 +86,17 @@ If the text box on the other device is empty, the text goes in as it is; if it h
 
 | Action | Key |
 | --- | --- |
-| Bring up the text window (copy and hide if it is in front) | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} |
-| Copy and hide | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
-| Hide without copying | `Esc` |
+| Bring up the text window (copy and close if it is in front) | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} |
+| Copy and close | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
+| Close without copying | `Esc` |
 | Show text you copied earlier (↑ at the start of the text box, ↓ at the end) | `↑` / `↓` |
 | Previous / next in history (wherever the cursor is) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
-| Open the snippet list and insert one | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
-| Open the action list and run one | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
-| Change the folder commands run in | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
+| Insert snippet | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
+| Open action list | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
+| Go to folder | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
 | Cancel an action (while it is running) | `Esc` |
-| Send to paired devices | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
-| Choose destinations | {macos:`Cmd+L`}{windows:`Ctrl+L`} |
+| Send | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
+| Choose where to send | {macos:`Cmd+L`}{windows:`Ctrl+L`} |
 | Insert / discard received text | {macos:`Cmd+I` / `Cmd+Shift+Backspace`}{windows:`Ctrl+I` / `Ctrl+Shift+Backspace`} |
 | Open Settings | {macos:`Cmd+,`}{windows:`Ctrl+,`} |
 
@@ -121,7 +121,7 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 
 - Mawok does not send usage statistics or error reports.
 - It sends your text outside the app only when you run an AI action (to the AI service you chose) or send it to another device (to your paired device).
-- Before you choose an AI service and select "Got it", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
+- Before you choose an AI service and select "Agree", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
 
 ## Settings file
 

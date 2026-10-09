@@ -122,7 +122,7 @@
 	<p role="status" class="px-3 py-6 text-center text-sm text-muted-foreground">{message}</p>
 {/snippet}
 
-<!-- 下は、送り先の一覧と同じく、下書きの下の列に重ならないよう 2.75rem 空ける -->
+<!-- 下は、送信先の一覧と同じく、下書きの下の列に重ならないよう 2.75rem 空ける -->
 <PaletteFrame label={listLabel} maxHeightClass="max-h-[calc(100%-4.5rem)]" {onclose}>
 	<div class="flex h-9 shrink-0 items-center gap-2 border-b px-3">
 		<SearchIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

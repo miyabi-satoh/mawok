@@ -7,9 +7,9 @@ Mawok は、ターミナルなどに文字を送る前に、いったん書い�
 
 1. {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} でテキストウィンドウを出す。
 2. 書く。Enter は改行です。
-3. {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} でコピーして隠し、戻った先のアプリで貼り付ける。
+3. {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} でコピーして閉じ、戻った先のアプリで貼り付ける。
 
-ほかに、定型文の差し込み、コマンドや AI での書き換え（アクション）、ほかの機器への送信ができます。
+ほかに、定型文の挿入、コマンドや AI での書き換え（アクション）、ほかの機器への送信ができます。
 Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、ログイン時に起動します（設定の「一般」で切れます）。
 
 ## 書いてコピーする
@@ -28,7 +28,7 @@ Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、�
 ## 定型文を使う
 
 1. {macos:`Cmd+J`}{windows:`Ctrl+J`} で定型文の一覧を出す。
-2. 文字を打って絞り込み、Enter で差し込む。
+2. 文字を打って絞り込み、Enter で挿入する。
 
 定型文は設定の「定型文」で登録します。一覧の末尾の「テキストを定型文に登録」で、書いているテキストをその場で登録することもできます。
 
@@ -36,7 +36,7 @@ Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、�
 
 コマンドや AI で、テキストを書き換えます。
 
-1. {macos:`Cmd+K`}{windows:`Ctrl+K`} でアクションの一覧を出す。
+1. {macos:`Cmd+K`}{windows:`Ctrl+K`} でアクション一覧を出す。
 2. アクションを選ぶ。範囲を選んでいればその範囲、なければ全体が対象になる。
 3. 結果が入力欄に入る。{macos:`Cmd+Z`}{windows:`Ctrl+Z`} で元に戻せる。
 
@@ -64,40 +64,40 @@ Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、�
 
 1. 設定の「アクション」の「AI サービス」で、使うサービスを選ぶ。
 2. Mawok を選んだら「サインイン」を押し、開いたページでサインインして「この PC を登録」を押す。ほかのサービスなら API キーを入れる。
-3. 送る内容の説明を読んで「了解」を押す。
+3. 送る内容の説明を読んで「同意する」を押す。
 
-Mawok を選ぶと API キーは要らず、使った分だけアカウントのクレジットから減ります。クレジットは同じ画面の「買い足す」から料金ページを開いて足せます。
+Mawok を選ぶと API キーは要らず、使った分だけアカウントのクレジットから減ります。クレジットは同じ画面の「クレジットを購入」から料金ページを開いて足せます。
 
 ## ほかの機器へ送る
 
 同じネットワークにある自分の別の機器の Mawok へ、テキストを送れます。
 
-はじめに一度、組み合わせます。
+はじめに一度、ペアリングします。
 
-1. 片方の機器で、設定の「機器」の「コードを出す」を押す。
-2. もう片方の機器で、そのコードを入れて「組み合わせる」を押す。
+1. 片方の機器で、設定の「機器」の「コードを表示」を押す。
+2. もう片方の機器で、そのコードを入力して「ペアリング」を押す。
 
 {macos:ローカルネットワークの許可を求められたら、許可します。}{windows:ファイアウォールの許可を求められたら、許可します。}
 
-送るときは、テキストウィンドウで {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} を押すか「送る」ボタンを押します。
-相手の入力欄が空ならそのまま入り、書きかけがあれば差し込むかどうかを選べます。
+送るときは、テキストウィンドウで {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} を押すか「送信」ボタンを押します。
+相手の入力欄が空ならそのまま入り、書きかけがあれば挿入するかどうかを選べます。
 
 ## キー操作の一覧
 
 | 操作 | キー |
 | --- | --- |
-| テキストウィンドウを出す（前面にあればコピーして隠す） | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} |
-| コピーして隠す | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
-| コピーせずに隠す | `Esc` |
+| テキストウィンドウを出す（前面にあればコピーして閉じる） | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} |
+| コピーして閉じる | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
+| コピーせずに閉じる | `Esc` |
 | 前にコピーしたテキストを出す（入力欄の先頭で ↑、末尾で ↓） | `↑` / `↓` |
 | 前の履歴・次の履歴（カーソルの行にかかわらず） | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
-| 定型文の一覧を出して差し込む | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
-| アクションの一覧を出して実行する | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
-| コマンドを動かすフォルダーを移る | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
+| 定型文を挿入 | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
+| アクション一覧を開く | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
+| フォルダーへ移動 | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
 | アクションを取り消す（実行している間） | `Esc` |
-| 組み合わせた機器へ送る | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
-| 送り先を選ぶ | {macos:`Cmd+L`}{windows:`Ctrl+L`} |
-| 届いたテキストを差し込む・捨てる | {macos:`Cmd+I` / `Cmd+Shift+Backspace`}{windows:`Ctrl+I` / `Ctrl+Shift+Backspace`} |
+| 送信 | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
+| 送信先を選ぶ | {macos:`Cmd+L`}{windows:`Ctrl+L`} |
+| 届いたテキストを挿入・破棄 | {macos:`Cmd+I` / `Cmd+Shift+Backspace`}{windows:`Ctrl+I` / `Ctrl+Shift+Backspace`} |
 | 設定を開く | {macos:`Cmd+,`}{windows:`Ctrl+,`} |
 
 キーは設定の「キー操作」で変えられます。
@@ -120,8 +120,8 @@ Mawok を選ぶと API キーは要らず、使った分だけアカウントの
 ## 送る内容とプライバシー
 
 - Mawok は、使われ方の統計やエラーの報告を送りません。
-- テキストを外へ送るのは、AI アクションを実行したとき（選んだ AI サービスへ）と、ほかの機器へ送ったとき（組み合わせた自分の機器へ）だけです。
-- AI サービスが送った内容をどう扱うか（学習に使うか・保持する日数）は、サービスを選んで「了解」を押す前の画面に出ます。
+- テキストを外へ送るのは、AI アクションを実行したとき（選んだ AI サービスへ）と、ほかの機器へ送ったとき（ペアリングした自分の機器へ）だけです。
+- AI サービスが送った内容をどう扱うか（学習に使うか・保持する日数）は、サービスを選んで「同意する」を押す前の画面に出ます。
 
 ## 設定ファイル
 
@@ -154,9 +154,9 @@ Mawok を選ぶと API キーは要らず、使った分だけアカウントの
 | `[text_window_keys]`             | 「キー操作の一覧」の既定のキー   | テキストウィンドウのキー。`copy`・`history_older` など操作ごと。空文字は割り当てなし |
 | `[[replacements]]`               | なし                             | 置き換え辞書の1件（`from`・`to`・`enabled`）                             |
 | `[[snippets]]`                   | なし                             | 定型文の1件（`name`・`body`）                                            |
-| `[[paired_devices]]`             | なし                             | 組み合わせた機器（設定の「機器」で組み合わせる）                         |
+| `[[paired_devices]]`             | なし                             | ペアリングした機器（設定の「機器」でペアリングする）                     |
 | `ai_service`                     | `"none"`                         | AI アクションに使う AI サービス（`"none"`・`"mawok"`・`"gemini"`・`"anthropic"`・`"openai"`） |
-| `ai_consent`                     | なし                             | 送る内容と扱いを了解した AI サービス                                     |
+| `ai_consent`                     | なし                             | 送る内容と扱いに同意した AI サービス                                     |
 | `[ai_models]`                    | AI サービスごとの既定のモデル    | AI のモデル。AI サービスごと（`gemini = "…"`・`anthropic = "…"` など）   |
 | `[[actions]]`                    | 表示言語の既定のアクション       | アクションの1件（`name`・`command`・`output`〔`"replace"`・`"insert"`・`"none"`〕・`encoding`〔`"utf-8"`・`"shift_jis"` など〕・`enabled`） |
 

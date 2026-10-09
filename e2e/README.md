@@ -160,7 +160,7 @@ just msix-check msix        # msix/msix.test.mjs だけ
   - 控えは `e2e/.autostart-backup.json` にも置き (`e2e/.gitignore` 済み)、config.toml の控えと同じく、Ctrl+C やコンソールの窓を閉じたときはその場で、強制終了されたときは次の実行の始めに書き戻す。控えが読めないとエラーで言われたときは、両方の値を確かめてからファイルを消す。
 - **ログイン時の起動とクリップボードの印は、OS 側を直接読む**: 登録は HKCU の `Run` と `Explorer\StartupApproved\Run` を読む (`lib/os.mjs` の `readAutostartEntry`)。
   クリップボードの履歴に残さない印は、本文とは別の「形式」として同じクリップボードに載るので、載っている形式の名前で見る (`getClipboardFormats`。`EnumClipboardFormats` と `GetClipboardFormatName`)。
-- **E2E は Windows の外観 (アプリのモード) を一時的に切り替える**: テキストの文字色のテストは、テーマを「OS に従う」にしたときの入れ替わりを見るため、HKCU の `AppsUseLightTheme` を書き換える。書き換える前の値は `e2e/.apps-theme-backup.json` に控え (`e2e/.gitignore` 済み)、終わったら・中断されたら書き戻す。次の実行も、残った控えがあれば先に書き戻す (`os.mjs` の `snapshotAppsTheme`・`recoverStaleAppsThemeIfAny`)。
+- **E2E は Windows の外観 (アプリのモード) を一時的に切り替える**: テキストの文字色のテストは、テーマを「システム」にしたときの入れ替わりを見るため、HKCU の `AppsUseLightTheme` を書き換える。書き換える前の値は `e2e/.apps-theme-backup.json` に控え (`e2e/.gitignore` 済み)、終わったら・中断されたら書き戻す。次の実行も、残った控えがあれば先に書き戻す (`os.mjs` の `snapshotAppsTheme`・`recoverStaleAppsThemeIfAny`)。
 - **Win+V の履歴に、テストがコピーした項目が入ることがある**: クリップボードの履歴のテストは、設定をオフにしてコピーした項目が履歴に出ることを見て、見た後にその項目を履歴から消す (`removeFromClipboardHistory`)。利用者の履歴の中身は、あるかどうかを読むだけ。履歴がオフの機では、履歴のテストを飛ばす。
 - **AI のキーの資格情報は、キーがまだ無い AI サービスでだけ試す**: `actions-command` は、資格情報マネージャーにキーの無い AI サービスを選んで仮のキーを入れ、消えることを見る。本物のキーがあるかもしれないサービスには触らない (全部にあれば飛ばす)。
 - **コマンドのアクションのテストは、`more` と `find` を System32 のフルパスで呼ぶ**: E2E のアプリは `just e2e` を回したシェルの PATH を引き継ぐ。開発機の PATH では Git や uutils の同じ名前のコマンドが先に当たり、`more` は標準入力を読み終えても終わらず、`find` は GNU の find になる。既定のアクションの `sort` のように、コマンドの行を変えずに裸の名前で当てたいテスト (`actions-default-sort`) は、フルパスにする代わりに、テストファイルの頭で System32 を PATH の先頭に足す。

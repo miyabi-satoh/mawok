@@ -9,7 +9,7 @@ pub enum Lang {
 }
 
 impl Lang {
-    /// 設定の表示言語から決める。「OS に従う」なら、OS の言語設定から決めた言語を使う
+    /// 設定の表示言語から決める。「システム」なら、OS の言語設定から決めた言語を使う
     pub fn resolve(setting: Language, system: Lang) -> Self {
         match setting {
             Language::System => system,
