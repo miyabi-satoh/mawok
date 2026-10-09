@@ -296,7 +296,8 @@ pub fn menu(current: &Path, home: &Path, recent: &[PathBuf]) -> FolderMenu {
 /// 移れなかったフォルダーを最近のフォルダーから外すか。フォルダーでなくなっていたら外す。
 /// 見つからないときは、本当に無く、親があるとき（フォルダーそのものが消えたか、親がファイルに置き換わったとき）だけ外す。
 /// 外付けのドライブを抜いた・ネットワークの共有がつながっていない・読む権限が無いだけで消えないようにするため。
-/// macOS のドライブや共有のそのもの（`/Volumes/USB`）は、外れると親の `/Volumes` だけが残るので外さない
+/// macOS のドライブや共有のそのもの（`/Volumes/USB`）は、外れると親の `/Volumes` だけが残るので外さない。
+/// 親はリンクの先まで見る。共有を指すリンク（`~/nas`）の中のフォルダーを、共有が切れただけで外さないため
 pub fn is_gone(error: FolderError, folder: &Path) -> bool {
     match error {
         FolderError::NotAFolder => true,
@@ -304,9 +305,9 @@ pub fn is_gone(error: FolderError, folder: &Path) -> bool {
             matches!(
                 folder.metadata(),
                 Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
-            ) && folder.parent().is_some_and(|parent| {
-                parent != Path::new("/Volumes") && parent.symlink_metadata().is_ok()
-            })
+            ) && folder
+                .parent()
+                .is_some_and(|parent| parent != Path::new("/Volumes") && parent.metadata().is_ok())
         }
         FolderError::Network => false,
     }
@@ -664,6 +665,12 @@ mod tests {
             FolderError::NotFound,
             Path::new("/Volumes/mawok-unplugged")
         ));
+        #[cfg(unix)]
+        {
+            let link = d.home.join("nas");
+            std::os::unix::fs::symlink(d.home.join("unplugged"), &link).unwrap();
+            assert!(!is_gone(FolderError::NotFound, &link.join("project")));
+        }
         assert!(!is_gone(
             FolderError::NotFound,
             &d.home.join("unplugged/project")
