@@ -6,7 +6,7 @@ export const SYNC_ITEM_LIMIT = 100;
 export const SYNC_ITEM_BYTES = 256 * 1024;
 export const SYNC_TOTAL_BYTES = 16 * 1024 * 1024;
 /** 全体の上限 (16 MiB) を base64 にし、JSON の分を足しても収まる本文の上限。これより大きい要求は書けないので読まずに断る。 */
-export const SYNC_REQUEST_BYTES = 24 * 1024 * 1024;
+export const SYNC_REQUEST_BYTES = Math.ceil((SYNC_TOTAL_BYTES * 4) / 3) + 2 * 1024 * 1024;
 export const SYNC_TOMBSTONE_RETENTION = 90 * 24 * 60 * 60;
 
 type Collection = 'settings' | 'history';
@@ -380,9 +380,9 @@ export async function purgeSync(env: Env, t = now()) {
 	const before = t - SYNC_TOMBSTONE_RETENTION;
 	await env.DB.batch([
 		env.DB.prepare(
-			`UPDATE sync_accounts SET purged_seq = max(purged_seq, coalesce((
+			`UPDATE sync_accounts SET purged_seq = max(purged_seq, (
 			SELECT max(seq) FROM sync_items WHERE account_id = sync_accounts.account_id AND deleted = 1 AND updated_at <= ?
-		), purged_seq))
+		))
 		WHERE EXISTS (SELECT 1 FROM sync_items WHERE account_id = sync_accounts.account_id AND deleted = 1 AND updated_at <= ?)`
 		).bind(before, before),
 		env.DB.prepare('DELETE FROM sync_items WHERE deleted = 1 AND updated_at <= ?').bind(before),

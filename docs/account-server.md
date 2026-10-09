@@ -85,7 +85,7 @@
 - 1項目は 256 KiB、アカウント全体は 16 MiB、1回に書くのは 100 項目までにする。暗号文だけでも、窓口の容量と通信量を際限なく使わないため。
 - Pro が終わった写しは 90 日後に消す。サブスクが無いアカウントの写しも消す。
 - Mawok は `GET /v1/sync` で受け取り、`PUT /v1/sync` でまとめて書き、鍵を失くしたときだけ `POST /v1/sync/reset` を使う。
-  - 読む: `GET /v1/sync?since=<seq>&limit=<n>&rebuild=1` → `{ key_id, seq, reset, items: [{ collection, id, seq, deleted, data }], more, next }`。`data` は暗号文の base64 で、消した記録では `null`。1ページは既定 200・上限 500 項目（書く 100 項目とは別の数）。消した記録も返すので、知らない項目の分は読み捨てる（組み直しの途中で消された項目を取りこぼさないため）。
+  - 読む: `GET /v1/sync?since=<seq>&limit=<n>&rebuild=1` → `{ key_id, seq, reset, items: [{ collection, id, seq, deleted, data }], more, next }`。`data` は暗号文の base64 で、消した記録では `null`。1ページは既定 200・上限 500 項目（書く 100 項目とは別の数）。消した記録も返すので、知らない項目の分は読み捨てる。
   - `more` が true なら `since=next` で続きを取る。`since=0` から始めたときと `reset: true` を受けたときは、組み直しの途中なので続きに `rebuild=1` を付ける。`more` が false になったときの `next` を次の `since` にする。
   - 書く: `PUT /v1/sync` に `{ key_id, items: [{ collection, id, base_seq, deleted, data }] }`。`base_seq` は最後に見たその項目の `seq`（新しい項目は `null`）。応答は `{ seq, items: [{ collection, id, seq }] }`。
 - `reset: true` なら、窓口の写しで組み直す。組み直しの途中で `key_id` が変わったら、別の機器が reset したので最初から組み直す。`conflict` は `conflicts` の今の項目（窓口に無い項目は `seq: null`）に合わせてから書き直し、`conflicts` が空なら同じ要求を送り直す。`key_mismatch` はペアリングし直すか reset を案内する。413 の `limit` は `item`・`total`・`request` のどれが大きすぎたかを表す。
