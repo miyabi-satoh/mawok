@@ -242,9 +242,26 @@ describe('proOf', () => {
 			.run();
 		expect(await proOf(env, account, 1)).toMatchObject({
 			active: true,
-			until: 4_102_444_800,
+			until: cancelAt,
 			displayUntil: cancelAt,
 			renews: false
+		});
+	});
+
+	it('keeps renewing when Stripe cancel_at is after the paid-through time', async () => {
+		const account = await newAccount();
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, cancel_at, created_at)
+			 VALUES (?, ?, 'monthly', 4_102_444_800, 'trialing', 4_102_444_801, 0)`
+		)
+			.bind(randomHex(16), account)
+			.run();
+		expect(await proOf(env, account, 1)).toMatchObject({
+			active: true,
+			until: 4_102_444_800,
+			displayUntil: 4_102_444_800,
+			trial: true,
+			renews: true
 		});
 	});
 });

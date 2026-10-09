@@ -353,6 +353,11 @@ async function handleStripeEvent(
 						.bind(accountId)
 						.first<{ id: string }>()
 				: null;
+			const knownSubscription = account
+				? await env.DB.prepare('SELECT 1 FROM subscriptions WHERE id = ? AND account_id = ?')
+						.bind(paid.subscription.id, account.id)
+						.first()
+				: null;
 			const revokedPayment =
 				'(SELECT created_at FROM stripe_revoked_payments WHERE payment_intent_id = ?)';
 			await env.DB.batch([
@@ -360,6 +365,10 @@ async function handleStripeEvent(
 					`INSERT INTO subscriptions (id, account_id, plan, stripe_customer_id, paid_through, status, created_at)
 					 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
 					 WHERE ?2 IS NOT NULL AND ?6 != 'canceled' AND ${revokedPayment.replace('?', '?8')} IS NULL
+					   AND (?10 = 1 OR NOT EXISTS (
+					     SELECT 1 FROM subscriptions
+					     WHERE account_id = ?2 AND id != ?1 AND revoked_at IS NULL AND paid_through > ?7
+					   ))
 					 ON CONFLICT (id) DO UPDATE SET plan = excluded.plan, stripe_customer_id = excluded.stripe_customer_id,
 					 paid_through = max(subscriptions.paid_through, excluded.paid_through), status = excluded.status
 					 WHERE subscriptions.account_id IS NOT NULL AND subscriptions.revoked_at IS NULL
@@ -374,15 +383,14 @@ async function handleStripeEvent(
 					paid.subscription.status,
 					t,
 					paid.paymentIntentId,
-					paid.paymentIntentId
+					paid.paymentIntentId,
+					knownSubscription ? 1 : 0
 				),
 				env.DB.prepare(
 					`UPDATE subscriptions SET cancel_at_period_end = ?, cancel_at = ?
 					 WHERE id = ? AND account_id IS NOT NULL AND revoked_at IS NULL AND status != 'canceled'`
 				).bind(
-					paid.subscription.cancel_at_period_end === true || paid.subscription.cancel_at != null
-						? 1
-						: 0,
+					paid.subscription.cancel_at_period_end === true ? 1 : 0,
 					paid.subscription.cancel_at ?? null,
 					paid.subscription.id
 				),
@@ -393,12 +401,12 @@ async function handleStripeEvent(
 							env.DB.prepare(
 								`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
 						 amount, currency, managed_payments, card_country, buyer_country, domestic, stripe_subscription_id, created_at, revoked_at)
-						 VALUES (?, (SELECT account_id FROM subscriptions WHERE id = ?), 'mawok-pro', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+							 VALUES (?, ?, 'mawok-pro', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 						 ${revokedPayment.replace('?', '?13')})
 								 ON CONFLICT DO NOTHING`
 							).bind(
 								randomHex(16),
-								paid.subscription.id,
+								account?.id ?? null,
 								`invoice:${paid.invoiceId}`,
 								paid.paymentIntentId,
 								paid.amount,
@@ -413,15 +421,33 @@ async function handleStripeEvent(
 							)
 						])
 			]);
+			const duplicate =
+				!knownSubscription && account
+					? await env.DB.prepare(
+							`SELECT 1 FROM subscriptions
+							 WHERE account_id = ? AND id != ? AND revoked_at IS NULL AND paid_through > ?`
+						)
+							.bind(account.id, paid.subscription.id, t)
+							.first()
+					: null;
 			// 返金・不審請求が先に届いていたときは、期間を延ばさず Stripe 側も打ち切る。
 			if (
 				!account ||
+				duplicate ||
 				(paid.paymentIntentId &&
 					(await env.DB.prepare('SELECT 1 FROM stripe_revoked_payments WHERE payment_intent_id = ?')
 						.bind(paid.paymentIntentId)
 						.first()))
 			)
 				await cancelSubscription(config, paid.subscription.id);
+			if (duplicate) {
+				await reportProInvoiceProblem(
+					env,
+					String(object.id),
+					'同じアカウントに、まだ有効な別の Pro のサブスクがあります。返金は運営で判断します。'
+				);
+				return 'failed';
+			}
 			return;
 		}
 		case 'customer.subscription.updated':
@@ -434,12 +460,7 @@ async function handleStripeEvent(
 			await env.DB.prepare(
 				"UPDATE subscriptions SET status = ?, cancel_at_period_end = ?, cancel_at = ? WHERE id = ? AND status != 'canceled'"
 			)
-				.bind(
-					sub.status,
-					sub.cancel_at_period_end === true || sub.cancel_at != null ? 1 : 0,
-					sub.cancel_at ?? null,
-					row.id
-				)
+				.bind(sub.status, sub.cancel_at_period_end === true ? 1 : 0, sub.cancel_at ?? null, row.id)
 				.run();
 			return;
 		}

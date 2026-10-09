@@ -66,8 +66,9 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 		         WHERE stripe_subscription_id = subscriptions.id
 		           AND product = 'mawok-pro' AND revoked_at IS NULL) AS paid
 		 FROM subscriptions
-		 WHERE account_id = ? AND revoked_at IS NULL AND paid_through > ?
-		 ORDER BY paid_through DESC LIMIT 1`
+		 WHERE account_id = ? AND revoked_at IS NULL
+		   AND min(coalesce(cancel_at, paid_through), paid_through) > ?
+		 ORDER BY min(coalesce(cancel_at, paid_through), paid_through) DESC LIMIT 1`
 	)
 		.bind(accountId, t)
 		.first<{
@@ -81,12 +82,14 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 	return row
 		? {
 				active: true,
-				until: row.paid_through,
+				until: Math.min(row.cancel_at ?? row.paid_through, row.paid_through),
 				plan: row.plan,
 				trial: row.paid === 0,
 				renews:
-					row.status !== 'canceled' && row.cancel_at_period_end !== 1 && row.cancel_at === null,
-				displayUntil: row.cancel_at ?? row.paid_through
+					row.status !== 'canceled' &&
+					row.cancel_at_period_end !== 1 &&
+					(row.cancel_at === null || row.cancel_at > row.paid_through),
+				displayUntil: Math.min(row.cancel_at ?? row.paid_through, row.paid_through)
 			}
 		: { active: false, until: null, plan: null, trial: false, renews: false, displayUntil: null };
 }

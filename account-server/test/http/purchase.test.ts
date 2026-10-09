@@ -194,7 +194,7 @@ describe('buying credit', () => {
 	it('shows cancel_at instead of the paid-through date when Stripe set it', async () => {
 		const { cookie } = await signIn('pro-cancel-at@example.com');
 		const account = await accountId('pro-cancel-at@example.com');
-		const cancelAt = Date.UTC(2100, 0, 15) / 1000;
+		const cancelAt = Date.UTC(2099, 11, 15) / 1000;
 		await env.DB.prepare(
 			`INSERT INTO subscriptions
 			 (id, account_id, plan, paid_through, status, cancel_at_period_end, cancel_at, created_at)
@@ -374,7 +374,7 @@ describe('buying credit', () => {
 			await env.DB.prepare('SELECT cancel_at_period_end, cancel_at FROM subscriptions WHERE id = ?')
 				.bind(first.subscriptionId)
 				.first()
-		).toEqual({ cancel_at_period_end: 1, cancel_at: 1_999_999_999 });
+		).toEqual({ cancel_at_period_end: 0, cancel_at: 1_999_999_999 });
 		vi.restoreAllMocks();
 		proInvoiceApi(account, {
 			subscriptionId: first.subscriptionId,
@@ -389,7 +389,45 @@ describe('buying credit', () => {
 			await env.DB.prepare('SELECT cancel_at_period_end, cancel_at FROM subscriptions WHERE id = ?')
 				.bind(first.subscriptionId)
 				.first()
-		).toEqual({ cancel_at_period_end: 1, cancel_at: 2_000_000_000 });
+		).toEqual({ cancel_at_period_end: 0, cancel_at: 2_000_000_000 });
+	});
+
+	it('cancels and reports a second active Pro subscription while retaining its ledger entry', async () => {
+		await signIn('duplicate-pro@example.com');
+		const account = await accountId('duplicate-pro@example.com');
+		const first = proInvoiceApi(account);
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account);
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const event = paidInvoice(second.invoiceId);
+		expect((await webhook(event)).status).toBe(200);
+		expect(
+			await env.DB.prepare('SELECT 1 FROM subscriptions WHERE id = ?')
+				.bind(second.subscriptionId)
+				.first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare(
+				'SELECT account_id, revoked_at FROM purchases WHERE stripe_subscription_id = ?'
+			)
+				.bind(second.subscriptionId)
+				.first()
+		).toEqual({ account_id: account, revoked_at: null });
+		expect(
+			second.stripe.mock.calls.some(
+				([url, init]) =>
+					String(url).endsWith(`/subscriptions/${second.subscriptionId}`) &&
+					init?.method === 'DELETE'
+			)
+		).toBe(true);
+		expect(
+			await env.DB.prepare('SELECT status FROM stripe_events WHERE id = ?').bind(event.id).first()
+		).toEqual({ status: 'failed' });
+		expect(logged).toHaveBeenCalledWith(
+			expect.stringContaining('まだ有効な別の Pro のサブスクがあります')
+		);
+		vi.restoreAllMocks();
 	});
 
 	it('expires the open checkout before switching between credit and Pro', async () => {

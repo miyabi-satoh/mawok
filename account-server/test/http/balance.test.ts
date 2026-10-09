@@ -34,12 +34,12 @@ describe('balance', () => {
 		);
 	});
 
-	it('returns the active Pro plan and paid-through time', async () => {
+	it('returns the active Pro plan through its earlier cancel_at time', async () => {
 		const { token } = await linkApp('pro-balance@example.com');
 		const account = await accountId('pro-balance@example.com');
 		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
-			 VALUES ('sub_balance', ?, 'yearly', 4102444800, 'active', 0)`
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, cancel_at, created_at)
+			 VALUES ('sub_balance', ?, 'yearly', 4102444800, 'active', 4102444000, 0)`
 		)
 			.bind(account)
 			.run();
@@ -52,7 +52,7 @@ describe('balance', () => {
 			.bind(account)
 			.run();
 		expect(await (await app('/v1/balance', token)).json()).toMatchObject({
-			pro: { active: true, until: 4102444800, plan: 'yearly', trial: false }
+			pro: { active: true, until: 4102444000, plan: 'yearly', trial: false }
 		});
 	});
 });
