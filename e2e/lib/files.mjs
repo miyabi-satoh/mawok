@@ -86,17 +86,41 @@ export async function fileExists(file) {
 	);
 }
 
-/** ログの今の大きさ (バイト数)。起動する前に取っておき、`readLogSince` で起動した後の分だけを読む */
-export function logSize(file) {
-	return fs.existsSync(file) ? fs.statSync(file).size : 0;
+/** 回って名前が変わったログ (`Mawok_<日時>.log`)。日時は年から秒までの固定の桁なので、名前の順が古い順になる */
+function listRotatedLogs(file) {
+	const prefix = `${path.basename(file, '.log')}_`;
+	try {
+		return fs
+			.readdirSync(path.dirname(file))
+			.filter((name) => name.startsWith(prefix) && name.endsWith('.log'))
+			.sort();
+	} catch (error) {
+		if (error.code === 'ENOENT') return [];
+		throw error;
+	}
+}
+
+/** ログの今の位置。起動する前に取っておき、`readLogSince` で起動した後の分だけを読む */
+export function markLog(file) {
+	return {
+		size: fs.existsSync(file) ? fs.statSync(file).size : 0,
+		newestRotated: listRotatedLogs(file).at(-1) ?? ''
+	};
 }
 
 /**
- * ログのうち、`offset` バイト目から後 (起動した後に書かれた分)。ログは 1 MB で回る (diagnostics.rs) ので、
- * 起動した後に回って `offset` より短くなっていれば、頭から読む。`offset` はバイト数なので、バイト列のまま切る
+ * ログのうち、`markLog` で取った位置から後 (起動した後に書かれた分)。ログは 1 MB で回る (diagnostics.rs) ので、
+ * 起動した後に回って今のファイルが測ったときより短ければ、回って名前が変わった分の続きも含める。
+ * 大きさはバイト数なので、バイト列のまま切る
  */
-export function readLogSince(file, offset) {
-	if (!fs.existsSync(file)) return '';
-	const content = fs.readFileSync(file);
-	return content.subarray(content.length < offset ? 0 : offset).toString('utf8');
+export function readLogSince(file, mark) {
+	const current = fs.existsSync(file) ? fs.readFileSync(file) : Buffer.alloc(0);
+	if (current.length >= mark.size) return current.subarray(mark.size).toString('utf8');
+	const dir = path.dirname(file);
+	const parts = listRotatedLogs(file)
+		.filter((name) => name > mark.newestRotated)
+		.map((name, index) =>
+			fs.readFileSync(path.join(dir, name)).subarray(index === 0 ? mark.size : 0)
+		);
+	return Buffer.concat([...parts, current]).toString('utf8');
 }

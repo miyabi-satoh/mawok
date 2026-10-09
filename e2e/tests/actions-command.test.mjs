@@ -24,7 +24,9 @@ import {
 	waitAlert
 } from '../lib/app.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
-import { beginTestConfig, tryReadConfig } from '../lib/config.mjs';
+import { APP_IDENTIFIER } from '../lib/app-conf.mjs';
+import { APP_DATA_DIRS, beginTestConfig, tryReadConfig } from '../lib/config.mjs';
+import { markLog, readLogSince } from '../lib/files.mjs';
 import { getMawokProcessId, isMawokRunning, runPowerShell, setClipboard } from '../lib/os.mjs';
 import {
 	clickTrayMenuItem,
@@ -44,8 +46,7 @@ const suite = createSuite();
 const STAMP = Date.now();
 // 「出さない」のアクションが追記するファイル。アプリは E2E と同じ環境変数で動くので、%TEMP% はここと同じ
 const APPEND_FILE = path.join(os.tmpdir(), `mawok-e2e-actions-${STAMP}.txt`);
-const LOG_DIR = path.join(process.env.LOCALAPPDATA, 'com.amiiby.mawok', 'logs');
-const LOG_PATH = path.join(LOG_DIR, 'Mawok.log');
+const LOG_PATH = path.join(APP_DATA_DIRS.local, 'logs', 'Mawok.log');
 
 // more と find は System32 のものをフルパスで呼ぶ。開発機の PATH では、Git や uutils の同じ名前のコマンドが先に当たり、
 // 標準入力を読み終えても終わらなかったり (more)、別の意味になったり (find) するため。
@@ -109,39 +110,11 @@ async function listPings(marker) {
 }
 
 /** AI サービスのキーを入れる資格情報の名前 (ai.rs の credential_user と、secrets.rs のサービス名) */
-const credentialName = (service) => `${service}-api-key.com.amiiby.mawok`;
+const credentialName = (service) => `${service}-api-key.${APP_IDENTIFIER}`;
 
 async function hasCredential(service) {
 	const stdout = await runPowerShell('cmdkey /list | Out-String');
 	return stdout.includes(credentialName(service));
-}
-
-/** ログのうち、`from` (測った時点のファイルの大きさ) より後に書かれた分。途中で切り替わっていれば、切り替わった先も含める */
-async function readLogSince(from) {
-	const current = await fs.readFile(LOG_PATH, 'utf8');
-	if (Buffer.byteLength(current) >= from.size) {
-		return Buffer.from(current).subarray(from.size).toString('utf8');
-	}
-	const rotated = (await fs.readdir(LOG_DIR))
-		.filter((name) => name.startsWith('Mawok_') && name > from.newestRotated)
-		.sort();
-	const parts = [];
-	for (const [index, name] of rotated.entries()) {
-		const text = await fs.readFile(path.join(LOG_DIR, name));
-		parts.push(text.subarray(index === 0 ? from.size : 0).toString('utf8'));
-	}
-	return parts.join('') + current;
-}
-
-async function measureLog() {
-	const size = await fs
-		.stat(LOG_PATH)
-		.then((stat) => stat.size)
-		.catch(() => 0);
-	const rotated = (await fs.readdir(LOG_DIR).catch(() => []))
-		.filter((name) => name.startsWith('Mawok_'))
-		.sort();
-	return { size, newestRotated: rotated.at(-1) ?? '' };
 }
 
 test.describe('コマンドのアクション', () => {
@@ -161,7 +134,7 @@ test.describe('コマンドのアクション', () => {
 			aiConsent: null,
 			actions: ACTIONS
 		});
-		logStart = await measureLog();
+		logStart = markLog(LOG_PATH);
 	});
 	test.after(async () => {
 		try {
@@ -486,7 +459,7 @@ test.describe('コマンドのアクション', () => {
 	});
 
 	test('ログには、コマンドの行・渡した文・出力を書かず、番号と失敗の種類、終了コードだけを残す (27.)', async () => {
-		const log = await readLogSince(logStart);
+		const log = readLogSince(LOG_PATH, logStart);
 		for (const secret of [
 			'mawok-no-such-command',
 			'findstr',
