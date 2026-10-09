@@ -2280,6 +2280,12 @@ describe('作業フォルダー', () => {
 		invoked.mockImplementation((command) => {
 			if (command === 'current_folder') return Promise.resolve('~/notes');
 			if (command === 'change_folder') return changeResult();
+			if (command === 'complete_folder')
+				return Promise.resolve({
+					input: '~/notes/Do',
+					candidates: ['Documents', 'Downloads'],
+					total: 102
+				});
 			return Promise.resolve(undefined);
 		});
 		settings.current = view();
@@ -2316,6 +2322,31 @@ describe('作業フォルダー', () => {
 		await expect.element(screen.getByRole('dialog')).toBeInTheDocument();
 		await userEvent.keyboard('x');
 		await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+	});
+
+	it('Tab で補って候補を欄の下に出し、欄にとどまる。打ち直すと候補を消す', async () => {
+		const screen = await render(Page);
+		await userEvent.keyboard('{Meta>}d{/Meta}');
+		const input = screen.getByRole('textbox', { name: m.folder_input() });
+		await expect.element(input).toHaveFocus();
+		await userEvent.keyboard('{End}/d{Tab}');
+
+		expect(callsOf(invoked, 'complete_folder').at(-1)?.[1]).toEqual({ input: '~/notes/d' });
+		await expect.element(input).toHaveValue('~/notes/Do');
+		await expect.element(input).toHaveFocus();
+		const element = input.element() as HTMLInputElement;
+		expect([element.selectionStart, element.selectionEnd]).toEqual([10, 10]);
+		const list = screen.getByRole('list', { name: m.folder_candidates() });
+		await expect.element(list).toHaveTextContent('DocumentsDownloads');
+		await expect
+			.element(screen.getByText(m.folder_candidates_more({ count: 100 })))
+			.toBeInTheDocument();
+		await expect
+			.element(screen.getByText(m.folder_candidates_count({ count: 102 })))
+			.toBeInTheDocument();
+
+		await userEvent.keyboard('c');
+		await expect.element(list).not.toBeInTheDocument();
 	});
 
 	it('Esc とキーのもう一押しで、移らずに閉じる', async () => {

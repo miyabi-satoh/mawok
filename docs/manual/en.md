@@ -53,6 +53,7 @@ Add actions under "Actions" in Settings.
 Commands run in your home folder. To run them in another folder, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and press `Enter`.
 
 - A relative path starts from the current folder.
+- Type the start of a folder name and press `Tab` to complete it. If several folders match, they appear below the box.
 - The title bar shows the folder.
 - Clear the box and press `Enter` to go back to your home folder. Quitting Mawok also goes back to it.
 

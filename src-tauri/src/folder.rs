@@ -1,7 +1,14 @@
 //! コマンドのアクションを動かすフォルダー（テキストウィンドウで移る作業フォルダー。docs/actions.md「作業フォルダー」）。
 //! 移った先は起動している間だけ覚え、起動し直すとホームフォルダーに戻る
 
+use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
+
+/// 補うときに足す区切り。Windows は `/` も受けるが、エクスプローラーと同じ `\` を足す
+const SEPARATOR: char = if cfg!(windows) { '\\' } else { '/' };
+
+/// 欄の下に並べる候補の上限。それより多いときは、絞り込むよう件数だけを添える
+const CANDIDATE_LIMIT: usize = 100;
 
 /// 移れなかった理由。画面は符号で文言を選ぶ
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,15 +34,32 @@ impl FolderError {
 /// 空ならホーム、`~` で始まればホームから、相対パスなら今のフォルダーから（今のフォルダーが消えていればホームから）。
 /// 前後の `"` を外し、`..` は文字の上で解いてシンボリックリンクは解かない（docs/actions.md「作業フォルダー」）
 pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, FolderError> {
-    let trimmed = input.trim();
-    let input = trimmed
+    let input = unquote(input.trim());
+    let resolved = if input.is_empty() || input == "~" {
+        home.to_path_buf()
+    } else {
+        expand(current, home, input)?
+    };
+    match resolved.metadata() {
+        Err(_) => Err(FolderError::NotFound),
+        Ok(metadata) if !metadata.is_dir() => Err(FolderError::NotAFolder),
+        Ok(_) => Ok(resolved),
+    }
+}
+
+/// エクスプローラーの「パスのコピー」が付ける前後の `"` を外す（resolve と complete で共通）
+fn unquote(input: &str) -> &str {
+    input
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
-        .unwrap_or(trimmed);
+        .unwrap_or(input)
+}
+
+/// 打たれたパスを、`~` と今のフォルダーから見た絶対パスにする（resolve と complete で共通）。
+/// 空なら今のフォルダー（今のフォルダーが消えていればホーム）
+fn expand(current: &Path, home: &Path, input: &str) -> Result<PathBuf, FolderError> {
     let base = if current.is_dir() { current } else { home };
-    let path = if input.is_empty() || input == "~" {
-        home.to_path_buf()
-    } else if let Some(rest) = input
+    let path = if let Some(rest) = input
         .strip_prefix("~/")
         .or_else(|| input.strip_prefix("~\\"))
     {
@@ -52,11 +76,157 @@ pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, Fold
     if resolved.to_string_lossy().starts_with(r"\\") {
         return Err(FolderError::Network);
     }
-    match resolved.metadata() {
-        Err(_) => Err(FolderError::NotFound),
-        Ok(metadata) if !metadata.is_dir() => Err(FolderError::NotAFolder),
-        Ok(_) => Ok(resolved),
+    Ok(resolved)
+}
+
+/// 欄で Tab を押したときに補った結果
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+pub struct FolderCompletion {
+    /// 補った後の欄の中身
+    pub input: String,
+    /// 当てはまるフォルダーが2つ以上のときの名前（並べ替えて、上限まで）
+    pub candidates: Vec<String>,
+    /// 当てはまるフォルダーの数
+    pub total: u32,
+}
+
+/// 打ちかけのパスの最後の名前を、当てはまるフォルダーの名前で補う（docs/actions.md「作業フォルダー」）。
+/// 大文字と小文字は区別せずに拾い、補った所は実際の名前の書き方にする（大文字と小文字を区別するファイルシステムでも移れるように。
+/// 2つ以上のときは最初の候補の書き方）。
+/// 1つなら名前と区切りまで、2つ以上なら共通する所まで補い、候補を返す。
+/// 隠したフォルダー（`.` で始まる名前と、Windows の隠しの属性）は、`.` を打ったときか、ほかに当てはまるものが無いときだけ候補にする。
+/// Windows の隠しとシステムの両方の属性のフォルダーは候補にしない
+pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
+    // 末尾の空白は、`Program Files` の `Program ` のように打ちかけの名前の一部なので残す
+    let input = unquote(input.trim_start());
+    let unchanged = || FolderCompletion {
+        input: input.to_string(),
+        candidates: Vec::new(),
+        total: 0,
+    };
+    if input == "~" {
+        return FolderCompletion {
+            input: format!("~{SEPARATOR}"),
+            ..unchanged()
+        };
     }
+    let split = input
+        .rfind(|c| c == '/' || (cfg!(windows) && c == '\\'))
+        .map_or(0, |index| index + 1);
+    let (folder_part, prefix) = input.split_at(split);
+    let Ok(folder) = expand(current, home, folder_part) else {
+        return unchanged();
+    };
+    let Ok(entries) = std::fs::read_dir(&folder) else {
+        return unchanged();
+    };
+    let lowered = prefix.to_lowercase();
+    let mut visible = Vec::new();
+    let mut hidden = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if !name.to_lowercase().starts_with(&lowered) {
+            continue;
+        }
+        // 名前の一覧と一緒に返る種類で見て、フォルダーの数だけ stat しない。
+        // シンボリックリンクだけは先を見て、フォルダーなら候補にする（移るときもリンクのまま移れる）
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !(file_type.is_dir() || file_type.is_symlink() && entry.path().is_dir()) {
+            continue;
+        }
+        match visibility(&name, &entry) {
+            Visibility::Protected => {}
+            Visibility::Hidden if !prefix.starts_with('.') => hidden.push(name),
+            _ => visible.push(name),
+        }
+    }
+    let mut names = if visible.is_empty() { hidden } else { visible };
+    names.sort_by_cached_key(|name| name.to_lowercase());
+    match names.as_slice() {
+        [] => unchanged(),
+        [name] => FolderCompletion {
+            input: format!("{folder_part}{name}{SEPARATOR}"),
+            ..unchanged()
+        },
+        _ => FolderCompletion {
+            input: format!("{folder_part}{}", completed_part(&names, prefix)),
+            total: names.len() as u32,
+            candidates: names.into_iter().take(CANDIDATE_LIMIT).collect(),
+        },
+    }
+}
+
+/// 2つ以上の名前で補った後の、最後の名前の部分。打った所は、候補どうしで書き方が揃っていればそれに合わせ、
+/// 揃っていなければ（`desktop` と `Documents` に `D` など）打ったとおりに残す
+fn completed_part(names: &[String], prefix: &str) -> String {
+    let common = common_prefix(names);
+    let typed = prefix.chars().count();
+    let head: String = common.chars().take(typed).collect();
+    if names.iter().all(|name| name.starts_with(&head)) {
+        common.to_string()
+    } else {
+        prefix.chars().chain(common.chars().skip(typed)).collect()
+    }
+}
+
+enum Visibility {
+    Shown,
+    /// `.` で始まる名前と、Windows の隠しの属性（エクスプローラーが既定で出さないもの）
+    Hidden,
+    /// Windows の隠しとシステムの両方の属性（エクスプローラーが「保護されたオペレーティング システム ファイル」として出さないもの）。
+    /// `Application Data` のような中を開けない古い名前の転送先なども含み、移っても使えないので候補にしない
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Protected,
+}
+
+fn visibility(name: &str, entry: &std::fs::DirEntry) -> Visibility {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+        let attributes = entry
+            .metadata()
+            .map_or(0, |metadata| metadata.file_attributes());
+        if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+            return if attributes & FILE_ATTRIBUTE_SYSTEM != 0 {
+                Visibility::Protected
+            } else {
+                Visibility::Hidden
+            };
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = entry;
+    if name.starts_with('.') {
+        Visibility::Hidden
+    } else {
+        Visibility::Shown
+    }
+}
+
+/// 名前に共通する頭の部分。大文字と小文字は区別せず、最初の名前の書き方で返す
+fn common_prefix(names: &[String]) -> &str {
+    let first = &names[0];
+    let end = names[1..]
+        .iter()
+        .map(|name| {
+            first
+                .char_indices()
+                .zip(name.chars())
+                .take_while(|((_, a), b)| a.to_lowercase().eq(b.to_lowercase()))
+                .last()
+                .map_or(0, |((index, a), _)| index + a.len_utf8())
+        })
+        .min()
+        .unwrap_or(first.len());
+    &first[..end]
 }
 
 /// `.` を除き、`..` を一つ前の名前と打ち消す。ルートより上へは戻らない
@@ -198,6 +368,107 @@ mod tests {
         assert_eq!(
             resolve(&d.home, &d.home, r"\\server\share"),
             Err(FolderError::Network)
+        );
+    }
+
+    /// 補う先のフォルダー。手放すときにフォルダーごと消す
+    fn completion_dirs(name: &str) -> Dirs {
+        let d = Dirs::new(name);
+        for folder in [
+            "My Folder",
+            "Documents",
+            "Documents-old",
+            "Downloads",
+            "desktop",
+            ".config",
+            "work/inner",
+        ] {
+            fs::create_dir_all(d.home.join(folder)).unwrap();
+        }
+        fs::write(d.home.join("Docs.txt"), "").unwrap();
+        d
+    }
+
+    /// 補った後の期待値。打った区切りは打ったとおりに残り、補って足す末尾の区切りだけが OS のものになる
+    fn sep(path: &str) -> String {
+        format!("{}{SEPARATOR}", path.strip_suffix('/').unwrap())
+    }
+
+    #[test]
+    fn completes_a_single_match_up_to_the_separator() {
+        let d = completion_dirs("complete-single");
+        let completion = complete(&d.home, &d.home, "wo");
+        assert_eq!(completion.input, sep("work/"));
+        assert!(completion.candidates.is_empty());
+        // 末尾の空白は名前の一部として残す
+        assert_eq!(complete(&d.home, &d.home, " My ").input, sep("My Folder/"));
+        // 1つなら、打った大文字と小文字を実際の名前に合わせる
+        assert_eq!(complete(&d.home, &d.home, "WO").input, sep("work/"));
+        assert_eq!(
+            complete(&d.home, &d.home, "work/").input,
+            sep("work/inner/")
+        );
+        assert_eq!(
+            complete(&d.work, &d.home, "../wo").input,
+            format!("..{}", sep("/work/"))
+        );
+    }
+
+    #[test]
+    fn completes_the_common_part_of_several_matches_ignoring_case() {
+        let d = completion_dirs("complete-several");
+        // 候補どうしで書き方が揃っていれば、打った所も合わせる。ファイルの Docs.txt は候補にしない
+        let completion = complete(&d.home, &d.home, "docu");
+        assert_eq!(completion.input, "Documents");
+        assert_eq!(completion.candidates, ["Documents", "Documents-old"]);
+        assert_eq!(completion.total, 2);
+        // 揃っていなければ、打ったとおりに残す
+        let completion = complete(&d.home, &d.home, "D");
+        assert_eq!(completion.input, "D");
+        assert_eq!(
+            completion.candidates,
+            ["desktop", "Documents", "Documents-old", "Downloads"]
+        );
+    }
+
+    #[test]
+    fn offers_dot_folders_only_after_a_dot() {
+        let d = completion_dirs("complete-dot");
+        assert!(!complete(&d.home, &d.home, "")
+            .candidates
+            .contains(&".config".to_string()));
+        assert_eq!(complete(&d.home, &d.home, ".c").input, sep(".config/"));
+        // ほかに当てはまるものが無ければ候補にする
+        fs::create_dir_all(d.home.join("only-hidden/.git")).unwrap();
+        assert_eq!(
+            complete(&d.home, &d.home, "only-hidden/").input,
+            sep("only-hidden/.git/")
+        );
+    }
+
+    #[test]
+    fn completes_from_home_after_a_tilde() {
+        let d = completion_dirs("complete-tilde");
+        assert_eq!(complete(&d.work, &d.home, "~").input, sep("~/"));
+        assert_eq!(complete(&d.work, &d.home, "~/wo").input, sep("~/work/"));
+    }
+
+    #[test]
+    fn leaves_the_input_when_nothing_matches() {
+        let d = completion_dirs("complete-none");
+        let completion = complete(&d.home, &d.home, "nowhere/x");
+        assert_eq!(completion.input, "nowhere/x");
+        assert!(completion.candidates.is_empty());
+        assert_eq!(completion.total, 0);
+    }
+
+    #[test]
+    fn drops_the_quotes_of_a_copied_path() {
+        let d = completion_dirs("complete-quotes");
+        let quoted = format!("\"{}\"", d.home.join("wo").display());
+        assert_eq!(
+            complete(&d.home, &d.home, &quoted).input,
+            format!("{}{SEPARATOR}", d.work.display())
         );
     }
 
