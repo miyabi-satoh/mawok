@@ -44,6 +44,10 @@ pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, Fold
         base.join(input)
     };
     let resolved = normalize(&path);
+    // Windows の `C:foo`（ドライブ相対）は join で今のフォルダーに付かず、そのドライブの別のフォルダーから見られるので断る
+    if !resolved.is_absolute() {
+        return Err(FolderError::NotFound);
+    }
     #[cfg(windows)]
     if resolved.to_string_lossy().starts_with(r"\\") {
         return Err(FolderError::Network);
@@ -174,6 +178,16 @@ mod tests {
         assert_eq!(
             normalize(Path::new("/a/../..")),
             Path::new("/").to_path_buf()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_drive_relative_paths() {
+        let d = Dirs::new("drive-relative");
+        assert_eq!(
+            resolve(&d.home, &d.home, "C:Windows"),
+            Err(FolderError::NotFound)
         );
     }
 
