@@ -34,7 +34,8 @@ describe('buying credit', () => {
 			cardCountry = 'JP',
 			status = 'active',
 			price = 'price_pro_monthly',
-			cancelAtPeriodEnd = false
+			cancelAtPeriodEnd = false,
+			cancelAt = null
 		}: {
 			subscriptionId?: string;
 			invoiceId?: string;
@@ -45,6 +46,7 @@ describe('buying credit', () => {
 			status?: string;
 			price?: string;
 			cancelAtPeriodEnd?: boolean;
+			cancelAt?: number | null;
 		} = {}
 	) {
 		const paymentIntentId = `pi_${subscriptionId}`;
@@ -95,6 +97,7 @@ describe('buying credit', () => {
 					id: subscriptionId,
 					status,
 					cancel_at_period_end: cancelAtPeriodEnd,
+					cancel_at: cancelAt,
 					customer: `cus_${subscriptionId}`,
 					metadata: {
 						product: 'mawok-pro',
@@ -142,7 +145,7 @@ describe('buying credit', () => {
 		expect(confirmation).toMatch(/name="plan"\s+value="monthly"/);
 	});
 
-	it('shows the trial charge date, then the renewal or cancellation date on the account page', async () => {
+	it('shows the trial charge date, then renewal or cancellation on the account page', async () => {
 		const { cookie } = await signIn('pro-status@example.com');
 		const account = await accountId('pro-status@example.com');
 		await env.DB.prepare(
@@ -155,6 +158,15 @@ describe('buying credit', () => {
 		let page = await (await request('/account/', { cookie })).text();
 		expect(page).toContain('から課金が始まります');
 		expect(page).toContain('「支払いを管理する」から解約');
+		await env.DB.prepare('UPDATE subscriptions SET cancel_at_period_end = 1 WHERE id = ?')
+			.bind('sub_pro_status')
+			.run();
+		page = await (await request('/account/', { cookie })).text();
+		expect(page).toContain('試用は');
+		expect(page).toContain('課金はされません');
+		await env.DB.prepare('UPDATE subscriptions SET cancel_at_period_end = 0 WHERE id = ?')
+			.bind('sub_pro_status')
+			.run();
 		await env.DB.prepare(
 			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
 			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
@@ -170,6 +182,37 @@ describe('buying credit', () => {
 			.run();
 		page = await (await request('/account/', { cookie })).text();
 		expect(page).toContain('まで使えます（更新されません）');
+		await env.DB.prepare(
+			'UPDATE subscriptions SET cancel_at_period_end = 0, status = ? WHERE id = ?'
+		)
+			.bind('canceled', 'sub_pro_status')
+			.run();
+		page = await (await request('/account/', { cookie })).text();
+		expect(page).toContain('まで使えます（更新されません）');
+	});
+
+	it('shows cancel_at instead of the paid-through date when Stripe set it', async () => {
+		const { cookie } = await signIn('pro-cancel-at@example.com');
+		const account = await accountId('pro-cancel-at@example.com');
+		const cancelAt = Date.UTC(2100, 0, 15) / 1000;
+		await env.DB.prepare(
+			`INSERT INTO subscriptions
+			 (id, account_id, plan, paid_through, status, cancel_at_period_end, cancel_at, created_at)
+			 VALUES ('sub_pro_cancel_at', ?, 'monthly', 4_102_444_800, 'active', 1, ?, 0)`
+		)
+			.bind(account, cancelAt)
+			.run();
+		await env.DB.prepare(
+			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
+			 VALUES ('purchase_pro_cancel_at', ?, 'mawok-pro', 'invoice:cancel-at', 'pi_cancel_at',
+			 480, 'jpy', 0, 1, 'sub_pro_cancel_at', 0)`
+		)
+			.bind(account)
+			.run();
+		const page = await (await request('/account/', { cookie })).text();
+		const date = new Date(cancelAt * 1000).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+		expect(page).toContain(`${date} まで使えます（更新されません）`);
 	});
 
 	it('does not grant Pro credit from balance while the account is in its trial', async () => {
@@ -285,6 +328,28 @@ describe('buying credit', () => {
 		).toMatchObject({ revoked_at: expect.any(Number) });
 	});
 
+	it('keeps Pro credit when a credit purchase is refunded', async () => {
+		await signIn('credit-refund-keeps-pro@example.com');
+		const account = await accountId('credit-refund-keeps-pro@example.com');
+		await buy(account, 'cs_credit_refund_keeps_pro');
+		await env.DB.prepare(
+			`INSERT INTO grants (id, account_id, kind, granted, remaining, expires_at, created_at)
+			 VALUES ('grant_pro_kept', ?, 'pro', 100, 100, 4_102_444_800, 0)`
+		)
+			.bind(account)
+			.run();
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: 'pi_cs_credit_refund_keeps_pro', refunded: true } }
+		});
+		expect(
+			await env.DB.prepare('SELECT remaining, revoked FROM grants WHERE id = ?')
+				.bind('grant_pro_kept')
+				.first()
+		).toEqual({ remaining: 100, revoked: 0 });
+	});
+
 	it('records an unaccepted Pro invoice as failed and reports it to the operator log', async () => {
 		await signIn('bad-pro-invoice@example.com');
 		const account = await accountId('bad-pro-invoice@example.com');
@@ -300,15 +365,20 @@ describe('buying credit', () => {
 		);
 	});
 
-	it('records a cancellation scheduled in Stripe subscription updates', async () => {
+	it('records both Stripe cancellation markers in subscription updates', async () => {
 		await signIn('pro-cancel-at-period-end@example.com');
 		const account = await accountId('pro-cancel-at-period-end@example.com');
-		const first = proInvoiceApi(account);
+		const first = proInvoiceApi(account, { cancelAt: 1_999_999_999 });
 		await webhook(paidInvoice(first.invoiceId));
+		expect(
+			await env.DB.prepare('SELECT cancel_at_period_end, cancel_at FROM subscriptions WHERE id = ?')
+				.bind(first.subscriptionId)
+				.first()
+		).toEqual({ cancel_at_period_end: 1, cancel_at: 1_999_999_999 });
 		vi.restoreAllMocks();
 		proInvoiceApi(account, {
 			subscriptionId: first.subscriptionId,
-			cancelAtPeriodEnd: true
+			cancelAt: 2_000_000_000
 		});
 		await webhook({
 			id: `evt_${crypto.randomUUID()}`,
@@ -316,10 +386,10 @@ describe('buying credit', () => {
 			data: { object: { id: first.subscriptionId } }
 		});
 		expect(
-			await env.DB.prepare('SELECT cancel_at_period_end FROM subscriptions WHERE id = ?')
+			await env.DB.prepare('SELECT cancel_at_period_end, cancel_at FROM subscriptions WHERE id = ?')
 				.bind(first.subscriptionId)
 				.first()
-		).toEqual({ cancel_at_period_end: 1 });
+		).toEqual({ cancel_at_period_end: 1, cancel_at: 2_000_000_000 });
 	});
 
 	it('expires the open checkout before switching between credit and Pro', async () => {
@@ -343,6 +413,39 @@ describe('buying credit', () => {
 			'https://api.stripe.com/v1/checkout/sessions/cs_switch_1/expire',
 			'https://api.stripe.com/v1/checkout/sessions/cs_switch_2/expire'
 		]);
+	});
+
+	it('replaces the checkout reservation when expiring its Stripe session fails', async () => {
+		const { cookie } = await signIn('replace-broken-checkout@example.com');
+		let created = 0;
+		let expirations = 0;
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+			if (String(url).endsWith('/expire')) {
+				expirations += 1;
+				if (expirations === 1) return new Response('temporary failure', { status: 500 });
+				throw new TypeError('network failure');
+			}
+			created += 1;
+			return Response.json({
+				id: `cs_replace_${created}`,
+				url: `https://checkout.stripe.test/replace/${created}`
+			});
+		});
+		await postForm('/account/buy', { next: '/account/' }, cookie);
+		expect(
+			(await postForm('/account/buy', { next: '/account/', plan: 'monthly' }, cookie)).status
+		).toBe(303);
+		expect(
+			(await postForm('/account/buy', { next: '/account/', plan: 'yearly' }, cookie)).status
+		).toBe(303);
+		expect(logged).toHaveBeenCalledTimes(2);
+		expect(
+			await env.DB.prepare('SELECT price, session_id FROM checkouts WHERE account_id = ?')
+				.bind(await accountId('replace-broken-checkout@example.com'))
+				.first()
+		).toEqual({ price: 'yearly', session_id: 'cs_replace_3' });
+		logged.mockRestore();
 	});
 
 	it('does not grant or extend Pro for a payment revoked before its invoice, and cancels it', async () => {

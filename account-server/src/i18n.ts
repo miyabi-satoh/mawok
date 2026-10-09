@@ -150,6 +150,7 @@ const ja = {
 		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} に自動で更新されます。`,
 	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
 		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} まで使えます（更新されません）。`,
+	proTrialCanceledUntil: (date: string) => `試用は ${date} までです。課金はされません。`,
 	proTrialUntil: (date: string) =>
 		`${date} から課金が始まります。止めるときは「支払いを管理する」から解約してください。`,
 	manageBilling: '支払いを管理する',
@@ -281,6 +282,8 @@ const en: typeof ja = {
 		`Pro (${plan}): renews automatically on ${date}.`,
 	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
 		`Pro (${plan}): available until ${date}; it will not renew.`,
+	proTrialCanceledUntil: (date: string) =>
+		`Your trial lasts until ${date}. You will not be charged.`,
 	proTrialUntil: (date: string) =>
 		`Billing starts on ${date}. To stop it, cancel through “Manage billing”.`,
 	manageBilling: 'Manage billing',

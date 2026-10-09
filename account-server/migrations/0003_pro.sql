@@ -13,6 +13,7 @@ CREATE TABLE subscriptions (
 CREATE INDEX subscriptions_account ON subscriptions (account_id);
 
 ALTER TABLE purchases ADD COLUMN stripe_subscription_id TEXT;
+CREATE INDEX purchases_subscription ON purchases (stripe_subscription_id);
 ALTER TABLE checkouts ADD COLUMN price TEXT NOT NULL DEFAULT '';
 ALTER TABLE checkouts ADD COLUMN session_id TEXT;
 
@@ -28,3 +29,4 @@ UPDATE consumptions SET grant_kind = CASE WHEN purchase_id IS NULL THEN 'free' E
 
 -- Stripe の期間末解約を、アカウントの画面でも出す。
 ALTER TABLE subscriptions ADD COLUMN cancel_at_period_end INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE subscriptions ADD COLUMN cancel_at INTEGER;

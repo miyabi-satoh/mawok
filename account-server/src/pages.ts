@@ -486,10 +486,12 @@ export function homePage(
 				pro?.active
 					? html`<p>
 								${
-									pro.trial
-										? t.proTrialUntil(date(pro.until!))
-										: pro.cancelAtPeriodEnd
-											? t.proCanceledUntil(pro.plan!, date(pro.until!))
+									!pro.renews
+										? pro.trial
+											? t.proTrialCanceledUntil(date(pro.displayUntil!))
+											: t.proCanceledUntil(pro.plan!, date(pro.displayUntil!))
+										: pro.trial
+											? t.proTrialUntil(date(pro.until!))
 											: t.proUntil(pro.plan!, date(pro.until!))
 								}
 							</p>

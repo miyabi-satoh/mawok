@@ -5,6 +5,7 @@ import {
 	confirmProInvoice,
 	createProCheckoutSession,
 	createCheckoutSession,
+	expireCheckoutSession,
 	ProInvoiceError,
 	StripeError,
 	stripeConfig,
@@ -140,6 +141,26 @@ describe('createProCheckoutSession', () => {
 		expect(sent.get('subscription_data[metadata][product]')).toBe('mawok-pro');
 		expect(sent.get('subscription_data[metadata][account_id]')).toBe('acc');
 		expect(sent.get('subscription_data[metadata][buyer_country]')).toBe('JP');
+	});
+});
+
+describe('expireCheckoutSession', () => {
+	it('leaves the caller free to replace a session Stripe cannot close', async () => {
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		for (const answer of [
+			async () => new Response('', { status: 400 }),
+			async () => new Response('', { status: 404 }),
+			async () => new Response('', { status: 500 }),
+			async () => {
+				throw new TypeError('network failure');
+			}
+		]) {
+			const stripe = vi.spyOn(globalThis, 'fetch').mockImplementation(answer);
+			await expect(expireCheckoutSession(config, 'cs_old')).resolves.toBeUndefined();
+			stripe.mockRestore();
+		}
+		expect(logged).toHaveBeenCalledTimes(2);
+		logged.mockRestore();
 	});
 });
 

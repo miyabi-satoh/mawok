@@ -180,7 +180,7 @@ app.get('/v1/balance', async (c) => {
 	const pro = await proOf(c.env, accountId);
 	if (pro.active && !pro.trial) await grantProStatement(c.env, accountId, pro).run();
 	const { remaining, percent } = await balance(c.env, accountId);
-	const { cancelAtPeriodEnd: _cancelAtPeriodEnd, ...proResponse } = pro;
+	const { renews: _renews, displayUntil: _displayUntil, ...proResponse } = pro;
 	return c.json({
 		email: account?.email,
 		remaining_percent: remaining > 0 ? percent : 0,
@@ -377,9 +377,15 @@ async function handleStripeEvent(
 					paid.paymentIntentId
 				),
 				env.DB.prepare(
-					`UPDATE subscriptions SET cancel_at_period_end = ?
+					`UPDATE subscriptions SET cancel_at_period_end = ?, cancel_at = ?
 					 WHERE id = ? AND account_id IS NOT NULL AND revoked_at IS NULL AND status != 'canceled'`
-				).bind(paid.subscription.cancel_at_period_end === true ? 1 : 0, paid.subscription.id),
+				).bind(
+					paid.subscription.cancel_at_period_end === true || paid.subscription.cancel_at != null
+						? 1
+						: 0,
+					paid.subscription.cancel_at ?? null,
+					paid.subscription.id
+				),
 				// 試用の 0 円請求書は、売上の台帳に残さない。
 				...(paid.amount === 0 || !paid.paymentIntentId
 					? []
@@ -426,9 +432,14 @@ async function handleStripeEvent(
 			if (!row || row.status === 'canceled') return;
 			const sub = await getSubscription(config, row.id);
 			await env.DB.prepare(
-				"UPDATE subscriptions SET status = ?, cancel_at_period_end = ? WHERE id = ? AND status != 'canceled'"
+				"UPDATE subscriptions SET status = ?, cancel_at_period_end = ?, cancel_at = ? WHERE id = ? AND status != 'canceled'"
 			)
-				.bind(sub.status, sub.cancel_at_period_end === true ? 1 : 0, row.id)
+				.bind(
+					sub.status,
+					sub.cancel_at_period_end === true || sub.cancel_at != null ? 1 : 0,
+					sub.cancel_at ?? null,
+					row.id
+				)
 				.run();
 			return;
 		}
@@ -500,8 +511,9 @@ async function handleStripeEvent(
 				env.DB.prepare(
 					`UPDATE grants SET revoked = revoked + remaining, remaining = 0
 					 WHERE account_id = (SELECT account_id FROM purchases WHERE stripe_payment_intent_id = ?)
+					   AND (SELECT product FROM purchases WHERE stripe_payment_intent_id = ?) = 'mawok-pro'
 					   AND kind = 'pro' AND expires_at > ?`
-				).bind(object.payment_intent, t),
+				).bind(object.payment_intent, object.payment_intent, t),
 				env.DB.prepare(
 					`UPDATE subscriptions SET revoked_at = coalesce(revoked_at, ?)
 					 WHERE id = (SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?)`

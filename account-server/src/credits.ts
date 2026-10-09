@@ -14,8 +14,8 @@ export type Pro = {
 	trial: boolean;
 };
 
-/** アカウントの画面だけに出す、Stripe で予約された期間末の解約。 */
-export type AccountPro = Pro & { cancelAtPeriodEnd: boolean };
+/** アカウントの画面だけに出す、次の期間へ更新されるかどうかと表示する期限。 */
+export type AccountPro = Pro & { renews: boolean; displayUntil: number | null };
 
 /**
  * 残りのある付与の、付けた量に対する残りの割合。金額や回数には直さない。
@@ -61,7 +61,7 @@ export function grantFreeStatement(env: Env, accountId: string, t = now()) {
 /** Pro の状態。払い終えた期間が今より後なら Pro のまま使える。 */
 export async function proOf(env: Env, accountId: string, t = now()): Promise<AccountPro> {
 	const row = await env.DB.prepare(
-		`SELECT plan, paid_through, cancel_at_period_end,
+		`SELECT plan, paid_through, status, cancel_at_period_end, cancel_at,
 		 EXISTS (SELECT 1 FROM purchases
 		         WHERE stripe_subscription_id = subscriptions.id
 		           AND product = 'mawok-pro' AND revoked_at IS NULL) AS paid
@@ -73,7 +73,9 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 		.first<{
 			plan: 'monthly' | 'yearly';
 			paid_through: number;
+			status: string;
 			cancel_at_period_end: number;
+			cancel_at: number | null;
 			paid: number;
 		}>();
 	return row
@@ -82,9 +84,11 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 				until: row.paid_through,
 				plan: row.plan,
 				trial: row.paid === 0,
-				cancelAtPeriodEnd: row.cancel_at_period_end === 1
+				renews:
+					row.status !== 'canceled' && row.cancel_at_period_end !== 1 && row.cancel_at === null,
+				displayUntil: row.cancel_at ?? row.paid_through
 			}
-		: { active: false, until: null, plan: null, trial: false, cancelAtPeriodEnd: false };
+		: { active: false, until: null, plan: null, trial: false, renews: false, displayUntil: null };
 }
 
 /** Asia/Tokyo の暦月の終わり。Pro の付与はその月だけ使える。 */

@@ -234,10 +234,11 @@ export async function expireCheckoutSession(config: StripeConfig, sessionId: str
 			`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`,
 			{ method: 'POST', headers: { authorization: `Bearer ${config.secretKey}` } }
 		);
-		if (!res.ok) throw new StripeError(res.status, await res.text());
+		// 既に払い終えた・閉じた画面は Stripe が 400/404 にする。5xx でも古い予約は捨て、期限で閉じる Stripe 側には任せる。
+		if (!res.ok && res.status !== 400 && res.status !== 404)
+			console.error('failed to expire Checkout Session', sessionId, res.status);
 	} catch (e) {
-		// すでに払い終えた・閉じた画面は Stripe が 400 にする。払われていれば webhook で処理する。
-		if (!(e instanceof StripeError && e.status === 400)) throw e;
+		console.error('failed to expire Checkout Session', sessionId, e);
 	}
 }
 
@@ -247,6 +248,7 @@ type StripeSubscription = {
 	customer: string;
 	metadata: Record<string, string> | null;
 	cancel_at_period_end?: boolean;
+	cancel_at?: number | null;
 	items: {
 		data: { current_period_end: number; price: { id: string; currency?: string | null } }[];
 	};

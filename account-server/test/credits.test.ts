@@ -212,7 +212,11 @@ describe('proOf', () => {
 		)
 			.bind(subscription, account, 4_102_444_800)
 			.run();
-		expect(await proOf(env, account, 1)).toMatchObject({ active: true, trial: true });
+		expect(await proOf(env, account, 1)).toMatchObject({
+			active: true,
+			trial: true,
+			renews: false
+		});
 		await env.DB.prepare(
 			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
 			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
@@ -220,6 +224,27 @@ describe('proOf', () => {
 		)
 			.bind(randomHex(16), account, randomHex(16), randomHex(16), subscription)
 			.run();
-		expect(await proOf(env, account, 1)).toMatchObject({ active: true, trial: false });
+		expect(await proOf(env, account, 1)).toMatchObject({
+			active: true,
+			trial: false,
+			renews: false
+		});
+	});
+
+	it('uses Stripe cancel_at as the displayed last usable date and marks the subscription nonrenewing', async () => {
+		const account = await newAccount();
+		const cancelAt = 4_102_444_000;
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, cancel_at, created_at)
+			 VALUES (?, ?, 'monthly', 4_102_444_800, 'active', ?, 0)`
+		)
+			.bind(randomHex(16), account, cancelAt)
+			.run();
+		expect(await proOf(env, account, 1)).toMatchObject({
+			active: true,
+			until: 4_102_444_800,
+			displayUntil: cancelAt,
+			renews: false
+		});
 	});
 });
