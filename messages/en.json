@@ -292,6 +292,8 @@
 	"actions_search": "Filter actions",
 	"folder_palette": "Folder commands run in",
 	"folder_input": "Folder path",
+	"folder_candidates": "Matching folders",
+	"folder_candidates_more": "{count} more. Type more of the name to narrow them down.",
 	"folder_error_not_found": "Couldn't find the folder.",
 	"folder_error_not_a_folder": "Not a folder.",
 	"folder_error_network": "Commands can't run in a network path (one that starts with {prefix}). Use a path with a mapped drive letter.",

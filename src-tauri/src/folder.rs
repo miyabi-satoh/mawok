@@ -1,7 +1,14 @@
 //! コマンドのアクションを動かすフォルダー（テキストウィンドウで移る作業フォルダー。docs/actions.md「作業フォルダー」）。
 //! 移った先は起動している間だけ覚え、起動し直すとホームフォルダーに戻る
 
+use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
+
+/// 補うときに足す区切り。Windows は `/` も受けるが、エクスプローラーと同じ `\` を足す
+const SEPARATOR: char = if cfg!(windows) { '\\' } else { '/' };
+
+/// 欄の下に並べる候補の上限。それより多いときは、絞り込むよう件数だけを添える
+const CANDIDATE_LIMIT: usize = 100;
 
 /// 移れなかった理由。画面は符号で文言を選ぶ
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,10 +39,23 @@ pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, Fold
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
         .unwrap_or(trimmed);
-    let base = if current.is_dir() { current } else { home };
-    let path = if input.is_empty() || input == "~" {
+    let resolved = if input.is_empty() || input == "~" {
         home.to_path_buf()
-    } else if let Some(rest) = input
+    } else {
+        expand(current, home, input)?
+    };
+    match resolved.metadata() {
+        Err(_) => Err(FolderError::NotFound),
+        Ok(metadata) if !metadata.is_dir() => Err(FolderError::NotAFolder),
+        Ok(_) => Ok(resolved),
+    }
+}
+
+/// 打たれたパスを、`~` と今のフォルダーから見た絶対パスにする（resolve と complete で共通）。
+/// 空なら今のフォルダー（今のフォルダーが消えていればホーム）
+fn expand(current: &Path, home: &Path, input: &str) -> Result<PathBuf, FolderError> {
+    let base = if current.is_dir() { current } else { home };
+    let path = if let Some(rest) = input
         .strip_prefix("~/")
         .or_else(|| input.strip_prefix("~\\"))
     {
@@ -52,11 +72,101 @@ pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, Fold
     if resolved.to_string_lossy().starts_with(r"\\") {
         return Err(FolderError::Network);
     }
-    match resolved.metadata() {
-        Err(_) => Err(FolderError::NotFound),
-        Ok(metadata) if !metadata.is_dir() => Err(FolderError::NotAFolder),
-        Ok(_) => Ok(resolved),
+    Ok(resolved)
+}
+
+/// 欄で Tab を押したときに補った結果
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+pub struct FolderCompletion {
+    /// 補った後の欄の中身
+    pub input: String,
+    /// 当てはまるフォルダーが2つ以上のときの名前（並べ替えて、上限まで）
+    pub candidates: Vec<String>,
+    /// 当てはまるフォルダーの数
+    pub total: u32,
+}
+
+/// 打ちかけのパスの最後の名前を、当てはまるフォルダーの名前で補う（docs/actions.md「作業フォルダー」）。
+/// 1つなら名前と区切りまで、2つ以上なら共通する所まで補い、候補を返す。大文字と小文字は区別しない。
+/// `.` で始まるフォルダーは、`.` を打ったときだけ候補にする
+pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
+    let trimmed = input.trim_start();
+    let input = trimmed
+        .strip_prefix('"')
+        .map_or(trimmed, |rest| rest.strip_suffix('"').unwrap_or(rest));
+    let unchanged = || FolderCompletion {
+        input: input.to_string(),
+        candidates: Vec::new(),
+        total: 0,
+    };
+    if input == "~" {
+        return FolderCompletion {
+            input: format!("~{SEPARATOR}"),
+            ..unchanged()
+        };
     }
+    let split = input
+        .rfind(|c| c == '/' || (cfg!(windows) && c == '\\'))
+        .map_or(0, |index| index + 1);
+    let (folder_part, prefix) = input.split_at(split);
+    let Ok(folder) = expand(current, home, folder_part) else {
+        return unchanged();
+    };
+    let Ok(entries) = std::fs::read_dir(&folder) else {
+        return unchanged();
+    };
+    let lowered = prefix.to_lowercase();
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            if name.starts_with('.') && !prefix.starts_with('.') {
+                return None;
+            }
+            // シンボリックリンクの先がフォルダーなら候補にする（移るときもリンクのまま移れる）
+            (name.to_lowercase().starts_with(&lowered) && entry.path().is_dir()).then_some(name)
+        })
+        .collect();
+    names.sort_by_cached_key(|name| name.to_lowercase());
+    match names.as_slice() {
+        [] => unchanged(),
+        [name] => FolderCompletion {
+            input: format!("{folder_part}{name}{SEPARATOR}"),
+            ..unchanged()
+        },
+        _ => FolderCompletion {
+            // 打った所は打ったとおりに残し、その先だけを最初の名前の書き方で足す
+            input: format!(
+                "{folder_part}{prefix}{}",
+                common_prefix(&names)
+                    .chars()
+                    .skip(prefix.chars().count())
+                    .collect::<String>()
+            ),
+            total: names.len() as u32,
+            candidates: names.into_iter().take(CANDIDATE_LIMIT).collect(),
+        },
+    }
+}
+
+/// 名前に共通する頭の部分。大文字と小文字は区別せず、最初の名前の書き方で返す
+fn common_prefix(names: &[String]) -> &str {
+    let first = &names[0];
+    let end = names[1..]
+        .iter()
+        .map(|name| {
+            first
+                .char_indices()
+                .zip(name.chars())
+                .take_while(|((_, a), b)| a.to_lowercase().eq(b.to_lowercase()))
+                .last()
+                .map_or(0, |((index, a), _)| index + a.len_utf8())
+        })
+        .min()
+        .unwrap_or(first.len());
+    &first[..end]
 }
 
 /// `.` を除き、`..` を一つ前の名前と打ち消す。ルートより上へは戻らない
@@ -198,6 +308,94 @@ mod tests {
         assert_eq!(
             resolve(&d.home, &d.home, r"\\server\share"),
             Err(FolderError::Network)
+        );
+    }
+
+    /// 補う先のフォルダー。手放すときにフォルダーごと消す
+    fn completion_dirs(name: &str) -> Dirs {
+        let d = Dirs::new(name);
+        for folder in [
+            "Documents",
+            "Documents-old",
+            "Downloads",
+            "desktop",
+            ".config",
+            "work/inner",
+        ] {
+            fs::create_dir_all(d.home.join(folder)).unwrap();
+        }
+        fs::write(d.home.join("Docs.txt"), "").unwrap();
+        d
+    }
+
+    fn sep(path: &str) -> String {
+        path.replace('/', &SEPARATOR.to_string())
+    }
+
+    #[test]
+    fn completes_a_single_match_up_to_the_separator() {
+        let d = completion_dirs("complete-single");
+        let completion = complete(&d.home, &d.home, "wo");
+        assert_eq!(completion.input, sep("work/"));
+        assert!(completion.candidates.is_empty());
+        assert_eq!(
+            complete(&d.home, &d.home, "work/").input,
+            sep("work/inner/")
+        );
+        assert_eq!(
+            complete(&d.work, &d.home, "../wo").input,
+            format!("..{}", sep("/work/"))
+        );
+    }
+
+    #[test]
+    fn completes_the_common_part_of_several_matches_ignoring_case() {
+        let d = completion_dirs("complete-several");
+        // 打った所は打ったとおりに残す。ファイルの Docs.txt は候補にしない
+        let completion = complete(&d.home, &d.home, "docu");
+        assert_eq!(completion.input, "documents");
+        assert_eq!(completion.candidates, ["Documents", "Documents-old"]);
+        assert_eq!(completion.total, 2);
+        let completion = complete(&d.home, &d.home, "D");
+        assert_eq!(completion.input, "D");
+        assert_eq!(
+            completion.candidates,
+            ["desktop", "Documents", "Documents-old", "Downloads"]
+        );
+    }
+
+    #[test]
+    fn offers_dot_folders_only_after_a_dot() {
+        let d = completion_dirs("complete-dot");
+        assert!(!complete(&d.home, &d.home, "")
+            .candidates
+            .contains(&".config".to_string()));
+        assert_eq!(complete(&d.home, &d.home, ".c").input, sep(".config/"));
+    }
+
+    #[test]
+    fn completes_from_home_after_a_tilde() {
+        let d = completion_dirs("complete-tilde");
+        assert_eq!(complete(&d.work, &d.home, "~").input, sep("~/"));
+        assert_eq!(complete(&d.work, &d.home, "~/wo").input, sep("~/work/"));
+    }
+
+    #[test]
+    fn leaves_the_input_when_nothing_matches() {
+        let d = completion_dirs("complete-none");
+        let completion = complete(&d.home, &d.home, "nowhere/x");
+        assert_eq!(completion.input, "nowhere/x");
+        assert!(completion.candidates.is_empty());
+        assert_eq!(completion.total, 0);
+    }
+
+    #[test]
+    fn drops_the_quotes_of_a_copied_path() {
+        let d = completion_dirs("complete-quotes");
+        let quoted = format!("\"{}\"", d.home.join("wo").display());
+        assert_eq!(
+            complete(&d.home, &d.home, &quoted).input,
+            format!("{}{SEPARATOR}", d.work.display())
         );
     }
 

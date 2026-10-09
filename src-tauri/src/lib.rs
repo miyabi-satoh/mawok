@@ -2034,6 +2034,24 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 欄に打ちかけのパスを、今の作業フォルダーから見て補う（folder.rs の complete）。
+/// change_folder と同じく、つながらないフォルダーで画面を止めないよう async にする。フォルダーの名前はログに書かない
+#[tauri::command]
+async fn complete_folder(
+    app: AppHandle,
+    input: String,
+) -> Result<folder::FolderCompletion, String> {
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    let base = app
+        .state::<ActionState>()
+        .folder
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| home.clone());
+    Ok(folder::complete(&base, &home, &input))
+}
+
 /// 下書きウィンドウが隠れている間に終わったアクションを、OS の通知で知らせる。
 /// 文言は画面が表示言語で作る。押しても何もしない（Tauri の通知は、押したことを受け取れない）。
 /// 文言はアクションの名前を含み、利用者が付けた名前なのでログには書かない
@@ -3333,6 +3351,7 @@ pub fn run() {
             open_mawok_buy_page,
             run_action,
             change_folder,
+            complete_folder,
             current_folder,
             begin_action,
             cancel_action,

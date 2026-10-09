@@ -1,12 +1,14 @@
 <script lang="ts">
 	import FolderIcon from '@lucide/svelte/icons/folder';
+	import { tick } from 'svelte';
+	import type { FolderCompletion } from '$lib/bindings/FolderCompletion';
 	import PaletteFrame from '$lib/components/palette-frame.svelte';
 	import { hasNoModifiers, isImeKey, toDraftKey, type Platform } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 
 	/**
 	 * コマンドのアクションを動かすフォルダーへ移る欄（docs/actions.md「作業フォルダー」）。
-	 * 今のフォルダーを入れた状態で出し、打ったパスで Enter を押すと移る
+	 * 今のフォルダーを入れた状態で出し、打ったパスで Enter を押すと移る。Tab で打ちかけのフォルダーの名前を補う
 	 */
 	type Props = {
 		/** 今のフォルダー（タイトルバーに出しているのと同じ形） */
@@ -16,22 +18,40 @@
 		toggleKey: string;
 		/** 打ったパスへ移る。移れなければ、欄の下に出す文言を返す */
 		onsubmit: (input: string) => Promise<string | null>;
+		/** 打ちかけのパスを補う。補えなければ null */
+		oncomplete: (input: string) => Promise<FolderCompletion | null>;
 		onclose: () => void;
 	};
 
-	let { current, platform, toggleKey, onsubmit, onclose }: Props = $props();
+	let { current, platform, toggleKey, onsubmit, oncomplete, onclose }: Props = $props();
 
 	// 出すたびに部品ごと作り直すので、開いたときのフォルダーから始まる
 	// svelte-ignore state_referenced_locally
 	let input = $state(current);
 	let error = $state('');
 	let submitting = $state(false);
+	// 補った候補。打ち直すと消す
+	let candidates = $state<string[]>([]);
+	let total = $state(0);
+	let inputElement: HTMLInputElement | undefined;
 
 	async function submit() {
 		if (submitting) return;
 		submitting = true;
 		error = (await onsubmit(input)) ?? '';
 		submitting = false;
+	}
+
+	async function complete() {
+		const requested = input;
+		const completion = await oncomplete(requested);
+		// 待つ間に打ち直していたら、古いパスの補いで上書きしない
+		if (!completion || input !== requested) return;
+		input = completion.input;
+		candidates = completion.candidates;
+		total = completion.total;
+		await tick();
+		inputElement?.setSelectionRange(input.length, input.length);
 	}
 
 	function onKeydown(event: KeyboardEvent) {
@@ -45,6 +65,7 @@
 		// 欄の外（後ろの下書き）へ抜けると、欄が出たまま見えない入力欄に文字が入るので、Tab で抜けないようにする
 		if (event.key === 'Tab') {
 			event.preventDefault();
+			if (hasNoModifiers(event)) void complete();
 			return;
 		}
 		if (!hasNoModifiers(event)) return;
@@ -70,14 +91,30 @@
 			autocomplete="off"
 			spellcheck="false"
 			bind:value={input}
-			oninput={() => (error = '')}
+			oninput={() => {
+				error = '';
+				candidates = [];
+			}}
 			onkeydown={onKeydown}
+			bind:this={inputElement}
 			{@attach (element) => {
 				element.focus();
 				element.select();
 			}}
 		/>
 	</div>
+	{#if candidates.length > 0}
+		<div class="min-h-0 overflow-y-auto border-t px-3 py-2 text-sm text-muted-foreground">
+			<ul aria-label={m.folder_candidates()} class="flex flex-wrap gap-x-4 gap-y-1">
+				{#each candidates as name (name)}
+					<li class="min-w-0 break-all">{name}</li>
+				{/each}
+			</ul>
+			{#if total > candidates.length}
+				<p class="mt-1">{m.folder_candidates_more({ count: total - candidates.length })}</p>
+			{/if}
+		</div>
+	{/if}
 	{#if error}
 		<p id="folder-palette-error" role="alert" class="border-t px-3 py-2 text-sm text-destructive">
 			{error}

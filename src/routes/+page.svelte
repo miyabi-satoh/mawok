@@ -45,6 +45,7 @@
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
 	import type { ReceivedDraft } from '$lib/bindings/ReceivedDraft';
+	import type { FolderCompletion } from '$lib/bindings/FolderCompletion';
 	import { coalescedSaver } from '$lib/saver';
 	import { folderErrorMessage } from '$lib/folder-errors';
 	import {
@@ -441,6 +442,11 @@
 			})
 			.catch(() => {});
 		return true;
+	}
+
+	/** 打ちかけのパスを補う。補えなければ（ホームフォルダーが取れないなど）null で、欄はそのまま */
+	async function completeFolder(input: string): Promise<FolderCompletion | null> {
+		return invoke<FolderCompletion>('complete_folder', { input }).catch(() => null);
 	}
 
 	async function closeFolder() {
@@ -1254,6 +1260,7 @@
 			platform={settings.current.platform}
 			toggleKey={settings.current.textWindowKeys.changeFolder}
 			onsubmit={changeFolder}
+			oncomplete={completeFolder}
 			onclose={closeFolder}
 		/>
 	{/if}
