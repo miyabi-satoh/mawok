@@ -22,9 +22,11 @@
 		/** 最近のフォルダーへ移る。ホームへ戻るときは空文字 */
 		onchange: (path: string) => void;
 		onpick: () => void;
+		/** メニューを移らずに閉じたとき（Esc・外を押す・今のフォルダーを選ぶ）。下書きにフォーカスを戻す */
+		onclose: () => void;
 	};
 
-	let { menu, disabled, onopen, onchange, onpick }: Props = $props();
+	let { menu, disabled, onopen, onchange, onpick, onclose }: Props = $props();
 
 	const name = $derived(menu.atHome ? m.folder_home() : menu.current.name);
 	const label = $derived(m.folder_button({ path: menu.current.display }));
@@ -60,7 +62,12 @@
 			<span class="truncate">{name}</span>
 			<ChevronDownIcon data-icon="inline-end" />
 		</DropdownMenu.Trigger>
+		<!-- 閉じたときにボタンへフォーカスを戻さない。ボタンにあると、下書きの Esc や Cmd+Enter が効かなくなる -->
 		<DropdownMenu.Content
+			onCloseAutoFocus={(event) => {
+				event.preventDefault();
+				onclose();
+			}}
 			align="start"
 			side="top"
 			class="w-auto max-w-[min(24rem,calc(100vw-1rem))]"

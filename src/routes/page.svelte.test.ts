@@ -2438,6 +2438,12 @@ describe('作業フォルダー', () => {
 		const button = screen.getByRole('button', { name: m.folder_button({ path: '~/notes' }) });
 		await expect.element(button).toHaveTextContent('notes');
 
+		// 移らずに閉じたら、ボタンでなく入力欄にフォーカスを戻す（下書きのキーが効くように）
+		await button.click();
+		await expect.element(screen.getByRole('menu')).toBeInTheDocument();
+		await userEvent.keyboard('{Escape}');
+		await expect.element(screen.getByRole('textbox', { name: m.draft_label() })).toHaveFocus();
+
 		await button.click();
 		await screen.getByRole('menuitem', { name: /work/ }).click();
 		await vi.waitFor(() =>

@@ -2090,9 +2090,10 @@ fn remember_folder(app: &AppHandle, folder: &std::path::Path, home: &std::path::
     }
 }
 
-/// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの（folder.rs の menu）
+/// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの（folder.rs の menu）。
+/// 最近のフォルダーがあるかを確かめるので、change_folder と同じく、つながらないネットワークのフォルダーで画面を止めないよう async にする
 #[tauri::command]
-fn folder_menu(app: AppHandle) -> Result<folder::FolderMenu, String> {
+async fn folder_menu(app: AppHandle) -> Result<folder::FolderMenu, String> {
     let home = app.path().home_dir().map_err(|error| error.to_string())?;
     let current = app
         .state::<ActionState>()
@@ -2143,10 +2144,16 @@ async fn pick_folder(app: AppHandle) -> Result<bool, String> {
     let Some(window) = main_window(&app) else {
         return Err("main window not found".to_string());
     };
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    app.state::<ActionState>()
+    // 選ぶ画面を開くまでの間に押し直されても、2つ目は開かない。2つ開くと、先に閉じた方で印が外れ、残った方の裏で下書きが隠れるため
+    if app
+        .state::<ActionState>()
         .picking_folder
-        .store(true, Ordering::Relaxed);
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .is_err()
+    {
+        return Ok(false);
+    }
+    let (sender, receiver) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
         .set_directory(&base)

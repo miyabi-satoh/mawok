@@ -467,6 +467,8 @@
 
 	/** フォルダーのボタンのメニューで移る。移れなければ、理由を下書きの下に出す */
 	async function moveFolderFromMenu(move: () => Promise<unknown>) {
+		// 前に移れなかった理由は、移り直すときに消す。ほかの理由（アクションの失敗など）は残す
+		if (errorTitle === m.folder_change_failed()) error = '';
 		try {
 			await move();
 		} catch (failure) {
@@ -964,7 +966,8 @@
 	-->
 	<!--
 		上の並び。履歴の前・次を左にまとめ、道具を右に寄せる（ブラウザや Finder のツールバーと同じ並び）。
-		前・次は、覚えている履歴がなければ使えないので出さない
+		前・次は、覚えている履歴がなければ使えないので出さない。
+		列が狭いとき（最小の幅の近く）は、定型文とアクションをアイコンだけにする
 	-->
 	{#if showButtons && settings.current}
 		{@const platform = settings.current.platform}
@@ -1131,8 +1134,8 @@
 		{@const platform = settings.current.platform}
 		{@const keys = settings.current.textWindowKeys}
 		<!--
-			キーを添えるのはコピーだけ。ほかは狭い窓に文字を詰め込まないよう、マウスを重ねたときの説明に出す。
-			列が狭いとき（最小の幅の近く）は、定型文とアクションをアイコンだけにする。英語でコピーのキーが3つだと、はみ出していた
+			下の並び。左に今のフォルダー、右に送る・コピー。キーを添えるのはコピーだけで、ほかは狭い窓に文字を詰め込まないよう、
+			マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
 		-->
 		<div class="@container flex items-center gap-1">
 			{#if folderMenu}
@@ -1142,6 +1145,7 @@
 					onopen={refreshFolderMenu}
 					onchange={(path) => moveFolderFromMenu(() => invoke('change_folder', { input: path }))}
 					onpick={() => moveFolderFromMenu(() => invoke('pick_folder'))}
+					onclose={() => textarea?.focus()}
 				/>
 			{/if}
 			{#if hasPairedDevice}
