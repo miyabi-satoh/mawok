@@ -51,7 +51,13 @@ describe('sync HTTP', () => {
 			seq: 2,
 			reset: false,
 			items: [{ collection: 'history', id: 'newest', seq: 1, deleted: false, data: 'AgM=' }],
-			more: true
+			more: true,
+			next: 1
+		});
+		expect(await (await app('/v1/sync?since=1&limit=1&rebuild=1', token)).json()).toMatchObject({
+			items: [{ collection: 'settings', id: 'first', seq: 2 }],
+			more: false,
+			next: 2
 		});
 	});
 
@@ -88,6 +94,55 @@ describe('sync HTTP', () => {
 				})
 			).json()
 		).toEqual({ error: 'key_mismatch' });
+		expect(
+			await (
+				await put(token, {
+					key_id: KEY,
+					items: [
+						{ collection: 'settings', id: 'missing', base_seq: 99, deleted: false, data: 'AQ==' }
+					]
+				})
+			).json()
+		).toEqual({
+			error: 'conflict',
+			conflicts: [{ collection: 'settings', id: 'missing', seq: null, deleted: true, data: null }]
+		});
+	});
+
+	it('writes all 100 items without exceeding D1 bindings', async () => {
+		const email = 'sync-hundred@example.com';
+		const { token } = await linkApp(email);
+		await makePro(email);
+		const items = Array.from({ length: 100 }, (_, n) => ({
+			collection: 'settings' as const,
+			id: `item-${n}`,
+			base_seq: null,
+			deleted: false,
+			data: 'AQ=='
+		}));
+		const response = await put(token, { key_id: KEY, items });
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({
+			seq: 100,
+			items: expect.arrayContaining([{ collection: 'settings', id: 'item-99', seq: 100 }])
+		});
+	});
+
+	it('retries once when a different item is written at the same time', async () => {
+		const email = 'sync-concurrent@example.com';
+		const { token } = await linkApp(email);
+		await makePro(email);
+		const responses = await Promise.all(
+			['left', 'right'].map((id) =>
+				put(token, {
+					key_id: KEY,
+					items: [{ collection: 'settings', id, base_seq: null, deleted: false, data: 'AQ==' }]
+				})
+			)
+		);
+		expect(responses.map((response) => response.status).sort()).toEqual([200, 200]);
+		const synced = await (await app('/v1/sync?since=0', token)).json<{ items: unknown[] }>();
+		expect(synced.items).toHaveLength(2);
 	});
 
 	it('enforces the item and total limits', async () => {

@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import {
 	SYNC_ITEM_BYTES,
+	SYNC_ACCOUNT_UPDATE_SQL,
 	SYNC_TOTAL_BYTES,
 	getSync,
 	putSync,
@@ -13,11 +14,17 @@ import { newAccount } from './helpers';
 const KEY = 'a'.repeat(16);
 
 describe('sync', () => {
-	it('makes a reset necessary when the saved position was purged', () => {
-		expect(shouldReset(0, 3)).toBe(false);
-		expect(shouldReset(2, 3)).toBe(true);
-		expect(shouldReset(3, 3)).toBe(false);
-		expect(shouldReset(4, 3)).toBe(false);
+	it('resets only outside a rebuild when the saved position was purged or is newer than the server', () => {
+		expect(shouldReset(0, 3, 5, false)).toBe(false);
+		expect(shouldReset(2, 3, 5, false)).toBe(true);
+		expect(shouldReset(3, 3, 5, false)).toBe(false);
+		expect(shouldReset(6, 3, 5, false)).toBe(true);
+		expect(shouldReset(2, 3, 5, true)).toBe(false);
+		expect(shouldReset(6, 3, 5, true)).toBe(false);
+	});
+
+	it('keeps every D1 statement below the 100 binding limit at 100 items', () => {
+		expect(SYNC_ACCOUNT_UPDATE_SQL.match(/\?/g) ?? []).toHaveLength(10);
 	});
 
 	it('checks an item and the total before writing anything', async () => {
@@ -33,7 +40,7 @@ describe('sync', () => {
 			error: 'too_large',
 			limit: 'item'
 		});
-		expect((await getSync(env, account, { since: 0, limit: 10 })).seq).toBe(0);
+		expect((await getSync(env, account, { since: 0, limit: 10, rebuild: false })).seq).toBe(0);
 
 		await env.DB.prepare(
 			'INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes) VALUES (?, ?, 0, 0, ?)'

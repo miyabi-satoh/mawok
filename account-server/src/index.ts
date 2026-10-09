@@ -58,7 +58,15 @@ import {
 	verifyWebhook
 } from './stripe';
 import { currentAccount, endSession, startSession } from './session';
-import { getSync, hasSyncPro, purgeSync, putSync, resetSync, syncQuery } from './sync';
+import {
+	getSync,
+	hasSyncPro,
+	purgeSync,
+	putSync,
+	resetSync,
+	SYNC_REQUEST_BYTES,
+	syncQuery
+} from './sync';
 import {
 	isEmail,
 	normalizeEmail,
@@ -213,16 +221,20 @@ app.delete('/v1/token', async (c) => {
 async function syncAccount(c: Context<App>): Promise<string | Response> {
 	const accountId = await appAccount(c);
 	if (!accountId) return c.json({ error: 'unauthorized' }, 401);
-	if (!(await hasSyncPro(c.env, accountId))) return c.json({ error: 'pro_required' }, 403);
 	if (await limited(c, c.env.SYNC_LIMITER, accountId))
 		return c.json({ error: 'rate_limited' }, 429);
+	if (!(await hasSyncPro(c.env, accountId))) return c.json({ error: 'pro_required' }, 403);
 	return accountId;
 }
 
 app.get('/v1/sync', async (c) => {
 	const accountId = await syncAccount(c);
 	if (accountId instanceof Response) return accountId;
-	const query = syncQuery({ since: c.req.query('since'), limit: c.req.query('limit') });
+	const query = syncQuery({
+		since: c.req.query('since'),
+		limit: c.req.query('limit'),
+		rebuild: c.req.query('rebuild')
+	});
 	if (!query) return c.json({ error: 'invalid_request' }, 400);
 	return c.json(await getSync(c.env, accountId, query));
 });
@@ -230,6 +242,9 @@ app.get('/v1/sync', async (c) => {
 app.put('/v1/sync', async (c) => {
 	const accountId = await syncAccount(c);
 	if (accountId instanceof Response) return accountId;
+	const contentLength = Number(c.req.header('content-length'));
+	if (Number.isFinite(contentLength) && contentLength > SYNC_REQUEST_BYTES)
+		return c.json({ error: 'too_large', limit: 'request' }, 413);
 	const result = await putSync(c.env, accountId, await c.req.json().catch(() => undefined));
 	if (result.ok) return c.json({ seq: result.seq, items: result.items });
 	if (result.error === 'invalid_request') return c.json({ error: result.error }, 400);
