@@ -2017,8 +2017,17 @@ fn cancel_action(state: tauri::State<'_, ActionState>, request: u64) {
 #[tauri::command]
 fn current_folder(app: AppHandle) -> Result<String, String> {
     let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    let current = app.state::<ActionState>().folder.lock().unwrap().clone();
-    Ok(folder::display(current.as_deref().unwrap_or(&home), &home))
+    Ok(folder::display(&working_folder(&app, &home), &home))
+}
+
+/// 今の作業フォルダー。移っていなければホームフォルダー
+fn working_folder(app: &AppHandle, home: &std::path::Path) -> PathBuf {
+    app.state::<ActionState>()
+        .folder
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| home.to_path_buf())
 }
 
 /// コマンドのアクションの作業フォルダーを、打たれたパスへ移す（folder.rs の resolve）。空ならホームに戻る。
@@ -2031,13 +2040,7 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
         error!("couldn't find the home folder: {error}");
         folder::FolderError::NotFound.code().to_string()
     })?;
-    let state = app.state::<ActionState>();
-    let base = state
-        .folder
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| home.clone());
+    let base = working_folder(&app, &home);
     let resolved = folder::resolve(&base, &home, &input).map_err(|error| {
         info!("couldn't change the working folder: {}", error.code());
         // メニューの最近のフォルダーから選んで、消えていたら外す（メニューは、あるかを確かめずに出すため）
@@ -2053,7 +2056,7 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
         format!("{APP_NAME} — {}", folder::display(&resolved, &home))
     };
     remember_folder(&app, &resolved, &home);
-    *state.folder.lock().unwrap() = (resolved != home).then_some(resolved);
+    *app.state::<ActionState>().folder.lock().unwrap() = (resolved != home).then_some(resolved);
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         if let Err(error) = window.set_title(&title) {
             warn!("couldn't set the title of the draft window: {error}");
@@ -2082,17 +2085,22 @@ fn with_recent_folders<T>(app: &AppHandle, f: impl FnOnce(&mut Vec<PathBuf>) -> 
     f(recent)
 }
 
+/// 最近のフォルダーを書く。書けなければ警告だけにする
+fn save_recent_folders(app: &AppHandle, recent: &[PathBuf]) {
+    if let Some(path) = recent_folders_path(app) {
+        if let Err(error) = folder::save_recent(&path, recent) {
+            warn!("couldn't save the recent folders: {error}");
+        }
+    }
+}
+
 /// 移った先を最近のフォルダーに入れて書く。書けなくても移るのは止めない（次に覚え直せる）
 fn remember_folder(app: &AppHandle, folder: &std::path::Path, home: &std::path::Path) {
     let recent = with_recent_folders(app, |recent| {
         folder::remember(recent, folder, home);
         recent.clone()
     });
-    if let Some(path) = recent_folders_path(app) {
-        if let Err(error) = folder::save_recent(&path, &recent) {
-            warn!("couldn't save the recent folders: {error}");
-        }
-    }
+    save_recent_folders(app, &recent);
 }
 
 /// 移れなかったフォルダーを最近のフォルダーから外して書く
@@ -2102,24 +2110,14 @@ fn forget_folder(app: &AppHandle, folder: &std::path::Path) {
     }) else {
         return;
     };
-    if let Some(path) = recent_folders_path(app) {
-        if let Err(error) = folder::save_recent(&path, &recent) {
-            warn!("couldn't save the recent folders: {error}");
-        }
-    }
+    save_recent_folders(app, &recent);
 }
 
 /// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの（folder.rs の menu）
 #[tauri::command]
 fn folder_menu(app: AppHandle) -> Result<folder::FolderMenu, String> {
     let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    let current = app
-        .state::<ActionState>()
-        .folder
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| home.clone());
+    let current = working_folder(&app, &home);
     let recent = with_recent_folders(&app, |recent| recent.clone());
     Ok(folder::menu(&current, &home, &recent))
 }
@@ -2132,13 +2130,7 @@ async fn complete_folder(
     input: String,
 ) -> Result<folder::FolderCompletion, String> {
     let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    let base = app
-        .state::<ActionState>()
-        .folder
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| home.clone());
+    let base = working_folder(&app, &home);
     Ok(folder::complete(&base, &home, &input))
 }
 
