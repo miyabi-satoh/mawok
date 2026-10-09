@@ -117,7 +117,7 @@ impl Lang {
             Lang::En => format!("Fixed unreadable settings and conflicting keys: {shown}"),
             Lang::Ja if rest > 0 => {
                 format!(
-                    "設定ファイルの読めない値と重なったキーを直しました: {shown} ほか {rest} 件"
+                    "設定ファイルの読めない値と重なったキーを直しました: {shown} ほか {rest} 件"
                 )
             }
             Lang::Ja => format!("設定ファイルの読めない値と重なったキーを直しました: {shown}"),
@@ -238,12 +238,39 @@ mod tests {
         );
         assert_eq!(
             Lang::Ja.config_repaired(&keys(5)),
-            "設定ファイルの読めない値と重なったキーを直しました: replacements[0], replacements[1], replacements[2] ほか 2 件"
+            "設定ファイルの読めない値と重なったキーを直しました: replacements[0], replacements[1], replacements[2] ほか 2 件"
         );
         assert_eq!(
             Lang::En.config_repaired(&keys(4)),
             "Fixed unreadable settings and conflicting keys: replacements[0], replacements[1], replacements[2] and 1 more"
         );
+    }
+
+    /// 数字と単位の間は、そこで折り返さないようノーブレークスペースにする。
+    /// 見る形は src/lib/messages.test.ts の BREAKABLE_NUMBER_UNIT と同じ（単位の一覧は UNIT の写し）
+    #[test]
+    fn no_breakable_space_between_number_and_unit() {
+        const UNITS: [&str; 17] = [
+            "秒", "分", "時間", "日", "週", "か月", "年", "件", "回", "文字", "行", "個", "つ",
+            "KB", "MB", "GB", "TB",
+        ];
+        let is_japanese = |c: char| matches!(c, '一'..='龠' | '々' | 'ぁ'..='ん' | 'ァ'..='ヶ');
+        let source = include_str!("i18n.rs");
+        let messages = &source[..source.find("#[cfg(test)]").expect("tests follow messages")];
+        let breakable: Vec<&str> = messages
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|line| {
+                line.match_indices(' ').any(|(at, _)| {
+                    let (before, after) = (&line[..at], &line[at + 1..]);
+                    let unit_follows = UNITS.iter().any(|unit| after.starts_with(unit));
+                    (before.ends_with(|c: char| c.is_ascii_digit())
+                        && (unit_follows || after.starts_with(is_japanese)))
+                        || (before.ends_with('}') && unit_follows)
+                })
+            })
+            .collect();
+        assert!(breakable.is_empty(), "{breakable:#?}");
     }
 
     #[test]

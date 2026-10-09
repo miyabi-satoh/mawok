@@ -43,8 +43,6 @@
 	} from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
-	import type { Action } from '$lib/bindings/Action';
-	import type { ActionOutput } from '$lib/bindings/ActionOutput';
 	import type { ReceivedDraft } from '$lib/bindings/ReceivedDraft';
 	import { coalescedSaver } from '$lib/saver';
 	import {
@@ -54,7 +52,7 @@
 	} from '$lib/replacement-preview.svelte';
 	import { actionErrorMessage } from '$lib/action-errors';
 	import { aiInstruction, isRunnable, newAction, splitActionTarget } from '$lib/action-target';
-	import { settings } from '$lib/settings.svelte';
+	import { settings, type Action, type ActionOutput } from '$lib/settings.svelte';
 	import { firstLine, snippetLabel } from '$lib/snippets';
 
 	// 設定は画面が出る前に読み終わっている（src/hooks.client.ts）が、届く前に描かれても既定で表示できるようにする
@@ -208,20 +206,20 @@
 	let historyStarted = false;
 	let historyReady = false;
 	let historySavePending = false;
-	let historySave: Promise<unknown> = Promise.resolve();
 	// 「履歴を消す」の回数。読み込みの最中に消されたら、その読み込みの結果は捨てる
 	let historyClearedCount = 0;
+
+	// 保存を待つ間に履歴が変わる（消される）ことがあるので、送る直前の中身を読む
+	const saveHistory = coalescedSaver(() =>
+		invoke('save_draft_history', { entries: draftHistory.entries }).catch(() => {})
+	);
 
 	function saveDraftHistory() {
 		if (!historyReady) {
 			historySavePending = true;
 			return;
 		}
-		// 連鎖の順番待ちの間に履歴が変わる（消される）ことがあるので、送る直前の中身を読む
-		historySave = historySave
-			.catch(() => {})
-			.then(() => invoke('save_draft_history', { entries: draftHistory.entries }))
-			.catch(() => {});
+		saveHistory();
 	}
 
 	$effect(() => {

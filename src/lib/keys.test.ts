@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { m } from '$lib/paraglide/messages';
+import { DEFAULT_DRAFT_KEYS } from '$lib/test-support/settings-view';
 import {
 	DRAFT_ACTIONS,
 	DRAFT_ACTIONS_IN_SETTINGS,
@@ -10,8 +11,7 @@ import {
 	keyLabels,
 	keyRejectionMessage,
 	platformFromUrl,
-	toAccelerator,
-	type DraftKeys
+	toAccelerator
 } from './keys';
 
 describe('DRAFT_ACTIONS_IN_SETTINGS', () => {
@@ -125,20 +125,6 @@ describe('isDismissKey', () => {
 		expect(isDismissKey({ key: 'Enter', isComposing: false, keyCode: 13 })).toBe(false);
 	});
 });
-
-/** Rust 側の既定のキー（src-tauri/src/draft_keys.rs）の写し */
-const DEFAULT_DRAFT_KEYS: DraftKeys = {
-	copy: 'CommandOrControl+Enter',
-	send: 'CommandOrControl+Shift+Enter',
-	settings: 'CommandOrControl+Comma',
-	snippets: 'CommandOrControl+KeyJ',
-	actions: 'CommandOrControl+KeyK',
-	historyOlder: 'CommandOrControl+Alt+ArrowUp',
-	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	sendTargets: 'CommandOrControl+KeyL',
-	insertReceived: 'CommandOrControl+KeyI',
-	discardReceived: 'CommandOrControl+Shift+Backspace'
-};
 
 describe('draftActionFor', () => {
 	const press = (
