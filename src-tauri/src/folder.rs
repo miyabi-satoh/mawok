@@ -86,7 +86,9 @@ fn expand(current: &Path, home: &Path, input: &str) -> Result<PathBuf, FolderErr
 pub struct FolderCompletion {
     /// 補った後の欄の中身
     pub input: String,
-    /// 当てはまるフォルダーが2つ以上のときの名前（並べ替えて、上限まで）
+    /// 打ったパスの、最後の名前より前の部分。候補を選んだら、これに候補をつないで欄に入れる
+    pub base: String,
+    /// 当てはまるフォルダーが2つ以上のときの名前と区切り（並べ替えて、上限まで）
     pub candidates: Vec<String>,
     /// 当てはまるフォルダーの数
     pub total: u32,
@@ -101,8 +103,13 @@ pub struct FolderCompletion {
 pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
     // 末尾の空白は、`Program Files` の `Program ` のように打ちかけの名前の一部なので残す
     let input = unquote(input.trim_start());
+    let split = input
+        .rfind(|c| c == '/' || (cfg!(windows) && c == '\\'))
+        .map_or(0, |index| index + 1);
+    let (folder_part, prefix) = input.split_at(split);
     let unchanged = || FolderCompletion {
         input: input.to_string(),
+        base: folder_part.to_string(),
         candidates: Vec::new(),
         total: 0,
     };
@@ -112,10 +119,6 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
             ..unchanged()
         };
     }
-    let split = input
-        .rfind(|c| c == '/' || (cfg!(windows) && c == '\\'))
-        .map_or(0, |index| index + 1);
-    let (folder_part, prefix) = input.split_at(split);
     let Ok(folder) = expand(current, home, folder_part) else {
         return unchanged();
     };
@@ -156,8 +159,13 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
         },
         _ => FolderCompletion {
             input: format!("{folder_part}{}", completed_part(&names, prefix)),
+            base: folder_part.to_string(),
             total: names.len() as u32,
-            candidates: names.into_iter().take(CANDIDATE_LIMIT).collect(),
+            candidates: names
+                .into_iter()
+                .take(CANDIDATE_LIMIT)
+                .map(|name| format!("{name}{SEPARATOR}"))
+                .collect(),
         },
     }
 }
@@ -420,14 +428,19 @@ mod tests {
         // 候補どうしで書き方が揃っていれば、打った所も合わせる。ファイルの Docs.txt は候補にしない
         let completion = complete(&d.home, &d.home, "docu");
         assert_eq!(completion.input, "Documents");
-        assert_eq!(completion.candidates, ["Documents", "Documents-old"]);
+        // 候補は、選んだら土台につないで欄に入れられるよう、区切りまで付ける
+        assert_eq!(
+            completion.candidates,
+            [sep("Documents/"), sep("Documents-old/")]
+        );
         assert_eq!(completion.total, 2);
+        assert_eq!(complete(&d.home, &d.home, "work/../docu").base, "work/../");
         // 揃っていなければ、打ったとおりに残す
         let completion = complete(&d.home, &d.home, "D");
         assert_eq!(completion.input, "D");
         assert_eq!(
             completion.candidates,
-            ["desktop", "Documents", "Documents-old", "Downloads"]
+            ["desktop/", "Documents/", "Documents-old/", "Downloads/"].map(sep)
         );
     }
 
@@ -436,7 +449,7 @@ mod tests {
         let d = completion_dirs("complete-dot");
         assert!(!complete(&d.home, &d.home, "")
             .candidates
-            .contains(&".config".to_string()));
+            .contains(&sep(".config/")));
         assert_eq!(complete(&d.home, &d.home, ".c").input, sep(".config/"));
         // ほかに当てはまるものが無ければ候補にする
         fs::create_dir_all(d.home.join("only-hidden/.git")).unwrap();

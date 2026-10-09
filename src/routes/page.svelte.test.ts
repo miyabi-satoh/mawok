@@ -2277,15 +2277,27 @@ describe('作業フォルダー', () => {
 
 	beforeEach(() => {
 		changeResult = () => Promise.resolve(undefined);
-		invoked.mockImplementation((command) => {
+		invoked.mockImplementation((command, args) => {
 			if (command === 'current_folder') return Promise.resolve('~/notes');
 			if (command === 'change_folder') return changeResult();
-			if (command === 'complete_folder')
-				return Promise.resolve({
-					input: '~/notes/Do',
-					candidates: ['Documents', 'Downloads'],
-					total: 102
-				});
+			if (command === 'complete_folder') {
+				const { input } = args as { input: string };
+				if (input === '~/notes/d')
+					return Promise.resolve({
+						input: '~/notes/Do',
+						base: '~/notes/',
+						candidates: ['Documents/', 'Downloads/'],
+						total: 102
+					});
+				if (input === '~/notes/wo')
+					return Promise.resolve({
+						input: '~/notes/work/',
+						base: '~/notes/',
+						candidates: [],
+						total: 0
+					});
+				return Promise.resolve({ input, base: '', candidates: [], total: 0 });
+			}
 			return Promise.resolve(undefined);
 		});
 		settings.current = view();
@@ -2297,7 +2309,7 @@ describe('作業フォルダー', () => {
 		await textarea.fill('あいう');
 		await userEvent.keyboard('{Meta>}d{/Meta}');
 
-		const input = screen.getByRole('textbox', { name: m.folder_input() });
+		const input = screen.getByRole('combobox', { name: m.folder_input() });
 		await expect.element(input).toHaveFocus();
 		await expect.element(input).toHaveValue('~/notes');
 		const element = input.element() as HTMLInputElement;
@@ -2314,7 +2326,7 @@ describe('作業フォルダー', () => {
 		changeResult = () => Promise.reject('folder.not_found');
 		const screen = await render(Page);
 		await userEvent.keyboard('{Meta>}d{/Meta}');
-		await expect.element(screen.getByRole('textbox', { name: m.folder_input() })).toHaveFocus();
+		await expect.element(screen.getByRole('combobox', { name: m.folder_input() })).toHaveFocus();
 
 		await userEvent.keyboard('nowhere{Enter}');
 
@@ -2327,7 +2339,7 @@ describe('作業フォルダー', () => {
 	it('Tab で補って候補を欄の下に出し、欄にとどまる。打ち直すと候補を消す', async () => {
 		const screen = await render(Page);
 		await userEvent.keyboard('{Meta>}d{/Meta}');
-		const input = screen.getByRole('textbox', { name: m.folder_input() });
+		const input = screen.getByRole('combobox', { name: m.folder_input() });
 		await expect.element(input).toHaveFocus();
 		await userEvent.keyboard('{End}/d{Tab}');
 
@@ -2336,8 +2348,8 @@ describe('作業フォルダー', () => {
 		await expect.element(input).toHaveFocus();
 		const element = input.element() as HTMLInputElement;
 		expect([element.selectionStart, element.selectionEnd]).toEqual([10, 10]);
-		const list = screen.getByRole('list', { name: m.folder_candidates() });
-		await expect.element(list).toHaveTextContent('DocumentsDownloads');
+		const list = screen.getByRole('listbox', { name: m.folder_candidates() });
+		await expect.element(list).toHaveTextContent('Documents/Downloads/');
 		await expect
 			.element(screen.getByText(m.folder_candidates_more({ count: 100 })))
 			.toBeInTheDocument();
@@ -2347,6 +2359,49 @@ describe('作業フォルダー', () => {
 
 		await userEvent.keyboard('c');
 		await expect.element(list).not.toBeInTheDocument();
+	});
+
+	it('候補が並んだら Tab と Shift+Tab で順に選んで欄に入れ、Enter で決める。Esc で選ぶ前に戻す', async () => {
+		const screen = await render(Page);
+		await userEvent.keyboard('{Meta>}d{/Meta}');
+		const input = screen.getByRole('combobox', { name: m.folder_input() });
+		await expect.element(input).toHaveFocus();
+		await userEvent.keyboard('{End}/d{Tab}');
+		await expect.element(input).toHaveValue('~/notes/Do');
+
+		await userEvent.keyboard('{Tab}');
+		await expect.element(input).toHaveValue('~/notes/Documents/');
+		await expect
+			.element(screen.getByRole('option', { name: 'Documents/' }))
+			.toHaveAttribute('aria-selected', 'true');
+		await userEvent.keyboard('{Tab}');
+		await expect.element(input).toHaveValue('~/notes/Downloads/');
+		await userEvent.keyboard('{Escape}');
+		await expect.element(input).toHaveValue('~/notes/Do');
+		await expect.element(screen.getByRole('dialog')).toBeInTheDocument();
+
+		await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+		await expect.element(input).toHaveValue('~/notes/Downloads/');
+		await userEvent.keyboard('{Enter}');
+		await expect.element(input).toHaveValue('~/notes/Downloads/');
+		await expect.element(screen.getByRole('listbox')).not.toBeInTheDocument();
+		await expect.element(screen.getByRole('dialog')).toBeInTheDocument();
+		expect(commandsCalled()).not.toContain('change_folder');
+	});
+
+	it('打っている間は1つに決まる続きを薄く出し、→ で受け入れる', async () => {
+		const screen = await render(Page);
+		await userEvent.keyboard('{Meta>}d{/Meta}');
+		const input = screen.getByRole('combobox', { name: m.folder_input() });
+		await expect.element(input).toHaveFocus();
+		await userEvent.keyboard('{End}/wo');
+
+		await expect
+			.element(screen.getByTestId('folder-suggestion'))
+			.toHaveTextContent('~/notes/work/');
+		await userEvent.keyboard('{ArrowRight}');
+		await expect.element(input).toHaveValue('~/notes/work/');
+		await expect.element(screen.getByTestId('folder-suggestion')).not.toBeInTheDocument();
 	});
 
 	it('Esc とキーのもう一押しで、移らずに閉じる', async () => {

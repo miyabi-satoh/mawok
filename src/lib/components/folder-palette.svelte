@@ -3,12 +3,15 @@
 	import { tick } from 'svelte';
 	import type { FolderCompletion } from '$lib/bindings/FolderCompletion';
 	import PaletteFrame from '$lib/components/palette-frame.svelte';
+	import { stepSelection, suggestionSuffix } from '$lib/folder-completion';
 	import { hasNoModifiers, isImeKey, toDraftKey, type Platform } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 
 	/**
 	 * コマンドのアクションを動かすフォルダーへ移る欄（docs/actions.md「作業フォルダー」）。
-	 * 今のフォルダーを入れた状態で出し、打ったパスで Enter を押すと移る。Tab で打ちかけのフォルダーの名前を補う
+	 * 今のフォルダーを入れた状態で出し、打ったパスで Enter を押すと移る。
+	 * 補い方はシェルに合わせる。Tab で打ちかけのフォルダーの名前を補い、候補が並んだらもう一度 Tab で順に選ぶ（zsh の menu-select）。
+	 * 打っている間は、1つに決まる続きを薄く出し、→ か Tab で受け入れる（fish の autosuggestion）
 	 */
 	type Props = {
 		/** 今のフォルダー（タイトルバーに出しているのと同じ形） */
@@ -30,9 +33,15 @@
 	let input = $state(current);
 	let error = $state('');
 	let submitting = $state(false);
-	// 補った候補。打ち直すと消す
+	// 補った候補（区切りまで付いた名前）と、選んだら候補をつなぐ土台。打ち直すと消す
 	let candidates = $state<string[]>([]);
 	let total = $state(0);
+	let base = '';
+	// 選んでいる候補。-1 は選んでいない。選ぶ前の欄の中身は、Esc で戻すために取っておく
+	let selected = $state(-1);
+	let beforeMenu = '';
+	// 薄く出す続き。カーソルが末尾に無いときと、欄からはみ出しているときは出さない（続きの位置が打った文字とずれるため）
+	let suggestion = $state('');
 	let inputElement: HTMLInputElement | undefined;
 	// 打つ・Enter・Tab のたびに進める。補いを待つ間に進んでいたら、古いパスの補いで上書きしない
 	let edits = 0;
@@ -41,6 +50,24 @@
 		edits += 1;
 		candidates = [];
 		total = 0;
+		selected = -1;
+		suggestion = '';
+	}
+
+	async function moveCaretToEnd() {
+		await tick();
+		inputElement?.setSelectionRange(input.length, input.length);
+	}
+
+	/** 今の欄の中身で、1つに決まる続きがあれば薄く出す */
+	async function suggest() {
+		const requested = edits;
+		const typed = input;
+		const completion = await oncomplete(typed);
+		if (!completion || edits !== requested || !inputElement) return;
+		const atEnd = inputElement.selectionStart === typed.length;
+		const fits = inputElement.scrollWidth <= inputElement.clientWidth;
+		suggestion = atEnd && fits ? suggestionSuffix(typed, completion) : '';
 	}
 
 	async function submit() {
@@ -54,14 +81,47 @@
 	async function complete() {
 		edits += 1;
 		const requested = edits;
+		suggestion = '';
 		const completion = await oncomplete(input);
 		if (!completion || edits !== requested) return;
 		input = completion.input;
 		error = '';
 		candidates = completion.candidates;
 		total = completion.total;
-		await tick();
-		inputElement?.setSelectionRange(input.length, input.length);
+		base = completion.base;
+		await moveCaretToEnd();
+		if (candidates.length === 0) void suggest();
+	}
+
+	/** 並んでいる候補を、順に選んで欄に入れる */
+	async function select(step: 1 | -1) {
+		if (selected < 0) beforeMenu = input;
+		selected = stepSelection(selected, candidates.length, step);
+		input = base + candidates[selected];
+		await moveCaretToEnd();
+		document.getElementById(`folder-candidate-${selected}`)?.scrollIntoView({ block: 'nearest' });
+	}
+
+	/** 選んだ候補で決める。続けて Tab でその中を補ったり、Enter で移ったりできる */
+	async function accept(index: number) {
+		input = base + candidates[index];
+		clearCandidates();
+		inputElement?.focus();
+		await moveCaretToEnd();
+		void suggest();
+	}
+
+	function cancelMenu() {
+		input = beforeMenu;
+		selected = -1;
+		void moveCaretToEnd();
+	}
+
+	async function acceptSuggestion() {
+		input += suggestion;
+		clearCandidates();
+		await moveCaretToEnd();
+		void suggest();
 	}
 
 	function onKeydown(event: KeyboardEvent) {
@@ -72,46 +132,88 @@
 			onclose();
 			return;
 		}
+		const listed = candidates.length > 0;
 		// 欄の外（後ろの下書き）へ抜けると、欄が出たまま見えない入力欄に文字が入るので、Tab で抜けないようにする
 		if (event.key === 'Tab') {
 			event.preventDefault();
-			if (hasNoModifiers(event)) void complete();
+			if (event.metaKey || event.ctrlKey || event.altKey) return;
+			if (listed) void select(event.shiftKey ? -1 : 1);
+			else if (!event.shiftKey) void complete();
 			return;
 		}
 		if (!hasNoModifiers(event)) return;
-		if (event.key === 'Escape') {
+		if (listed && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
 			event.preventDefault();
-			onclose();
+			void select(event.key === 'ArrowDown' ? 1 : -1);
+		} else if (event.key === 'ArrowRight' && suggestion) {
+			event.preventDefault();
+			void acceptSuggestion();
+		} else if (event.key === 'Escape') {
+			event.preventDefault();
+			if (selected >= 0) cancelMenu();
+			else onclose();
 		} else if (event.key === 'Enter') {
 			event.preventDefault();
-			void submit();
+			if (selected >= 0) void accept(selected);
+			else void submit();
 		}
+	}
+
+	/** カーソルを動かして末尾から離れたら、続きを消す */
+	function onCaretMove() {
+		if (suggestion && inputElement?.selectionStart !== input.length) suggestion = '';
 	}
 </script>
 
 <PaletteFrame label={m.folder_palette()} maxHeightClass="max-h-[calc(100%-4.5rem)]" {onclose}>
 	<div class="flex h-9 shrink-0 items-center gap-2 px-3">
 		<FolderIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-		<!-- プレースホルダーは置かない。欄の意味は aria-label とフォルダーのアイコンで示す -->
-		<input
-			aria-label={m.folder_input()}
-			aria-invalid={error ? 'true' : undefined}
-			aria-describedby={error ? 'folder-palette-error' : undefined}
-			class="h-full min-w-0 flex-1 bg-transparent text-sm outline-none"
-			autocomplete="off"
-			spellcheck="false"
-			bind:value={input}
-			oninput={() => {
-				error = '';
-				clearCandidates();
-			}}
-			onkeydown={onKeydown}
-			bind:this={inputElement}
-			{@attach (element) => {
-				element.focus();
-				element.select();
-			}}
-		/>
+		<!--
+			プレースホルダーは置かない。欄の意味は aria-label とフォルダーのアイコンで示す。
+			薄く出す続きは、欄に重ねた同じ書体の層に、打った所を見えなくして並べ、続きだけを見せる
+		-->
+		<div class="relative h-full min-w-0 flex-1">
+			<input
+				role="combobox"
+				aria-label={m.folder_input()}
+				aria-expanded={candidates.length > 0}
+				aria-controls="folder-candidates"
+				aria-autocomplete="list"
+				aria-activedescendant={selected >= 0 ? `folder-candidate-${selected}` : undefined}
+				aria-invalid={error ? 'true' : undefined}
+				aria-describedby={error ? 'folder-palette-error' : undefined}
+				class="h-full w-full bg-transparent text-sm outline-none"
+				autocomplete="off"
+				spellcheck="false"
+				bind:value={input}
+				oninput={(event) => {
+					error = '';
+					clearCandidates();
+					// 変換中の文字は確定するまで続きの元にしない
+					if (!(event instanceof InputEvent && event.isComposing)) void suggest();
+				}}
+				oncompositionend={() => void suggest()}
+				onkeydown={onKeydown}
+				onkeyup={onCaretMove}
+				onpointerup={onCaretMove}
+				bind:this={inputElement}
+				{@attach (element) => {
+					element.focus();
+					element.select();
+				}}
+			/>
+			{#if suggestion}
+				<div
+					aria-hidden="true"
+					data-testid="folder-suggestion"
+					class="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-sm whitespace-pre"
+				>
+					<span class="invisible">{input}</span><span class="text-muted-foreground/70"
+						>{suggestion}</span
+					>
+				</div>
+			{/if}
+		</div>
 	</div>
 	<!--
 		Tab を押してもフォーカスは欄から動かないので、候補が出たことを読み上げで知らせる。一覧ごと読むと長いので、件数だけを読む。
@@ -121,14 +223,34 @@
 		{candidates.length > 0 ? m.folder_candidates_count({ count: total }) : ''}
 	</p>
 	{#if candidates.length > 0}
-		<div class="min-h-0 overflow-y-auto border-t px-3 py-2 text-sm text-muted-foreground">
-			<ul aria-label={m.folder_candidates()} class="flex flex-wrap gap-x-4 gap-y-1">
-				{#each candidates as name (name)}
-					<li class="min-w-0 break-all">{name}</li>
+		<div class="min-h-0 overflow-y-auto border-t px-2 py-2 text-sm text-muted-foreground">
+			<ul
+				id="folder-candidates"
+				role="listbox"
+				aria-label={m.folder_candidates()}
+				class="flex flex-wrap gap-x-2 gap-y-0.5"
+			>
+				{#each candidates as name, index (name)}
+					<!-- 押しても欄からフォーカスを動かさず、その候補で決める -->
+					<li
+						id="folder-candidate-{index}"
+						role="option"
+						aria-selected={index === selected}
+						class={[
+							'min-w-0 cursor-default rounded px-1 break-all',
+							index === selected && 'bg-accent text-accent-foreground'
+						]}
+						onpointerdown={(event) => {
+							event.preventDefault();
+							void accept(index);
+						}}
+					>
+						{name}
+					</li>
 				{/each}
 			</ul>
 			{#if total > candidates.length}
-				<p class="mt-1">{m.folder_candidates_more({ count: total - candidates.length })}</p>
+				<p class="mt-1 px-1">{m.folder_candidates_more({ count: total - candidates.length })}</p>
 			{/if}
 		</div>
 	{/if}
