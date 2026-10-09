@@ -169,7 +169,7 @@ struct AppState {
     config_path: PathBuf,
     /// アプリのバージョン。ログの先頭に出しているものと同じ出どころにして、突き合わせられるようにする
     version: String,
-    /// OS の言語設定から決めた言語。表示言語が「OS に従う」のときに使う
+    /// OS の言語設定から決めた言語。表示言語が「システム」のときに使う
     system_lang: Lang,
     /// 組み合わせるときに相手へ名乗る、この機器の名前
     device_name: String,

@@ -24,7 +24,7 @@ import { beginTestConfig, tryReadConfig } from '../lib/config.mjs';
 // 色見本 (input type="color") を本物のクリックで押し、出た色選びに R・G・B を打って、欄に #rrggbb で入ることも見る。
 // Windows の WebView2 で出るのは、OS のダイアログではなく WebView2 (Chromium) の色選びのポップアップで、
 // UI Automation には出てこないので、キーボードで操作する (開いた直後から Tab 3回で R、4回で G、5回で B の欄)。
-// テーマを「OS に従う」にしたときは、Windows の外観 (アプリのモード) を切り替えて、ライトとダークの色が入れ替わることを見る
+// テーマを「システム」にしたときは、Windows の外観 (アプリのモード) を切り替えて、ライトとダークの色が入れ替わることを見る
 // (lib/os.mjs の snapshotAppsTheme。切り替えた外観は、終わったら・中断されたら元に戻す)。
 //
 // 色は getComputedStyle で読む。oklch のまま返る値と #rrggbb を直に比べられないので、
@@ -156,7 +156,7 @@ test.describe('下書きの文字色', () => {
 		}
 	});
 
-	test('テーマを「OS に従う」にすると、Windows の外観を切り替えたときにライトとダークの色が入れ替わる', async () => {
+	test('テーマを「システム」にすると、Windows の外観を切り替えたときにライトとダークの色が入れ替わる', async () => {
 		const appsTheme = await snapshotAppsTheme();
 		try {
 			await invokeApp(client, 'set_draft_text_color', { light: '#112233', dark: '#445566' });
