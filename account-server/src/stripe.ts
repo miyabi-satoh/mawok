@@ -24,6 +24,7 @@ export type StripeConfig = {
 	webhookSecret: string;
 	creditsPriceId: string;
 	taxRateId: string;
+	proPrices?: Record<'monthly' | 'yearly', string>;
 };
 
 /** 秘密の値が3つと税率がそろったときだけ売る。手元で動かすときは無くてよい。 */
@@ -46,8 +47,19 @@ export function stripeConfig(env: Env): StripeConfig | undefined {
 		secretKey: STRIPE_SECRET_KEY,
 		webhookSecret: STRIPE_WEBHOOK_SECRET,
 		creditsPriceId: STRIPE_AI_CREDITS_PRICE_ID,
-		taxRateId: STRIPE_TAX_RATE_ID
+		taxRateId: STRIPE_TAX_RATE_ID,
+		proPrices:
+			env.STRIPE_PRO_MONTHLY_PRICE_ID && env.STRIPE_PRO_YEARLY_PRICE_ID
+				? { monthly: env.STRIPE_PRO_MONTHLY_PRICE_ID, yearly: env.STRIPE_PRO_YEARLY_PRICE_ID }
+				: undefined
 	};
+}
+
+/** 月額と年額の Price が両方あるときだけ Pro を売る。 */
+export function proForSale(
+	config: StripeConfig
+): config is StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> } {
+	return config.proPrices !== undefined;
 }
 
 /**
@@ -145,6 +157,169 @@ export async function createCheckoutSession(
 	});
 	if (!res.ok) throw new StripeError(res.status, await res.text());
 	return res.json<{ url: string }>();
+}
+
+/** Pro の Checkout Session。試用を受けたことがあるアカウントには試用を渡さない。 */
+export async function createProCheckoutSession(
+	config: StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> },
+	{
+		accountId,
+		email,
+		plan,
+		lang,
+		successUrl,
+		cancelUrl,
+		expiresAt,
+		submitMessage,
+		managedPayments,
+		trial,
+		idempotencyKey
+	}: {
+		accountId: string;
+		email: string;
+		plan: 'monthly' | 'yearly';
+		lang: string;
+		successUrl: string;
+		cancelUrl: string;
+		expiresAt: number;
+		submitMessage?: string;
+		managedPayments: boolean;
+		trial: boolean;
+		idempotencyKey: string;
+	}
+): Promise<{ id: string; url: string }> {
+	const params = new URLSearchParams({
+		mode: 'subscription',
+		'line_items[0][price]': config.proPrices[plan],
+		'line_items[0][quantity]': '1',
+		client_reference_id: accountId,
+		'metadata[product]': 'mawok-pro',
+		'subscription_data[metadata][product]': 'mawok-pro',
+		'subscription_data[metadata][account_id]': accountId,
+		'subscription_data[metadata][managed_payments]': managedPayments ? '1' : '0',
+		locale: lang,
+		success_url: successUrl,
+		cancel_url: cancelUrl,
+		expires_at: String(expiresAt),
+		'managed_payments[enabled]': String(managedPayments)
+	});
+	if (trial) params.set('subscription_data[trial_period_days]', '14');
+	if (!managedPayments) {
+		params.set('payment_method_types[0]', 'card');
+		params.set('line_items[0][tax_rates][0]', config.taxRateId);
+	}
+	if (!APPLE_RELAY_DOMAINS.some((domain) => email.endsWith(`@${domain}`)))
+		params.set('customer_email', email);
+	if (submitMessage) params.set('custom_text[submit][message]', submitMessage);
+	const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+		method: 'POST',
+		headers: { authorization: `Bearer ${config.secretKey}`, 'idempotency-key': idempotencyKey },
+		body: params
+	});
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	return res.json<{ id: string; url: string }>();
+}
+
+type StripeSubscription = {
+	id: string;
+	status: string;
+	customer: string;
+	metadata: Record<string, string> | null;
+	items: { data: { current_period_end: number; price: { id: string } }[] };
+};
+
+async function stripeGet<T>(
+	config: StripeConfig,
+	path: string,
+	query?: URLSearchParams
+): Promise<T> {
+	const res = await fetch(`https://api.stripe.com/v1/${path}${query ? `?${query}` : ''}`, {
+		headers: { authorization: `Bearer ${config.secretKey}` }
+	});
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	return res.json<T>();
+}
+
+export function getSubscription(config: StripeConfig, id: string) {
+	return stripeGet<StripeSubscription>(config, `subscriptions/${encodeURIComponent(id)}`);
+}
+
+/** 0 円の試用開始請求書も含め、Pro の請求書を取り直して確かめる。 */
+export async function confirmProInvoice(
+	config: StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> },
+	invoiceId: string
+) {
+	const invoice = await stripeGet<{
+		id: string;
+		status: string;
+		total: number;
+		currency: string;
+		payment_intent: string | null;
+		parent: { subscription_details?: { subscription: string } | null } | null;
+		lines: {
+			data: {
+				amount: number;
+				quantity: number | null;
+				period: { end: number };
+				pricing: { price_details?: { price: string } } | null;
+			}[];
+		};
+	}>(
+		config,
+		`invoices/${encodeURIComponent(invoiceId)}`,
+		new URLSearchParams([['expand[]', 'parent.subscription_details']])
+	);
+	const subscriptionId = invoice.parent?.subscription_details?.subscription;
+	if (invoice.status !== 'paid' || !subscriptionId) return undefined;
+	const sub = await getSubscription(config, subscriptionId);
+	if (sub.metadata?.product !== 'mawok-pro') return undefined;
+	const line = invoice.lines.data.find((item) => {
+		const price = item.pricing?.price_details?.price;
+		return price !== undefined && price in config.proPrices;
+	});
+	const priceId = line?.pricing?.price_details?.price;
+	if (!line || line.quantity !== 1 || !priceId || sub.items.data.length !== 1) return undefined;
+	const plan =
+		priceId === config.proPrices.monthly
+			? 'monthly'
+			: priceId === config.proPrices.yearly
+				? 'yearly'
+				: undefined;
+	if (!plan) return undefined;
+	return {
+		invoiceId: invoice.id,
+		subscription: sub,
+		plan,
+		periodEnd: line.period.end,
+		amount: invoice.total,
+		currency: invoice.currency,
+		paymentIntentId: invoice.payment_intent,
+		managedPayments: sub.metadata?.managed_payments === '1'
+	};
+}
+
+export async function cancelSubscription(config: StripeConfig, id: string) {
+	const res = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(id)}`, {
+		method: 'DELETE',
+		headers: { authorization: `Bearer ${config.secretKey}` }
+	});
+	if (!res.ok && res.status !== 404 && res.status !== 400)
+		throw new StripeError(res.status, await res.text());
+}
+
+export async function billingPortalUrl(
+	config: StripeConfig,
+	customer: string,
+	returnUrl: string,
+	lang: string
+) {
+	const res = await fetch('https://api.stripe.com/v1/billing_portal/sessions', {
+		method: 'POST',
+		headers: { authorization: `Bearer ${config.secretKey}` },
+		body: new URLSearchParams({ customer, return_url: returnUrl, locale: lang })
+	});
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	return (await res.json<{ url: string }>()).url;
 }
 
 /** 付けてよいと確かめた支払い。台帳に残す。 */

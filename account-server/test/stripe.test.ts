@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	confirmPurchase,
+	createProCheckoutSession,
 	createCheckoutSession,
 	StripeError,
 	stripeConfig,
@@ -104,6 +105,37 @@ describe('createCheckoutSession', () => {
 			async () => new Response('{"error":{"type":"idempotency_error"}}', { status: 409 })
 		);
 		await expect(checkout()).rejects.toSatisfy((e) => e instanceof StripeError && e.status === 409);
+	});
+});
+
+describe('createProCheckoutSession', () => {
+	it('creates a subscription with the first 14-day trial and its account metadata', async () => {
+		const stripe = vi
+			.spyOn(globalThis, 'fetch')
+			.mockImplementation(async () =>
+				Response.json({ id: 'cs_pro', url: 'https://checkout.stripe.test/c/pay/cs_pro' })
+			);
+		await createProCheckoutSession(
+			{ ...config, proPrices: { monthly: 'price_pro_monthly', yearly: 'price_pro_yearly' } },
+			{
+				accountId: 'acc',
+				email: 'buyer@example.com',
+				plan: 'monthly',
+				lang: 'ja',
+				successUrl: 'https://account.test/done',
+				cancelUrl: 'https://account.test/cancel',
+				expiresAt: 2_000_000_000,
+				managedPayments: false,
+				trial: true,
+				idempotencyKey: 'pro-key'
+			}
+		);
+		const sent = new URLSearchParams(String(stripe.mock.calls[0][1]!.body));
+		expect(sent.get('mode')).toBe('subscription');
+		expect(sent.get('line_items[0][price]')).toBe('price_pro_monthly');
+		expect(sent.get('subscription_data[trial_period_days]')).toBe('14');
+		expect(sent.get('subscription_data[metadata][product]')).toBe('mawok-pro');
+		expect(sent.get('subscription_data[metadata][account_id]')).toBe('acc');
 	});
 });
 

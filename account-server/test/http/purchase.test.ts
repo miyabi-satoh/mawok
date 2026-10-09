@@ -22,6 +22,15 @@ const { purchaseGrant: PURCHASE_GRANT } = pricing(env);
 
 // 支払いの画面へ送る中身と、知らせを信じてよいかの決まりは test/stripe.test.ts で確かめる。
 describe('buying credit', () => {
+	it('shows a Pro trial confirmation for a selected plan', async () => {
+		const { cookie } = await signIn('pro-offer@example.com');
+		const confirmation = await (await request('/account/buy?plan=monthly', { cookie })).text();
+		expect(confirmation).toContain('Mawok Pro（月額）');
+		expect(confirmation).toContain('480 円/月（税込み）');
+		expect(confirmation).toContain('14 日間は無料');
+		expect(confirmation).toMatch(/name="plan"\s+value="monthly"/);
+	});
+
 	async function ledgerOf(account: string) {
 		return env.DB.prepare(
 			`SELECT managed_payments, card_country, buyer_country, domestic, amount, currency FROM purchases

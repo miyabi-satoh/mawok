@@ -10,6 +10,9 @@ interface __BaseEnv_Env {
 	STRIPE_WEBHOOK_SECRET?: string;
 	/** AI アクションのクレジット (300 円) の Price の id。 */
 	STRIPE_AI_CREDITS_PRICE_ID?: string;
+	/** Pro の月額・年額の Price の id。 */
+	STRIPE_PRO_MONTHLY_PRICE_ID?: string;
+	STRIPE_PRO_YEARLY_PRICE_ID?: string;
 	/** Google でのサインイン (→ src/google.ts)。2つそろったときだけ出す。 */
 	GOOGLE_CLIENT_ID?: string;
 	GOOGLE_CLIENT_SECRET?: string;

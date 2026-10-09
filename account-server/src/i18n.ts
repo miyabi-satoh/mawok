@@ -123,6 +123,27 @@ const ja = {
 		'支払いをまだ確かめられていません。少ししてから確かめ直してください。買い直す前に、領収のメールが届いていないかも確かめてください。',
 	checkAgain: 'もう一度確かめる',
 	bought: 'クレジットを購入しました。Mawok の設定に戻ると、残りに反映されます。',
+	proTitle: 'Mawok Pro',
+	proNotForSale: 'いまは Pro を申し込めません。',
+	proUnavailable: 'いまは Pro を申し込めません。',
+	proSubscribe: 'Pro の料金を見る',
+	proItem: (plan: 'monthly' | 'yearly') => `Mawok Pro（${plan === 'yearly' ? '年額' : '月額'}）`,
+	proPrice: (plan: 'monthly' | 'yearly'): string =>
+		plan === 'yearly' ? '4,800 円/年（税込み）' : '480 円/月（税込み）',
+	proPayment: {
+		domestic: '期間ごとに同じ額で自動更新します。次の画面 (Stripe) でカードを登録します。',
+		overseas:
+			'期間ごとに同じ額で自動更新します。販売と決済は Link (Sold through Link, LLC) が代わりに行います。'
+	} as Record<SaleRegion, string>,
+	proDelivery: '申し込みが済むとすぐ、このアカウントで Pro を使えます。',
+	proTrial:
+		'最初の 14 日間は無料です。試用の終わる前に解約しなければ、次の期間から課金が始まります。無料の試用は、1つのアカウントにつき 1 回だけです。',
+	proCheckoutNote:
+		'最初の 14 日間は無料です。試用の終わる前に解約しなければ、期間ごとに同じ額で自動更新します。',
+	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
+		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} まで有効です。`,
+	proTrialUntil: (date: string) => `Pro を無料で試用中です。試用は ${date} に終わります。`,
+	manageBilling: '支払いを管理する',
 	accountTitle: 'アカウント',
 	balance: (percent: number) => `AI アクションのクレジット: 残り ${percent}%`,
 	noBalance: 'AI アクションのクレジットはありません。',
@@ -223,6 +244,27 @@ const en: typeof ja = {
 	checkAgain: 'Check again',
 	bought:
 		'AI action credit has been added. Go back to Mawok settings to see your remaining credit.',
+	proTitle: 'Mawok Pro',
+	proNotForSale: 'Pro is not available right now.',
+	proUnavailable: 'Pro is not available right now.',
+	proSubscribe: 'See Pro pricing',
+	proItem: (plan: 'monthly' | 'yearly') => `Mawok Pro (${plan})`,
+	proPrice: (plan: 'monthly' | 'yearly') =>
+		plan === 'yearly' ? '4,800 yen/year (tax included)' : '480 yen/month (tax included)',
+	proPayment: {
+		domestic:
+			'It renews automatically at the same price each period. Register a card on the next page (Stripe).',
+		overseas:
+			'It renews automatically at the same price each period. The sale and payment are handled on our behalf by Link (Sold through Link, LLC).'
+	},
+	proDelivery: 'Pro is available on this account as soon as you subscribe.',
+	proTrial:
+		'Your first 14 days are free. Unless you cancel before the trial ends, billing starts for the next period. Each account can use the free trial once.',
+	proCheckoutNote:
+		'Your first 14 days are free. Unless you cancel before the trial ends, it renews automatically at the same price each period.',
+	proUntil: (plan: 'monthly' | 'yearly', date: string) => `Pro (${plan}): active until ${date}.`,
+	proTrialUntil: (date: string) => `Trying Pro free until ${date}.`,
+	manageBilling: 'Manage billing',
 	accountTitle: 'Account',
 	balance: (percent: number) => `AI action credit: ${percent}% left`,
 	noBalance: 'No AI action credit.',

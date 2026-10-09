@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { balance, charge, grantFreeStatement } from '../src/credits';
+import { balance, charge, grantFreeStatement, grantProStatement } from '../src/credits';
 import { pricing } from '../src/pricing';
 import { randomHex } from '../src/util';
 import { grantsOf, newAccount } from './helpers';
@@ -15,13 +15,17 @@ async function addGrant(
 		remaining = granted,
 		revoked = 0,
 		createdAt = 0,
-		purchase
+		purchase,
+		kind = purchase ? 'purchase' : 'free',
+		expiresAt
 	}: {
 		granted: number;
 		remaining?: number;
 		revoked?: number;
 		createdAt?: number;
 		purchase?: string;
+		kind?: 'purchase' | 'free' | 'pro';
+		expiresAt?: number;
 	}
 ) {
 	if (purchase) {
@@ -34,10 +38,20 @@ async function addGrant(
 			.run();
 	}
 	await env.DB.prepare(
-		`INSERT INTO grants (id, account_id, purchase_id, granted, remaining, revoked, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`
+		`INSERT INTO grants (id, account_id, purchase_id, kind, granted, remaining, revoked, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	)
-		.bind(randomHex(16), account, purchase ?? null, granted, remaining, revoked, createdAt)
+		.bind(
+			randomHex(16),
+			account,
+			purchase ?? null,
+			kind,
+			granted,
+			remaining,
+			revoked,
+			expiresAt ?? null,
+			createdAt
+		)
 		.run();
 }
 
@@ -117,6 +131,24 @@ describe('charge', () => {
 		await charge(env, account, 0);
 		expect(await grantsOf(account)).toMatchObject([{ remaining: 0 }]);
 	});
+
+	it('uses this month’s Pro credit before purchases and ignores an expired grant', async () => {
+		const account = await newAccount();
+		await addGrant(account, { granted: 100, kind: 'pro', expiresAt: 4_102_444_800 });
+		await addGrant(account, { granted: 100, kind: 'pro', expiresAt: 1 });
+		await addGrant(account, { granted: PURCHASE_GRANT, purchase: randomHex(8) });
+		await charge(env, account, 150, 10);
+		const rows = await env.DB.prepare(
+			`SELECT grant_kind AS kind, milli_yen FROM consumptions
+			 WHERE grant_id IN (SELECT id FROM grants WHERE account_id = ?) ORDER BY rowid`
+		)
+			.bind(account)
+			.all();
+		expect(rows.results).toEqual([
+			{ kind: 'pro', milli_yen: 100 },
+			{ kind: 'purchase', milli_yen: 50 }
+		]);
+	});
 });
 
 describe('grantFreeStatement', () => {
@@ -149,5 +181,23 @@ describe('grantFreeStatement', () => {
 		expect(await grantsOf(third)).toEqual([]);
 		await grantFreeStatement(capped, third, MID_FEBRUARY).run();
 		expect(await grantsOf(third)).toHaveLength(1);
+	});
+});
+
+describe('grantProStatement', () => {
+	it('grants once in a Tokyo calendar month, only while paid and active', async () => {
+		const account = await newAccount();
+		const at = Date.UTC(2100, 0, 15) / 1000;
+		const pro = { active: true, until: at + 1000, plan: 'monthly' as const, trial: false };
+		await grantProStatement(env, account, pro, at).run();
+		await grantProStatement(env, account, pro, at).run();
+		await grantProStatement(env, account, { ...pro, trial: true }, at + 1).run();
+		const row = await env.DB.prepare(
+			"SELECT granted, expires_at FROM grants WHERE account_id = ? AND kind = 'pro'"
+		)
+			.bind(account)
+			.first<{ granted: number; expires_at: number }>();
+		expect(row?.granted).toBe(pricing(env).proMonthlyGrant);
+		expect(row?.expires_at).toBe(Date.UTC(2100, 1, 1) / 1000 - 9 * 60 * 60);
 	});
 });

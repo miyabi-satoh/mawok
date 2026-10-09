@@ -10,7 +10,7 @@
 import { Hono, type Context } from 'hono';
 import { csrf } from 'hono/csrf';
 import { parsePrompt, relay } from './ai';
-import { balance, charge, grantFreeStatement } from './credits';
+import { balance, charge, grantFreeStatement, grantProStatement, proOf } from './credits';
 import { messages, resolveLang, type Lang } from './i18n';
 import { pricing } from './pricing';
 import { sendMail } from './mail';
@@ -18,6 +18,7 @@ import {
 	approvePage,
 	checkingPurchasePage,
 	confirmPage,
+	proConfirmPage,
 	confirmSignInPage,
 	homePage,
 	LEGAL_PAGES,
@@ -32,8 +33,14 @@ import { appleConfig, finishAppleSignIn, startAppleSignIn } from './apple';
 import { finishGoogleSignIn, googleConfig, startGoogleSignIn } from './google';
 import {
 	confirmPurchase,
+	confirmProInvoice,
+	createProCheckoutSession,
+	billingPortalUrl,
+	cancelSubscription,
+	getSubscription,
 	createCheckoutSession,
 	PRODUCT,
+	proForSale,
 	StripeError,
 	stripeConfig,
 	type StripeConfig,
@@ -167,8 +174,10 @@ app.get('/v1/balance', async (c) => {
 		.first<{ email: string }>();
 	// 無料の分を取りこぼしていれば、ここで付け直す (→ src/credits.ts)。
 	await grantFreeStatement(c.env, accountId).run();
+	const pro = await proOf(c.env, accountId);
+	await grantProStatement(c.env, accountId, pro).run();
 	const { remaining, percent } = await balance(c.env, accountId);
-	return c.json({ email: account?.email, remaining_percent: remaining > 0 ? percent : 0 });
+	return c.json({ email: account?.email, remaining_percent: remaining > 0 ? percent : 0, pro });
 });
 
 /** Mawok でのサインアウト。トークンを外す。 */
@@ -195,6 +204,8 @@ app.post('/v1/ai', async (c) => {
 	const { rates } = pricing(c.env);
 	// 無料の分を取りこぼしていれば、ここで付け直す (→ src/credits.ts)。
 	await grantFreeStatement(c.env, accountId).run();
+	const pro = await proOf(c.env, accountId);
+	await grantProStatement(c.env, accountId, pro).run();
 	const t = now();
 	// 同じアカウントは同時に1件だけ。印を取ってから残りを確かめるので、並べて送って残りを超えて使わせないように。
 	const owner = randomHex(16);
@@ -306,6 +317,66 @@ async function handleStripeEvent(
 	object: Record<string, unknown>
 ) {
 	switch (type) {
+		case 'invoice.paid': {
+			if (!proForSale(config)) return;
+			const paid = await confirmProInvoice(config, String(object.id));
+			if (!paid) return;
+			const accountId = paid.subscription.metadata?.account_id;
+			const t = now();
+			await env.DB.batch([
+				env.DB.prepare(
+					`INSERT INTO subscriptions (id, account_id, plan, stripe_customer_id, paid_through, status, created_at)
+					 VALUES (?1, (SELECT id FROM accounts WHERE id = ?2), ?3, ?4, ?5, ?6, ?7)
+					 ON CONFLICT (id) DO UPDATE SET plan = excluded.plan, stripe_customer_id = excluded.stripe_customer_id,
+					 paid_through = max(subscriptions.paid_through, excluded.paid_through), status = excluded.status
+					 WHERE subscriptions.revoked_at IS NULL`
+				).bind(
+					paid.subscription.id,
+					accountId ?? '',
+					paid.plan,
+					paid.subscription.customer,
+					paid.periodEnd,
+					paid.subscription.status,
+					t
+				),
+				// 試用の 0 円請求書は、売上の台帳に残さない。
+				...(paid.amount === 0 || !paid.paymentIntentId
+					? []
+					: [
+							env.DB.prepare(
+								`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+					 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
+					 VALUES (?, (SELECT account_id FROM subscriptions WHERE id = ?), 'mawok-pro', ?, ?, ?, ?, ?, 1, ?, ?)
+					 ON CONFLICT DO NOTHING`
+							).bind(
+								randomHex(16),
+								paid.subscription.id,
+								`invoice:${paid.invoiceId}`,
+								paid.paymentIntentId,
+								paid.amount,
+								paid.currency,
+								paid.managedPayments ? 1 : 0,
+								paid.subscription.id,
+								t
+							)
+						])
+			]);
+			return;
+		}
+		case 'customer.subscription.updated':
+		case 'customer.subscription.deleted': {
+			const row = await env.DB.prepare('SELECT id, status FROM subscriptions WHERE id = ?')
+				.bind(String(object.id))
+				.first<{ id: string; status: string }>();
+			if (!row || row.status === 'canceled') return;
+			const sub = await getSubscription(config, row.id);
+			await env.DB.prepare(
+				"UPDATE subscriptions SET status = ? WHERE id = ? AND status != 'canceled'"
+			)
+				.bind(sub.status, row.id)
+				.run();
+			return;
+		}
 		// カードは completed の時点で払われている。MP の Session では後から払う方法も選べ、払われると async_payment_succeeded が届く。
 		case 'checkout.session.completed':
 		case 'checkout.session.async_payment_succeeded': {
@@ -370,8 +441,18 @@ async function handleStripeEvent(
 				env.DB.prepare(
 					`UPDATE grants SET revoked = revoked + remaining, remaining = 0 WHERE purchase_id IN
 					   (SELECT id FROM purchases WHERE stripe_payment_intent_id = ?)`
-				).bind(object.payment_intent)
+				).bind(object.payment_intent),
+				env.DB.prepare(
+					`UPDATE subscriptions SET revoked_at = coalesce(revoked_at, ?)
+					 WHERE id = (SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?)`
+				).bind(t, object.payment_intent)
 			]);
+			const sub = await env.DB.prepare(
+				'SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?'
+			)
+				.bind(object.payment_intent)
+				.first<{ stripe_subscription_id: string | null }>();
+			if (sub?.stripe_subscription_id) await cancelSubscription(config, sub.stripe_subscription_id);
 			return;
 		}
 	}
@@ -398,8 +479,11 @@ accountApp.get('/', async (c) => {
 	)
 		.bind(account.id)
 		.all<LinkedApp>();
+	const pro = await proOf(c.env, account.id);
 	return c.html(
 		homePage(lang, account.email, await balance(c.env, account.id), apps, saleRegion(c), {
+			pro,
+			billing: stripeConfig(c.env) !== undefined,
 			bought: c.req.query('bought') === '1'
 		})
 	);
@@ -720,6 +804,19 @@ accountApp.get('/buy', async (c) => {
 	const lang = resolveLang(c);
 	const account = await currentAccount(c);
 	if (!account) return c.html(signIn(c, lang, `${ACCOUNT}/buy`));
+	const plan = c.req.query('plan');
+	if (plan === 'monthly' || plan === 'yearly') {
+		const config = stripeConfig(c.env);
+		if (!config || !proForSale(config))
+			return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proNotForSale), 404);
+		const pro = await proOf(c.env, account.id);
+		if (pro.active) return c.redirect(ACCOUNT_HOME, 303);
+		return c.html(
+			proConfirmPage(lang, account.email, plan, saleRegion(c)!, {
+				trial: !(await hadSubscription(c.env, account.id))
+			})
+		);
+	}
 	const region = saleRegion(c);
 	if (!region)
 		return c.html(messagePage(lang, messages[lang].buyTitle, messages[lang].notForSale), 404);
@@ -731,11 +828,14 @@ accountApp.post('/buy', async (c) => {
 	const lang = resolveLang(c);
 	const form = await c.req.parseBody();
 	const next = safeNext(formString(form, 'next'));
+	const proPlan = formString(form, 'plan');
 	const account = await currentAccount(c);
 	if (!account) return c.html(signIn(c, lang, next), 401);
 	const config = stripeConfig(c.env);
 	if (!config)
 		return c.html(messagePage(lang, messages[lang].buyTitle, messages[lang].notForSale), 404);
+	if (proPlan === 'monthly' || proPlan === 'yearly')
+		return startProCheckout(c, account, config, proPlan, lang, next);
 	// 支払いの画面の予約を取る。開いている画面があれば同じ画面へ送り、2つのタブや、確かめを待つ間の買い直しで
 	// 二重に払わせないように。払い終えた画面を開き直すと、Stripe が払い終えたことを示す。
 	const t = now();
@@ -821,6 +921,18 @@ accountApp.get('/buy/done', async (c) => {
 	const next = safeNext(c.req.query('next'));
 	const account = await currentAccount(c);
 	if (!account) return c.html(signIn(c, lang, next));
+	if (c.req.query('pro') === '1') {
+		if ((await proOf(c.env, account.id)).active) {
+			await c.env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(account.id).run();
+			return c.redirect(next, 303);
+		}
+		const tries = Number(c.req.query('tries') ?? '0') || 0;
+		const retry = new URL(c.req.url);
+		retry.searchParams.set('tries', String(tries + 1));
+		return c.html(
+			checkingPurchasePage(lang, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
+		);
+	}
 	const bought = await c.env.DB.prepare(
 		`SELECT 1 FROM grants JOIN purchases ON purchases.id = grants.purchase_id
 		 WHERE purchases.stripe_checkout_session_id = ? AND grants.account_id = ?`
@@ -838,6 +950,131 @@ accountApp.get('/buy/done', async (c) => {
 	retry.searchParams.set('tries', String(tries + 1));
 	return c.html(
 		checkingPurchasePage(lang, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
+	);
+});
+
+async function hadSubscription(env: Env, accountId: string) {
+	return (
+		(await env.DB.prepare('SELECT 1 FROM subscriptions WHERE account_id = ?')
+			.bind(accountId)
+			.first()) !== null
+	);
+}
+
+/** Pro の Checkout を予約して作る。プランを替えて押し直すと、古い支払い画面は閉じる。 */
+async function startProCheckout(
+	c: Context<App>,
+	account: { id: string; email: string },
+	config: StripeConfig,
+	plan: 'monthly' | 'yearly',
+	lang: Lang,
+	next: string
+) {
+	if (!proForSale(config))
+		return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proNotForSale), 404);
+	if ((await proOf(c.env, account.id)).active) return c.redirect(next, 303);
+	const t = now();
+	const old = await c.env.DB.prepare(
+		'SELECT id, price, session_id FROM checkouts WHERE account_id = ? AND expires_at > ?'
+	)
+		.bind(account.id, t)
+		.first<{ id: string; price: string; session_id: string | null }>();
+	if (old && old.price !== plan) {
+		if (old.session_id) {
+			try {
+				await fetch(
+					`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(old.session_id)}/expire`,
+					{ method: 'POST', headers: { authorization: `Bearer ${config.secretKey}` } }
+				);
+			} catch {
+				/* 同じ画面を閉じられなくても新しい予約を作る。 */
+			}
+		}
+		await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ?').bind(old.id).run();
+	}
+	await c.env.DB.batch([
+		c.env.DB.prepare('DELETE FROM checkouts WHERE expires_at <= ?').bind(t),
+		c.env.DB.prepare(
+			`INSERT INTO checkouts (id, account_id, next, lang, expires_at, managed_payments, price)
+		 VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (account_id) DO NOTHING`
+		).bind(
+			randomHex(16),
+			account.id,
+			next,
+			lang,
+			t + CHECKOUT_TTL,
+			usesManagedPayments(buyerCountry(c)) ? 1 : 0,
+			plan
+		)
+	]);
+	const checkout = (await c.env.DB.prepare(
+		'SELECT id, next, lang, url, expires_at, managed_payments, price FROM checkouts WHERE account_id = ?'
+	)
+		.bind(account.id)
+		.first<{
+			id: string;
+			next: string;
+			lang: Lang;
+			url: string | null;
+			expires_at: number;
+			managed_payments: number;
+			price: 'monthly' | 'yearly';
+		}>())!;
+	if (checkout.url) return c.redirect(checkout.url, 303);
+	const origin = new URL(c.req.url).origin;
+	const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang, pro: '1' });
+	let session: { id: string; url: string };
+	try {
+		session = await createProCheckoutSession(config, {
+			accountId: account.id,
+			email: account.email,
+			plan: checkout.price,
+			lang: checkout.lang,
+			successUrl: `${origin}${ACCOUNT}/buy/done?${done}`,
+			cancelUrl: `${origin}${ACCOUNT}/buy?plan=${checkout.price}&lang=${checkout.lang}`,
+			expiresAt: checkout.expires_at,
+			submitMessage: checkout.managed_payments
+				? undefined
+				: messages[checkout.lang].proCheckoutNote,
+			managedPayments: checkout.managed_payments === 1,
+			trial: !(await hadSubscription(c.env, account.id)),
+			idempotencyKey: `mawok-pro-checkout-${checkout.id}`
+		});
+	} catch (e) {
+		if (e instanceof StripeError && e.status === 409)
+			return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].buyBusy), 409);
+		if (e instanceof StripeError)
+			await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ? AND url IS NULL')
+				.bind(checkout.id)
+				.run();
+		throw e;
+	}
+	await c.env.DB.prepare('UPDATE checkouts SET url = ?, session_id = ? WHERE id = ?')
+		.bind(session.url, session.id, checkout.id)
+		.run();
+	return c.redirect(session.url, 303);
+}
+
+/** Stripe のカスタマーポータル (解約・支払い方法・領収書)。 */
+accountApp.post('/billing', async (c) => {
+	const lang = resolveLang(c);
+	const account = await currentAccount(c);
+	if (!account) return c.html(signIn(c, lang, ACCOUNT_HOME), 401);
+	const config = stripeConfig(c.env);
+	const row = await c.env.DB.prepare(
+		`SELECT stripe_customer_id FROM subscriptions WHERE account_id = ? AND stripe_customer_id IS NOT NULL ORDER BY paid_through DESC`
+	)
+		.bind(account.id)
+		.first<{ stripe_customer_id: string }>();
+	if (!config || !row) return c.redirect(ACCOUNT_HOME, 303);
+	return c.redirect(
+		await billingPortalUrl(
+			config,
+			row.stripe_customer_id,
+			`${new URL(c.req.url).origin}${ACCOUNT_HOME}`,
+			lang
+		),
+		303
 	);
 });
 
