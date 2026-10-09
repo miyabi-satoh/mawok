@@ -2,6 +2,7 @@
 import { getEntry } from 'astro:content';
 import Base from '../layouts/Base.astro';
 import Breadcrumb from '../components/Breadcrumb.astro';
+import { TOKUSHOHO_URL } from '../lib/links';
 
 const { data } = (await getEntry('product', 'index'))!;
 ---
@@ -25,7 +26,7 @@ const { data } = (await getEntry('product', 'index'))!;
 
     <h2 id="conditions">購入の条件</h2>
     <p>
-      支払方法・支払時期・引き渡し・返品の原則と、販売事業者・連絡先は、amiiby の<a href="https://amiiby.com/tokushoho/">特定商取引法に基づく表記</a>に載せています。ここには、価格・動作環境と、Mawok のクレジットに限った定めを書きます。
+      支払方法・支払時期・引き渡し・返品の原則と、販売事業者・連絡先は、amiiby の<a href={TOKUSHOHO_URL}>特定商取引法に基づく表記</a>に載せています。ここには、価格・動作環境と、Mawok のクレジットに限った定めを書きます。
     </p>
     <dl class="terms">
       <dt>販売価格</dt>

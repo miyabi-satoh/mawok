@@ -2784,9 +2784,7 @@ fn open_license_source(app: AppHandle, url: String) -> Result<(), String> {
     if !is_https_url(&url) {
         return Err(format!("not an https URL: {url}"));
     }
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|error| error.to_string())
+    open_page(&app, &url)
 }
 
 fn is_https_url(url: &str) -> bool {

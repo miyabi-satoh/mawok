@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// 行頭にあれば、残りを指示文として AI サービスへ送る印
-const AI_PREFIX: &str = "@ai";
+pub const AI_PREFIX: &str = "@ai";
 /// コマンドの行や指示文の中で、実行する文に置き換える印
 pub const TEXT_MARK: &str = "{{t}}";
 

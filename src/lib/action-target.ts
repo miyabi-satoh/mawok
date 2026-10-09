@@ -1,13 +1,14 @@
-import type { Action } from '$lib/bindings/Action';
+import type { Action } from '$lib/settings.svelte';
+import { CONSTANTS } from '$lib/bindings/constants';
 
-/** 行頭にあれば、残りを指示文として AI サービスへ送る印（src-tauri/src/actions.rs の AI_PREFIX と揃える） */
-const AI_PREFIX = '@ai';
-/** コマンドの行で、下書きに置き換える印（src-tauri/src/actions.rs の TEXT_MARK と揃える） */
-export const TEXT_MARK = '{{t}}';
+/** 行頭にあれば、残りを指示文として AI サービスへ送る印 */
+const AI_PREFIX = CONSTANTS.AI_PREFIX;
+/** コマンドの行で、下書きに置き換える印 */
+export const TEXT_MARK = CONSTANTS.TEXT_MARK;
 
-/** 新しく足すアクションの1件。結果は置き換え、文字コードは UTF-8、有効にしておく（src-tauri/src/config.rs の Default for Action と揃える） */
+/** 新しく足すアクションの1件。結果・文字コード・有効かは、設定ファイルで省いたときと同じ既定にする */
 export function newAction(name: string, command: string): Action {
-	return { name, command, output: 'replace', encoding: 'utf-8', enabled: true };
+	return { ...CONSTANTS.NEW_ACTION, name, command };
 }
 
 /**

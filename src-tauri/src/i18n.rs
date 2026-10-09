@@ -117,7 +117,7 @@ impl Lang {
             Lang::En => format!("Fixed unreadable settings and conflicting keys: {shown}"),
             Lang::Ja if rest > 0 => {
                 format!(
-                    "設定ファイルの読めない値と重なったキーを直しました: {shown} ほか {rest} 件"
+                    "設定ファイルの読めない値と重なったキーを直しました: {shown} ほか {rest} 件"
                 )
             }
             Lang::Ja => format!("設定ファイルの読めない値と重なったキーを直しました: {shown}"),
@@ -238,12 +238,35 @@ mod tests {
         );
         assert_eq!(
             Lang::Ja.config_repaired(&keys(5)),
-            "設定ファイルの読めない値と重なったキーを直しました: replacements[0], replacements[1], replacements[2] ほか 2 件"
+            "設定ファイルの読めない値と重なったキーを直しました: replacements[0], replacements[1], replacements[2] ほか 2 件"
         );
         assert_eq!(
             Lang::En.config_repaired(&keys(4)),
             "Fixed unreadable settings and conflicting keys: replacements[0], replacements[1], replacements[2] and 1 more"
         );
+    }
+
+    /// 数字と単位の間は、そこで折り返さないようノーブレークスペースにする（画面の文言は src/lib/messages.test.ts が見る）
+    #[test]
+    fn no_breakable_space_between_number_and_unit() {
+        const UNITS: [&str; 13] = [
+            "秒", "分", "時間", "日", "週", "か月", "年", "件", "回", "文字", "行", "個", "つ",
+        ];
+        let source = include_str!("i18n.rs");
+        let messages = &source[..source.find("#[cfg(test)]").expect("tests follow messages")];
+        let breakable: Vec<&str> = messages
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|line| {
+                UNITS.iter().any(|unit| {
+                    line.match_indices(&format!(" {unit}")).any(|(at, _)| {
+                        line[..at].ends_with('}')
+                            || line[..at].ends_with(|c: char| c.is_ascii_digit())
+                    })
+                })
+            })
+            .collect();
+        assert!(breakable.is_empty(), "{breakable:#?}");
     }
 
     #[test]
