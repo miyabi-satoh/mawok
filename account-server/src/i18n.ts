@@ -122,7 +122,7 @@ const ja = {
 	purchaseNotYet:
 		'支払いをまだ確かめられていません。少ししてから確かめ直してください。買い直す前に、領収のメールが届いていないかも確かめてください。',
 	checkAgain: 'もう一度確かめる',
-	bought: 'クレジットを買い足しました。Mawok の設定に戻ると、残りに反映されます。',
+	bought: 'クレジットを購入しました。Mawok の設定に戻ると、残りに反映されます。',
 	accountTitle: 'アカウント',
 	balance: (percent: number) => `AI アクションのクレジット: 残り ${percent}%`,
 	noBalance: 'AI アクションのクレジットはありません。',
