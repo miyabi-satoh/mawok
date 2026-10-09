@@ -283,7 +283,7 @@ test.describe('描かれ方', () => {
 		// 履歴のボタンは、覚えている履歴があるときだけ出る
 		await typeIntoDraft(client, '履歴に残す下書き');
 		await hideDraft(client);
-		await waitDraftHidden('コピーして隠れる');
+		await waitDraftHidden('コピーして閉じる');
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, DRAFT_TEXT);
 		await inspectDraft(client, 'text', { check: () => findHighlightProblems(client) });

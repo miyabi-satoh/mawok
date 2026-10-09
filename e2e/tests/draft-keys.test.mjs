@@ -74,7 +74,7 @@ test.describe('下書きウィンドウのキーの変更', () => {
 			assert.equal(await getClipboard(), SENTINEL, '元のキーではコピーしないはず');
 
 			await sendKeySequence([[VK.CONTROL, VK.M]]);
-			await waitDraftHidden('変えたキーで隠れる');
+			await waitDraftHidden('変えたキーで閉じる');
 			await waitFor(getClipboard, (value) => value === text, { label: 'クリップボード' });
 
 			await invokeApp(client, 'reset_draft_key', { action: 'copy' });
@@ -87,7 +87,7 @@ test.describe('下書きウィンドウのキーの変更', () => {
 			await showDraftAndWaitVisible('下書きウィンドウの表示 (既定に戻した後)');
 			await typeIntoDraft(client, again);
 			await sendKeySequence([[VK.CONTROL, VK.ENTER]]);
-			await waitDraftHidden('既定のキーで隠れる');
+			await waitDraftHidden('既定のキーで閉じる');
 			await waitFor(getClipboard, (value) => value === again, {
 				label: 'クリップボード (既定に戻した後)'
 			});
