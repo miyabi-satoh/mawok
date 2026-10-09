@@ -232,7 +232,7 @@
 	"settings_actions_enabled": "「{name}」を使う",
 	"settings_actions_enabled_unnamed": "このアクションを使う",
 	"settings_actions_output": "結果の出し方",
-	"settings_actions_output_replace": "置き換える",
+	"settings_actions_output_replace": "置換",
 	"settings_actions_output_insert": "挿入",
 	"settings_actions_output_none": "出さない",
 	"settings_actions_encoding": "文字コード",

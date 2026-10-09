@@ -255,7 +255,7 @@ test.describe('macOS: コマンドのアクション', () => {
 				.filter(({ role }) => role === 'AXRadioButton')
 				.map(({ name }) => name)
 				.slice(-3),
-			['置き換える', '挿入', '出さない'],
+			['置換', '挿入', '出さない'],
 			'結果の出し方の選択'
 		);
 

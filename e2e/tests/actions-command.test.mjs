@@ -217,7 +217,7 @@ test.describe('コマンドのアクション', () => {
 				return { font, outputs };
 			}, command);
 			assert.match(row.font, /mono|consolas|courier/i, `等幅のはず: ${row.font}`);
-			assert.deepEqual(row.outputs, ['置き換える', '挿入', '出さない']);
+			assert.deepEqual(row.outputs, ['置換', '挿入', '出さない']);
 
 			const warning = () =>
 				client.execute(
