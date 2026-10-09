@@ -2040,8 +2040,11 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
         .unwrap_or_else(|| home.clone());
     let resolved = folder::resolve(&base, &home, &input).map_err(|error| {
         info!("couldn't change the working folder: {}", error.code());
-        // メニューの最近のフォルダーから選んで、消えていたら外す（メニューは、あるかを確かめずに出すため）
-        if error == folder::FolderError::NotFound {
+        // メニューの最近のフォルダーから選んで、消えていたか、フォルダーでなくなっていたら外す（メニューは、あるかを確かめずに出すため）
+        if matches!(
+            error,
+            folder::FolderError::NotFound | folder::FolderError::NotAFolder
+        ) {
             forget_folder(&app, std::path::Path::new(input.trim()));
         }
         error.code().to_string()
