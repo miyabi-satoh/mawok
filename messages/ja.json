@@ -294,7 +294,7 @@
 	"folder_input": "フォルダーのパス",
 	"folder_error_not_found": "フォルダーが見つかりません。",
 	"folder_error_not_a_folder": "フォルダーではありません。",
-	"folder_error_network": "ネットワークのパス（\\\\ で始まるパス）では、コマンドを動かせません。ドライブ文字を割り当てたパスで移ってください。",
+	"folder_error_network": "ネットワークのパス（{prefix} で始まるパス）では、コマンドを動かせません。ドライブ文字を割り当てたパスで移ってください。",
 	"actions_list": "アクション",
 	"actions_empty": "アクションはまだありません。設定（{settings}）の「アクション」で足せます。",
 	"actions_empty_no_key": "アクションはまだありません。設定の「アクション」で足せます。",

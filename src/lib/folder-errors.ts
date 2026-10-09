@@ -5,7 +5,8 @@ import { m } from '$lib/paraglide/messages';
 const MESSAGES: Record<string, () => string> = {
 	'folder.not_found': m.folder_error_not_found,
 	'folder.not_a_folder': m.folder_error_not_a_folder,
-	'folder.network': m.folder_error_network
+	// Paraglide はテンプレートリテラルに書き出すときに \ を写さず1つ減らすので、文言には書かず引数で渡す
+	'folder.network': () => m.folder_error_network({ prefix: '\\\\' })
 };
 
 /** 移れなかった理由を、欄の下に出す案内にする。符号でなければ、受け取った文字列をそのまま出す */

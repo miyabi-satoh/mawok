@@ -6,7 +6,7 @@ describe('folderErrorMessage', () => {
 	it('Rust 側の符号を、何をすればよいかの案内にする', () => {
 		expect(folderErrorMessage('folder.not_found')).toBe(m.folder_error_not_found());
 		expect(folderErrorMessage('folder.not_a_folder')).toBe(m.folder_error_not_a_folder());
-		expect(folderErrorMessage('folder.network')).toBe(m.folder_error_network());
+		expect(folderErrorMessage('folder.network')).toContain('\\\\');
 	});
 
 	it('符号でなければ、受け取った文字列をそのまま出す', () => {

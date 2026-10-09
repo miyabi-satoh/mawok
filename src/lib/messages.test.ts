@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import ja from '../../messages/ja.json';
+import en from '../../messages/en.json';
 
 /** 単位として数の後に来る語。プレースホルダーは名前で数かどうかを決めず、後ろの語で見る */
 const UNIT = '(?:秒|分|時間|日|週|か月|年|件|回|文字|行|個|つ|[KMGT]B)';
@@ -22,5 +23,15 @@ describe('日本語の文言', () => {
 		const manual = readFileSync(new URL('../../docs/manual/ja.md', import.meta.url), 'utf8');
 		const breakable = manual.split('\n').filter((line) => BREAKABLE_NUMBER_UNIT.test(line));
 		expect(breakable).toEqual([]);
+	});
+});
+
+describe('文言の書き方', () => {
+	// Paraglide はテンプレートリテラルに書き出すときに \ を写さず、画面では1つ減る。要る所は引数で渡す（$lib/folder-errors）
+	it('文言に \\ を書かない', () => {
+		const withBackslash = [...Object.entries(ja), ...Object.entries(en)]
+			.filter(([key, value]) => key !== '$schema' && String(value).includes('\\'))
+			.map(([key]) => key);
+		expect(withBackslash).toEqual([]);
 	});
 });

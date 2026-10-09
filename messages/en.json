@@ -294,7 +294,7 @@
 	"folder_input": "Folder path",
 	"folder_error_not_found": "Couldn't find the folder.",
 	"folder_error_not_a_folder": "Not a folder.",
-	"folder_error_network": "Commands can't run in a network path (one that starts with \\\\). Use a path with a mapped drive letter.",
+	"folder_error_network": "Commands can't run in a network path (one that starts with {prefix}). Use a path with a mapped drive letter.",
 	"actions_list": "Actions",
 	"actions_empty": "No actions yet. Add them under Actions in Settings ({settings}).",
 	"actions_empty_no_key": "No actions yet. Add them under Actions in Settings.",
