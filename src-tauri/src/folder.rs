@@ -159,13 +159,13 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
         },
         _ => FolderCompletion {
             input: format!("{folder_part}{}", completed_part(&names, prefix)),
-            base: folder_part.to_string(),
             total: names.len() as u32,
             candidates: names
                 .into_iter()
                 .take(CANDIDATE_LIMIT)
                 .map(|name| format!("{name}{SEPARATOR}"))
                 .collect(),
+            ..unchanged()
         },
     }
 }

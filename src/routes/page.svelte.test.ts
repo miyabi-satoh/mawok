@@ -2382,6 +2382,13 @@ describe('作業フォルダー', () => {
 
 		await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
 		await expect.element(input).toHaveValue('~/notes/Downloads/');
+		await userEvent.keyboard('{Escape}{Escape}');
+		// 選んでいなければ、一覧だけを閉じて打ったパスを残す
+		await expect.element(screen.getByRole('listbox')).not.toBeInTheDocument();
+		await expect.element(input).toHaveValue('~/notes/Do');
+		await expect.element(screen.getByRole('dialog')).toBeInTheDocument();
+		await userEvent.keyboard('{Backspace}{Backspace}d{Tab}{Tab}{Shift>}{Tab}{/Shift}');
+		await expect.element(input).toHaveValue('~/notes/Downloads/');
 		await userEvent.keyboard('{Enter}');
 		await expect.element(input).toHaveValue('~/notes/Downloads/');
 		await expect.element(screen.getByRole('listbox')).not.toBeInTheDocument();

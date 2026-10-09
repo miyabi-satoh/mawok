@@ -85,7 +85,8 @@
 		edits += 1;
 		const requested = edits;
 		suggestion = '';
-		const completion = await oncomplete(input);
+		const typed = input;
+		const completion = await oncomplete(typed);
 		if (!completion || edits !== requested) return;
 		input = completion.input;
 		error = '';
@@ -93,7 +94,8 @@
 		total = completion.total;
 		base = completion.base;
 		await moveCaretToEnd();
-		if (candidates.length === 0) void suggest();
+		// 補えたときだけ、補った先の続きを探す。補えなければ、同じパスを問い合わせ直すことになる
+		if (candidates.length === 0 && input !== typed) void suggest();
 	}
 
 	/** 並んでいる候補を、順に選んで欄に入れる */
@@ -155,7 +157,9 @@
 			void acceptSuggestion();
 		} else if (event.key === 'Escape') {
 			event.preventDefault();
+			// 選んでいれば選ぶ前に、候補が並んでいれば一覧を閉じるだけにし、打ったパスを残す
 			if (selected >= 0) cancelMenu();
+			else if (candidates.length > 0) clearCandidates();
 			else onclose();
 		} else if (event.key === 'Enter') {
 			event.preventDefault();
@@ -164,9 +168,13 @@
 		}
 	}
 
-	/** カーソルを動かして末尾から離れたら、続きを消す */
+	const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
+
+	/** カーソルを動かして末尾から離れたら続きを消し、末尾に戻ったら出し直す */
 	function onCaretMove() {
-		if (suggestion && inputElement?.selectionStart !== input.length) suggestion = '';
+		const atEnd = inputElement?.selectionStart === input.length;
+		if (!atEnd) suggestion = '';
+		else if (!suggestion && candidates.length === 0) void suggest();
 	}
 </script>
 
@@ -182,7 +190,7 @@
 				role="combobox"
 				aria-label={m.folder_input()}
 				aria-expanded={candidates.length > 0}
-				aria-controls="folder-candidates"
+				aria-controls={candidates.length > 0 ? 'folder-candidates' : undefined}
 				aria-autocomplete="both"
 				aria-activedescendant={selected >= 0 ? `folder-candidate-${selected}` : undefined}
 				aria-invalid={error ? 'true' : undefined}
@@ -199,7 +207,9 @@
 				}}
 				oncompositionend={() => void suggest()}
 				onkeydown={onKeydown}
-				onkeyup={onCaretMove}
+				onkeyup={(event) => {
+					if (CARET_KEYS.has(event.key)) onCaretMove();
+				}}
 				onpointerup={onCaretMove}
 				bind:this={inputElement}
 				{@attach (element) => {
