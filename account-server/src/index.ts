@@ -10,7 +10,14 @@
 import { Hono, type Context } from 'hono';
 import { csrf } from 'hono/csrf';
 import { parsePrompt, relay } from './ai';
-import { balance, charge, grantFreeStatement, grantProStatement, proOf } from './credits';
+import {
+	balance,
+	charge,
+	grantFreeStatement,
+	grantProStatement,
+	proOf,
+	proUntilSql
+} from './credits';
 import { messages, resolveLang, type Lang } from './i18n';
 import { pricing } from './pricing';
 import { sendMail } from './mail';
@@ -367,7 +374,7 @@ async function handleStripeEvent(
 					 WHERE ?2 IS NOT NULL AND ?6 != 'canceled' AND ${revokedPayment.replace('?', '?8')} IS NULL
 					   AND (?10 = 1 OR NOT EXISTS (
 					     SELECT 1 FROM subscriptions
-					     WHERE account_id = ?2 AND id != ?1 AND revoked_at IS NULL AND paid_through > ?7
+					     WHERE account_id = ?2 AND id != ?1 AND revoked_at IS NULL AND ${proUntilSql} > ?7
 					   ))
 					 ON CONFLICT (id) DO UPDATE SET plan = excluded.plan, stripe_customer_id = excluded.stripe_customer_id,
 					 paid_through = max(subscriptions.paid_through, excluded.paid_through), status = excluded.status
@@ -421,25 +428,22 @@ async function handleStripeEvent(
 							)
 						])
 			]);
+			const revoked =
+				paid.paymentIntentId &&
+				(await env.DB.prepare('SELECT 1 FROM stripe_revoked_payments WHERE payment_intent_id = ?')
+					.bind(paid.paymentIntentId)
+					.first());
 			const duplicate =
-				!knownSubscription && account
+				!knownSubscription && account && paid.subscription.status !== 'canceled' && !revoked
 					? await env.DB.prepare(
 							`SELECT 1 FROM subscriptions
-							 WHERE account_id = ? AND id != ? AND revoked_at IS NULL AND paid_through > ?`
+							 WHERE account_id = ? AND id != ? AND revoked_at IS NULL AND ${proUntilSql} > ?`
 						)
 							.bind(account.id, paid.subscription.id, t)
 							.first()
 					: null;
 			// 返金・不審請求が先に届いていたときは、期間を延ばさず Stripe 側も打ち切る。
-			if (
-				!account ||
-				duplicate ||
-				(paid.paymentIntentId &&
-					(await env.DB.prepare('SELECT 1 FROM stripe_revoked_payments WHERE payment_intent_id = ?')
-						.bind(paid.paymentIntentId)
-						.first()))
-			)
-				await cancelSubscription(config, paid.subscription.id);
+			if (!account || duplicate || revoked) await cancelSubscription(config, paid.subscription.id);
 			if (duplicate) {
 				await reportProInvoiceProblem(
 					env,

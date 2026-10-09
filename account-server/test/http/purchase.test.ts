@@ -430,6 +430,68 @@ describe('buying credit', () => {
 		vi.restoreAllMocks();
 	});
 
+	it('accepts a new Pro subscription after the earlier one ended at cancel_at', async () => {
+		await signIn('resubscribe-after-cancel@example.com');
+		const account = await accountId('resubscribe-after-cancel@example.com');
+		const first = proInvoiceApi(account, { cancelAt: 1 });
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account);
+		await webhook(paidInvoice(second.invoiceId));
+		expect(
+			await env.DB.prepare('SELECT account_id FROM subscriptions WHERE id = ?')
+				.bind(second.subscriptionId)
+				.first()
+		).toEqual({ account_id: account });
+		expect(
+			second.stripe.mock.calls.some(
+				([url, init]) =>
+					String(url).endsWith(`/subscriptions/${second.subscriptionId}`) &&
+					init?.method === 'DELETE'
+			)
+		).toBe(false);
+		vi.restoreAllMocks();
+	});
+
+	it('does not report a duplicate when a Pro payment was revoked before its invoice', async () => {
+		await signIn('revoked-not-duplicate@example.com');
+		const account = await accountId('revoked-not-duplicate@example.com');
+		const first = proInvoiceApi(account);
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account);
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: second.paymentIntentId, refunded: true } }
+		});
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const event = paidInvoice(second.invoiceId);
+		await webhook(event);
+		expect(logged).not.toHaveBeenCalled();
+		expect(
+			await env.DB.prepare('SELECT status FROM stripe_events WHERE id = ?').bind(event.id).first()
+		).toEqual({ status: 'done' });
+		vi.restoreAllMocks();
+	});
+
+	it('does not report a duplicate when Stripe already canceled the later subscription', async () => {
+		await signIn('canceled-not-duplicate@example.com');
+		const account = await accountId('canceled-not-duplicate@example.com');
+		const first = proInvoiceApi(account);
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account, { status: 'canceled' });
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const event = paidInvoice(second.invoiceId);
+		await webhook(event);
+		expect(logged).not.toHaveBeenCalled();
+		expect(
+			await env.DB.prepare('SELECT status FROM stripe_events WHERE id = ?').bind(event.id).first()
+		).toEqual({ status: 'done' });
+		vi.restoreAllMocks();
+	});
+
 	it('expires the open checkout before switching between credit and Pro', async () => {
 		const { cookie } = await signIn('switch-checkout@example.com');
 		let created = 0;

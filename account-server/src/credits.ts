@@ -17,6 +17,13 @@ export type Pro = {
 /** アカウントの画面だけに出す、次の期間へ更新されるかどうかと表示する期限。 */
 export type AccountPro = Pro & { renews: boolean; displayUntil: number | null };
 
+/** `subscriptions` の Pro を使える期限。 */
+export const proUntilSql = 'min(coalesce(cancel_at, paid_through), paid_through)';
+
+function proUntil(paidThrough: number, cancelAt: number | null) {
+	return Math.min(cancelAt ?? paidThrough, paidThrough);
+}
+
 /**
  * 残りのある付与の、付けた量に対する残りの割合。金額や回数には直さない。
  * 買い足した直後に前の付与の残りがあると、両方を合わせた割合になる。
@@ -67,8 +74,8 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 		           AND product = 'mawok-pro' AND revoked_at IS NULL) AS paid
 		 FROM subscriptions
 		 WHERE account_id = ? AND revoked_at IS NULL
-		   AND min(coalesce(cancel_at, paid_through), paid_through) > ?
-		 ORDER BY min(coalesce(cancel_at, paid_through), paid_through) DESC LIMIT 1`
+		   AND ${proUntilSql} > ?
+		 ORDER BY ${proUntilSql} DESC LIMIT 1`
 	)
 		.bind(accountId, t)
 		.first<{
@@ -82,14 +89,14 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 	return row
 		? {
 				active: true,
-				until: Math.min(row.cancel_at ?? row.paid_through, row.paid_through),
+				until: proUntil(row.paid_through, row.cancel_at),
 				plan: row.plan,
 				trial: row.paid === 0,
 				renews:
 					row.status !== 'canceled' &&
 					row.cancel_at_period_end !== 1 &&
 					(row.cancel_at === null || row.cancel_at > row.paid_through),
-				displayUntil: Math.min(row.cancel_at ?? row.paid_through, row.paid_through)
+				displayUntil: proUntil(row.paid_through, row.cancel_at)
 			}
 		: { active: false, until: null, plan: null, trial: false, renews: false, displayUntil: null };
 }
