@@ -337,7 +337,8 @@ async function handleStripeEvent(
 					 WHERE ?2 IS NOT NULL AND ?6 != 'canceled' AND ${revokedPayment.replace('?', '?8')} IS NULL
 					 ON CONFLICT (id) DO UPDATE SET plan = excluded.plan, stripe_customer_id = excluded.stripe_customer_id,
 					 paid_through = max(subscriptions.paid_through, excluded.paid_through), status = excluded.status
-					 WHERE subscriptions.revoked_at IS NULL AND subscriptions.status != 'canceled'
+					 WHERE subscriptions.account_id IS NOT NULL AND subscriptions.revoked_at IS NULL
+					 AND subscriptions.status != 'canceled'
 					 AND ${revokedPayment.replace('?', '?9')} IS NULL`
 				).bind(
 					paid.subscription.id,
