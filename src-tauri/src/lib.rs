@@ -1590,7 +1590,7 @@ fn mawok_sign_in_pending(app: AppHandle) -> Option<MawokSignIn> {
         .map(|pending| pending.shown.clone())
 }
 
-/// 続いている申し込みを打ち切る（画面で「やめる」を押したとき）
+/// 続いている申し込みを打ち切る（画面で「キャンセル」を押したとき）
 #[tauri::command]
 fn cancel_mawok_sign_in(app: AppHandle) {
     let pending = app

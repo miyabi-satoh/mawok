@@ -113,7 +113,7 @@
 		if (!view || !target) return;
 		// IME が処理したキー（変換中の Esc など）は、変換の操作なので記録にも中止にも使わない
 		if (isImeKey(event)) return;
-		// 記録中に出る「既定に戻す」「外す」「キャンセル」へ、キーボードだけでも移って押せるようにする。
+		// 記録中に出る「既定に戻す」「割り当てを解除」「キャンセル」へ、キーボードだけでも移って押せるようにする。
 		// 修飾キーなしの Tab と、ボタンの上での Enter・Space は、記録できるキーではないので通す
 		const onButton = event.target instanceof Element && event.target.closest('button') !== null;
 		if (
@@ -478,7 +478,7 @@
 	</div>
 {/snippet}
 
-<!-- 記録中に出す「既定に戻す」「外す」。狭い窓でも行に収まるようアイコンにし、名前はツールチップと読み上げで出す -->
+<!-- 記録中に出す「既定に戻す」「割り当てを解除」。狭い窓でも行に収まるようアイコンにし、名前はツールチップと読み上げで出す -->
 {#snippet keyRecordingStatus(key: string, defaultKey: string, reset: () => void, clear: () => void)}
 	<!-- 狭い窓では、ボタンだけを次の行へ送らず、まとめて次の行の右端へ送る（置き場の側が flex-wrap と ml-auto を持つ） -->
 	<div class="flex items-center gap-1">
