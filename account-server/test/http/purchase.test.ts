@@ -4,6 +4,7 @@ import { costOf } from '../../src/ai';
 import { pricing } from '../../src/pricing';
 import {
 	accountId,
+	app,
 	buy,
 	completed,
 	geminiAnswers,
@@ -22,6 +23,576 @@ const { purchaseGrant: PURCHASE_GRANT } = pricing(env);
 
 // 支払いの画面へ送る中身と、知らせを信じてよいかの決まりは test/stripe.test.ts で確かめる。
 describe('buying credit', () => {
+	function proInvoiceApi(
+		account: string,
+		{
+			subscriptionId = `sub_${crypto.randomUUID()}`,
+			invoiceId = `in_${crypto.randomUUID()}`,
+			managedPayments = false,
+			buyerCountry = 'JP',
+			customerCountry = 'JP',
+			cardCountry = 'JP',
+			status = 'active',
+			price = 'price_pro_monthly',
+			cancelAtPeriodEnd = false,
+			cancelAt = null
+		}: {
+			subscriptionId?: string;
+			invoiceId?: string;
+			managedPayments?: boolean;
+			buyerCountry?: string;
+			customerCountry?: string | null;
+			cardCountry?: string | null;
+			status?: string;
+			price?: string;
+			cancelAtPeriodEnd?: boolean;
+			cancelAt?: number | null;
+		} = {}
+	) {
+		const paymentIntentId = `pi_${subscriptionId}`;
+		const stripe = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+			const path = new URL(String(url)).pathname;
+			if (path.endsWith(`/invoices/${invoiceId}`))
+				return Response.json({
+					id: invoiceId,
+					status: 'paid',
+					total: 480,
+					amount_paid: 480,
+					currency: 'jpy',
+					customer_details: { address: customerCountry ? { country: customerCountry } : null },
+					parent: { subscription_details: { subscription: subscriptionId } },
+					lines: {
+						has_more: false,
+						data: [
+							{
+								amount: 480,
+								currency: 'jpy',
+								quantity: 1,
+								period: { end: 2_000_000_000 },
+								pricing: { price_details: { price } },
+								discount_amounts: []
+							}
+						]
+					},
+					payments: {
+						has_more: false,
+						data: [
+							{
+								status: 'paid',
+								amount_paid: 480,
+								payment: {
+									type: 'payment_intent',
+									payment_intent: {
+										id: paymentIntentId,
+										latest_charge: cardCountry ? `ch_${subscriptionId}` : null
+									}
+								}
+							}
+						]
+					}
+				});
+			if (path.endsWith(`/subscriptions/${subscriptionId}`)) {
+				if (init?.method === 'DELETE') return Response.json({});
+				return Response.json({
+					id: subscriptionId,
+					status,
+					cancel_at_period_end: cancelAtPeriodEnd,
+					cancel_at: cancelAt,
+					customer: `cus_${subscriptionId}`,
+					metadata: {
+						product: 'mawok-pro',
+						account_id: account,
+						managed_payments: managedPayments ? '1' : '0',
+						buyer_country: buyerCountry
+					},
+					items: {
+						data: [
+							{
+								current_period_end: 2_000_000_000,
+								price: { id: price, currency: 'jpy' }
+							}
+						]
+					}
+				});
+			}
+			if (path.endsWith(`/charges/ch_${subscriptionId}`))
+				return Response.json({ payment_method_details: { card: { country: cardCountry } } });
+			throw new Error(`Unexpected Stripe request: ${path}`);
+		});
+		return { subscriptionId, invoiceId, paymentIntentId, stripe };
+	}
+
+	function paidInvoice(invoiceId: string) {
+		return {
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'invoice.paid',
+			data: { object: { id: invoiceId } }
+		};
+	}
+
+	it('shows a Pro trial confirmation for a selected plan', async () => {
+		const { cookie } = await signIn('pro-offer@example.com');
+		const confirmation = await (await request('/account/buy?plan=monthly', { cookie })).text();
+		expect(confirmation).toContain('Mawok Pro（月額）');
+		expect(confirmation).toContain('480 円/月（税込み）');
+		expect(confirmation).toContain('14 日間は無料');
+		expect(confirmation).toContain('解約と返金');
+		expect(confirmation).toContain('アカウントのページからいつでもできます');
+		expect(confirmation).toContain('支払い済みの期間の終わりまで Pro を使えます');
+		expect(confirmation.indexOf('解約と返金')).toBeLessThan(
+			confirmation.indexOf('申し込みを確定して支払いへ')
+		);
+		expect(confirmation).toMatch(/name="plan"\s+value="monthly"/);
+	});
+
+	it('shows the trial charge date, then renewal or cancellation on the account page', async () => {
+		const { cookie } = await signIn('pro-status@example.com');
+		const account = await accountId('pro-status@example.com');
+		await env.DB.prepare(
+			`INSERT INTO subscriptions
+			 (id, account_id, plan, stripe_customer_id, paid_through, status, cancel_at_period_end, created_at)
+			 VALUES ('sub_pro_status', ?, 'monthly', 'cus_pro_status', 4_102_444_800, 'trialing', 0, 0)`
+		)
+			.bind(account)
+			.run();
+		let page = await (await request('/account/', { cookie })).text();
+		expect(page).toContain('から課金が始まります');
+		expect(page).toContain('「支払いを管理する」から解約');
+		await env.DB.prepare('UPDATE subscriptions SET cancel_at_period_end = 1 WHERE id = ?')
+			.bind('sub_pro_status')
+			.run();
+		page = await (await request('/account/', { cookie })).text();
+		expect(page).toContain('試用は');
+		expect(page).toContain('課金はされません');
+		await env.DB.prepare('UPDATE subscriptions SET cancel_at_period_end = 0 WHERE id = ?')
+			.bind('sub_pro_status')
+			.run();
+		await env.DB.prepare(
+			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
+			 VALUES ('purchase_pro_status', ?, 'mawok-pro', 'invoice:pro-status', 'pi_pro_status',
+			 480, 'jpy', 0, 1, 'sub_pro_status', 0)`
+		)
+			.bind(account)
+			.run();
+		page = await (await request('/account/', { cookie })).text();
+		expect(page).toContain('に自動で更新されます');
+		await env.DB.prepare('UPDATE subscriptions SET cancel_at_period_end = 1 WHERE id = ?')
+			.bind('sub_pro_status')
+			.run();
+		page = await (await request('/account/', { cookie })).text();
+		expect(page).toContain('まで使えます（更新されません）');
+		await env.DB.prepare(
+			'UPDATE subscriptions SET cancel_at_period_end = 0, status = ? WHERE id = ?'
+		)
+			.bind('canceled', 'sub_pro_status')
+			.run();
+		page = await (await request('/account/', { cookie })).text();
+		expect(page).toContain('まで使えます（更新されません）');
+	});
+
+	it('shows cancel_at instead of the paid-through date when Stripe set it', async () => {
+		const { cookie } = await signIn('pro-cancel-at@example.com');
+		const account = await accountId('pro-cancel-at@example.com');
+		const cancelAt = Date.UTC(2099, 11, 15) / 1000;
+		await env.DB.prepare(
+			`INSERT INTO subscriptions
+			 (id, account_id, plan, paid_through, status, cancel_at_period_end, cancel_at, created_at)
+			 VALUES ('sub_pro_cancel_at', ?, 'monthly', 4_102_444_800, 'active', 1, ?, 0)`
+		)
+			.bind(account, cancelAt)
+			.run();
+		await env.DB.prepare(
+			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
+			 VALUES ('purchase_pro_cancel_at', ?, 'mawok-pro', 'invoice:cancel-at', 'pi_cancel_at',
+			 480, 'jpy', 0, 1, 'sub_pro_cancel_at', 0)`
+		)
+			.bind(account)
+			.run();
+		const page = await (await request('/account/', { cookie })).text();
+		const date = new Date(cancelAt * 1000).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+		expect(page).toContain(`${date} まで使えます（更新されません）`);
+	});
+
+	it('does not grant Pro credit from balance while the account is in its trial', async () => {
+		const { token } = await linkApp('pro-trial-credit@example.com');
+		const account = await accountId('pro-trial-credit@example.com');
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
+			 VALUES ('sub_pro_trial_credit', ?, 'monthly', 4_102_444_800, 'trialing', 0)`
+		)
+			.bind(account)
+			.run();
+		await app('/v1/balance', token);
+		expect(
+			await env.DB.prepare("SELECT 1 FROM grants WHERE account_id = ? AND kind = 'pro'")
+				.bind(account)
+				.first()
+		).toBeNull();
+		await env.DB.prepare(
+			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
+			 VALUES ('purchase_pro_trial_credit', ?, 'mawok-pro', 'invoice:trial-credit', 'pi_trial_credit',
+			 480, 'jpy', 0, 1, 'sub_pro_trial_credit', 0)`
+		)
+			.bind(account)
+			.run();
+		await app('/v1/balance', token);
+		expect(
+			await env.DB.prepare("SELECT 1 FROM grants WHERE account_id = ? AND kind = 'pro'")
+				.bind(account)
+				.first()
+		).not.toBeNull();
+	});
+
+	it('does not grant Pro credit from AI relay while the account is in its trial', async () => {
+		const { token } = await linkApp('pro-trial-relay@example.com');
+		const account = await accountId('pro-trial-relay@example.com');
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
+			 VALUES ('sub_pro_trial_relay', ?, 'monthly', 4_102_444_800, 'trialing', 0)`
+		)
+			.bind(account)
+			.run();
+		geminiAnswers();
+		expect((await sendAi(token)).status).toBe(200);
+		expect(
+			await env.DB.prepare("SELECT 1 FROM grants WHERE account_id = ? AND kind = 'pro'")
+				.bind(account)
+				.first()
+		).toBeNull();
+	});
+
+	it('keeps an overseas Pro invoice as a ledger entry but not a subscription after its account is deleted', async () => {
+		await signIn('gone-pro@example.com');
+		const account = await accountId('gone-pro@example.com');
+		await env.DB.prepare('DELETE FROM accounts WHERE id = ?').bind(account).run();
+		const { subscriptionId, invoiceId, stripe } = proInvoiceApi(account, {
+			managedPayments: true,
+			buyerCountry: 'US',
+			customerCountry: 'US',
+			cardCountry: null
+		});
+		expect((await webhook(paidInvoice(invoiceId))).status).toBe(200);
+		expect(
+			await env.DB.prepare('SELECT 1 FROM subscriptions WHERE id = ?').bind(subscriptionId).first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare(
+				`SELECT account_id, managed_payments, card_country, buyer_country, domestic
+				 FROM purchases WHERE stripe_subscription_id = ?`
+			)
+				.bind(subscriptionId)
+				.first()
+		).toEqual({
+			account_id: null,
+			managed_payments: 1,
+			card_country: null,
+			buyer_country: 'US',
+			domestic: 0
+		});
+		expect(
+			stripe.mock.calls.some(
+				([url, init]) =>
+					String(url).endsWith(`/subscriptions/${subscriptionId}`) && init?.method === 'DELETE'
+			)
+		).toBe(true);
+	});
+
+	it('takes back this month’s remaining Pro credit with a refunded Pro payment', async () => {
+		await signIn('pro-credit-refund@example.com');
+		const account = await accountId('pro-credit-refund@example.com');
+		const { subscriptionId, invoiceId, paymentIntentId } = proInvoiceApi(account);
+		await webhook(paidInvoice(invoiceId));
+		await env.DB.prepare(
+			`INSERT INTO grants (id, account_id, kind, granted, remaining, expires_at, created_at)
+			 VALUES ('grant_pro_refund', ?, 'pro', 100, 100, 4_102_444_800, 0)`
+		)
+			.bind(account)
+			.run();
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: paymentIntentId, refunded: true } }
+		});
+		expect(
+			await env.DB.prepare('SELECT remaining, revoked FROM grants WHERE id = ?')
+				.bind('grant_pro_refund')
+				.first()
+		).toEqual({ remaining: 0, revoked: 100 });
+		expect(
+			await env.DB.prepare('SELECT revoked_at FROM subscriptions WHERE id = ?')
+				.bind(subscriptionId)
+				.first<{ revoked_at: number | null }>()
+		).toMatchObject({ revoked_at: expect.any(Number) });
+	});
+
+	it('keeps Pro credit when a credit purchase is refunded', async () => {
+		await signIn('credit-refund-keeps-pro@example.com');
+		const account = await accountId('credit-refund-keeps-pro@example.com');
+		await buy(account, 'cs_credit_refund_keeps_pro');
+		await env.DB.prepare(
+			`INSERT INTO grants (id, account_id, kind, granted, remaining, expires_at, created_at)
+			 VALUES ('grant_pro_kept', ?, 'pro', 100, 100, 4_102_444_800, 0)`
+		)
+			.bind(account)
+			.run();
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: 'pi_cs_credit_refund_keeps_pro', refunded: true } }
+		});
+		expect(
+			await env.DB.prepare('SELECT remaining, revoked FROM grants WHERE id = ?')
+				.bind('grant_pro_kept')
+				.first()
+		).toEqual({ remaining: 100, revoked: 0 });
+	});
+
+	it('records an unaccepted Pro invoice as failed and reports it to the operator log', async () => {
+		await signIn('bad-pro-invoice@example.com');
+		const account = await accountId('bad-pro-invoice@example.com');
+		const { invoiceId } = proInvoiceApi(account, { price: 'price_not_pro' });
+		const event = paidInvoice(invoiceId);
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		expect((await webhook(event)).status).toBe(200);
+		expect(
+			await env.DB.prepare('SELECT status FROM stripe_events WHERE id = ?').bind(event.id).first()
+		).toEqual({ status: 'failed' });
+		expect(logged).toHaveBeenCalledWith(
+			expect.stringContaining('請求書で Pro を付けられませんでした')
+		);
+	});
+
+	it('records both Stripe cancellation markers in subscription updates', async () => {
+		await signIn('pro-cancel-at-period-end@example.com');
+		const account = await accountId('pro-cancel-at-period-end@example.com');
+		const first = proInvoiceApi(account, { cancelAt: 1_999_999_999 });
+		await webhook(paidInvoice(first.invoiceId));
+		expect(
+			await env.DB.prepare('SELECT cancel_at_period_end, cancel_at FROM subscriptions WHERE id = ?')
+				.bind(first.subscriptionId)
+				.first()
+		).toEqual({ cancel_at_period_end: 0, cancel_at: 1_999_999_999 });
+		vi.restoreAllMocks();
+		proInvoiceApi(account, {
+			subscriptionId: first.subscriptionId,
+			cancelAt: 2_000_000_000
+		});
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'customer.subscription.updated',
+			data: { object: { id: first.subscriptionId } }
+		});
+		expect(
+			await env.DB.prepare('SELECT cancel_at_period_end, cancel_at FROM subscriptions WHERE id = ?')
+				.bind(first.subscriptionId)
+				.first()
+		).toEqual({ cancel_at_period_end: 0, cancel_at: 2_000_000_000 });
+	});
+
+	it('cancels and reports a second active Pro subscription while retaining its ledger entry', async () => {
+		await signIn('duplicate-pro@example.com');
+		const account = await accountId('duplicate-pro@example.com');
+		const first = proInvoiceApi(account);
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account);
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const event = paidInvoice(second.invoiceId);
+		expect((await webhook(event)).status).toBe(200);
+		expect(
+			await env.DB.prepare('SELECT 1 FROM subscriptions WHERE id = ?')
+				.bind(second.subscriptionId)
+				.first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare(
+				'SELECT account_id, revoked_at FROM purchases WHERE stripe_subscription_id = ?'
+			)
+				.bind(second.subscriptionId)
+				.first()
+		).toEqual({ account_id: account, revoked_at: null });
+		expect(
+			second.stripe.mock.calls.some(
+				([url, init]) =>
+					String(url).endsWith(`/subscriptions/${second.subscriptionId}`) &&
+					init?.method === 'DELETE'
+			)
+		).toBe(true);
+		expect(
+			await env.DB.prepare('SELECT status FROM stripe_events WHERE id = ?').bind(event.id).first()
+		).toEqual({ status: 'failed' });
+		expect(logged).toHaveBeenCalledWith(
+			expect.stringContaining('まだ有効な別の Pro のサブスクがあります')
+		);
+		vi.restoreAllMocks();
+	});
+
+	it('accepts a new Pro subscription after the earlier one ended at cancel_at', async () => {
+		await signIn('resubscribe-after-cancel@example.com');
+		const account = await accountId('resubscribe-after-cancel@example.com');
+		const first = proInvoiceApi(account, { cancelAt: 1 });
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account);
+		await webhook(paidInvoice(second.invoiceId));
+		expect(
+			await env.DB.prepare('SELECT account_id FROM subscriptions WHERE id = ?')
+				.bind(second.subscriptionId)
+				.first()
+		).toEqual({ account_id: account });
+		expect(
+			second.stripe.mock.calls.some(
+				([url, init]) =>
+					String(url).endsWith(`/subscriptions/${second.subscriptionId}`) &&
+					init?.method === 'DELETE'
+			)
+		).toBe(false);
+		vi.restoreAllMocks();
+	});
+
+	it('does not report a duplicate when a Pro payment was revoked before its invoice', async () => {
+		await signIn('revoked-not-duplicate@example.com');
+		const account = await accountId('revoked-not-duplicate@example.com');
+		const first = proInvoiceApi(account);
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account);
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: second.paymentIntentId, refunded: true } }
+		});
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const event = paidInvoice(second.invoiceId);
+		await webhook(event);
+		expect(logged).not.toHaveBeenCalled();
+		expect(
+			await env.DB.prepare('SELECT status FROM stripe_events WHERE id = ?').bind(event.id).first()
+		).toEqual({ status: 'done' });
+		vi.restoreAllMocks();
+	});
+
+	it('does not report a duplicate when Stripe already canceled the later subscription', async () => {
+		await signIn('canceled-not-duplicate@example.com');
+		const account = await accountId('canceled-not-duplicate@example.com');
+		const first = proInvoiceApi(account);
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account, { status: 'canceled' });
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const event = paidInvoice(second.invoiceId);
+		await webhook(event);
+		expect(logged).not.toHaveBeenCalled();
+		expect(
+			await env.DB.prepare('SELECT status FROM stripe_events WHERE id = ?').bind(event.id).first()
+		).toEqual({ status: 'done' });
+		vi.restoreAllMocks();
+	});
+
+	it('expires the open checkout before switching between credit and Pro', async () => {
+		const { cookie } = await signIn('switch-checkout@example.com');
+		let created = 0;
+		const stripe = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+			if (String(url).endsWith('/expire')) return Response.json({});
+			created += 1;
+			return Response.json({
+				id: `cs_switch_${created}`,
+				url: `https://checkout.stripe.test/${created}`
+			});
+		});
+		await postForm('/account/buy', { next: '/account/' }, cookie);
+		await postForm('/account/buy', { next: '/account/', plan: 'monthly' }, cookie);
+		await postForm('/account/buy', { next: '/account/' }, cookie);
+		const expired = stripe.mock.calls
+			.filter(([url]) => String(url).endsWith('/expire'))
+			.map(([url]) => String(url));
+		expect(expired).toEqual([
+			'https://api.stripe.com/v1/checkout/sessions/cs_switch_1/expire',
+			'https://api.stripe.com/v1/checkout/sessions/cs_switch_2/expire'
+		]);
+	});
+
+	it('replaces the checkout reservation when expiring its Stripe session fails', async () => {
+		const { cookie } = await signIn('replace-broken-checkout@example.com');
+		let created = 0;
+		let expirations = 0;
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+			if (String(url).endsWith('/expire')) {
+				expirations += 1;
+				if (expirations === 1) return new Response('temporary failure', { status: 500 });
+				throw new TypeError('network failure');
+			}
+			created += 1;
+			return Response.json({
+				id: `cs_replace_${created}`,
+				url: `https://checkout.stripe.test/replace/${created}`
+			});
+		});
+		await postForm('/account/buy', { next: '/account/' }, cookie);
+		expect(
+			(await postForm('/account/buy', { next: '/account/', plan: 'monthly' }, cookie)).status
+		).toBe(303);
+		expect(
+			(await postForm('/account/buy', { next: '/account/', plan: 'yearly' }, cookie)).status
+		).toBe(303);
+		expect(logged).toHaveBeenCalledTimes(2);
+		expect(
+			await env.DB.prepare('SELECT price, session_id FROM checkouts WHERE account_id = ?')
+				.bind(await accountId('replace-broken-checkout@example.com'))
+				.first()
+		).toEqual({ price: 'yearly', session_id: 'cs_replace_3' });
+		logged.mockRestore();
+	});
+
+	it('does not grant or extend Pro for a payment revoked before its invoice, and cancels it', async () => {
+		await signIn('revoked-pro@example.com');
+		const account = await accountId('revoked-pro@example.com');
+		const { subscriptionId, invoiceId, paymentIntentId, stripe } = proInvoiceApi(account);
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: paymentIntentId, refunded: true } }
+		});
+		expect((await webhook(paidInvoice(invoiceId))).status).toBe(200);
+		expect(
+			await env.DB.prepare('SELECT 1 FROM subscriptions WHERE id = ?').bind(subscriptionId).first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare('SELECT revoked_at FROM purchases WHERE stripe_subscription_id = ?')
+				.bind(subscriptionId)
+				.first<{ revoked_at: number | null }>()
+		).toMatchObject({ revoked_at: expect.any(Number) });
+		expect(
+			stripe.mock.calls.some(
+				([url, init]) =>
+					String(url).endsWith(`/subscriptions/${subscriptionId}`) && init?.method === 'DELETE'
+			)
+		).toBe(true);
+	});
+
+	it('never restores a canceled Pro subscription from a late paid invoice', async () => {
+		await signIn('canceled-pro@example.com');
+		const account = await accountId('canceled-pro@example.com');
+		const subscriptionId = `sub_${crypto.randomUUID()}`;
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
+			 VALUES (?, ?, 'monthly', 1, 'canceled', 0)`
+		)
+			.bind(subscriptionId, account)
+			.run();
+		const { invoiceId } = proInvoiceApi(account, { subscriptionId });
+		await webhook(paidInvoice(invoiceId));
+		expect(
+			await env.DB.prepare('SELECT status, paid_through FROM subscriptions WHERE id = ?')
+				.bind(subscriptionId)
+				.first()
+		).toEqual({ status: 'canceled', paid_through: 1 });
+	});
+
 	async function ledgerOf(account: string) {
 		return env.DB.prepare(
 			`SELECT managed_payments, card_country, buyer_country, domestic, amount, currency FROM purchases

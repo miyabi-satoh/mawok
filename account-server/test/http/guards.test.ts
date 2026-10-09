@@ -134,6 +134,11 @@ const ENTRIES: Entry[] = [
 		guards: ['csrf', 'session-401'],
 		send: form('/account/buy', { next: '/account/' })
 	},
+	{
+		route: 'POST /account/billing',
+		guards: ['csrf', 'session-401'],
+		send: form('/account/billing', {})
+	},
 	{ route: 'GET /account/buy', guards: ['session-page'], send: get('/account/buy') },
 	{
 		route: 'GET /account/buy/done',

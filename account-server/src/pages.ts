@@ -1,7 +1,7 @@
 import { html } from 'hono/html';
 import type { HtmlEscapedString } from 'hono/utils/html';
 import { messages, type Lang } from './i18n';
-import type { Balance } from './credits';
+import type { AccountPro, Balance } from './credits';
 import { ACCOUNT, ACCOUNT_HOME, PRICING_PATH, PURCHASE_CONDITIONS } from './util';
 
 /** 規約類の置き場。利用規約とプライバシーポリシーは同じ Worker の静的アセットで出す (→ docs/account-server.md「作り」)。
@@ -409,6 +409,48 @@ export function confirmPage(lang: Lang, email: string, region: SaleRegion) {
 	);
 }
 
+/** Pro の支払いの直前の最終確認画面。 */
+export function proConfirmPage(
+	lang: Lang,
+	email: string,
+	plan: 'monthly' | 'yearly',
+	region: SaleRegion,
+	{ trial }: { trial: boolean }
+) {
+	const t = messages[lang];
+	const rows: [string, string][] = [
+		[t.confirmItemLabel, t.proItem(plan)],
+		[t.confirmPriceLabel, t.proPrice(plan)],
+		[t.confirmPaymentLabel, t.proPayment[region]],
+		[t.confirmDeliveryLabel, t.proDelivery],
+		[t.proCancelLabel, t.proCancel[region](LEGAL_PAGES.tokushoho)]
+	];
+	return page(
+		lang,
+		t.proTitle,
+		html`<h1>${t.confirmTitle}</h1>
+			<dl class="order">
+				${rows.map(
+					([label, value]) =>
+						html`<dt>${label}</dt>
+							<dd>${withLinks(value)}</dd>`
+				)}
+			</dl>
+			${trial ? html`<p>${t.proTrial}</p>` : ''}
+			<form method="post" action="${ACCOUNT}/buy">
+				<p class="muted">${withLegalLinks(lang, t.buyConsent)}</p>
+				<input type="hidden" name="next" value="${ACCOUNT_HOME}" /><input
+					type="hidden"
+					name="plan"
+					value="${plan}"
+				/>
+				<button>${t.confirmButton}</button>
+			</form>
+			<p><a href="${PRICING_PATH}">${t.backToPricing}</a></p>
+			${signedInAs(lang, email, `${ACCOUNT}/buy?plan=${plan}`)}`
+	);
+}
+
 /** Mawok が申し込みに付けた値。 */
 export type LinkRequest = { port: number; state: string; challenge: string; name: string };
 
@@ -421,7 +463,11 @@ export function homePage(
 	balance: Balance,
 	apps: LinkedApp[],
 	region: SaleRegion | undefined,
-	{ bought = false }: { bought?: boolean } = {}
+	{
+		bought = false,
+		pro,
+		billing = false
+	}: { bought?: boolean; pro?: AccountPro; billing?: boolean } = {}
 ) {
 	const t = messages[lang];
 	const date = (seconds: number) =>
@@ -435,6 +481,25 @@ export function homePage(
 			${bought ? html`<p role="status">${t.bought}</p>` : ''}
 			<p>${balance.remaining > 0 ? t.balance(balance.percent) : t.noBalance}</p>
 			${region ? html`<p><a class="action" href="${PRICING_PATH}">${t.buyTitle}</a></p>` : ''}
+			<h2>${t.proTitle}</h2>
+			${
+				pro?.active
+					? html`<p>
+								${
+									!pro.renews
+										? pro.trial
+											? t.proTrialCanceledUntil(date(pro.displayUntil!))
+											: t.proCanceledUntil(pro.plan!, date(pro.displayUntil!))
+										: pro.trial
+											? t.proTrialUntil(date(pro.until!))
+											: t.proUntil(pro.plan!, date(pro.until!))
+								}
+							</p>
+							${billing ? html`<form method="post" action="${ACCOUNT}/billing"><button class="secondary">${t.manageBilling}</button></form>` : ''}`
+					: region
+						? html`<p><a class="action" href="${PRICING_PATH}">${t.proSubscribe}</a></p>`
+						: html`<p>${t.proUnavailable}</p>`
+			}
 			<h2>${t.appsTitle}</h2>
 			${
 				apps.length === 0

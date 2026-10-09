@@ -19,11 +19,15 @@ export class StripeError extends Error {
 	}
 }
 
+/** Pro の請求書だが、Price や支払い方が窓口で受け付けられる形でない。 */
+export class ProInvoiceError extends Error {}
+
 export type StripeConfig = {
 	secretKey: string;
 	webhookSecret: string;
 	creditsPriceId: string;
 	taxRateId: string;
+	proPrices?: Record<'monthly' | 'yearly', string>;
 };
 
 /** 秘密の値が3つと税率がそろったときだけ売る。手元で動かすときは無くてよい。 */
@@ -46,8 +50,19 @@ export function stripeConfig(env: Env): StripeConfig | undefined {
 		secretKey: STRIPE_SECRET_KEY,
 		webhookSecret: STRIPE_WEBHOOK_SECRET,
 		creditsPriceId: STRIPE_AI_CREDITS_PRICE_ID,
-		taxRateId: STRIPE_TAX_RATE_ID
+		taxRateId: STRIPE_TAX_RATE_ID,
+		proPrices:
+			env.STRIPE_PRO_MONTHLY_PRICE_ID && env.STRIPE_PRO_YEARLY_PRICE_ID
+				? { monthly: env.STRIPE_PRO_MONTHLY_PRICE_ID, yearly: env.STRIPE_PRO_YEARLY_PRICE_ID }
+				: undefined
 	};
+}
+
+/** 月額と年額の Price が両方あるときだけ Pro を売る。 */
+export function proForSale(
+	config: StripeConfig
+): config is StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> } {
+	return config.proPrices !== undefined;
 }
 
 /**
@@ -98,7 +113,7 @@ export async function createCheckoutSession(
 		buyerCountry?: string;
 		idempotencyKey: string;
 	}
-): Promise<{ url: string }> {
+): Promise<{ id: string; url: string }> {
 	const params = new URLSearchParams({
 		mode: 'payment',
 		'line_items[0][price]': config.creditsPriceId,
@@ -144,7 +159,271 @@ export async function createCheckoutSession(
 		body: params
 	});
 	if (!res.ok) throw new StripeError(res.status, await res.text());
-	return res.json<{ url: string }>();
+	return res.json<{ id: string; url: string }>();
+}
+
+/** Pro の Checkout Session。試用を受けたことがあるアカウントには試用を渡さない。 */
+export async function createProCheckoutSession(
+	config: StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> },
+	{
+		accountId,
+		email,
+		plan,
+		lang,
+		successUrl,
+		cancelUrl,
+		expiresAt,
+		submitMessage,
+		managedPayments,
+		buyerCountry,
+		trial,
+		idempotencyKey
+	}: {
+		accountId: string;
+		email: string;
+		plan: 'monthly' | 'yearly';
+		lang: string;
+		successUrl: string;
+		cancelUrl: string;
+		expiresAt: number;
+		submitMessage?: string;
+		managedPayments: boolean;
+		/** Checkout を開いたときのアクセス元の国。請求書の台帳へ残す。 */
+		buyerCountry?: string;
+		trial: boolean;
+		idempotencyKey: string;
+	}
+): Promise<{ id: string; url: string }> {
+	const params = new URLSearchParams({
+		mode: 'subscription',
+		'line_items[0][price]': config.proPrices[plan],
+		'line_items[0][quantity]': '1',
+		client_reference_id: accountId,
+		'metadata[product]': 'mawok-pro',
+		'subscription_data[metadata][product]': 'mawok-pro',
+		'subscription_data[metadata][account_id]': accountId,
+		'subscription_data[metadata][managed_payments]': managedPayments ? '1' : '0',
+		locale: lang,
+		success_url: successUrl,
+		cancel_url: cancelUrl,
+		expires_at: String(expiresAt),
+		'managed_payments[enabled]': String(managedPayments)
+	});
+	if (buyerCountry) params.set('subscription_data[metadata][buyer_country]', buyerCountry);
+	if (trial) params.set('subscription_data[trial_period_days]', '14');
+	if (!managedPayments) {
+		params.set('payment_method_types[0]', 'card');
+		params.set('line_items[0][tax_rates][0]', config.taxRateId);
+	}
+	if (!APPLE_RELAY_DOMAINS.some((domain) => email.endsWith(`@${domain}`)))
+		params.set('customer_email', email);
+	if (submitMessage) params.set('custom_text[submit][message]', submitMessage);
+	const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+		method: 'POST',
+		headers: { authorization: `Bearer ${config.secretKey}`, 'idempotency-key': idempotencyKey },
+		body: params
+	});
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	return res.json<{ id: string; url: string }>();
+}
+
+/** 開いている支払い画面を閉じる。別の払い方で押し直して二重に払わせないため。 */
+export async function expireCheckoutSession(config: StripeConfig, sessionId: string) {
+	try {
+		const res = await fetch(
+			`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`,
+			{ method: 'POST', headers: { authorization: `Bearer ${config.secretKey}` } }
+		);
+		// 既に払い終えた・閉じた画面は Stripe が 400/404 にする。5xx でも古い予約は捨て、期限で閉じる Stripe 側には任せる。
+		if (!res.ok && res.status !== 400 && res.status !== 404)
+			console.error('failed to expire Checkout Session', sessionId, res.status);
+	} catch (e) {
+		console.error('failed to expire Checkout Session', sessionId, e);
+	}
+}
+
+type StripeSubscription = {
+	id: string;
+	status: string;
+	customer: string;
+	metadata: Record<string, string> | null;
+	cancel_at_period_end?: boolean;
+	cancel_at?: number | null;
+	items: {
+		data: { current_period_end: number; price: { id: string; currency?: string | null } }[];
+	};
+};
+
+async function stripeGet<T>(
+	config: StripeConfig,
+	path: string,
+	query?: URLSearchParams
+): Promise<T> {
+	const res = await fetch(`https://api.stripe.com/v1/${path}${query ? `?${query}` : ''}`, {
+		headers: { authorization: `Bearer ${config.secretKey}` }
+	});
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	return res.json<T>();
+}
+
+/** Pro の目印を持つ、払われた請求書かだけを調べる。Price が未設定でも知らせるために使う。 */
+export async function isPaidProInvoice(config: StripeConfig, invoiceId: string): Promise<boolean> {
+	const invoice = await stripeGet<{
+		status: string;
+		parent: { subscription_details?: { subscription: string } | null } | null;
+	}>(
+		config,
+		`invoices/${encodeURIComponent(invoiceId)}`,
+		new URLSearchParams([['expand[]', 'parent.subscription_details']])
+	);
+	const subscriptionId = invoice.parent?.subscription_details?.subscription;
+	if (invoice.status !== 'paid' || !subscriptionId) return false;
+	return (await getSubscription(config, subscriptionId)).metadata?.product === 'mawok-pro';
+}
+
+export function getSubscription(config: StripeConfig, id: string) {
+	return stripeGet<StripeSubscription>(config, `subscriptions/${encodeURIComponent(id)}`);
+}
+
+/** 0 円の試用開始請求書も含め、Pro の請求書を取り直して確かめる。 */
+export async function confirmProInvoice(
+	config: StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> },
+	invoiceId: string
+) {
+	const invoice = await stripeGet<{
+		id: string;
+		status: string;
+		total: number;
+		amount_paid: number;
+		currency: string;
+		customer_details: { address: { country: string | null } | null } | null;
+		parent: { subscription_details?: { subscription: string } | null } | null;
+		lines: {
+			has_more: boolean;
+			data: {
+				amount: number;
+				currency: string;
+				quantity: number | null;
+				period: { end: number };
+				pricing: { price_details?: { price: string } } | null;
+				discount_amounts: { amount: number }[];
+			}[];
+		};
+		payments: {
+			has_more: boolean;
+			data: {
+				status: string;
+				amount_paid: number | null;
+				payment: {
+					type: string;
+					payment_intent?: { id: string; latest_charge: string | null };
+				};
+			}[];
+		};
+	}>(
+		config,
+		`invoices/${encodeURIComponent(invoiceId)}`,
+		new URLSearchParams([
+			['expand[]', 'payments.data.payment.payment_intent'],
+			['expand[]', 'parent.subscription_details']
+		])
+	);
+	const subscriptionId = invoice.parent?.subscription_details?.subscription;
+	if (invoice.status !== 'paid' || !subscriptionId) return undefined;
+	const sub = await getSubscription(config, subscriptionId);
+	if (sub.metadata?.product !== 'mawok-pro') return undefined;
+	const lines = invoice.lines.data;
+	// 試用開始の 0 円請求書も、通常の請求書と同じ Price の1項目として確かめる。
+	const charged = invoice.total === 0 ? lines : lines.filter((line) => line.amount > 0);
+	const line = charged[0];
+	const priceId = line?.pricing?.price_details?.price;
+	if (!line || !priceId || sub.items.data.length !== 1)
+		throw new ProInvoiceError('Pro の Price の項目が1つではありません。');
+	const plan =
+		priceId === config.proPrices.monthly
+			? 'monthly'
+			: priceId === config.proPrices.yearly
+				? 'yearly'
+				: undefined;
+	if (!plan) throw new ProInvoiceError('Pro の Price ではありません。');
+	const paid = invoice.payments.data.filter((payment) => payment.status === 'paid');
+	const intent = paid[0]?.payment.payment_intent;
+	const zeroInvoice = invoice.total === 0;
+	if (
+		invoice.lines.has_more ||
+		charged.length !== 1 ||
+		lines.length !== 1 ||
+		lines.some(
+			(item) =>
+				item.quantity !== 1 ||
+				item.currency !== invoice.currency ||
+				item.discount_amounts.some((discount) => discount.amount !== 0) ||
+				item.pricing?.price_details?.price !== priceId
+		) ||
+		sub.items.data[0].price.id !== priceId ||
+		(sub.items.data[0].price.currency !== undefined &&
+			sub.items.data[0].price.currency !== null &&
+			sub.items.data[0].price.currency !== invoice.currency) ||
+		lines.reduce((sum, item) => sum + item.amount, 0) !== invoice.total ||
+		invoice.amount_paid !== invoice.total ||
+		invoice.payments.has_more ||
+		(zeroInvoice
+			? paid.length > 1 || paid.some((payment) => payment.amount_paid !== 0)
+			: paid.length !== 1 ||
+				paid[0].payment.type !== 'payment_intent' ||
+				!intent ||
+				paid[0].amount_paid !== invoice.total)
+	) {
+		throw new ProInvoiceError(
+			'項目が Pro の Price の1つ (数量 1・値引き無し) でないか、Stripe で全額を1回で払ったものではありません。'
+		);
+	}
+	const charge = intent?.latest_charge
+		? await stripeGet<{ payment_method_details: { card?: { country: string | null } } | null }>(
+				config,
+				`charges/${encodeURIComponent(intent.latest_charge)}`
+			)
+		: null;
+	const cardCountry = charge?.payment_method_details?.card?.country ?? null;
+	const buyerCountry = sub.metadata?.buyer_country ?? null;
+	const country = invoice.customer_details?.address?.country || cardCountry || buyerCountry;
+	return {
+		invoiceId: invoice.id,
+		subscription: sub,
+		plan,
+		periodEnd: line.period.end,
+		amount: invoice.total,
+		currency: invoice.currency,
+		paymentIntentId: intent?.id ?? null,
+		managedPayments: sub.metadata?.managed_payments === '1',
+		cardCountry,
+		buyerCountry,
+		domestic: country === 'JP'
+	};
+}
+
+export async function cancelSubscription(config: StripeConfig, id: string) {
+	const res = await fetch(`https://api.stripe.com/v1/subscriptions/${encodeURIComponent(id)}`, {
+		method: 'DELETE',
+		headers: { authorization: `Bearer ${config.secretKey}` }
+	});
+	if (!res.ok && res.status !== 404 && res.status !== 400)
+		throw new StripeError(res.status, await res.text());
+}
+
+export async function billingPortalUrl(
+	config: StripeConfig,
+	customer: string,
+	returnUrl: string,
+	lang: string
+) {
+	const res = await fetch('https://api.stripe.com/v1/billing_portal/sessions', {
+		method: 'POST',
+		headers: { authorization: `Bearer ${config.secretKey}` },
+		body: new URLSearchParams({ customer, return_url: returnUrl, locale: lang })
+	});
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	return (await res.json<{ url: string }>()).url;
 }
 
 /** 付けてよいと確かめた支払い。台帳に残す。 */

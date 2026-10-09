@@ -7,6 +7,22 @@ import { now, randomHex } from './util';
 
 /** 今の残高。`percent` は残りの割合 (切り上げ。使い切ったときだけ 0)。 */
 export type Balance = { remaining: number; percent: number };
+export type Pro = {
+	active: boolean;
+	until: number | null;
+	plan: 'monthly' | 'yearly' | null;
+	trial: boolean;
+};
+
+/** アカウントの画面だけに出す、次の期間へ更新されるかどうかと表示する期限。 */
+export type AccountPro = Pro & { renews: boolean; displayUntil: number | null };
+
+/** `subscriptions` の Pro を使える期限。 */
+export const proUntilSql = 'min(coalesce(cancel_at, paid_through), paid_through)';
+
+function proUntil(paidThrough: number, cancelAt: number | null) {
+	return Math.min(cancelAt ?? paidThrough, paidThrough);
+}
 
 /**
  * 残りのある付与の、付けた量に対する残りの割合。金額や回数には直さない。
@@ -15,9 +31,9 @@ export type Balance = { remaining: number; percent: number };
 export async function balance(env: Env, accountId: string): Promise<Balance> {
 	const row = await env.DB.prepare(
 		`SELECT coalesce(sum(remaining), 0) AS remaining, coalesce(sum(granted - revoked), 0) AS size
-		 FROM grants WHERE account_id = ? AND remaining > 0`
+		 FROM grants WHERE account_id = ? AND remaining > 0 AND (expires_at IS NULL OR expires_at > ?)`
 	)
-		.bind(accountId)
+		.bind(accountId, now())
 		.first<{ remaining: number; size: number }>();
 	const remaining = row?.remaining ?? 0;
 	const size = row?.size ?? 0;
@@ -41,12 +57,74 @@ function monthStart(t: number): number {
 export function grantFreeStatement(env: Env, accountId: string, t = now()) {
 	const { freeGrant, freeMonthlyCap } = pricing(env);
 	return env.DB.prepare(
-		`INSERT INTO grants (id, account_id, purchase_id, granted, remaining, created_at)
-		 SELECT ?1, ?2, NULL, ?3, ?3, ?4
-		 WHERE NOT EXISTS (SELECT 1 FROM grants WHERE account_id = ?2 AND purchase_id IS NULL)
+		`INSERT INTO grants (id, account_id, purchase_id, kind, granted, remaining, created_at)
+		 SELECT ?1, ?2, NULL, 'free', ?3, ?3, ?4
+		 WHERE NOT EXISTS (SELECT 1 FROM grants WHERE account_id = ?2 AND kind = 'free')
 		   AND (SELECT coalesce(sum(granted), 0) FROM grants
-		        WHERE purchase_id IS NULL AND created_at >= ?5) + ?3 <= ?6`
+		        WHERE kind = 'free' AND created_at >= ?5) + ?3 <= ?6`
 	).bind(randomHex(16), accountId, freeGrant, t, monthStart(t), freeMonthlyCap);
+}
+
+/** Pro の状態。払い終えた期間が今より後なら Pro のまま使える。 */
+export async function proOf(env: Env, accountId: string, t = now()): Promise<AccountPro> {
+	const row = await env.DB.prepare(
+		`SELECT plan, paid_through, status, cancel_at_period_end, cancel_at,
+		 EXISTS (SELECT 1 FROM purchases
+		         WHERE stripe_subscription_id = subscriptions.id
+		           AND product = 'mawok-pro' AND revoked_at IS NULL) AS paid
+		 FROM subscriptions
+		 WHERE account_id = ? AND revoked_at IS NULL
+		   AND ${proUntilSql} > ?
+		 ORDER BY ${proUntilSql} DESC LIMIT 1`
+	)
+		.bind(accountId, t)
+		.first<{
+			plan: 'monthly' | 'yearly';
+			paid_through: number;
+			status: string;
+			cancel_at_period_end: number;
+			cancel_at: number | null;
+			paid: number;
+		}>();
+	return row
+		? {
+				active: true,
+				until: proUntil(row.paid_through, row.cancel_at),
+				plan: row.plan,
+				trial: row.paid === 0,
+				renews:
+					row.status !== 'canceled' &&
+					row.cancel_at_period_end !== 1 &&
+					(row.cancel_at === null || row.cancel_at > row.paid_through),
+				displayUntil: proUntil(row.paid_through, row.cancel_at)
+			}
+		: { active: false, until: null, plan: null, trial: false, renews: false, displayUntil: null };
+}
+
+/** Asia/Tokyo の暦月の終わり。Pro の付与はその月だけ使える。 */
+function tokyoMonthEnd(t: number): number {
+	const parts = new Intl.DateTimeFormat('en-US', {
+		timeZone: 'Asia/Tokyo',
+		year: 'numeric',
+		month: 'numeric'
+	}).formatToParts(new Date(t * 1000));
+	const values = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+	const year = Number(values.year);
+	const month = Number(values.month);
+	return (Date.UTC(year, month, 1) - 9 * 60 * 60 * 1000) / 1000;
+}
+
+/** 有効で支払い中の Pro に、その暦月の分を遅延で1回だけ付ける。 */
+export function grantProStatement(env: Env, accountId: string, pro: Pro, t = now()) {
+	const expiresAt = tokyoMonthEnd(t);
+	const amount = pro.plan === 'yearly' ? pricing(env).proYearlyGrant : pricing(env).proMonthlyGrant;
+	return env.DB.prepare(
+		`INSERT INTO grants (id, account_id, purchase_id, kind, granted, remaining, expires_at, created_at)
+		 SELECT ?1, ?2, NULL, 'pro', ?3, ?3, ?4, ?5
+		 WHERE ?6 = 1 AND NOT EXISTS (
+		   SELECT 1 FROM grants WHERE account_id = ?2 AND kind = 'pro' AND expires_at = ?4
+		 )`
+	).bind(randomHex(16), accountId, amount, expiresAt, t, pro.active && !pro.trial ? 1 : 0);
 }
 
 /**
@@ -58,11 +136,12 @@ export function grantFreeStatement(env: Env, accountId: string, t = now()) {
 export async function charge(env: Env, accountId: string, cost: number, t = now()) {
 	if (cost <= 0) return;
 	const { results } = await env.DB.prepare(
-		`SELECT id, remaining FROM grants WHERE account_id = ? AND remaining > 0
-		 ORDER BY purchase_id IS NULL, created_at, rowid`
+		`SELECT id, kind, remaining FROM grants WHERE account_id = ? AND remaining > 0
+		 AND (expires_at IS NULL OR expires_at > ?)
+		 ORDER BY CASE WHEN kind = 'pro' THEN 0 WHEN purchase_id IS NOT NULL THEN 1 ELSE 2 END, created_at, rowid`
 	)
-		.bind(accountId)
-		.all<{ id: string; remaining: number }>();
+		.bind(accountId, t)
+		.all<{ id: string; kind: 'pro' | 'purchase' | 'free'; remaining: number }>();
 	const statements: D1PreparedStatement[] = [];
 	let left = cost;
 	for (const grant of results) {
@@ -72,8 +151,8 @@ export async function charge(env: Env, accountId: string, cost: number, t = now(
 		// 記録してから引く。どちらも、その時点の残りを超えない量にする。
 		statements.push(
 			env.DB.prepare(
-				`INSERT INTO consumptions (id, purchase_id, milli_yen, created_at)
-				 SELECT ?1, purchase_id, min(?2, remaining), ?3 FROM grants WHERE id = ?4 AND remaining > 0`
+				`INSERT INTO consumptions (id, purchase_id, grant_id, grant_kind, milli_yen, created_at)
+					 SELECT ?1, purchase_id, id, kind, min(?2, remaining), ?3 FROM grants WHERE id = ?4 AND remaining > 0`
 			).bind(randomHex(16), amount, t, grant.id),
 			env.DB.prepare(
 				'UPDATE grants SET remaining = remaining - min(?, remaining) WHERE id = ?'

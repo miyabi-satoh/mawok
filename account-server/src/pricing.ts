@@ -19,6 +19,9 @@ export type Pricing = {
 	freeGrant: number;
 	/** 無料の分に使う、月の原価の上限 (milli_yen)。 */
 	freeMonthlyCap: number;
+	/** Pro の月額・年額プランで、暦月ごとに付ける原価 (milli_yen)。 */
+	proMonthlyGrant: number;
+	proYearlyGrant: number;
 	rates: Rates;
 };
 
@@ -34,6 +37,8 @@ export function pricing(env: Env): Pricing {
 		purchaseGrant: read('PURCHASE_GRANT_MILLI_YEN', env.PURCHASE_GRANT_MILLI_YEN, true),
 		freeGrant: read('FREE_GRANT_MILLI_YEN', env.FREE_GRANT_MILLI_YEN, true),
 		freeMonthlyCap: read('FREE_MONTHLY_CAP_YEN', env.FREE_MONTHLY_CAP_YEN, false) * 1000,
+		proMonthlyGrant: read('PRO_MONTHLY_GRANT_MILLI_YEN', env.PRO_MONTHLY_GRANT_MILLI_YEN, true),
+		proYearlyGrant: read('PRO_YEARLY_GRANT_MILLI_YEN', env.PRO_YEARLY_GRANT_MILLI_YEN, true),
 		rates: {
 			usdJpy: read('USD_JPY', env.USD_JPY, false),
 			inputUsdPerMtok: read('INPUT_USD_PER_MTOK', env.INPUT_USD_PER_MTOK, false),

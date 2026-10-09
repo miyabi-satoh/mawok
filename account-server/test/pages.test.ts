@@ -9,4 +9,21 @@ describe('homePage', () => {
 		expect(await home(1, 1)).toContain('AI アクションのクレジット: 残り 1%');
 		expect(await home(0, 0)).toContain('AI アクションのクレジットはありません');
 	});
+
+	it('says a canceled trial will not be charged in English', async () => {
+		const page = String(
+			await homePage('en', 'a@example.com', { remaining: 1, percent: 1 }, [], 'domestic', {
+				pro: {
+					active: true,
+					until: 2_000_000_000,
+					plan: 'monthly',
+					trial: true,
+					renews: false,
+					displayUntil: 2_000_000_000
+				}
+			})
+		);
+		expect(page).toContain('Your trial lasts until');
+		expect(page).toContain('You will not be charged.');
+	});
 });

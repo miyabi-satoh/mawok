@@ -38,7 +38,8 @@ describe('linking Mawok', () => {
 		).toBeNull();
 		expect(await (await app('/v1/balance', token)).json()).toEqual({
 			email,
-			remaining_percent: 100
+			remaining_percent: 100,
+			pro: { active: false, until: null, plan: null, trial: false }
 		});
 		// 窓口の画面で、どの機器の Mawok かが分かる。
 		expect(await (await request('/account/', { cookie })).text()).toContain('Taro の MacBook（');

@@ -2,7 +2,11 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	confirmPurchase,
+	confirmProInvoice,
+	createProCheckoutSession,
 	createCheckoutSession,
+	expireCheckoutSession,
+	ProInvoiceError,
 	StripeError,
 	stripeConfig,
 	usesManagedPayments,
@@ -104,6 +108,185 @@ describe('createCheckoutSession', () => {
 			async () => new Response('{"error":{"type":"idempotency_error"}}', { status: 409 })
 		);
 		await expect(checkout()).rejects.toSatisfy((e) => e instanceof StripeError && e.status === 409);
+	});
+});
+
+describe('createProCheckoutSession', () => {
+	it('creates a subscription with the first 14-day trial and its account metadata', async () => {
+		const stripe = vi
+			.spyOn(globalThis, 'fetch')
+			.mockImplementation(async () =>
+				Response.json({ id: 'cs_pro', url: 'https://checkout.stripe.test/c/pay/cs_pro' })
+			);
+		await createProCheckoutSession(
+			{ ...config, proPrices: { monthly: 'price_pro_monthly', yearly: 'price_pro_yearly' } },
+			{
+				accountId: 'acc',
+				email: 'buyer@example.com',
+				plan: 'monthly',
+				lang: 'ja',
+				successUrl: 'https://account.test/done',
+				cancelUrl: 'https://account.test/cancel',
+				expiresAt: 2_000_000_000,
+				managedPayments: false,
+				buyerCountry: 'JP',
+				trial: true,
+				idempotencyKey: 'pro-key'
+			}
+		);
+		const sent = new URLSearchParams(String(stripe.mock.calls[0][1]!.body));
+		expect(sent.get('mode')).toBe('subscription');
+		expect(sent.get('line_items[0][price]')).toBe('price_pro_monthly');
+		expect(sent.get('subscription_data[trial_period_days]')).toBe('14');
+		expect(sent.get('subscription_data[metadata][product]')).toBe('mawok-pro');
+		expect(sent.get('subscription_data[metadata][account_id]')).toBe('acc');
+		expect(sent.get('subscription_data[metadata][buyer_country]')).toBe('JP');
+	});
+});
+
+describe('expireCheckoutSession', () => {
+	it('leaves the caller free to replace a session Stripe cannot close', async () => {
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+		for (const answer of [
+			async () => new Response('', { status: 400 }),
+			async () => new Response('', { status: 404 }),
+			async () => new Response('', { status: 500 }),
+			async () => {
+				throw new TypeError('network failure');
+			}
+		]) {
+			const stripe = vi.spyOn(globalThis, 'fetch').mockImplementation(answer);
+			await expect(expireCheckoutSession(config, 'cs_old')).resolves.toBeUndefined();
+			stripe.mockRestore();
+		}
+		expect(logged).toHaveBeenCalledTimes(2);
+		logged.mockRestore();
+	});
+});
+
+describe('confirmProInvoice', () => {
+	const proConfig = {
+		...config,
+		proPrices: { monthly: 'price_pro_monthly', yearly: 'price_pro_yearly' }
+	};
+
+	function proInvoice(overrides: Record<string, unknown> = {}) {
+		const invoice = {
+			id: 'in_pro',
+			status: 'paid',
+			total: 480,
+			amount_paid: 480,
+			currency: 'jpy',
+			customer_details: { address: { country: 'JP' } },
+			parent: { subscription_details: { subscription: 'sub_pro' } },
+			lines: {
+				has_more: false,
+				data: [
+					{
+						amount: 480,
+						currency: 'jpy',
+						quantity: 1,
+						period: { end: 2_000_000_000 },
+						pricing: { price_details: { price: 'price_pro_monthly' } },
+						discount_amounts: []
+					}
+				]
+			},
+			payments: {
+				has_more: false,
+				data: [
+					{
+						status: 'paid',
+						amount_paid: 480,
+						payment: {
+							type: 'payment_intent',
+							payment_intent: { id: 'pi_pro', latest_charge: 'ch_pro' }
+						}
+					}
+				]
+			},
+			...overrides
+		};
+		vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+			const path = new URL(String(url)).pathname;
+			if (path.endsWith('/invoices/in_pro')) return Response.json(invoice);
+			if (path.endsWith('/subscriptions/sub_pro'))
+				return Response.json({
+					id: 'sub_pro',
+					status: 'active',
+					customer: 'cus_pro',
+					metadata: { product: 'mawok-pro', managed_payments: '0', buyer_country: 'US' },
+					items: {
+						data: [
+							{
+								current_period_end: 2_000_000_000,
+								price: { id: 'price_pro_monthly', currency: 'jpy' }
+							}
+						]
+					}
+				});
+			if (path.endsWith('/charges/ch_pro'))
+				return Response.json({ payment_method_details: { card: { country: 'US' } } });
+			throw new Error(`Unexpected Stripe request: ${path}`);
+		});
+	}
+
+	it('confirms every invoice field before recording a Pro payment', async () => {
+		proInvoice();
+		expect(await confirmProInvoice(proConfig, 'in_pro')).toMatchObject({
+			plan: 'monthly',
+			amount: 480,
+			currency: 'jpy',
+			paymentIntentId: 'pi_pro',
+			cardCountry: 'US',
+			buyerCountry: 'US',
+			domestic: true
+		});
+		vi.restoreAllMocks();
+		proInvoice({ customer_details: { address: null } });
+		expect((await confirmProInvoice(proConfig, 'in_pro'))?.domestic).toBe(false);
+		for (const overrides of [
+			{ amount_paid: 479 },
+			{ lines: { has_more: true, data: [] } },
+			{
+				payments: {
+					has_more: false,
+					data: [{ status: 'paid', amount_paid: 480, payment: { type: 'bank_transfer' } }]
+				}
+			}
+		]) {
+			vi.restoreAllMocks();
+			proInvoice(overrides);
+			await expect(
+				confirmProInvoice(proConfig, 'in_pro'),
+				JSON.stringify(overrides)
+			).rejects.toBeInstanceOf(ProInvoiceError);
+		}
+	});
+
+	it('accepts the zero-yen trial invoice without recording a payment intent', async () => {
+		proInvoice({
+			total: 0,
+			amount_paid: 0,
+			lines: {
+				has_more: false,
+				data: [
+					{
+						amount: 0,
+						currency: 'jpy',
+						quantity: 1,
+						period: { end: 2_000_000_000 },
+						pricing: { price_details: { price: 'price_pro_monthly' } },
+						discount_amounts: []
+					}
+				]
+			},
+			payments: { has_more: false, data: [] }
+		});
+		expect(await confirmProInvoice(proConfig, 'in_pro')).toMatchObject({
+			amount: 0,
+			paymentIntentId: null
+		});
 	});
 });
 

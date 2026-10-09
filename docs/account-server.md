@@ -10,11 +10,11 @@
 
 この文書とコードの語は、画面（Mawok・窓口・メール・規約類）では次のように呼ぶ。利用者に仕組みの語を見せないため。
 
-| この文書 | 画面 |
-|---|---|
+| この文書                       | 画面                                             |
+| ------------------------------ | ------------------------------------------------ |
 | Mawok とアカウントを結ぶ・外す | （PC を）登録・登録を解除（英語は link・unlink） |
-| 結んでいる Mawok | 登録している PC |
-| 窓口 | Mawok のアカウント（のページ・サービス） |
+| 結んでいる Mawok               | 登録している PC                                  |
+| 窓口                           | Mawok のアカウント（のページ・サービス）         |
 
 ## サインイン
 
@@ -67,6 +67,15 @@
 - Stripe の Checkout で売り、Webhook で付与する。日本の外からの買い手には Managed Payments（MP）で売る。購入は台帳（`purchases`）に残す。目印は `mawok-ai`、Price は `STRIPE_AI_CREDITS_PRICE_ID`。
 - 料金ページから窓口の最終確認画面へ進む。Mawok の「クレジットを購入」と残高切れの帯は料金ページを開く。付与は Webhook でだけ行う。
 - 返金・不審請求の申し立てが届いたら、その購入の付与の残りだけを取り消す（使った分は取り戻さない。MP の返金が使った後に来ても同じ）。
+
+## Pro
+
+- Pro は月額 480 円・年額 4,800 円（税込み）の Stripe Checkout のサブスクで売る。日本からの買い手には直接、それ以外には Managed Payments で売る。Price は秘密の値 `STRIPE_PRO_MONTHLY_PRICE_ID`・`STRIPE_PRO_YEARLY_PRICE_ID` がそろったときだけ売る。
+- 料金ページから `GET /account/buy?plan=monthly|yearly` の最終確認を開く。最初の申し込みでは Stripe Checkout に 14 日の試用を渡し、カードを登録する。アカウントの `subscriptions` に一度でも行があれば、試用は渡さない。
+- `invoice.paid` で Stripe から請求書とサブスクを取り直し、`subscriptions.paid_through` を請求した期間の終わりまで延ばす。試用の始まりの 0 円の請求書も期限を延ばすが、購入の台帳には残さない。Price・明細・支払い方が受け付けられない Pro の請求書、または Pro の Price が未設定の請求書は、`OPERATOR_EMAIL` があれば運営者へ知らせて webhook を失敗として残し、無ければログに残す。同じアカウントに有効な別のサブスクがある請求書は、台帳を残して Stripe 側で解約し、運営者へ知らせる。返金するかは運営が判断する。Pro は、打ち切られておらず `paid_through` と `cancel_at` の早いほうが今より後なら有効とする。試用かどうかは、そのサブスクに取り消していない Pro の支払いの台帳があるかで決める。`customer.subscription.updated`・`deleted` は状態・`cancel_at_period_end`・`cancel_at` をそれぞれ合わせる。`cancel_at` が `paid_through` 以下なら、更新されずその日時まで使える。返金または不審請求は、Pro の請求ならそのサブスクと、そのアカウントの失効していない Pro の付与の残りを取り消す。
+- `GET /v1/balance` は `pro: { active, until, plan, trial }` を返す。`until` は `paid_through` と `cancel_at` の早いほうの UNIX 秒。アプリは通信できないときも、ここで受けた期限の 7 日後まで Pro として扱う。
+- 有効で試用中でない Pro には、残高の問い合わせまたは中継のときに、Asia/Tokyo の暦月ごとに 1 回だけクレジットを付ける。値は秘密の値 `PRO_MONTHLY_GRANT_MILLI_YEN`（月額）または `PRO_YEARLY_GRANT_MILLI_YEN`（年額）で、月末に失効する。引く順は失効していない Pro、古い購入、無料の順で、残りの割合には失効した付与を含めない。
+- アカウントの画面には、更新される試用なら課金の開始日と解約方法、更新されない試用なら課金されず使える期限、支払い済みなら次の自動更新日または更新されずに使える期限、Stripe のカスタマーポータルを出す。別の購入へ移るとき、古い Checkout Session は Stripe 側で閉じる。閉じられないときも予約を作り直し、古い画面は Stripe の期限で閉じる。削除のスクリプトは、アカウントを消す前に Stripe のサブスクと開いている Checkout Session をその場で閉じる。削除後に開いたままの Checkout が払われたときもサブスクを解約する。サブスク行は持ち主と Stripe の customer id を外して残す。
 
 ## Mawok の側
 

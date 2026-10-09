@@ -33,4 +33,26 @@ describe('balance', () => {
 			'AI アクションのクレジット: 残り 100%'
 		);
 	});
+
+	it('returns the active Pro plan through its earlier cancel_at time', async () => {
+		const { token } = await linkApp('pro-balance@example.com');
+		const account = await accountId('pro-balance@example.com');
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, cancel_at, created_at)
+			 VALUES ('sub_balance', ?, 'yearly', 4102444800, 'active', 4102444000, 0)`
+		)
+			.bind(account)
+			.run();
+		// 払った請求書があるので、試用ではない。
+		await env.DB.prepare(
+			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
+			 VALUES ('p_balance', ?, 'mawok-pro', 'invoice:in_balance', 'pi_balance', 4800, 'jpy', 0, 1, 'sub_balance', 0)`
+		)
+			.bind(account)
+			.run();
+		expect(await (await app('/v1/balance', token)).json()).toMatchObject({
+			pro: { active: true, until: 4102444000, plan: 'yearly', trial: false }
+		});
+	});
 });
