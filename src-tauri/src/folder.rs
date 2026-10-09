@@ -34,7 +34,7 @@ impl FolderError {
 /// 空ならホーム、`~` で始まればホームから、相対パスなら今のフォルダーから（今のフォルダーが消えていればホームから）。
 /// 前後の `"` を外し、`..` は文字の上で解いてシンボリックリンクは解かない（docs/actions.md「作業フォルダー」）
 pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, FolderError> {
-    let input = unquote(input);
+    let input = unquote(input.trim());
     let resolved = if input.is_empty() || input == "~" {
         home.to_path_buf()
     } else {
@@ -47,13 +47,12 @@ pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, Fold
     }
 }
 
-/// 前後の空白と、エクスプローラーの「パスのコピー」が付ける前後の `"` を外す（resolve と complete で共通）
+/// エクスプローラーの「パスのコピー」が付ける前後の `"` を外す（resolve と complete で共通）
 fn unquote(input: &str) -> &str {
-    let trimmed = input.trim();
-    trimmed
+    input
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
-        .unwrap_or(trimmed)
+        .unwrap_or(input)
 }
 
 /// 打たれたパスを、`~` と今のフォルダーから見た絶対パスにする（resolve と complete で共通）。
@@ -100,7 +99,8 @@ pub struct FolderCompletion {
 /// 隠したフォルダー（`.` で始まる名前と、Windows の隠しの属性）は、`.` を打ったときか、ほかに当てはまるものが無いときだけ候補にする。
 /// Windows の隠しとシステムの両方の属性のフォルダーは候補にしない
 pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
-    let input = unquote(input);
+    // 末尾の空白は、`Program Files` の `Program ` のように打ちかけの名前の一部なので残す
+    let input = unquote(input.trim_start());
     let unchanged = || FolderCompletion {
         input: input.to_string(),
         candidates: Vec::new(),
@@ -375,6 +375,7 @@ mod tests {
     fn completion_dirs(name: &str) -> Dirs {
         let d = Dirs::new(name);
         for folder in [
+            "My Folder",
             "Documents",
             "Documents-old",
             "Downloads",
@@ -399,6 +400,8 @@ mod tests {
         let completion = complete(&d.home, &d.home, "wo");
         assert_eq!(completion.input, sep("work/"));
         assert!(completion.candidates.is_empty());
+        // 末尾の空白は名前の一部として残す
+        assert_eq!(complete(&d.home, &d.home, " My ").input, sep("My Folder/"));
         // 1つなら、打った大文字と小文字を実際の名前に合わせる
         assert_eq!(complete(&d.home, &d.home, "WO").input, sep("work/"));
         assert_eq!(
