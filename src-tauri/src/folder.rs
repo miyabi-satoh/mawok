@@ -97,7 +97,8 @@ pub struct FolderCompletion {
 /// 大文字と小文字は区別せずに拾い、補った所は実際の名前の書き方にする（大文字と小文字を区別するファイルシステムでも移れるように。
 /// 2つ以上のときは最初の候補の書き方）。
 /// 1つなら名前と区切りまで、2つ以上なら共通する所まで補い、候補を返す。
-/// 隠したフォルダー（`.` で始まる名前と、Windows の隠し・システムの属性）は、`.` を打ったときか、ほかに当てはまるものが無いときだけ候補にする
+/// 隠したフォルダー（`.` で始まる名前と、Windows の隠しの属性）は、`.` を打ったときか、ほかに当てはまるものが無いときだけ候補にする。
+/// Windows の隠しとシステムの両方の属性のフォルダーは候補にしない
 pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
     let input = unquote(input);
     let unchanged = || FolderCompletion {
@@ -139,10 +140,10 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
         if !(file_type.is_dir() || file_type.is_symlink() && entry.path().is_dir()) {
             continue;
         }
-        if is_hidden(&name, &entry) && !prefix.starts_with('.') {
-            hidden.push(name);
-        } else {
-            visible.push(name);
+        match visibility(&name, &entry) {
+            Visibility::Protected => {}
+            Visibility::Hidden if !prefix.starts_with('.') => hidden.push(name),
+            _ => visible.push(name),
         }
     }
     let mut names = if visible.is_empty() { hidden } else { visible };
@@ -174,23 +175,40 @@ fn completed_part(names: &[String], prefix: &str) -> String {
     }
 }
 
-/// 隠したフォルダーか。`.` で始まる名前と、Windows の隠し・システムの属性（エクスプローラーが既定で出さないもの）
-fn is_hidden(name: &str, entry: &std::fs::DirEntry) -> bool {
+enum Visibility {
+    Shown,
+    /// `.` で始まる名前と、Windows の隠しの属性（エクスプローラーが既定で出さないもの）
+    Hidden,
+    /// Windows の隠しとシステムの両方の属性（エクスプローラーが「保護されたオペレーティング システム ファイル」として出さないもの）。
+    /// `Application Data` のような中を開けない古い名前の転送先なども含み、移っても使えないので候補にしない
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Protected,
+}
+
+fn visibility(name: &str, entry: &std::fs::DirEntry) -> Visibility {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        // FILE_ATTRIBUTE_HIDDEN と FILE_ATTRIBUTE_SYSTEM
-        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
-        if entry
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+        let attributes = entry
             .metadata()
-            .is_ok_and(|metadata| metadata.file_attributes() & HIDDEN_OR_SYSTEM != 0)
-        {
-            return true;
+            .map_or(0, |metadata| metadata.file_attributes());
+        if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+            return if attributes & FILE_ATTRIBUTE_SYSTEM != 0 {
+                Visibility::Protected
+            } else {
+                Visibility::Hidden
+            };
         }
     }
     #[cfg(not(windows))]
     let _ = entry;
-    name.starts_with('.')
+    if name.starts_with('.') {
+        Visibility::Hidden
+    } else {
+        Visibility::Shown
+    }
 }
 
 /// 名前に共通する頭の部分。大文字と小文字は区別せず、最初の名前の書き方で返す
