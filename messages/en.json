@@ -266,7 +266,7 @@
 	"action_error_network": "Couldn't connect to the AI service. Check your network.",
 	"action_error_timeout": "The AI service didn't respond in time. Try again.",
 	"action_error_command_not_started": "Couldn't start the command. Details are in the log.",
-	"action_error_folder_missing": "Couldn't find the folder commands run in. Change the folder again.",
+	"action_error_folder_missing": "Couldn't find the current folder. Use “Go to folder” to choose it again.",
 	"action_error_command_not_found": "The command wasn't found. Under Actions in Settings, try writing it with its full path.",
 	"action_error_command_failed": "The command failed (exit code {code}).",
 	"action_error_command_killed": "The command was stopped before it finished.",

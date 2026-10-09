@@ -266,7 +266,7 @@
 	"action_error_network": "AI サービスにつながりませんでした。ネットワークを確かめてください。",
 	"action_error_timeout": "AI サービスから時間内に返事がありませんでした。やり直してください。",
 	"action_error_command_not_started": "コマンドを起動できませんでした。詳しい中身はログにあります。",
-	"action_error_folder_missing": "コマンドを動かすフォルダーが見つかりません。フォルダーを移り直してください。",
+	"action_error_folder_missing": "今のフォルダーが見つかりません。「フォルダーへ移動」で移り直してください。",
 	"action_error_command_not_found": "コマンドが見つかりませんでした。設定の「アクション」で、コマンドをフルパスで書いてみてください。",
 	"action_error_command_failed": "コマンドが失敗しました（終了コード {code}）。",
 	"action_error_command_killed": "コマンドが途中で止まりました。",

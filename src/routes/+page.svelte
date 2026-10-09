@@ -1149,7 +1149,7 @@
 				/>
 			{/if}
 			{#if hasPairedDevice}
-				<!-- 本体でチェックした機器へ送り、▼で送り先の一覧を開く -->
+				<!-- 本体でチェックした機器へ送り、▼で送信先の一覧を開く -->
 				<div class="ml-auto flex">
 					<Button
 						tabindex={-1}
