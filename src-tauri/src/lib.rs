@@ -1933,15 +1933,27 @@ fn refocus_draft_after_key_prompt(app: &AppHandle) {
     if !kept || !cfg!(target_os = "macos") {
         return;
     }
-    let Some(window) = main_window(app) else {
-        return;
-    };
-    if window.is_visible().unwrap_or(false)
-        && !window.is_focused().unwrap_or(true)
-        && !is_settings_focused(app)
-    {
-        info!("refocus the draft after reading the AI key");
-        focus::refocus_draft(app, &window);
+    refocus_draft_on_main_thread(app, "reading the AI key");
+}
+
+/// 出ている下書きにフォーカスが無く、設定ウィンドウにも無ければ、下書きにフォーカスを戻す。
+/// macOS のパネルの操作（make_key_window）はメインスレッドでしか行えないので、async のコマンドから呼ばれてもメインスレッドに移して行う
+fn refocus_draft_on_main_thread(app: &AppHandle, after: &'static str) {
+    let handle = app.clone();
+    let result = app.run_on_main_thread(move || {
+        let Some(window) = main_window(&handle) else {
+            return;
+        };
+        if window.is_visible().unwrap_or(false)
+            && !window.is_focused().unwrap_or(true)
+            && !is_settings_focused(&handle)
+        {
+            info!("refocus the draft after {after}");
+            focus::refocus_draft(&handle, &window);
+        }
+    });
+    if let Err(error) = result {
+        error!("refocus the draft: couldn't run on the main thread: {error}");
     }
 }
 
@@ -2096,9 +2108,7 @@ async fn pick_folder(app: AppHandle) -> Result<bool, String> {
     app.state::<ActionState>()
         .picking_folder
         .store(false, Ordering::Relaxed);
-    if window.is_visible().unwrap_or(false) && !window.is_focused().unwrap_or(true) {
-        focus::refocus_draft(&app, &window);
-    }
+    refocus_draft_on_main_thread(&app, "picking a folder");
     let Some(path) = picked.and_then(|picked| picked.into_path().ok()) else {
         return Ok(false);
     };
