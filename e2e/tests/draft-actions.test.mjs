@@ -70,7 +70,7 @@ test.describe('AI を使えないとき', () => {
 		}
 	});
 
-	/** 下のボタンの列に「アクション」があることを見て、Ctrl+K で一覧を開く */
+	/** ボタンの列に「アクション」があることを見て、Ctrl+K で一覧を開く */
 	async function openActionsWithKey() {
 		const buttons = await listDraftButtons(client);
 		assert.ok(

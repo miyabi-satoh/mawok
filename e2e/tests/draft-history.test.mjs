@@ -259,9 +259,14 @@ test.describe('下書きの履歴', () => {
 			await sendKeySequence([[VK.UP]]);
 			await expectDraftStaysEmpty(client, '件数が 0 のときの ↑ の後の入力欄');
 			const buttons = await listDraftButtons(client);
+			// 空の一覧で通らないよう、いつも出るボタンが読めていることを先に見る
 			assert.ok(
-				buttons.every((button) => button.position !== 'above'),
-				`前・次の列は出ないはず: ${JSON.stringify(buttons)}`
+				buttons.some((button) => button.text.startsWith('定型文')),
+				`ボタンが読めていない: ${JSON.stringify(buttons)}`
+			);
+			assert.ok(
+				buttons.every((button) => button.text !== '前' && button.text !== '次'),
+				`前・次のボタンは出ないはず: ${JSON.stringify(buttons)}`
 			);
 		} finally {
 			// 設定ファイルに書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
