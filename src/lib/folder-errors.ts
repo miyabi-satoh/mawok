@@ -5,7 +5,7 @@ import { m } from '$lib/paraglide/messages';
 const MESSAGES: Record<string, () => string> = {
 	'folder.not_found': m.folder_error_not_found,
 	'folder.not_a_folder': m.folder_error_not_a_folder,
-	// Paraglide はテンプレートリテラルに書き出すときに \ を写さず1つ減らすので、文言には書かず引数で渡す
+	// 文言には \ を書けないので、引数で渡す（src/lib/messages.test.ts「文言に \ を書かない」）
 	'folder.network': () => m.folder_error_network({ prefix: '\\\\' })
 };
 
