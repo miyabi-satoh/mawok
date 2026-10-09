@@ -80,12 +80,13 @@ test.describe('下書きのボタン', () => {
 		await clickElement(client, await getDraftWindowHandle(), await client.$(selector));
 	}
 
-	test('履歴がないうちは、入力欄の上に定型文・設定、下に今のフォルダー・コピーがあり、前・次はない', async () => {
+	test('履歴がないうちは、入力欄の上に定型文・アクション・設定、下に今のフォルダー・コピーがあり、前・次はない', async () => {
 		await showDraftAndWaitVisible();
 		const buttons = await listDraftButtons(client);
 		const above = buttons.filter((button) => button.position === 'above');
 		const below = buttons.filter((button) => button.position === 'below');
 		assert.ok(byText(above, '定型文'), JSON.stringify(buttons));
+		assert.ok(byText(above, 'アクション'), JSON.stringify(buttons));
 		assert.ok(
 			above.some((button) => button.label === '設定'),
 			JSON.stringify(buttons)
@@ -189,7 +190,7 @@ test.describe('下書きのボタン', () => {
 	});
 
 	test('歯車で設定が開き、「テキストウィンドウにボタンを表示」をオフにすると、出し直された下書きに上下どちらの列もない', async () => {
-		// 上の列 (前・次) も出る状態にしてから始める
+		// 前・次も出る状態にしてから始める
 		await copyDraft(client, 'git status');
 		await showDraftAndWaitVisible();
 		const [draftHandle] = await client.getWindowHandles();
