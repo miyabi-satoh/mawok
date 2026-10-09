@@ -2291,7 +2291,7 @@ describe('作業フォルダー', () => {
 					});
 				if (input === '~/notes/wo')
 					return Promise.resolve({
-						input: '~/notes/work/',
+						input: '~/notes/Work/',
 						base: '~/notes/',
 						candidates: [],
 						total: 0
@@ -2399,8 +2399,9 @@ describe('作業フォルダー', () => {
 		await expect
 			.element(screen.getByTestId('folder-suggestion'))
 			.toHaveTextContent('~/notes/work/');
+		// 受け入れると、打った所も実際の名前の書き方になる
 		await userEvent.keyboard('{ArrowRight}');
-		await expect.element(input).toHaveValue('~/notes/work/');
+		await expect.element(input).toHaveValue('~/notes/Work/');
 		await expect.element(screen.getByTestId('folder-suggestion')).not.toBeInTheDocument();
 	});
 

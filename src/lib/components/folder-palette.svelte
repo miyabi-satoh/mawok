@@ -42,6 +42,8 @@
 	let beforeMenu = '';
 	// 薄く出す続き。カーソルが末尾に無いときと、欄からはみ出しているときは出さない（続きの位置が打った文字とずれるため）
 	let suggestion = $state('');
+	// 続きを受け入れたときの欄の中身。打った所の大文字と小文字も実際の名前に合わせるため、続きをつながずにこれを入れる
+	let suggested = '';
 	let inputElement: HTMLInputElement | undefined;
 	// 打つ・Enter・Tab のたびに進める。補いを待つ間に進んでいたら、古いパスの補いで上書きしない
 	let edits = 0;
@@ -68,6 +70,7 @@
 		const atEnd = inputElement.selectionStart === typed.length;
 		const fits = inputElement.scrollWidth <= inputElement.clientWidth;
 		suggestion = atEnd && fits ? suggestionSuffix(typed, completion) : '';
+		suggested = completion.input;
 	}
 
 	async function submit() {
@@ -118,7 +121,7 @@
 	}
 
 	async function acceptSuggestion() {
-		input += suggestion;
+		input = suggested;
 		clearCandidates();
 		await moveCaretToEnd();
 		void suggest();
@@ -138,7 +141,9 @@
 			event.preventDefault();
 			if (event.metaKey || event.ctrlKey || event.altKey) return;
 			if (listed) void select(event.shiftKey ? -1 : 1);
-			else if (!event.shiftKey) void complete();
+			else if (event.shiftKey) return;
+			else if (suggestion) void acceptSuggestion();
+			else void complete();
 			return;
 		}
 		if (!hasNoModifiers(event)) return;
@@ -178,7 +183,7 @@
 				aria-label={m.folder_input()}
 				aria-expanded={candidates.length > 0}
 				aria-controls="folder-candidates"
-				aria-autocomplete="list"
+				aria-autocomplete="both"
 				aria-activedescendant={selected >= 0 ? `folder-candidate-${selected}` : undefined}
 				aria-invalid={error ? 'true' : undefined}
 				aria-describedby={error ? 'folder-palette-error' : undefined}
