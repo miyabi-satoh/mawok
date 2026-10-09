@@ -7,9 +7,9 @@ Mawok は、ターミナルなどに文字を送る前に、いったん書い�
 
 1. {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} でテキストウィンドウを出す。
 2. 書く。Enter は改行です。
-3. {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} でコピーして隠し、戻った先のアプリで貼り付ける。
+3. {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} でコピーして閉じ、戻った先のアプリで貼り付ける。
 
-ほかに、定型文の差し込み、コマンドや AI での書き換え（アクション）、ほかの機器への送信ができます。
+ほかに、定型文の挿入、コマンドや AI での書き換え（アクション）、ほかの機器への送信ができます。
 Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、ログイン時に起動します（設定の「一般」で切れます）。
 
 ## 書いてコピーする
@@ -28,7 +28,7 @@ Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、�
 ## 定型文を使う
 
 1. {macos:`Cmd+J`}{windows:`Ctrl+J`} で定型文の一覧を出す。
-2. 文字を打って絞り込み、Enter で差し込む。
+2. 文字を打って絞り込み、Enter で挿入する。
 
 定型文は設定の「定型文」で登録します。一覧の末尾の「テキストを定型文に登録」で、書いているテキストをその場で登録することもできます。
 
@@ -36,7 +36,7 @@ Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、�
 
 コマンドや AI で、テキストを書き換えます。
 
-1. {macos:`Cmd+K`}{windows:`Ctrl+K`} でアクションの一覧を出す。
+1. {macos:`Cmd+K`}{windows:`Ctrl+K`} でアクション一覧を出す。
 2. アクションを選ぶ。範囲を選んでいればその範囲、なければ全体が対象になる。
 3. 結果が入力欄に入る。{macos:`Cmd+Z`}{windows:`Ctrl+Z`} で元に戻せる。
 
@@ -79,25 +79,25 @@ Mawok を選ぶと API キーは要らず、使った分だけアカウントの
 
 {macos:ローカルネットワークの許可を求められたら、許可します。}{windows:ファイアウォールの許可を求められたら、許可します。}
 
-送るときは、テキストウィンドウで {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} を押すか「送る」ボタンを押します。
-相手の入力欄が空ならそのまま入り、書きかけがあれば差し込むかどうかを選べます。
+送るときは、テキストウィンドウで {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} を押すか「送信」ボタンを押します。
+相手の入力欄が空ならそのまま入り、書きかけがあれば挿入するかどうかを選べます。
 
 ## キー操作の一覧
 
 | 操作 | キー |
 | --- | --- |
-| テキストウィンドウを出す（前面にあればコピーして隠す） | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} |
-| コピーして隠す | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
-| コピーせずに隠す | `Esc` |
+| テキストウィンドウを出す（前面にあればコピーして閉じる） | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} |
+| コピーして閉じる | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
+| コピーせずに閉じる | `Esc` |
 | 前にコピーしたテキストを出す（入力欄の先頭で ↑、末尾で ↓） | `↑` / `↓` |
 | 前の履歴・次の履歴（カーソルの行にかかわらず） | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
-| 定型文の一覧を出して差し込む | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
-| アクションの一覧を出して実行する | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
-| コマンドを動かすフォルダーを移る | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
+| 定型文を挿入 | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
+| アクション一覧を開く | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
+| フォルダーへ移動 | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
 | アクションを取り消す（実行している間） | `Esc` |
-| 組み合わせた機器へ送る | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
-| 送り先を選ぶ | {macos:`Cmd+L`}{windows:`Ctrl+L`} |
-| 届いたテキストを差し込む・捨てる | {macos:`Cmd+I` / `Cmd+Shift+Backspace`}{windows:`Ctrl+I` / `Ctrl+Shift+Backspace`} |
+| 送信 | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
+| 送信先を選ぶ | {macos:`Cmd+L`}{windows:`Ctrl+L`} |
+| 届いたテキストを挿入・破棄 | {macos:`Cmd+I` / `Cmd+Shift+Backspace`}{windows:`Ctrl+I` / `Ctrl+Shift+Backspace`} |
 | 設定を開く | {macos:`Cmd+,`}{windows:`Ctrl+,`} |
 
 キーは設定の「キー操作」で変えられます。

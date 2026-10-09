@@ -329,13 +329,13 @@ test.describe('描かれ方', () => {
 		});
 	});
 
-	test('下書き: アクションの一覧', async () => {
+	test('下書き: アクション一覧', async () => {
 		await focusDraft(client);
 		await openPaletteWith(client, VK.K);
 		await inspectDraft(client, 'actions', { overlays: ['[role="dialog"]'] });
 	});
 
-	test('下書き: 送り先の一覧', async () => {
+	test('下書き: 送信先の一覧', async () => {
 		await focusDraft(client);
 		await openPaletteWith(client, VK.L);
 		await inspectDraft(client, 'send-targets', { overlays: ['[role="dialog"]'] });

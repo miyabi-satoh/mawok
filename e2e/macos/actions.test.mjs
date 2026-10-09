@@ -176,7 +176,7 @@ test.describe('macOS: コマンドのアクション', () => {
 		await clearAndHideDraft();
 	});
 
-	test('「差し込む」は、カーソルの位置と選んだ範囲の後ろに入れ、下書きが空でも実行できる (29.)', async () => {
+	test('「挿入」は、カーソルの位置と選んだ範囲の後ろに入れ、下書きが空でも実行できる (29.)', async () => {
 		await showDraftWith('abcdef', { paste: true });
 		for (let i = 0; i < 3; i++) await keyCode(KEY.left);
 		await runAction('insert');
@@ -255,7 +255,7 @@ test.describe('macOS: コマンドのアクション', () => {
 				.filter(({ role }) => role === 'AXRadioButton')
 				.map(({ name }) => name)
 				.slice(-3),
-			['置き換える', '差し込む', '出さない'],
+			['置き換える', '挿入', '出さない'],
 			'結果の出し方の選択'
 		);
 

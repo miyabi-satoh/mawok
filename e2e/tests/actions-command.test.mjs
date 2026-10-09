@@ -217,7 +217,7 @@ test.describe('コマンドのアクション', () => {
 				return { font, outputs };
 			}, command);
 			assert.match(row.font, /mono|consolas|courier/i, `等幅のはず: ${row.font}`);
-			assert.deepEqual(row.outputs, ['置き換える', '差し込む', '出さない']);
+			assert.deepEqual(row.outputs, ['置き換える', '挿入', '出さない']);
 
 			const warning = () =>
 				client.execute(
@@ -398,7 +398,7 @@ test.describe('コマンドのアクション', () => {
 		assert.deepEqual(JSON.parse(result), [text]);
 	});
 
-	test('「差し込む」は、カーソルの位置と選んだ範囲の後ろに入れ、下書きが空でも実行できる (29.)', async () => {
+	test('「挿入」は、カーソルの位置と選んだ範囲の後ろに入れ、下書きが空でも実行できる (29.)', async () => {
 		const date = execFileSync('cmd.exe', ['/d', '/c', 'echo %DATE%'], { encoding: 'utf8' }).trim();
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abcdef');
