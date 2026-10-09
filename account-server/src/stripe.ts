@@ -172,6 +172,7 @@ export async function createProCheckoutSession(
 		expiresAt,
 		submitMessage,
 		managedPayments,
+		buyerCountry,
 		trial,
 		idempotencyKey
 	}: {
@@ -184,6 +185,8 @@ export async function createProCheckoutSession(
 		expiresAt: number;
 		submitMessage?: string;
 		managedPayments: boolean;
+		/** Checkout を開いたときのアクセス元の国。請求書の台帳へ残す。 */
+		buyerCountry?: string;
 		trial: boolean;
 		idempotencyKey: string;
 	}
@@ -203,6 +206,7 @@ export async function createProCheckoutSession(
 		expires_at: String(expiresAt),
 		'managed_payments[enabled]': String(managedPayments)
 	});
+	if (buyerCountry) params.set('subscription_data[metadata][buyer_country]', buyerCountry);
 	if (trial) params.set('subscription_data[trial_period_days]', '14');
 	if (!managedPayments) {
 		params.set('payment_method_types[0]', 'card');
@@ -225,7 +229,9 @@ type StripeSubscription = {
 	status: string;
 	customer: string;
 	metadata: Record<string, string> | null;
-	items: { data: { current_period_end: number; price: { id: string } }[] };
+	items: {
+		data: { current_period_end: number; price: { id: string; currency?: string | null } }[];
+	};
 };
 
 async function stripeGet<T>(
@@ -253,32 +259,50 @@ export async function confirmProInvoice(
 		id: string;
 		status: string;
 		total: number;
+		amount_paid: number;
 		currency: string;
-		payment_intent: string | null;
+		customer_details: { address: { country: string | null } | null } | null;
 		parent: { subscription_details?: { subscription: string } | null } | null;
 		lines: {
+			has_more: boolean;
 			data: {
 				amount: number;
+				currency: string;
 				quantity: number | null;
 				period: { end: number };
 				pricing: { price_details?: { price: string } } | null;
+				discount_amounts: { amount: number }[];
+			}[];
+		};
+		payments: {
+			has_more: boolean;
+			data: {
+				status: string;
+				amount_paid: number | null;
+				payment: {
+					type: string;
+					payment_intent?: { id: string; latest_charge: string | null };
+				};
 			}[];
 		};
 	}>(
 		config,
 		`invoices/${encodeURIComponent(invoiceId)}`,
-		new URLSearchParams([['expand[]', 'parent.subscription_details']])
+		new URLSearchParams([
+			['expand[]', 'payments.data.payment.payment_intent'],
+			['expand[]', 'parent.subscription_details']
+		])
 	);
 	const subscriptionId = invoice.parent?.subscription_details?.subscription;
 	if (invoice.status !== 'paid' || !subscriptionId) return undefined;
 	const sub = await getSubscription(config, subscriptionId);
 	if (sub.metadata?.product !== 'mawok-pro') return undefined;
-	const line = invoice.lines.data.find((item) => {
-		const price = item.pricing?.price_details?.price;
-		return price !== undefined && price in config.proPrices;
-	});
+	const lines = invoice.lines.data;
+	// 試用開始の 0 円請求書も、通常の請求書と同じ Price の1項目として確かめる。
+	const charged = invoice.total === 0 ? lines : lines.filter((line) => line.amount > 0);
+	const line = charged[0];
 	const priceId = line?.pricing?.price_details?.price;
-	if (!line || line.quantity !== 1 || !priceId || sub.items.data.length !== 1) return undefined;
+	if (!line || !priceId || sub.items.data.length !== 1) return undefined;
 	const plan =
 		priceId === config.proPrices.monthly
 			? 'monthly'
@@ -286,6 +310,45 @@ export async function confirmProInvoice(
 				? 'yearly'
 				: undefined;
 	if (!plan) return undefined;
+	const paid = invoice.payments.data.filter((payment) => payment.status === 'paid');
+	const intent = paid[0]?.payment.payment_intent;
+	const zeroInvoice = invoice.total === 0;
+	if (
+		invoice.lines.has_more ||
+		charged.length !== 1 ||
+		lines.length !== 1 ||
+		lines.some(
+			(item) =>
+				item.quantity !== 1 ||
+				item.currency !== invoice.currency ||
+				item.discount_amounts.some((discount) => discount.amount !== 0) ||
+				item.pricing?.price_details?.price !== priceId
+		) ||
+		sub.items.data[0].price.id !== priceId ||
+		(sub.items.data[0].price.currency !== undefined &&
+			sub.items.data[0].price.currency !== null &&
+			sub.items.data[0].price.currency !== invoice.currency) ||
+		lines.reduce((sum, item) => sum + item.amount, 0) !== invoice.total ||
+		invoice.amount_paid !== invoice.total ||
+		invoice.payments.has_more ||
+		(zeroInvoice
+			? paid.length > 1 || paid.some((payment) => payment.amount_paid !== 0)
+			: paid.length !== 1 ||
+				paid[0].payment.type !== 'payment_intent' ||
+				!intent ||
+				paid[0].amount_paid !== invoice.total)
+	) {
+		return undefined;
+	}
+	const charge = intent?.latest_charge
+		? await stripeGet<{ payment_method_details: { card?: { country: string | null } } | null }>(
+				config,
+				`charges/${encodeURIComponent(intent.latest_charge)}`
+			)
+		: null;
+	const cardCountry = charge?.payment_method_details?.card?.country ?? null;
+	const buyerCountry = sub.metadata?.buyer_country ?? null;
+	const country = invoice.customer_details?.address?.country || cardCountry || buyerCountry;
 	return {
 		invoiceId: invoice.id,
 		subscription: sub,
@@ -293,8 +356,11 @@ export async function confirmProInvoice(
 		periodEnd: line.period.end,
 		amount: invoice.total,
 		currency: invoice.currency,
-		paymentIntentId: invoice.payment_intent,
-		managedPayments: sub.metadata?.managed_payments === '1'
+		paymentIntentId: intent?.id ?? null,
+		managedPayments: sub.metadata?.managed_payments === '1',
+		cardCountry,
+		buyerCountry,
+		domestic: country === 'JP'
 	};
 }
 

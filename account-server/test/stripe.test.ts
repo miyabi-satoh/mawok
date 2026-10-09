@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	confirmPurchase,
+	confirmProInvoice,
 	createProCheckoutSession,
 	createCheckoutSession,
 	StripeError,
@@ -126,6 +127,7 @@ describe('createProCheckoutSession', () => {
 				cancelUrl: 'https://account.test/cancel',
 				expiresAt: 2_000_000_000,
 				managedPayments: false,
+				buyerCountry: 'JP',
 				trial: true,
 				idempotencyKey: 'pro-key'
 			}
@@ -136,6 +138,133 @@ describe('createProCheckoutSession', () => {
 		expect(sent.get('subscription_data[trial_period_days]')).toBe('14');
 		expect(sent.get('subscription_data[metadata][product]')).toBe('mawok-pro');
 		expect(sent.get('subscription_data[metadata][account_id]')).toBe('acc');
+		expect(sent.get('subscription_data[metadata][buyer_country]')).toBe('JP');
+	});
+});
+
+describe('confirmProInvoice', () => {
+	const proConfig = {
+		...config,
+		proPrices: { monthly: 'price_pro_monthly', yearly: 'price_pro_yearly' }
+	};
+
+	function proInvoice(overrides: Record<string, unknown> = {}) {
+		const invoice = {
+			id: 'in_pro',
+			status: 'paid',
+			total: 480,
+			amount_paid: 480,
+			currency: 'jpy',
+			customer_details: { address: { country: 'JP' } },
+			parent: { subscription_details: { subscription: 'sub_pro' } },
+			lines: {
+				has_more: false,
+				data: [
+					{
+						amount: 480,
+						currency: 'jpy',
+						quantity: 1,
+						period: { end: 2_000_000_000 },
+						pricing: { price_details: { price: 'price_pro_monthly' } },
+						discount_amounts: []
+					}
+				]
+			},
+			payments: {
+				has_more: false,
+				data: [
+					{
+						status: 'paid',
+						amount_paid: 480,
+						payment: {
+							type: 'payment_intent',
+							payment_intent: { id: 'pi_pro', latest_charge: 'ch_pro' }
+						}
+					}
+				]
+			},
+			...overrides
+		};
+		vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+			const path = new URL(String(url)).pathname;
+			if (path.endsWith('/invoices/in_pro')) return Response.json(invoice);
+			if (path.endsWith('/subscriptions/sub_pro'))
+				return Response.json({
+					id: 'sub_pro',
+					status: 'active',
+					customer: 'cus_pro',
+					metadata: { product: 'mawok-pro', managed_payments: '0', buyer_country: 'US' },
+					items: {
+						data: [
+							{
+								current_period_end: 2_000_000_000,
+								price: { id: 'price_pro_monthly', currency: 'jpy' }
+							}
+						]
+					}
+				});
+			if (path.endsWith('/charges/ch_pro'))
+				return Response.json({ payment_method_details: { card: { country: 'US' } } });
+			throw new Error(`Unexpected Stripe request: ${path}`);
+		});
+	}
+
+	it('confirms every invoice field before recording a Pro payment', async () => {
+		proInvoice();
+		expect(await confirmProInvoice(proConfig, 'in_pro')).toMatchObject({
+			plan: 'monthly',
+			amount: 480,
+			currency: 'jpy',
+			paymentIntentId: 'pi_pro',
+			cardCountry: 'US',
+			buyerCountry: 'US',
+			domestic: true
+		});
+		vi.restoreAllMocks();
+		proInvoice({ customer_details: { address: null } });
+		expect((await confirmProInvoice(proConfig, 'in_pro'))?.domestic).toBe(false);
+		for (const overrides of [
+			{ amount_paid: 479 },
+			{ lines: { has_more: true, data: [] } },
+			{
+				payments: {
+					has_more: false,
+					data: [{ status: 'paid', amount_paid: 480, payment: { type: 'bank_transfer' } }]
+				}
+			}
+		]) {
+			vi.restoreAllMocks();
+			proInvoice(overrides);
+			expect(
+				await confirmProInvoice(proConfig, 'in_pro'),
+				JSON.stringify(overrides)
+			).toBeUndefined();
+		}
+	});
+
+	it('accepts the zero-yen trial invoice without recording a payment intent', async () => {
+		proInvoice({
+			total: 0,
+			amount_paid: 0,
+			lines: {
+				has_more: false,
+				data: [
+					{
+						amount: 0,
+						currency: 'jpy',
+						quantity: 1,
+						period: { end: 2_000_000_000 },
+						pricing: { price_details: { price: 'price_pro_monthly' } },
+						discount_amounts: []
+					}
+				]
+			},
+			payments: { has_more: false, data: [] }
+		});
+		expect(await confirmProInvoice(proConfig, 'in_pro')).toMatchObject({
+			amount: 0,
+			paymentIntentId: null
+		});
 	});
 });
 

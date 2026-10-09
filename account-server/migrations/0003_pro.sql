@@ -23,3 +23,5 @@ CREATE INDEX grants_expiring ON grants (account_id, kind, expires_at);
 -- 消費の記録はアカウント削除後も残す。付与を消しても行を残せるよう、参照だけを外す。
 ALTER TABLE consumptions ADD COLUMN grant_id TEXT REFERENCES grants (id) ON DELETE SET NULL;
 ALTER TABLE consumptions ADD COLUMN grant_kind TEXT;
+-- 導入前の消費にも付与の種類を残す。どの付与から使ったかは当時記録していないので grant_id は NULL のままにする。
+UPDATE consumptions SET grant_kind = CASE WHEN purchase_id IS NULL THEN 'free' ELSE 'purchase' END;

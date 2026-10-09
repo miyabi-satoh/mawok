@@ -136,6 +136,13 @@ const ja = {
 			'期間ごとに同じ額で自動更新します。販売と決済は Link (Sold through Link, LLC) が代わりに行います。'
 	} as Record<SaleRegion, string>,
 	proDelivery: '申し込みが済むとすぐ、このアカウントで Pro を使えます。',
+	proCancelLabel: '解約と返金',
+	proCancel: {
+		domestic: (tokushoho: string) =>
+			`解約はアカウントのページからいつでもできます。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。`,
+		overseas: (tokushoho: string) =>
+			`解約はアカウントのページからいつでもできます。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。購入から 60 日以内は、[Link の返金ポリシー](${LINK_REFUND_POLICY})で返金されることがあります。`
+	} as Record<SaleRegion, (tokushoho: string) => string>,
 	proTrial:
 		'最初の 14 日間は無料です。試用の終わる前に解約しなければ、次の期間から課金が始まります。無料の試用は、1つのアカウントにつき 1 回だけです。',
 	proCheckoutNote:
@@ -258,6 +265,13 @@ const en: typeof ja = {
 			'It renews automatically at the same price each period. The sale and payment are handled on our behalf by Link (Sold through Link, LLC).'
 	},
 	proDelivery: 'Pro is available on this account as soon as you subscribe.',
+	proCancelLabel: 'Cancellation and refunds',
+	proCancel: {
+		domestic: (tokushoho: string) =>
+			`You can cancel at any time on your account page. After canceling, you keep Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})).`,
+		overseas: (tokushoho: string) =>
+			`You can cancel at any time on your account page. After canceling, you keep Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})). Within 60 days of purchase, you may get a refund under [Link's refund policy](${LINK_REFUND_POLICY}).`
+	},
 	proTrial:
 		'Your first 14 days are free. Unless you cancel before the trial ends, billing starts for the next period. Each account can use the free trial once.',
 	proCheckoutNote:

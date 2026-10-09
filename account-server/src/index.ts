@@ -323,21 +323,32 @@ async function handleStripeEvent(
 			if (!paid) return;
 			const accountId = paid.subscription.metadata?.account_id;
 			const t = now();
+			const account = accountId
+				? await env.DB.prepare('SELECT id FROM accounts WHERE id = ?')
+						.bind(accountId)
+						.first<{ id: string }>()
+				: null;
+			const revokedPayment =
+				'(SELECT created_at FROM stripe_revoked_payments WHERE payment_intent_id = ?)';
 			await env.DB.batch([
 				env.DB.prepare(
 					`INSERT INTO subscriptions (id, account_id, plan, stripe_customer_id, paid_through, status, created_at)
-					 VALUES (?1, (SELECT id FROM accounts WHERE id = ?2), ?3, ?4, ?5, ?6, ?7)
+					 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+					 WHERE ?2 IS NOT NULL AND ?6 != 'canceled' AND ${revokedPayment.replace('?', '?8')} IS NULL
 					 ON CONFLICT (id) DO UPDATE SET plan = excluded.plan, stripe_customer_id = excluded.stripe_customer_id,
 					 paid_through = max(subscriptions.paid_through, excluded.paid_through), status = excluded.status
-					 WHERE subscriptions.revoked_at IS NULL`
+					 WHERE subscriptions.revoked_at IS NULL AND subscriptions.status != 'canceled'
+					 AND ${revokedPayment.replace('?', '?9')} IS NULL`
 				).bind(
 					paid.subscription.id,
-					accountId ?? '',
+					account?.id ?? null,
 					paid.plan,
 					paid.subscription.customer,
 					paid.periodEnd,
 					paid.subscription.status,
-					t
+					t,
+					paid.paymentIntentId,
+					paid.paymentIntentId
 				),
 				// 試用の 0 円請求書は、売上の台帳に残さない。
 				...(paid.amount === 0 || !paid.paymentIntentId
@@ -345,9 +356,10 @@ async function handleStripeEvent(
 					: [
 							env.DB.prepare(
 								`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
-					 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
-					 VALUES (?, (SELECT account_id FROM subscriptions WHERE id = ?), 'mawok-pro', ?, ?, ?, ?, ?, 1, ?, ?)
-					 ON CONFLICT DO NOTHING`
+						 amount, currency, managed_payments, card_country, buyer_country, domestic, stripe_subscription_id, created_at, revoked_at)
+						 VALUES (?, (SELECT account_id FROM subscriptions WHERE id = ?), 'mawok-pro', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+						 ${revokedPayment.replace('?', '?13')})
+								 ON CONFLICT DO NOTHING`
 							).bind(
 								randomHex(16),
 								paid.subscription.id,
@@ -356,11 +368,23 @@ async function handleStripeEvent(
 								paid.amount,
 								paid.currency,
 								paid.managedPayments ? 1 : 0,
+								paid.cardCountry,
+								paid.buyerCountry,
+								paid.domestic ? 1 : 0,
 								paid.subscription.id,
-								t
+								t,
+								paid.paymentIntentId
 							)
 						])
 			]);
+			// 返金・不審請求が先に届いていたときは、期間を延ばさず Stripe 側も打ち切る。
+			if (
+				paid.paymentIntentId &&
+				(await env.DB.prepare('SELECT 1 FROM stripe_revoked_payments WHERE payment_intent_id = ?')
+					.bind(paid.paymentIntentId)
+					.first())
+			)
+				await cancelSubscription(config, paid.subscription.id);
 			return;
 		}
 		case 'customer.subscription.updated':
@@ -995,8 +1019,8 @@ async function startProCheckout(
 	await c.env.DB.batch([
 		c.env.DB.prepare('DELETE FROM checkouts WHERE expires_at <= ?').bind(t),
 		c.env.DB.prepare(
-			`INSERT INTO checkouts (id, account_id, next, lang, expires_at, managed_payments, price)
-		 VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (account_id) DO NOTHING`
+			`INSERT INTO checkouts (id, account_id, next, lang, expires_at, managed_payments, buyer_country, price)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (account_id) DO NOTHING`
 		).bind(
 			randomHex(16),
 			account.id,
@@ -1004,11 +1028,12 @@ async function startProCheckout(
 			lang,
 			t + CHECKOUT_TTL,
 			usesManagedPayments(buyerCountry(c)) ? 1 : 0,
+			buyerCountry(c) ?? null,
 			plan
 		)
 	]);
 	const checkout = (await c.env.DB.prepare(
-		'SELECT id, next, lang, url, expires_at, managed_payments, price FROM checkouts WHERE account_id = ?'
+		'SELECT id, next, lang, url, expires_at, managed_payments, buyer_country, price FROM checkouts WHERE account_id = ?'
 	)
 		.bind(account.id)
 		.first<{
@@ -1018,6 +1043,7 @@ async function startProCheckout(
 			url: string | null;
 			expires_at: number;
 			managed_payments: number;
+			buyer_country: string | null;
 			price: 'monthly' | 'yearly';
 		}>())!;
 	if (checkout.url) return c.redirect(checkout.url, 303);
@@ -1037,6 +1063,7 @@ async function startProCheckout(
 				? undefined
 				: messages[checkout.lang].proCheckoutNote,
 			managedPayments: checkout.managed_payments === 1,
+			buyerCountry: checkout.buyer_country ?? undefined,
 			trial: !(await hadSubscription(c.env, account.id)),
 			idempotencyKey: `mawok-pro-checkout-${checkout.id}`
 		});

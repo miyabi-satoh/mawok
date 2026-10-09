@@ -423,7 +423,7 @@ export function proConfirmPage(
 		[t.confirmPriceLabel, t.proPrice(plan)],
 		[t.confirmPaymentLabel, t.proPayment[region]],
 		[t.confirmDeliveryLabel, t.proDelivery],
-		[t.confirmRefundLabel, t.confirmRefund[region](LEGAL_PAGES.tokushoho)]
+		[t.proCancelLabel, t.proCancel[region](LEGAL_PAGES.tokushoho)]
 	];
 	return page(
 		lang,
