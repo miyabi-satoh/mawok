@@ -17,7 +17,7 @@
 	type Props = {
 		menu: FolderMenu;
 		disabled: boolean;
-		/** メニューを開く前に呼ぶ。消えたフォルダーを外すため、中身を取り直す */
+		/** メニューを開く前に呼ぶ。Cmd/Ctrl+D の欄で移れずに一覧から外したものを映すため、中身を取り直す */
 		onopen: () => void;
 		/** 最近のフォルダーへ移る。ホームへ戻るときは空文字 */
 		onchange: (path: string) => void;

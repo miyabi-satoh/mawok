@@ -2,6 +2,7 @@
 //! 今のフォルダーは起動している間だけ覚え、起動し直すとホームフォルダーに戻る。最近移ったフォルダーの一覧は、メニューに出すため保存する
 
 use serde::Serialize;
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 
 /// 補うときに足す区切り。Windows は `/` も受けるが、エクスプローラーと同じ `\` を足す
@@ -12,6 +13,7 @@ pub const RECENT_LIMIT: usize = 5;
 
 /// 最近のフォルダーを書いておくファイル（app_local_data_dir の中）
 pub const RECENT_FILE_NAME: &str = "recent-folders.json";
+/// ファイルの形の版。形を変えたら上げる。版が合わないファイルは読まずに空の一覧から始める（最近のフォルダーは失っても困らないため）
 const RECENT_VERSION: u8 = 1;
 
 /// 欄の下に並べる候補の上限。それより多いときは、絞り込むよう件数だけを添える
@@ -292,11 +294,20 @@ pub fn menu(current: &Path, home: &Path, recent: &[PathBuf]) -> FolderMenu {
 }
 
 /// 移れなかったフォルダーを最近のフォルダーから外すか。フォルダーでなくなっていたら外す。
-/// 見つからないときは、親のフォルダーがあるとき（フォルダーそのものが消えたとき）だけ外す。外付けのドライブを抜いた・ネットワークの共有がつながっていないだけで消えないようにするため
+/// 見つからないときは、本当に無く、親があるとき（フォルダーそのものが消えたか、親がファイルに置き換わったとき）だけ外す。
+/// 外付けのドライブを抜いた・ネットワークの共有がつながっていない・読む権限が無いだけで消えないようにするため。
+/// macOS のドライブや共有のそのもの（`/Volumes/USB`）は、外れると親の `/Volumes` だけが残るので外さない
 pub fn is_gone(error: FolderError, folder: &Path) -> bool {
     match error {
         FolderError::NotAFolder => true,
-        FolderError::NotFound => folder.parent().is_some_and(Path::is_dir),
+        FolderError::NotFound => {
+            matches!(
+                folder.metadata(),
+                Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
+            ) && folder.parent().is_some_and(|parent| {
+                parent != Path::new("/Volumes") && parent.symlink_metadata().is_ok()
+            })
+        }
         FolderError::Network => false,
     }
 }
@@ -644,7 +655,15 @@ mod tests {
         let d = Dirs::new("gone");
         assert!(is_gone(FolderError::NotFound, &d.home.join("deleted")));
         assert!(is_gone(FolderError::NotAFolder, &d.home.join("file.txt")));
+        assert!(is_gone(
+            FolderError::NotFound,
+            &d.home.join("file.txt/project")
+        ));
         // 親も無い（ドライブを抜いた・共有がつながっていない）ときは残す
+        assert!(!is_gone(
+            FolderError::NotFound,
+            Path::new("/Volumes/mawok-unplugged")
+        ));
         assert!(!is_gone(
             FolderError::NotFound,
             &d.home.join("unplugged/project")
