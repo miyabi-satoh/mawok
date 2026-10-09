@@ -80,21 +80,21 @@ test.describe('下書きのボタン', () => {
 		await clickElement(client, await getDraftWindowHandle(), await client.$(selector));
 	}
 
-	test('履歴がないうちは、入力欄の下に設定・定型文・コピーの列があり、上に列はない', async () => {
+	test('履歴がないうちは、入力欄の上に定型文・設定、下に今のフォルダー・コピーがあり、前・次はない', async () => {
 		await showDraftAndWaitVisible();
 		const buttons = await listDraftButtons(client);
+		const above = buttons.filter((button) => button.position === 'above');
 		const below = buttons.filter((button) => button.position === 'below');
+		assert.ok(byText(above, '定型文'), JSON.stringify(buttons));
 		assert.ok(
-			below.some((button) => button.label === '設定'),
+			above.some((button) => button.label === '設定'),
 			JSON.stringify(buttons)
 		);
-		assert.ok(byText(below, '定型文'), JSON.stringify(buttons));
+		// 今のフォルダーのボタンは、フォルダーの名前を出す (起動したてはホーム)
+		assert.ok(byText(below, 'ホーム'), JSON.stringify(buttons));
 		assert.ok(byText(below, 'コピー'), JSON.stringify(buttons));
-		assert.equal(
-			buttons.filter((button) => button.position === 'above').length,
-			0,
-			JSON.stringify(buttons)
-		);
+		assert.equal(byText(buttons, '前'), undefined, JSON.stringify(buttons));
+		assert.equal(byText(buttons, '次'), undefined, JSON.stringify(buttons));
 	});
 
 	test('「コピー」を押すと隠れてフォーカスが戻り、貼り付け先に届き、出し直すと上に前・次の列が出る', async () => {
@@ -188,7 +188,7 @@ test.describe('下書きのボタン', () => {
 		}
 	});
 
-	test('歯車で設定が開き、「下書きにボタンを表示」をオフにすると、出し直された下書きに上下どちらの列もない', async () => {
+	test('歯車で設定が開き、「テキストウィンドウにボタンを表示」をオフにすると、出し直された下書きに上下どちらの列もない', async () => {
 		// 上の列 (前・次) も出る状態にしてから始める
 		await copyDraft(client, 'git status');
 		await showDraftAndWaitVisible();
