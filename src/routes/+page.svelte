@@ -433,10 +433,13 @@
 
 	function openFolder(): boolean {
 		if (!rememberSelection()) return false;
-		void invoke<string>('current_folder').then((current) => {
-			folder = current;
-			folderOpen = true;
-		});
+		// ホームフォルダーが取れないときは、欄を出さずに終える（Rust 側が理由をログに残す）
+		void invoke<string>('current_folder')
+			.then((current) => {
+				folder = current;
+				folderOpen = true;
+			})
+			.catch(() => {});
 		return true;
 	}
 

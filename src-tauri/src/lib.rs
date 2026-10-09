@@ -2000,28 +2000,31 @@ fn current_folder(app: AppHandle) -> Result<String, String> {
 
 /// コマンドのアクションの作業フォルダーを、打たれたパスへ移す（folder.rs の resolve）。空ならホームに戻る。
 /// 移った先をテキストウィンドウのタイトルバーに出す（ホームならアプリの名前だけ）。移れなければ符号を返す。
+/// つながらないネットワークのパスではファイルシステムの確かめが長く止まるので、画面を止めないよう async にし、確かめる間はロックを持たない。
 /// 利用者のフォルダーの名前はログに書かない
 #[tauri::command]
-fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
+async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
     let home = app.path().home_dir().map_err(|error| {
         error!("couldn't find the home folder: {error}");
         folder::FolderError::NotFound.code().to_string()
     })?;
     let state = app.state::<ActionState>();
-    let mut current = state.folder.lock().unwrap();
-    let base = current.clone().unwrap_or_else(|| home.clone());
+    let base = state
+        .folder
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| home.clone());
     let resolved = folder::resolve(&base, &home, &input).map_err(|error| {
         info!("couldn't change the working folder: {}", error.code());
         error.code().to_string()
     })?;
-    let shown = folder::display(&resolved, &home);
     let title = if resolved == home {
         APP_NAME.to_string()
     } else {
-        format!("{APP_NAME} — {shown}")
+        format!("{APP_NAME} — {}", folder::display(&resolved, &home))
     };
-    *current = (resolved != home).then_some(resolved);
-    drop(current);
+    *state.folder.lock().unwrap() = (resolved != home).then_some(resolved);
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         if let Err(error) = window.set_title(&title) {
             warn!("couldn't set the title of the draft window: {error}");

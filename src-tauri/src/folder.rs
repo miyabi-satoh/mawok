@@ -1,13 +1,16 @@
 //! コマンドのアクションを動かすフォルダー（テキストウィンドウで移る作業フォルダー。docs/actions.md「作業フォルダー」）。
 //! 移った先は起動している間だけ覚え、起動し直すとホームフォルダーに戻る
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// 移れなかった理由。画面は符号で文言を選ぶ
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FolderError {
     NotFound,
     NotAFolder,
+    /// `\\server\share` のようなネットワークのパス（Windows。docs/actions.md「作業フォルダー」）
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Network,
 }
 
 impl FolderError {
@@ -15,14 +18,21 @@ impl FolderError {
         match self {
             Self::NotFound => "folder.not_found",
             Self::NotAFolder => "folder.not_a_folder",
+            Self::Network => "folder.network",
         }
     }
 }
 
 /// 打たれたパスを、今のフォルダー `current` から見た実在のフォルダーにする。
-/// 空ならホーム、`~` で始まればホームから、相対パスなら今のフォルダーから。`..` とシンボリックリンクは解いた形にする
+/// 空ならホーム、`~` で始まればホームから、相対パスなら今のフォルダーから（今のフォルダーが消えていればホームから）。
+/// 前後の `"` を外し、`..` は文字の上で解いてシンボリックリンクは解かない（docs/actions.md「作業フォルダー」）
 pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, FolderError> {
-    let input = input.trim();
+    let trimmed = input.trim();
+    let input = trimmed
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(trimmed);
+    let base = if current.is_dir() { current } else { home };
     let path = if input.is_empty() || input == "~" {
         home.to_path_buf()
     } else if let Some(rest) = input
@@ -31,14 +41,38 @@ pub fn resolve(current: &Path, home: &Path, input: &str) -> Result<PathBuf, Fold
     {
         home.join(rest)
     } else {
-        current.join(input)
+        base.join(input)
     };
-    // Windows の canonicalize は `\\?\` を付けた形を返し、cmd の作業フォルダーにも見せる名前にも向かないので、付けない形にする
-    let resolved = dunce::canonicalize(&path).map_err(|_| FolderError::NotFound)?;
-    if !resolved.is_dir() {
-        return Err(FolderError::NotAFolder);
+    let resolved = normalize(&path);
+    #[cfg(windows)]
+    if resolved.to_string_lossy().starts_with(r"\\") {
+        return Err(FolderError::Network);
     }
-    Ok(resolved)
+    match resolved.metadata() {
+        Err(_) => Err(FolderError::NotFound),
+        Ok(metadata) if !metadata.is_dir() => Err(FolderError::NotAFolder),
+        Ok(_) => Ok(resolved),
+    }
+}
+
+/// `.` を除き、`..` を一つ前の名前と打ち消す。ルートより上へは戻らない
+fn normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(
+                    normalized.components().next_back(),
+                    Some(Component::Normal(_))
+                ) {
+                    normalized.pop();
+                }
+            }
+            other => normalized.push(other),
+        }
+    }
+    normalized
 }
 
 /// タイトルバーに出す形。macOS はホームの中を `~` で縮める（ターミナルと同じ）。Windows は `~` を使わないので、そのままにする
@@ -74,9 +108,8 @@ mod tests {
             let _ = fs::remove_dir_all(&root);
             fs::create_dir_all(root.join("work")).unwrap();
             fs::write(root.join("file.txt"), "").unwrap();
-            let home = dunce::canonicalize(&root).unwrap();
-            let work = home.join("work");
-            Self { home, work }
+            let work = root.join("work");
+            Self { home: root, work }
         }
     }
 
@@ -115,6 +148,42 @@ mod tests {
         assert_eq!(
             resolve(&d.home, &d.home, "file.txt"),
             Err(FolderError::NotAFolder)
+        );
+    }
+
+    #[test]
+    fn strips_the_quotes_of_a_copied_path() {
+        let d = Dirs::new("quotes");
+        let quoted = format!("\"{}\"", d.work.display());
+        assert_eq!(resolve(&d.home, &d.home, &quoted).unwrap(), d.work);
+    }
+
+    #[test]
+    fn starts_from_home_when_the_current_folder_is_gone() {
+        let d = Dirs::new("gone");
+        let gone = d.work.join("gone");
+        assert_eq!(resolve(&gone, &d.home, "work").unwrap(), d.work);
+    }
+
+    #[test]
+    fn resolves_dots_without_going_above_the_root() {
+        assert_eq!(
+            normalize(Path::new("/a/./b/../c")),
+            Path::new("/a/c").to_path_buf()
+        );
+        assert_eq!(
+            normalize(Path::new("/a/../..")),
+            Path::new("/").to_path_buf()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_network_paths() {
+        let d = Dirs::new("network");
+        assert_eq!(
+            resolve(&d.home, &d.home, r"\\server\share"),
+            Err(FolderError::Network)
         );
     }
 
