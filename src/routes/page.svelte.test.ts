@@ -2406,6 +2406,12 @@ describe('作業フォルダー', () => {
 		await expect
 			.element(screen.getByTestId('folder-suggestion'))
 			.toHaveTextContent('~/notes/work/');
+		// カーソルが末尾から離れたら消し、→ はカーソルを動かすだけにする。末尾に戻れば出し直す
+		await userEvent.keyboard('{ArrowLeft}');
+		await expect.element(screen.getByTestId('folder-suggestion')).not.toBeInTheDocument();
+		await userEvent.keyboard('{ArrowRight}');
+		await expect.element(input).toHaveValue('~/notes/wo');
+		await expect.element(screen.getByTestId('folder-suggestion')).toBeInTheDocument();
 		// 受け入れると、打った所も実際の名前の書き方になる
 		await userEvent.keyboard('{ArrowRight}');
 		await expect.element(input).toHaveValue('~/notes/Work/');

@@ -129,6 +129,13 @@
 		void suggest();
 	}
 
+	/** カーソルが末尾にあり、文字を選んでいないか */
+	function caretAtEnd(): boolean {
+		return (
+			inputElement?.selectionStart === input.length && inputElement.selectionEnd === input.length
+		);
+	}
+
 	function onKeydown(event: KeyboardEvent) {
 		// IME が処理したキーは、変換の操作なので横取りしない
 		if (isImeKey(event)) return;
@@ -144,7 +151,7 @@
 			if (event.metaKey || event.ctrlKey || event.altKey) return;
 			if (listed) void select(event.shiftKey ? -1 : 1);
 			else if (event.shiftKey) return;
-			else if (suggestion) void acceptSuggestion();
+			else if (suggestion && caretAtEnd()) void acceptSuggestion();
 			else void complete();
 			return;
 		}
@@ -152,7 +159,7 @@
 		if (listed && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
 			event.preventDefault();
 			void select(event.key === 'ArrowDown' ? 1 : -1);
-		} else if (event.key === 'ArrowRight' && suggestion) {
+		} else if (event.key === 'ArrowRight' && suggestion && caretAtEnd()) {
 			event.preventDefault();
 			void acceptSuggestion();
 		} else if (event.key === 'Escape') {
@@ -170,11 +177,13 @@
 
 	const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
 
-	/** カーソルを動かして末尾から離れたら続きを消し、末尾に戻ったら出し直す */
-	function onCaretMove() {
-		const atEnd = inputElement?.selectionStart === input.length;
-		if (!atEnd) suggestion = '';
-		else if (!suggestion && candidates.length === 0) void suggest();
+	/**
+	 * カーソルが末尾から離れたら続きを消す。末尾へ戻す操作（←→・Home・End・押す）のときは出し直す。
+	 * Cmd+← や ↑ のように、離れ方はキーで決めきれないので、離れたかはどのキーの後でも見る
+	 */
+	function onCaretMove(returning: boolean) {
+		if (!caretAtEnd()) suggestion = '';
+		else if (returning && !suggestion && candidates.length === 0) void suggest();
 	}
 </script>
 
@@ -208,9 +217,9 @@
 				oncompositionend={() => void suggest()}
 				onkeydown={onKeydown}
 				onkeyup={(event) => {
-					if (CARET_KEYS.has(event.key)) onCaretMove();
+					onCaretMove(CARET_KEYS.has(event.key));
 				}}
-				onpointerup={onCaretMove}
+				onpointerup={() => onCaretMove(true)}
 				bind:this={inputElement}
 				{@attach (element) => {
 					element.focus();
