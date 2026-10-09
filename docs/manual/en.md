@@ -64,9 +64,9 @@ From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and p
 
 1. Under "Actions" in Settings, choose a service under "AI service".
 2. If you choose Mawok, select "Sign in", sign in on the page that opens, then click "Link this PC". For another service, enter its API key.
-3. Read the explanation of what is sent, then select "Got it".
+3. Read the explanation of what is sent, then select "Agree".
 
-When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy more" on the same screen to open the purchase page in your browser.
+When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy credits" on the same screen to open the purchase page in your browser.
 
 ## Send to other devices
 
@@ -121,7 +121,7 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 
 - Mawok does not send usage statistics or error reports.
 - It sends your text outside the app only when you run an AI action (to the AI service you chose) or send it to another device (to your paired device).
-- Before you choose an AI service and select "Got it", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
+- Before you choose an AI service and select "Agree", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
 
 ## Settings file
 
