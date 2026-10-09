@@ -19,7 +19,7 @@ import {
 } from './app-conf.mjs';
 import {
 	fileExists,
-	logSize,
+	markLog,
 	readLogSince,
 	readTextIfExists,
 	recordPath,
@@ -970,8 +970,8 @@ export function openAgain({ newInstance = false } = {}) {
 
 /** 今からの Mawok のログを読む関数を返す (呼んだ時点より後に書かれた分) */
 export function watchLog() {
-	const offset = logSize(LOG_PATH);
-	return () => readLogSince(LOG_PATH, offset);
+	const mark = markLog(LOG_PATH);
+	return () => readLogSince(LOG_PATH, mark);
 }
 
 // NSApplicationActivationPolicy の値

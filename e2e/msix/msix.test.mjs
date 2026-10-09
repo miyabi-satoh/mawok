@@ -19,7 +19,7 @@ import {
 	registerCrashRecovery,
 	releaseLock
 } from '../lib/config.mjs';
-import { logSize, readLogSince } from '../lib/files.mjs';
+import { markLog, readLogSince } from '../lib/files.mjs';
 import { describeForegroundWindow, getMawokProcessId, stopPowerShell } from '../lib/os.mjs';
 import { closeLeftoverTrayMenu, closeTrayMenu, openTrayMenu, readTrayMenu } from '../lib/tray.mjs';
 import { waitFor } from '../lib/wait.mjs';
@@ -232,8 +232,8 @@ after(async () => {
 
 describe('EXE 版のファイルがある環境', () => {
 	let config;
-	/** 起動する前のログの大きさ。前の起動のログを読まないため */
-	let logOffset;
+	/** 起動する前のログの位置。前の起動のログを読まないため */
+	let logMark;
 
 	before(async () => {
 		config = await beginTestConfig({
@@ -241,7 +241,7 @@ describe('EXE 版のファイルがある環境', () => {
 			autostart: false,
 			pairedDevices: [PLACEHOLDER_DEVICE]
 		});
-		logOffset = logSize(LOG_FILE);
+		logMark = markLog(LOG_FILE);
 		await launchInPackage(pkg, CDP_PORT);
 	});
 
@@ -256,7 +256,7 @@ describe('EXE 版のファイルがある環境', () => {
 
 	test('パッケージとして動き、EXE 版と同じ場所のログに書く', async () => {
 		await waitFor(
-			() => readLogSince(LOG_FILE, logOffset),
+			() => readLogSince(LOG_FILE, logMark),
 			(text) => text.includes('packaged (MSIX): true'),
 			{ label: 'ログの packaged (MSIX): true' }
 		);
@@ -279,7 +279,7 @@ describe('EXE 版のファイルがある環境', () => {
 			);
 		}
 		await waitFor(
-			() => readLogSince(LOG_FILE, logOffset),
+			() => readLogSince(LOG_FILE, logMark),
 			(text) => text.includes('lan: listening on tcp'),
 			{ label: '待ち受けの開始', timeout: 10000 }
 		);
