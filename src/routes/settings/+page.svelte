@@ -1127,7 +1127,7 @@
 						{#if view.pairedDevices.length > 0}
 							{@const labels = deviceLabels(view.pairedDevices)}
 							<SettingsRow>
-								<!-- 同じ名前の機器は、送り先の一覧と同じく公開鍵の先頭4文字で見分け、どれを解除するか分かるようにする -->
+								<!-- 同じ名前の機器は、送信先の一覧と同じく公開鍵の先頭4文字で見分け、どれを解除するか分かるようにする -->
 								<!-- 行の間を空けて、上下の「解除」のボタンがくっついて見えないようにする -->
 								<div class="flex flex-col gap-3">
 									{#each view.pairedDevices as device (device.publicKey)}

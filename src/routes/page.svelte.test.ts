@@ -1111,7 +1111,7 @@ describe('組み合わせた機器へ送る', () => {
 		await expect.element(textarea).toHaveValue('git status');
 	});
 
-	it('送り先にチェックした機器がなければ、送らずに送り先の一覧を開く', async () => {
+	it('送信先にチェックした機器がなければ、送らずに送信先の一覧を開く', async () => {
 		settings.current = { ...view(), pairedDevices: [{ ...device, sendTo: false }] };
 		const screen = await render(Page);
 		const textarea = screen.getByRole('textbox');
@@ -1147,7 +1147,7 @@ describe('組み合わせた機器へ送る', () => {
 		await expect.element(textarea).toHaveValue('git status');
 	});
 
-	it('送り先の一覧では、つながらない機器はチェックできず、Enter でチェックした機器へ送る', async () => {
+	it('送信先の一覧では、つながらない機器はチェックできず、Enter でチェックした機器へ送る', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
 		settings.current = { ...view(), pairedDevices: [device, windows] };
 		invoked.mockImplementation((command) => {
@@ -1179,7 +1179,7 @@ describe('組み合わせた機器へ送る', () => {
 		expect(invoked).toHaveBeenCalledWith('send_draft', { text: 'git status', targets: ['ab'] });
 	});
 
-	it('送り先の一覧でチェックを外すと、設定に覚える', async () => {
+	it('送信先の一覧でチェックを外すと、設定に覚える', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
 		settings.current = { ...view(), pairedDevices: [device, windows] };
 		invoked.mockImplementation((command) =>
@@ -1300,7 +1300,7 @@ describe('組み合わせた機器へ送る', () => {
 		await expect.element(mac).toHaveAttribute('aria-selected', 'false');
 	});
 
-	it('送り先を覚えられなければ、チェックを戻して知らせる', async () => {
+	it('送信先を覚えられなければ、チェックを戻して知らせる', async () => {
 		settings.current = { ...view(), pairedDevices: [device] };
 		invoked.mockImplementation((command) => {
 			if (command === 'set_send_targets') return Promise.reject('permission denied');
@@ -1317,7 +1317,7 @@ describe('組み合わせた機器へ送る', () => {
 		await expect.element(mac).toHaveAttribute('aria-selected', 'true');
 	});
 
-	it('送り先の一覧を出したまま隠れたら、出し直したときは閉じて入力欄から始める', async () => {
+	it('送信先の一覧を出したまま隠れたら、出し直したときは閉じて入力欄から始める', async () => {
 		const screen = await render(Page);
 		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
 		const list = screen.getByRole('listbox', { name: m.draft_send_targets_list() });
@@ -1345,7 +1345,7 @@ describe('組み合わせた機器へ送る', () => {
 		await expect.element(screen.getByRole('textbox')).toHaveValue('届いた');
 	});
 
-	it('書きかけがあれば帯で知らせ、差し込むか捨てるかを選ぶ', async () => {
+	it('書きかけがあれば帯で知らせ、挿入か破棄かを選ぶ', async () => {
 		const screen = await render(Page);
 		const textarea = screen.getByRole('textbox');
 		await textarea.fill('書きかけ');
@@ -1577,7 +1577,7 @@ describe('キー操作', () => {
 		await expect.element(textarea).toHaveValue('one\ntwo');
 	});
 
-	it('送り先の一覧を開くキーで一覧を出し、もう一度押すと閉じる', async () => {
+	it('送信先の一覧を開くキーで一覧を出し、もう一度押すと閉じる', async () => {
 		settings.current = { ...view(), pairedDevices: [device] };
 		const screen = await render(Page);
 		await screen.getByRole('textbox').click();
@@ -1643,7 +1643,7 @@ describe('キー操作', () => {
 		const search = screen.getByRole('combobox');
 		await expect.element(search).toHaveFocus();
 
-		// 送り先の一覧を開くキー。定型文の一覧の中では、一覧の操作でも閉じるキーでもない
+		// 送信先の一覧を開くキー。定型文の一覧の中では、一覧の操作でも閉じるキーでもない
 		const event = new KeyboardEvent('keydown', {
 			code: 'KeyL',
 			key: 'l',
@@ -1672,7 +1672,7 @@ describe('キー操作', () => {
 		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('commit', { text: 'git status' }));
 	});
 
-	it('組み合わせた機器がなければ、送り先の一覧を開くキーでは何もしない', async () => {
+	it('組み合わせた機器がなければ、送信先の一覧を開くキーでは何もしない', async () => {
 		const screen = await render(Page);
 		await screen.getByRole('textbox').click();
 

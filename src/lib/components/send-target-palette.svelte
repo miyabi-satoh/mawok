@@ -58,7 +58,7 @@
 	const sendTo = (device: PairedDevice) => pressed.get(device.publicKey) ?? device.sendTo;
 	// 保存は押した順に1つずつ行う。同時に投げると、後に押した分が先に書き終わり、前に押した古い状態で上書きされうる
 	let saving: Promise<unknown> = Promise.resolve();
-	// この一覧で最後に保存できた送り先の公開鍵。設定の反映（settings-changed）より先に分かる
+	// この一覧で最後に保存できた送信先の公開鍵。設定の反映（settings-changed）より先に分かる
 	let saved: Set<string> | null = null;
 	const canCheck = (device: PairedDevice) => reachable?.has(device.publicKey) ?? false;
 	// つながらない機器は、チェックを覚えていても送らないので、外れて見せる

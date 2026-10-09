@@ -2392,7 +2392,7 @@ impl From<String> for SendFailure {
 const PARTIAL_SEND: &str = "lan.partial";
 
 /// 入力内容を組み合わせた機器の下書きへ送り、直前のアプリへフォーカスを戻してウィンドウを隠す（コピーして隠すときと揃える）。
-/// 送り先は、`targets`（公開鍵）を渡せばその機器、渡さなければ送り先にチェックした機器。
+/// 送信先は、`targets`（公開鍵）を渡せばその機器、渡さなければ送信先にチェックした機器。
 /// 送ったら true、入力欄が空で何も送らなかったら false を返す。1台にでも届かなければ隠さない。
 /// 相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
 #[tauri::command]
@@ -2556,7 +2556,7 @@ fn send_and_hide(
     Ok(sent)
 }
 
-/// 組み合わせた機器へつないで、動いているかを確かめる（送り先の一覧を開いたとき）。つながった機器の公開鍵を返す。
+/// 組み合わせた機器へつないで、動いているかを確かめる（送信先の一覧を開いたとき）。つながった機器の公開鍵を返す。
 /// 機器ごとに同時に確かめ、相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
 #[tauri::command]
 async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
@@ -2580,7 +2580,7 @@ async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
     .await
 }
 
-/// 送り先のチェックを覚える。渡した公開鍵の機器にチェックを入れ、ほかは外す
+/// 送信先のチェックを覚える。渡した公開鍵の機器にチェックを入れ、ほかは外す
 #[tauri::command]
 fn set_send_targets(app: AppHandle, public_keys: Vec<String>) -> Result<(), String> {
     update_config(&app, |config| {

@@ -612,7 +612,7 @@
 
 	/** 組み合わせた機器の下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
 	function send() {
-		// 送り先にチェックした機器がなければ、送らずに一覧を開いて選んでもらう
+		// 送信先にチェックした機器がなければ、送らずに一覧を開いて選んでもらう
 		if (!pairedDevices.some((device) => device.sendTo)) {
 			targetsOpen = true;
 			return;
@@ -635,7 +635,7 @@
 
 	/**
 	 * コピーするか送るかして隠す。隠すのは Rust 側で、渡したら true、空で何もしなかったら false が返る。
-	 * 送るときは、targets（公開鍵）を渡せばその機器へ、渡さなければ送り先にチェックした機器へ送る
+	 * 送るときは、targets（公開鍵）を渡せばその機器へ、渡さなければ送信先にチェックした機器へ送る
 	 */
 	async function hideWith(
 		command: 'commit' | 'send_draft',
