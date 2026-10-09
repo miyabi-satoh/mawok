@@ -12,6 +12,7 @@ mod diagnostics;
 mod draft_keys;
 mod events;
 mod focus;
+mod folder;
 mod history_store;
 mod hotkey;
 mod i18n;
@@ -127,6 +128,8 @@ struct DraftState {
 struct ActionState {
     /// 使い回す HTTP クライアント。最初に窓口か AI とやり取りするときに作る
     client: OnceLock<reqwest::Client>,
+    /// テキストウィンドウで移った作業フォルダー。None ならホームフォルダー（folder.rs）
+    folder: Mutex<Option<PathBuf>>,
     /// アクションに振った番号の最大。起動中ずっと増やすので、窓を読み込み直しても番号は戻らない
     last_request: AtomicU64,
     /// 走っているアクションと、取り消した番号
@@ -1877,7 +1880,7 @@ fn start_ai_action(
     }))
 }
 
-/// コマンドのアクションを始める。作業フォルダーはホームフォルダー
+/// コマンドのアクションを始める。作業フォルダーは、テキストウィンドウで移ったフォルダー（移っていなければホームフォルダー）
 fn start_command_action(
     app: &AppHandle,
     request: u64,
@@ -1891,13 +1894,22 @@ fn start_command_action(
         warn!("action {request} refused: the command is empty");
         return Err(actions::Failure::Unexpected.into());
     }
-    let home = app.path().home_dir().map_err(|error| {
-        error!("couldn't find the home folder: {error}");
-        ActionFailure::from(actions::Failure::CommandNotStarted)
-    })?;
+    let moved_to = app.state::<ActionState>().folder.lock().unwrap().clone();
+    let folder = match moved_to {
+        // 移った後にフォルダーが消えていれば、ホームで動かさずに断る。思っていない場所で動くと、相対パスのコマンドが別のファイルに触れるため
+        Some(folder) if !folder.is_dir() => {
+            warn!("action {request} refused: the working folder is gone");
+            return Err(actions::Failure::FolderMissing.into());
+        }
+        Some(folder) => folder,
+        None => app.path().home_dir().map_err(|error| {
+            error!("couldn't find the home folder: {error}");
+            ActionFailure::from(actions::Failure::CommandNotStarted)
+        })?,
+    };
     info!("action {request} started (command)");
     Ok(tauri::async_runtime::spawn(async move {
-        command::run(&command, &text, encoding, discard_output, &home, stopper).await
+        command::run(&command, &text, encoding, discard_output, &folder, stopper).await
     }))
 }
 
@@ -1976,6 +1988,47 @@ fn cancel_action(state: tauri::State<'_, ActionState>, request: u64) {
         info!("action {running} cancelled");
         abort();
     }
+}
+
+/// 今の作業フォルダーの見せる形（folder.rs の display）。移っていなければホームフォルダー
+#[tauri::command]
+fn current_folder(app: AppHandle) -> Result<String, String> {
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    let current = app.state::<ActionState>().folder.lock().unwrap().clone();
+    Ok(folder::display(current.as_deref().unwrap_or(&home), &home))
+}
+
+/// コマンドのアクションの作業フォルダーを、打たれたパスへ移す（folder.rs の resolve）。空ならホームに戻る。
+/// 移った先をテキストウィンドウのタイトルバーに出す（ホームならアプリの名前だけ）。移れなければ符号を返す。
+/// 利用者のフォルダーの名前はログに書かない
+#[tauri::command]
+fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
+    let home = app.path().home_dir().map_err(|error| {
+        error!("couldn't find the home folder: {error}");
+        folder::FolderError::NotFound.code().to_string()
+    })?;
+    let state = app.state::<ActionState>();
+    let mut current = state.folder.lock().unwrap();
+    let base = current.clone().unwrap_or_else(|| home.clone());
+    let resolved = folder::resolve(&base, &home, &input).map_err(|error| {
+        info!("couldn't change the working folder: {}", error.code());
+        error.code().to_string()
+    })?;
+    let shown = folder::display(&resolved, &home);
+    let title = if resolved == home {
+        APP_NAME.to_string()
+    } else {
+        format!("{APP_NAME} — {shown}")
+    };
+    *current = (resolved != home).then_some(resolved);
+    drop(current);
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+        if let Err(error) = window.set_title(&title) {
+            warn!("couldn't set the title of the draft window: {error}");
+        }
+    }
+    info!("changed the working folder");
+    Ok(())
 }
 
 /// 下書きウィンドウが隠れている間に終わったアクションを、OS の通知で知らせる。
@@ -3276,6 +3329,8 @@ pub fn run() {
             sign_out_mawok,
             open_mawok_buy_page,
             run_action,
+            change_folder,
+            current_folder,
             begin_action,
             cancel_action,
             notify_action_finished,

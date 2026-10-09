@@ -2469,6 +2469,7 @@ dependencies = [
  "apple-native-keyring-store",
  "arboard",
  "block2",
+ "dunce",
  "encoding_rs",
  "getrandom 0.4.3",
  "if-addrs",

@@ -13,6 +13,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { onMount, tick } from 'svelte';
+	import FolderPalette from '$lib/components/folder-palette.svelte';
 	import SendTargetPalette from '$lib/components/send-target-palette.svelte';
 	import TextPalette, { type PaletteAction } from '$lib/components/text-palette.svelte';
 	import * as Alert from '$lib/components/ui/alert';
@@ -45,6 +46,7 @@
 	import { EVENTS } from '$lib/bindings/constants';
 	import type { ReceivedDraft } from '$lib/bindings/ReceivedDraft';
 	import { coalescedSaver } from '$lib/saver';
+	import { folderErrorMessage } from '$lib/folder-errors';
 	import {
 		previewSegments,
 		ReplacementPreview,
@@ -388,6 +390,10 @@
 	}
 	// アクションの一覧を出しているか
 	let actionsOpen = $state(false);
+	// 作業フォルダーへ移る欄を出しているか
+	let folderOpen = $state(false);
+	// 欄を開いたときの作業フォルダーの見せる形（Rust 側の current_folder）。欄はこのパスを入れた状態で出す
+	let folder = $state('');
 
 	/** アクションを実行している最中の1回 */
 	type RunningAction = {
@@ -423,6 +429,31 @@
 	async function closeActions() {
 		actionsOpen = false;
 		await restoreSelection();
+	}
+
+	function openFolder(): boolean {
+		if (!rememberSelection()) return false;
+		void invoke<string>('current_folder').then((current) => {
+			folder = current;
+			folderOpen = true;
+		});
+		return true;
+	}
+
+	async function closeFolder() {
+		folderOpen = false;
+		await restoreSelection();
+	}
+
+	/** 打ったパスへ作業フォルダーを移す。移れたら欄を閉じ、移れなければ欄の下に出す文言を返す */
+	async function changeFolder(input: string): Promise<string | null> {
+		try {
+			await invoke('change_folder', { input });
+		} catch (error) {
+			return folderErrorMessage(error);
+		}
+		await closeFolder();
+		return null;
 	}
 
 	/**
@@ -668,6 +699,7 @@
 		// 送り先の一覧は、次に開いたときにつながるかを確かめ直す
 		snippetsOpen = false;
 		actionsOpen = false;
+		folderOpen = false;
 		targetsOpen = false;
 		// 前に出していたときの知らせは、出し直したら要らない
 		notice = '';
@@ -746,7 +778,7 @@
 		if (handled || event.target === textarea) return;
 		const view = settings.current;
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
-		if (snippetsOpen || actionsOpen || targetsOpen) {
+		if (snippetsOpen || actionsOpen || folderOpen || targetsOpen) {
 			if (action) event.preventDefault();
 			return;
 		}
@@ -778,6 +810,8 @@
 				return !sending && openSnippets();
 			case 'actions':
 				return !sending && openActions();
+			case 'changeFolder':
+				return !sending && openFolder();
 			case 'historyOlder':
 			case 'historyNewer':
 				if (sending) return false;
@@ -1209,6 +1243,15 @@
 			action={freeInputAction}
 			onpick={(item) => executeAction(item.action, snippetLabel(item))}
 			onclose={closeActions}
+		/>
+	{/if}
+	{#if folderOpen && settings.current}
+		<FolderPalette
+			current={folder}
+			platform={settings.current.platform}
+			toggleKey={settings.current.textWindowKeys.changeFolder}
+			onsubmit={changeFolder}
+			onclose={closeFolder}
 		/>
 	{/if}
 	{#if targetsOpen && hasPairedDevice && settings.current}

@@ -3,4 +3,4 @@
 /**
  * 操作ごとのキー。ホットキーと同じ書き方（`CommandOrControl+Shift+Enter`）で、空文字は割り当てなし
  */
-export type DraftKeys = { copy: string, send: string, settings: string, snippets: string, actions: string, historyOlder: string, historyNewer: string, sendTargets: string, insertReceived: string, discardReceived: string, };
+export type DraftKeys = { copy: string, send: string, settings: string, snippets: string, actions: string, historyOlder: string, historyNewer: string, sendTargets: string, insertReceived: string, discardReceived: string, changeFolder: string, };

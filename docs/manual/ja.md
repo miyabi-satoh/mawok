@@ -50,6 +50,12 @@ Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、�
 - コマンドが見つからないときは、フルパスで書きます。
 :::
 
+コマンドはホームフォルダーで動きます。別のフォルダーで動かすには、{macos:`Cmd+D`}{windows:`Ctrl+D`} で出る欄にパスを打って `Enter` を押します。
+
+- 相対パスは、今のフォルダーから見たパスになります。
+- 移った先はタイトルバーに出ます。
+- 欄を空にして `Enter` を押すとホームフォルダーに戻ります。Mawok を終了したときも戻ります。
+
 ## AI を使う
 
 1. 設定の「アクション」の「AI サービス」で、使うサービスを選ぶ。
@@ -83,6 +89,7 @@ Mawok を選ぶと API キーは要らず、使った分だけアカウントの
 | 前の履歴・次の履歴（カーソルの行にかかわらず） | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
 | 定型文の一覧を出して差し込む | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
 | アクションの一覧を出して実行する | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
+| コマンドを動かすフォルダーを移る | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
 | アクションを取り消す（実行している間） | `Esc` |
 | 組み合わせた機器へ送る | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
 | 送り先を選ぶ | {macos:`Cmd+L`}{windows:`Ctrl+L`} |

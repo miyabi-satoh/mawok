@@ -26,6 +26,7 @@ const MESSAGES: Record<string, () => string> = {
 	'action.network': m.action_error_network,
 	'action.timeout': m.action_error_timeout,
 	'action.command_not_started': m.action_error_command_not_started,
+	'action.folder_missing': m.action_error_folder_missing,
 	'action.text_not_embeddable': () => m.action_error_text_not_embeddable({ mark: TEXT_MARK }),
 	'action.multiline_command': m.action_error_multiline_command,
 	'action.empty_output': m.action_error_empty_output,

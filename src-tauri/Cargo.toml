@@ -26,6 +26,8 @@ serde = { version = "1", features = ["derive"] }
 # 設定ファイル（config.rs）。手で書いたコメントや並びを残したまま、変わった値だけを書き換えるため。0.x なのでマイナー版で固定する
 toml_edit = "0.25.15"
 tauri-plugin-global-shortcut = "2.3.2"
+# アクションの作業フォルダー（folder.rs）。Windows の canonicalize が付ける `\\?\` を付けない形にする
+dunce = "1.0.5"
 # 文字列しか書かないので、画像を扱う既定の feature は要らない
 arboard = { version = "3.6.1", default-features = false }
 # 下書きが隠れている間に終わったアクションを知らせる（lib.rs の notify_action_finished）
