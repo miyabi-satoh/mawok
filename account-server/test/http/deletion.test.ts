@@ -23,6 +23,12 @@ describe('deleting an account', () => {
 		const { cookie, token } = await linkApp(email);
 		const account = await accountId(email);
 		await buy(account, 'cs_leaving');
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, stripe_customer_id, paid_through, status, created_at)
+			 VALUES ('sub_leaving', ?, 'monthly', 'cus_leaving', 4_102_444_800, 'active', 0)`
+		)
+			.bind(account)
+			.run();
 		geminiAnswers();
 		await sendAi(token);
 		vi.restoreAllMocks();
@@ -50,6 +56,11 @@ describe('deleting an account', () => {
 			card_country: null,
 			buyer_country: null
 		});
+		expect(
+			await env.DB.prepare('SELECT account_id, stripe_customer_id FROM subscriptions WHERE id = ?')
+				.bind('sub_leaving')
+				.first()
+		).toEqual({ account_id: null, stripe_customer_id: null });
 		// 消費税の申告のため、使った分の記録も残す。
 		expect(
 			await env.DB.prepare('SELECT 1 FROM consumptions WHERE purchase_id = ?').bind(row!.id).first()

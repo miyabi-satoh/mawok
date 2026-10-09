@@ -25,3 +25,6 @@ ALTER TABLE consumptions ADD COLUMN grant_id TEXT REFERENCES grants (id) ON DELE
 ALTER TABLE consumptions ADD COLUMN grant_kind TEXT;
 -- 導入前の消費にも付与の種類を残す。どの付与から使ったかは当時記録していないので grant_id は NULL のままにする。
 UPDATE consumptions SET grant_kind = CASE WHEN purchase_id IS NULL THEN 'free' ELSE 'purchase' END;
+
+-- Stripe の期間末解約を、アカウントの画面でも出す。
+ALTER TABLE subscriptions ADD COLUMN cancel_at_period_end INTEGER NOT NULL DEFAULT 0;

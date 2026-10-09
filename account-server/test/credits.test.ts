@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { balance, charge, grantFreeStatement, grantProStatement } from '../src/credits';
+import { balance, charge, grantFreeStatement, grantProStatement, proOf } from '../src/credits';
 import { pricing } from '../src/pricing';
 import { randomHex } from '../src/util';
 import { grantsOf, newAccount } from './helpers';
@@ -199,5 +199,27 @@ describe('grantProStatement', () => {
 			.first<{ granted: number; expires_at: number }>();
 		expect(row?.granted).toBe(pricing(env).proMonthlyGrant);
 		expect(row?.expires_at).toBe(Date.UTC(2100, 1, 1) / 1000 - 9 * 60 * 60);
+	});
+});
+
+describe('proOf', () => {
+	it('treats a subscription without an unrevoked Pro payment as a trial even after it is canceled', async () => {
+		const account = await newAccount();
+		const subscription = randomHex(16);
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
+			 VALUES (?, ?, 'monthly', ?, 'canceled', 0)`
+		)
+			.bind(subscription, account, 4_102_444_800)
+			.run();
+		expect(await proOf(env, account, 1)).toMatchObject({ active: true, trial: true });
+		await env.DB.prepare(
+			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
+			 VALUES (?, ?, 'mawok-pro', ?, ?, 480, 'jpy', 0, 1, ?, 0)`
+		)
+			.bind(randomHex(16), account, randomHex(16), randomHex(16), subscription)
+			.run();
+		expect(await proOf(env, account, 1)).toMatchObject({ active: true, trial: false });
 	});
 });

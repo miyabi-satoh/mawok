@@ -124,7 +124,6 @@ const ja = {
 	checkAgain: 'もう一度確かめる',
 	bought: 'クレジットを購入しました。Mawok の設定に戻ると、残りに反映されます。',
 	proTitle: 'Mawok Pro',
-	proNotForSale: 'いまは Pro を申し込めません。',
 	proUnavailable: 'いまは Pro を申し込めません。',
 	proSubscribe: 'Pro の料金を見る',
 	proItem: (plan: 'monthly' | 'yearly') => `Mawok Pro（${plan === 'yearly' ? '年額' : '月額'}）`,
@@ -148,8 +147,11 @@ const ja = {
 	proCheckoutNote:
 		'最初の 14 日間は無料です。試用の終わる前に解約しなければ、期間ごとに同じ額で自動更新します。',
 	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
-		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} まで有効です。`,
-	proTrialUntil: (date: string) => `Pro を無料で試用中です。試用は ${date} に終わります。`,
+		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} に自動で更新されます。`,
+	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
+		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} まで使えます（更新されません）。`,
+	proTrialUntil: (date: string) =>
+		`${date} から課金が始まります。止めるときは「支払いを管理する」から解約してください。`,
 	manageBilling: '支払いを管理する',
 	accountTitle: 'アカウント',
 	balance: (percent: number) => `AI アクションのクレジット: 残り ${percent}%`,
@@ -252,7 +254,6 @@ const en: typeof ja = {
 	bought:
 		'AI action credit has been added. Go back to Mawok settings to see your remaining credit.',
 	proTitle: 'Mawok Pro',
-	proNotForSale: 'Pro is not available right now.',
 	proUnavailable: 'Pro is not available right now.',
 	proSubscribe: 'See Pro pricing',
 	proItem: (plan: 'monthly' | 'yearly') => `Mawok Pro (${plan})`,
@@ -276,8 +277,12 @@ const en: typeof ja = {
 		'Your first 14 days are free. Unless you cancel before the trial ends, billing starts for the next period. Each account can use the free trial once.',
 	proCheckoutNote:
 		'Your first 14 days are free. Unless you cancel before the trial ends, it renews automatically at the same price each period.',
-	proUntil: (plan: 'monthly' | 'yearly', date: string) => `Pro (${plan}): active until ${date}.`,
-	proTrialUntil: (date: string) => `Trying Pro free until ${date}.`,
+	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
+		`Pro (${plan}): renews automatically on ${date}.`,
+	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
+		`Pro (${plan}): available until ${date}; it will not renew.`,
+	proTrialUntil: (date: string) =>
+		`Billing starts on ${date}. To stop it, cancel through “Manage billing”.`,
 	manageBilling: 'Manage billing',
 	accountTitle: 'Account',
 	balance: (percent: number) => `AI action credit: ${percent}% left`,

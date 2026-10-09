@@ -37,9 +37,12 @@ import {
 	createProCheckoutSession,
 	billingPortalUrl,
 	cancelSubscription,
+	expireCheckoutSession,
 	getSubscription,
+	isPaidProInvoice,
 	createCheckoutSession,
 	PRODUCT,
+	ProInvoiceError,
 	proForSale,
 	StripeError,
 	stripeConfig,
@@ -175,9 +178,14 @@ app.get('/v1/balance', async (c) => {
 	// 無料の分を取りこぼしていれば、ここで付け直す (→ src/credits.ts)。
 	await grantFreeStatement(c.env, accountId).run();
 	const pro = await proOf(c.env, accountId);
-	await grantProStatement(c.env, accountId, pro).run();
+	if (pro.active && !pro.trial) await grantProStatement(c.env, accountId, pro).run();
 	const { remaining, percent } = await balance(c.env, accountId);
-	return c.json({ email: account?.email, remaining_percent: remaining > 0 ? percent : 0, pro });
+	const { cancelAtPeriodEnd: _cancelAtPeriodEnd, ...proResponse } = pro;
+	return c.json({
+		email: account?.email,
+		remaining_percent: remaining > 0 ? percent : 0,
+		pro: proResponse
+	});
 });
 
 /** Mawok でのサインアウト。トークンを外す。 */
@@ -205,7 +213,7 @@ app.post('/v1/ai', async (c) => {
 	// 無料の分を取りこぼしていれば、ここで付け直す (→ src/credits.ts)。
 	await grantFreeStatement(c.env, accountId).run();
 	const pro = await proOf(c.env, accountId);
-	await grantProStatement(c.env, accountId, pro).run();
+	if (pro.active && !pro.trial) await grantProStatement(c.env, accountId, pro).run();
 	const t = now();
 	// 同じアカウントは同時に1件だけ。印を取ってから残りを確かめるので、並べて送って残りを超えて使わせないように。
 	const owner = randomHex(16);
@@ -272,12 +280,12 @@ app.post('/v1/stripe/webhook', async (c) => {
 		.bind(event.id, event.type, now())
 		.run();
 	try {
-		await handleStripeEvent(c.env, config, event.type, event.data.object);
+		const outcome = await handleStripeEvent(c.env, config, event.type, event.data.object);
+		await markStripeEvent(c.env, event.id, outcome === 'failed' ? 'failed' : 'done');
 	} catch (e) {
 		await markStripeEvent(c.env, event.id, 'failed');
 		throw e;
 	}
-	await markStripeEvent(c.env, event.id, 'done');
 	// 片付けは次の知らせのときにもやり直せるので、失敗しても知らせは受け取ったことにする。
 	await forgetOldRecords(c.env).catch((e) => console.error('failed to forget old records', e));
 	return c.json({ received: true });
@@ -315,11 +323,28 @@ async function handleStripeEvent(
 	config: StripeConfig,
 	type: string,
 	object: Record<string, unknown>
-) {
+): Promise<'failed' | void> {
 	switch (type) {
 		case 'invoice.paid': {
-			if (!proForSale(config)) return;
-			const paid = await confirmProInvoice(config, String(object.id));
+			if (!proForSale(config)) {
+				if (await isPaidProInvoice(config, String(object.id))) {
+					await reportProInvoiceProblem(
+						env,
+						String(object.id),
+						'Pro の Price がそろっていません。'
+					);
+					return 'failed';
+				}
+				return;
+			}
+			let paid;
+			try {
+				paid = await confirmProInvoice(config, String(object.id));
+			} catch (e) {
+				if (!(e instanceof ProInvoiceError)) throw e;
+				await reportProInvoiceProblem(env, String(object.id), e.message);
+				return 'failed';
+			}
 			if (!paid) return;
 			const accountId = paid.subscription.metadata?.account_id;
 			const t = now();
@@ -351,6 +376,10 @@ async function handleStripeEvent(
 					paid.paymentIntentId,
 					paid.paymentIntentId
 				),
+				env.DB.prepare(
+					`UPDATE subscriptions SET cancel_at_period_end = ?
+					 WHERE id = ? AND account_id IS NOT NULL AND revoked_at IS NULL AND status != 'canceled'`
+				).bind(paid.subscription.cancel_at_period_end === true ? 1 : 0, paid.subscription.id),
 				// 試用の 0 円請求書は、売上の台帳に残さない。
 				...(paid.amount === 0 || !paid.paymentIntentId
 					? []
@@ -380,10 +409,11 @@ async function handleStripeEvent(
 			]);
 			// 返金・不審請求が先に届いていたときは、期間を延ばさず Stripe 側も打ち切る。
 			if (
-				paid.paymentIntentId &&
-				(await env.DB.prepare('SELECT 1 FROM stripe_revoked_payments WHERE payment_intent_id = ?')
-					.bind(paid.paymentIntentId)
-					.first())
+				!account ||
+				(paid.paymentIntentId &&
+					(await env.DB.prepare('SELECT 1 FROM stripe_revoked_payments WHERE payment_intent_id = ?')
+						.bind(paid.paymentIntentId)
+						.first()))
 			)
 				await cancelSubscription(config, paid.subscription.id);
 			return;
@@ -396,9 +426,9 @@ async function handleStripeEvent(
 			if (!row || row.status === 'canceled') return;
 			const sub = await getSubscription(config, row.id);
 			await env.DB.prepare(
-				"UPDATE subscriptions SET status = ? WHERE id = ? AND status != 'canceled'"
+				"UPDATE subscriptions SET status = ?, cancel_at_period_end = ? WHERE id = ? AND status != 'canceled'"
 			)
-				.bind(sub.status, row.id)
+				.bind(sub.status, sub.cancel_at_period_end === true ? 1 : 0, row.id)
 				.run();
 			return;
 		}
@@ -468,6 +498,11 @@ async function handleStripeEvent(
 					   (SELECT id FROM purchases WHERE stripe_payment_intent_id = ?)`
 				).bind(object.payment_intent),
 				env.DB.prepare(
+					`UPDATE grants SET revoked = revoked + remaining, remaining = 0
+					 WHERE account_id = (SELECT account_id FROM purchases WHERE stripe_payment_intent_id = ?)
+					   AND kind = 'pro' AND expires_at > ?`
+				).bind(object.payment_intent, t),
+				env.DB.prepare(
 					`UPDATE subscriptions SET revoked_at = coalesce(revoked_at, ?)
 					 WHERE id = (SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?)`
 				).bind(t, object.payment_intent)
@@ -481,6 +516,13 @@ async function handleStripeEvent(
 			return;
 		}
 	}
+}
+
+async function reportProInvoiceProblem(env: Env, invoiceId: string, reason: string) {
+	const subject = '[Mawok] 請求書で Pro を付けられませんでした';
+	const text = `請求書 ${invoiceId} は払われましたが、Pro を付けていません。\n\nわけ: ${reason}`;
+	if (env.OPERATOR_EMAIL) return sendMail(env, env.OPERATOR_EMAIL, subject, text);
+	console.error(`${subject}\n${text}`);
 }
 
 // ---- 人が開く画面 ----
@@ -833,7 +875,7 @@ accountApp.get('/buy', async (c) => {
 	if (plan === 'monthly' || plan === 'yearly') {
 		const config = stripeConfig(c.env);
 		if (!config || !proForSale(config))
-			return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proNotForSale), 404);
+			return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proUnavailable), 404);
 		const pro = await proOf(c.env, account.id);
 		if (pro.active) return c.redirect(ACCOUNT_HOME, 303);
 		return c.html(
@@ -864,6 +906,15 @@ accountApp.post('/buy', async (c) => {
 	// 支払いの画面の予約を取る。開いている画面があれば同じ画面へ送り、2つのタブや、確かめを待つ間の買い直しで
 	// 二重に払わせないように。払い終えた画面を開き直すと、Stripe が払い終えたことを示す。
 	const t = now();
+	const old = await c.env.DB.prepare(
+		'SELECT id, price, session_id FROM checkouts WHERE account_id = ? AND expires_at > ?'
+	)
+		.bind(account.id, t)
+		.first<{ id: string; price: string; session_id: string | null }>();
+	if (old && old.price !== '') {
+		if (old.session_id) await expireCheckoutSession(config, old.session_id);
+		await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ?').bind(old.id).run();
+	}
 	await c.env.DB.batch([
 		c.env.DB.prepare('DELETE FROM checkouts WHERE expires_at <= ?').bind(t),
 		c.env.DB.prepare(
@@ -900,7 +951,7 @@ accountApp.post('/buy', async (c) => {
 	// Stripe は作り終えた Session をそのまま返すので、画面は1つのまま。
 	const origin = new URL(c.req.url).origin;
 	const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang });
-	let session: { url: string };
+	let session: { id: string; url: string };
 	try {
 		session = await createCheckoutSession(config, {
 			accountId: account.id,
@@ -931,8 +982,8 @@ accountApp.post('/buy', async (c) => {
 			.run();
 		throw e;
 	}
-	await c.env.DB.prepare('UPDATE checkouts SET url = ? WHERE id = ?')
-		.bind(session.url, checkout.id)
+	await c.env.DB.prepare('UPDATE checkouts SET url = ?, session_id = ? WHERE id = ?')
+		.bind(session.url, session.id, checkout.id)
 		.run();
 	return c.redirect(session.url, 303);
 });
@@ -996,7 +1047,7 @@ async function startProCheckout(
 	next: string
 ) {
 	if (!proForSale(config))
-		return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proNotForSale), 404);
+		return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proUnavailable), 404);
 	if ((await proOf(c.env, account.id)).active) return c.redirect(next, 303);
 	const t = now();
 	const old = await c.env.DB.prepare(
@@ -1005,16 +1056,7 @@ async function startProCheckout(
 		.bind(account.id, t)
 		.first<{ id: string; price: string; session_id: string | null }>();
 	if (old && old.price !== plan) {
-		if (old.session_id) {
-			try {
-				await fetch(
-					`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(old.session_id)}/expire`,
-					{ method: 'POST', headers: { authorization: `Bearer ${config.secretKey}` } }
-				);
-			} catch {
-				/* 同じ画面を閉じられなくても新しい予約を作る。 */
-			}
-		}
+		if (old.session_id) await expireCheckoutSession(config, old.session_id);
 		await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ?').bind(old.id).run();
 	}
 	await c.env.DB.batch([

@@ -14,6 +14,9 @@ export type Pro = {
 	trial: boolean;
 };
 
+/** アカウントの画面だけに出す、Stripe で予約された期間末の解約。 */
+export type AccountPro = Pro & { cancelAtPeriodEnd: boolean };
+
 /**
  * 残りのある付与の、付けた量に対する残りの割合。金額や回数には直さない。
  * 買い足した直後に前の付与の残りがあると、両方を合わせた割合になる。
@@ -56,17 +59,32 @@ export function grantFreeStatement(env: Env, accountId: string, t = now()) {
 }
 
 /** Pro の状態。払い終えた期間が今より後なら Pro のまま使える。 */
-export async function proOf(env: Env, accountId: string, t = now()): Promise<Pro> {
+export async function proOf(env: Env, accountId: string, t = now()): Promise<AccountPro> {
 	const row = await env.DB.prepare(
-		`SELECT plan, paid_through, status FROM subscriptions
+		`SELECT plan, paid_through, cancel_at_period_end,
+		 EXISTS (SELECT 1 FROM purchases
+		         WHERE stripe_subscription_id = subscriptions.id
+		           AND product = 'mawok-pro' AND revoked_at IS NULL) AS paid
+		 FROM subscriptions
 		 WHERE account_id = ? AND revoked_at IS NULL AND paid_through > ?
 		 ORDER BY paid_through DESC LIMIT 1`
 	)
 		.bind(accountId, t)
-		.first<{ plan: 'monthly' | 'yearly'; paid_through: number; status: string }>();
+		.first<{
+			plan: 'monthly' | 'yearly';
+			paid_through: number;
+			cancel_at_period_end: number;
+			paid: number;
+		}>();
 	return row
-		? { active: true, until: row.paid_through, plan: row.plan, trial: row.status === 'trialing' }
-		: { active: false, until: null, plan: null, trial: false };
+		? {
+				active: true,
+				until: row.paid_through,
+				plan: row.plan,
+				trial: row.paid === 0,
+				cancelAtPeriodEnd: row.cancel_at_period_end === 1
+			}
+		: { active: false, until: null, plan: null, trial: false, cancelAtPeriodEnd: false };
 }
 
 /** Asia/Tokyo の暦月の終わり。Pro の付与はその月だけ使える。 */

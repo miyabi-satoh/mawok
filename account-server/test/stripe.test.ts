@@ -5,6 +5,7 @@ import {
 	confirmProInvoice,
 	createProCheckoutSession,
 	createCheckoutSession,
+	ProInvoiceError,
 	StripeError,
 	stripeConfig,
 	usesManagedPayments,
@@ -235,10 +236,10 @@ describe('confirmProInvoice', () => {
 		]) {
 			vi.restoreAllMocks();
 			proInvoice(overrides);
-			expect(
-				await confirmProInvoice(proConfig, 'in_pro'),
+			await expect(
+				confirmProInvoice(proConfig, 'in_pro'),
 				JSON.stringify(overrides)
-			).toBeUndefined();
+			).rejects.toBeInstanceOf(ProInvoiceError);
 		}
 	});
 

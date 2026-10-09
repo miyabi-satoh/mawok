@@ -13,6 +13,8 @@ interface __BaseEnv_Env {
 	/** Pro の月額・年額の Price の id。 */
 	STRIPE_PRO_MONTHLY_PRICE_ID?: string;
 	STRIPE_PRO_YEARLY_PRICE_ID?: string;
+	/** Pro の請求書を受け付けられなかったときの連絡先。無ければログに残す。 */
+	OPERATOR_EMAIL?: string;
 	/** Google でのサインイン (→ src/google.ts)。2つそろったときだけ出す。 */
 	GOOGLE_CLIENT_ID?: string;
 	GOOGLE_CLIENT_SECRET?: string;

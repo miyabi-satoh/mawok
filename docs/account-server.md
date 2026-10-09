@@ -72,10 +72,10 @@
 
 - Pro は月額 480 円・年額 4,800 円（税込み）の Stripe Checkout のサブスクで売る。日本からの買い手には直接、それ以外には Managed Payments で売る。Price は秘密の値 `STRIPE_PRO_MONTHLY_PRICE_ID`・`STRIPE_PRO_YEARLY_PRICE_ID` がそろったときだけ売る。
 - 料金ページから `GET /account/buy?plan=monthly|yearly` の最終確認を開く。最初の申し込みでは Stripe Checkout に 14 日の試用を渡し、カードを登録する。アカウントの `subscriptions` に一度でも行があれば、試用は渡さない。
-- `invoice.paid` で Stripe から請求書とサブスクを取り直し、`subscriptions.paid_through` を請求した期間の終わりまで延ばす。試用の始まりの 0 円の請求書も期限を延ばすが、購入の台帳には残さない。Pro は、打ち切られておらず `paid_through` が今より後なら有効とする。`customer.subscription.updated`・`deleted` は状態を合わせる。返金または不審請求は、その請求のサブスクを打ち切る。
+- `invoice.paid` で Stripe から請求書とサブスクを取り直し、`subscriptions.paid_through` を請求した期間の終わりまで延ばす。試用の始まりの 0 円の請求書も期限を延ばすが、購入の台帳には残さない。Price・明細・支払い方が受け付けられない Pro の請求書、または Pro の Price が未設定の請求書は、`OPERATOR_EMAIL` があれば運営者へ知らせて webhook を失敗として残し、無ければログに残す。Pro は、打ち切られておらず `paid_through` が今より後なら有効とする。試用かどうかは、そのサブスクに取り消していない Pro の支払いの台帳があるかで決める。`customer.subscription.updated`・`deleted` は状態と期間末の解約予約を合わせる。返金または不審請求は、その請求のサブスクと、そのアカウントの失効していない Pro の付与の残りを取り消す。
 - `GET /v1/balance` は `pro: { active, until, plan, trial }` を返す。`until` は `paid_through` の UNIX 秒。アプリは通信できないときも、ここで受けた期限の 7 日後まで Pro として扱う。
-- 有効で `active` の Pro には、残高の問い合わせまたは中継のときに、Asia/Tokyo の暦月ごとに 1 回だけクレジットを付ける。値は秘密の値 `PRO_MONTHLY_GRANT_MILLI_YEN`（月額）または `PRO_YEARLY_GRANT_MILLI_YEN`（年額）で、月末に失効する。試用中には付けない。引く順は失効していない Pro、古い購入、無料の順で、残りの割合には失効した付与を含めない。
-- アカウントの画面には Pro の状態・期限・Stripe のカスタマーポータルを出す。削除のスクリプトは、アカウントを消す前に Stripe のサブスクをその場で解約し、サブスク行は持ち主だけを外して残す。
+- 有効で試用中でない Pro には、残高の問い合わせまたは中継のときに、Asia/Tokyo の暦月ごとに 1 回だけクレジットを付ける。値は秘密の値 `PRO_MONTHLY_GRANT_MILLI_YEN`（月額）または `PRO_YEARLY_GRANT_MILLI_YEN`（年額）で、月末に失効する。引く順は失効していない Pro、古い購入、無料の順で、残りの割合には失効した付与を含めない。
+- アカウントの画面には、試用なら課金の開始日と解約方法、通常なら次の自動更新日、期間末の解約予約があれば更新されずに使える期限、Stripe のカスタマーポータルを出す。削除のスクリプトは、アカウントを消す前に Stripe のサブスクと開いている Checkout Session をその場で閉じる。削除後に開いたままの Checkout が払われたときもサブスクを解約する。サブスク行は持ち主と Stripe の customer id を外して残す。
 
 ## Mawok の側
 

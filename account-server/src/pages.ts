@@ -1,7 +1,7 @@
 import { html } from 'hono/html';
 import type { HtmlEscapedString } from 'hono/utils/html';
 import { messages, type Lang } from './i18n';
-import type { Balance, Pro } from './credits';
+import type { AccountPro, Balance } from './credits';
 import { ACCOUNT, ACCOUNT_HOME, PRICING_PATH, PURCHASE_CONDITIONS } from './util';
 
 /** 規約類の置き場。利用規約とプライバシーポリシーは同じ Worker の静的アセットで出す (→ docs/account-server.md「作り」)。
@@ -463,7 +463,11 @@ export function homePage(
 	balance: Balance,
 	apps: LinkedApp[],
 	region: SaleRegion | undefined,
-	{ bought = false, pro, billing = false }: { bought?: boolean; pro?: Pro; billing?: boolean } = {}
+	{
+		bought = false,
+		pro,
+		billing = false
+	}: { bought?: boolean; pro?: AccountPro; billing?: boolean } = {}
 ) {
 	const t = messages[lang];
 	const date = (seconds: number) =>
@@ -481,7 +485,13 @@ export function homePage(
 			${
 				pro?.active
 					? html`<p>
-								${pro.trial ? t.proTrialUntil(date(pro.until!)) : t.proUntil(pro.plan!, date(pro.until!))}
+								${
+									pro.trial
+										? t.proTrialUntil(date(pro.until!))
+										: pro.cancelAtPeriodEnd
+											? t.proCanceledUntil(pro.plan!, date(pro.until!))
+											: t.proUntil(pro.plan!, date(pro.until!))
+								}
 							</p>
 							${billing ? html`<form method="post" action="${ACCOUNT}/billing"><button class="secondary">${t.manageBilling}</button></form>` : ''}`
 					: region

@@ -43,6 +43,14 @@ describe('balance', () => {
 		)
 			.bind(account)
 			.run();
+		// 払った請求書があるので、試用ではない。
+		await env.DB.prepare(
+			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
+			 VALUES ('p_balance', ?, 'mawok-pro', 'invoice:in_balance', 'pi_balance', 4800, 'jpy', 0, 1, 'sub_balance', 0)`
+		)
+			.bind(account)
+			.run();
 		expect(await (await app('/v1/balance', token)).json()).toMatchObject({
 			pro: { active: true, until: 4102444800, plan: 'yearly', trial: false }
 		});

@@ -3,7 +3,7 @@
 //
 // 使い方: STRIPE_SECRET_KEY=<key> node scripts/delete-account.mjs <メールアドレス> [--env staging]
 import { spawnSync } from 'node:child_process';
-import { DELETE_ACCOUNT_STATEMENTS } from '../src/account-deletion.ts';
+import { DELETE_ACCOUNT_STATEMENTS, OPEN_CHECKOUT_SESSIONS } from '../src/account-deletion.ts';
 
 const [rawEmail, ...rest] = process.argv.slice(2);
 const email = (rawEmail ?? '').trim().toLowerCase();
@@ -49,5 +49,16 @@ for (const { id } of rows[0].results) {
 	if (!res.ok && res.status !== 404 && res.status !== 400)
 		throw new Error(`Stripe ${res.status}: ${await res.text()}`);
 	console.log(`canceled ${id}`);
+}
+const checkouts = d1(OPEN_CHECKOUT_SESSIONS.replaceAll('?1', `'${email}'`), true);
+for (const { session_id: sessionId } of checkouts[0].results) {
+	const res = await fetch(
+		`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`,
+		{ method: 'POST', headers: { authorization: `Bearer ${stripeKey}` } }
+	);
+	// 既に払われた・閉じた Session は Stripe が 400 にする。支払い済みなら webhook 側でサブスクを解約する。
+	if (!res.ok && res.status !== 400 && res.status !== 404)
+		throw new Error(`Stripe ${res.status}: ${await res.text()}`);
+	console.log(`expired ${sessionId}`);
 }
 d1(DELETE_ACCOUNT_STATEMENTS.map((s) => `${s.replaceAll('?1', `'${email}'`)};`).join('\n'));
