@@ -294,6 +294,7 @@
 	"folder_input": "フォルダーのパス",
 	"folder_candidates": "フォルダーの候補",
 	"folder_candidates_more": "ほか {count} 件。名前を打ち足すと絞り込めます。",
+	"folder_candidates_count": "当てはまるフォルダーが {count} 件あります。",
 	"folder_error_not_found": "フォルダーが見つかりません。",
 	"folder_error_not_a_folder": "フォルダーではありません。",
 	"folder_error_network": "ネットワークのパス（{prefix} で始まるパス）では、コマンドを動かせません。ドライブ文字を割り当てたパスで移ってください。",

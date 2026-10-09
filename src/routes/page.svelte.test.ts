@@ -2341,6 +2341,9 @@ describe('作業フォルダー', () => {
 		await expect
 			.element(screen.getByText(m.folder_candidates_more({ count: 100 })))
 			.toBeInTheDocument();
+		await expect
+			.element(screen.getByText(m.folder_candidates_count({ count: 102 })))
+			.toBeInTheDocument();
 
 		await userEvent.keyboard('c');
 		await expect.element(list).not.toBeInTheDocument();

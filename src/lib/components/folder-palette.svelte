@@ -113,15 +113,15 @@
 			}}
 		/>
 	</div>
-	<!-- Tab を押してもフォーカスは欄から動かないので、候補が出たことを読み上げで知らせる。読み上げは、前からある領域の中身が変わったときに働くので、領域はいつも置く -->
-	<div
-		aria-live="polite"
-		class={[
-			'min-h-0 overflow-y-auto text-sm text-muted-foreground',
-			candidates.length > 0 && 'border-t px-3 py-2'
-		]}
-	>
-		{#if candidates.length > 0}
+	<!--
+		Tab を押してもフォーカスは欄から動かないので、候補が出たことを読み上げで知らせる。一覧ごと読むと長いので、件数だけを読む。
+		読み上げは、前からある領域の中身が変わったときに働くので、領域はいつも置く
+	-->
+	<p aria-live="polite" class="sr-only">
+		{candidates.length > 0 ? m.folder_candidates_count({ count: total }) : ''}
+	</p>
+	{#if candidates.length > 0}
+		<div class="min-h-0 overflow-y-auto border-t px-3 py-2 text-sm text-muted-foreground">
 			<ul aria-label={m.folder_candidates()} class="flex flex-wrap gap-x-4 gap-y-1">
 				{#each candidates as name (name)}
 					<li class="min-w-0 break-all">{name}</li>
@@ -130,8 +130,8 @@
 			{#if total > candidates.length}
 				<p class="mt-1">{m.folder_candidates_more({ count: total - candidates.length })}</p>
 			{/if}
-		{/if}
-	</div>
+		</div>
+	{/if}
 	{#if error}
 		<p id="folder-palette-error" role="alert" class="border-t px-3 py-2 text-sm text-destructive">
 			{error}
