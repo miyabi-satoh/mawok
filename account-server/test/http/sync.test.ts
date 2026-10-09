@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { SYNC_TOTAL_BYTES } from '../../src/sync';
+import { purgeSync, SYNC_TOTAL_BYTES } from '../../src/sync';
 import { accountId, app, linkApp } from '../helpers';
 
 const KEY = 'a'.repeat(16);
@@ -198,6 +198,31 @@ describe('sync HTTP', () => {
 			key_id: 'b'.repeat(16),
 			seq: 2,
 			reset: true,
+			items: []
+		});
+	});
+
+	it('ends a rebuild at the account seq so a purged tombstone does not reset it again', async () => {
+		const email = 'sync-next@example.com';
+		const { token } = await linkApp(email);
+		const account = await makePro(email);
+		await put(token, {
+			key_id: KEY,
+			items: [
+				{ collection: 'settings', id: 'kept', base_seq: null, deleted: false, data: 'AQ==' },
+				{ collection: 'settings', id: 'gone', base_seq: null, deleted: true }
+			]
+		});
+		await env.DB.prepare(
+			`UPDATE sync_items SET updated_at = 0 WHERE account_id = ? AND id = 'gone'`
+		)
+			.bind(account)
+			.run();
+		await purgeSync(env);
+		const rebuilt = await (await app('/v1/sync?since=1', token)).json<{ next: number }>();
+		expect(rebuilt).toMatchObject({ reset: true, more: false, next: 2 });
+		expect(await (await app(`/v1/sync?since=${rebuilt.next}`, token)).json()).toMatchObject({
+			reset: false,
 			items: []
 		});
 	});

@@ -5,8 +5,8 @@ import { now } from './util';
 export const SYNC_ITEM_LIMIT = 100;
 export const SYNC_ITEM_BYTES = 256 * 1024;
 export const SYNC_TOTAL_BYTES = 16 * 1024 * 1024;
-/** base64 と JSON の分を含めた、100項目の要求を受けられる本文の上限。 */
-export const SYNC_REQUEST_BYTES = 36 * 1024 * 1024;
+/** 全体の上限 (16 MiB) を base64 にし、JSON の分を足しても収まる本文の上限。これより大きい要求は書けないので読まずに断る。 */
+export const SYNC_REQUEST_BYTES = 24 * 1024 * 1024;
 export const SYNC_TOMBSTONE_RETENTION = 90 * 24 * 60 * 60;
 
 type Collection = 'settings' | 'history';
@@ -147,6 +147,7 @@ export async function getSync(
 		env.DB.prepare(
 			'SELECT key_id, seq, purged_seq, bytes FROM sync_accounts WHERE account_id = ?'
 		).bind(accountId),
+		// CASE は shouldReset と同じ決まり。掃除が間に入っても、アカウントの行と同じ時点で決めるため SQL に置く。
 		env.DB.prepare(
 			`WITH sync_account AS (
 				SELECT seq, purged_seq FROM sync_accounts WHERE account_id = ?
@@ -186,7 +187,8 @@ export async function getSync(
 		reset,
 		items,
 		more,
-		next: items.at(-1)?.seq ?? account.seq
+		// 終わりは最後の項目でなく窓口の seq。掃除した消した記録の分だけ先にあり、最後の項目を指すと次に reset になるため。
+		next: more ? items.at(-1)!.seq : account.seq
 	};
 }
 
@@ -345,21 +347,17 @@ export async function putSync(env: Env, accountId: string, body: unknown): Promi
 			return { ok: false, error: 'too_large', limit: 'item' };
 		data.set(id, decoded);
 	}
-	for (let attempt = 0; attempt < 2; attempt++) {
+	// 関係の無い項目の書き込みや掃除と重なって外れただけなら、1回だけ書き直す。
+	// 2回とも外れたら、conflicts が空の 409 を返し、アプリに同じ要求を送り直してもらう。
+	for (let attempt = 0; ; attempt++) {
 		const current = await currentSync(env, accountId, items);
 		if (current.account.key_id !== null && current.account.key_id !== request.key_id)
 			return { ok: false, error: 'key_mismatch' };
 		const conflicts = conflictsFor(items, current.items);
-		if (conflicts.length > 0) return { ok: false, error: 'conflict', conflicts };
+		if (conflicts.length > 0 || attempt === 2) return { ok: false, error: 'conflict', conflicts };
 		const written = await writeSync(env, accountId, request.key_id, items, data, current);
 		if (written) return written;
-		if (attempt === 0) continue;
-		const latest = await currentSync(env, accountId, items);
-		if (latest.account.key_id !== null && latest.account.key_id !== request.key_id)
-			return { ok: false, error: 'key_mismatch' };
-		return { ok: false, error: 'conflict', conflicts: conflictsFor(items, latest.items) };
 	}
-	return { ok: false, error: 'invalid_request' };
 }
 
 /** 鍵を作り直した機器のため、前の暗号文と消した記録を一度に外す。 */
@@ -384,8 +382,9 @@ export async function purgeSync(env: Env, t = now()) {
 		env.DB.prepare(
 			`UPDATE sync_accounts SET purged_seq = max(purged_seq, coalesce((
 			SELECT max(seq) FROM sync_items WHERE account_id = sync_accounts.account_id AND deleted = 1 AND updated_at <= ?
-		), purged_seq))`
-		).bind(before),
+		), purged_seq))
+		WHERE EXISTS (SELECT 1 FROM sync_items WHERE account_id = sync_accounts.account_id AND deleted = 1 AND updated_at <= ?)`
+		).bind(before, before),
 		env.DB.prepare('DELETE FROM sync_items WHERE deleted = 1 AND updated_at <= ?').bind(before),
 		env.DB.prepare(
 			`DELETE FROM sync_accounts
