@@ -259,14 +259,17 @@
 				class="flex flex-wrap gap-x-2 gap-y-0.5"
 			>
 				{#each candidates as name, index (name)}
-					<!-- 押しても欄からフォーカスを動かさず、その候補で決める -->
+					<!--
+						押しても欄からフォーカスを動かさず、その候補で決める。
+						選んだ候補は、薄い文字の短い名前が並ぶ中で見分けられるよう、zsh の menu-select と同じく反転して出す
+					-->
 					<li
 						id="folder-candidate-{index}"
 						role="option"
 						aria-selected={index === selected}
 						class={[
 							'min-w-0 cursor-default rounded px-1 break-all',
-							index === selected && 'bg-accent text-accent-foreground'
+							index === selected && 'bg-primary text-primary-foreground'
 						]}
 						onpointerdown={(event) => {
 							event.preventDefault();
