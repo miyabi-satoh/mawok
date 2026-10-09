@@ -370,8 +370,9 @@ mod tests {
         d
     }
 
+    /// 補った後の期待値。打った区切りは打ったとおりに残り、補って足す末尾の区切りだけが OS のものになる
     fn sep(path: &str) -> String {
-        path.replace('/', &SEPARATOR.to_string())
+        format!("{}{SEPARATOR}", path.strip_suffix('/').unwrap())
     }
 
     #[test]
