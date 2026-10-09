@@ -2274,12 +2274,15 @@ describe('書きかけのあるなしを知らせる', () => {
 
 describe('作業フォルダー', () => {
 	let changeResult: () => Promise<unknown>;
+	let pickResult: () => Promise<unknown>;
 
 	beforeEach(() => {
 		changeResult = () => Promise.resolve(undefined);
+		pickResult = () => Promise.resolve(true);
 		invoked.mockImplementation((command, args) => {
 			if (command === 'current_folder') return Promise.resolve('~/notes');
 			if (command === 'change_folder') return changeResult();
+			if (command === 'pick_folder') return pickResult();
 			if (command === 'complete_folder') {
 				const { input } = args as { input: string };
 				if (input === '~/notes/d')
@@ -2420,6 +2423,22 @@ describe('作業フォルダー', () => {
 		await userEvent.keyboard('{ArrowRight}');
 		await expect.element(input).toHaveValue('~/notes/Work/');
 		await expect.element(screen.getByTestId('folder-suggestion')).not.toBeInTheDocument();
+	});
+
+	it('下のボタンで欄を出し、「選ぶ...」で選んだら閉じる。選ばずに閉じたら欄に戻る', async () => {
+		const screen = await render(Page);
+		await screen.getByRole('button', { name: m.draft_folder() }).click();
+		const input = screen.getByRole('combobox', { name: m.folder_input() });
+		await expect.element(input).toHaveFocus();
+
+		pickResult = () => Promise.resolve(false);
+		await screen.getByRole('button', { name: m.folder_pick() }).click();
+		await expect.element(input).toHaveFocus();
+		expect(commandsCalled()).toContain('pick_folder');
+
+		pickResult = () => Promise.resolve(true);
+		await screen.getByRole('button', { name: m.folder_pick() }).click();
+		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
 	});
 
 	it('Esc とキーのもう一押しで、移らずに閉じる', async () => {

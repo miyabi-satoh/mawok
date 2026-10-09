@@ -2,6 +2,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import FolderIcon from '@lucide/svelte/icons/folder';
 	import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
@@ -447,6 +448,17 @@
 	/** 打ちかけのパスを補う。補えなければ（ホームフォルダーが取れないなど）null で、欄はそのまま */
 	async function completeFolder(input: string): Promise<FolderCompletion | null> {
 		return invoke<FolderCompletion>('complete_folder', { input }).catch(() => null);
+	}
+
+	/** OS のフォルダーを選ぶ画面で選んで移る。移れたら欄を閉じる。選ばずに閉じたら欄はそのまま。移れなければ欄の下に出す文言を返す */
+	async function pickFolder(): Promise<string | null> {
+		try {
+			if (!(await invoke<boolean>('pick_folder'))) return null;
+		} catch (error) {
+			return folderErrorMessage(error);
+		}
+		await closeFolder();
+		return null;
 	}
 
 	async function closeFolder() {
@@ -1101,6 +1113,18 @@
 				<SparklesIcon data-icon="inline-start" />
 				<span class="@max-[30rem]:sr-only">{m.draft_actions()}</span>
 			</Button>
+			<!-- 送る・コピーのボタンと並ぶと狭いので、アイコンだけにする。今のフォルダーはタイトルバーに出ている -->
+			<Button
+				tabindex={-1}
+				variant="ghost"
+				size="icon-sm"
+				aria-label={m.draft_folder()}
+				title={keyHint(m.draft_folder_hint(), keys.changeFolder, platform)}
+				disabled={sending || running !== null}
+				onclick={openFolder}
+			>
+				<FolderIcon />
+			</Button>
 			{#if hasPairedDevice}
 				<!-- 本体でチェックした機器へ送り、▼で送り先の一覧を開く -->
 				<div class="ml-auto flex">
@@ -1261,6 +1285,7 @@
 			toggleKey={settings.current.textWindowKeys.changeFolder}
 			onsubmit={changeFolder}
 			oncomplete={completeFolder}
+			onpick={pickFolder}
 			onclose={closeFolder}
 		/>
 	{/if}

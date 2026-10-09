@@ -136,6 +136,8 @@ struct ActionState {
     requests: Mutex<ActionRequests>,
     /// AI サービスのキーをキーチェーンから読んでいる数。読んでいる間は、フォーカスが外れても下書きを隠さない
     reading_key: AtomicUsize,
+    /// フォルダーを選ぶ画面を出しているか。出している間は、フォーカスが外れても下書きを隠さない（pick_folder）
+    picking_folder: AtomicBool,
     /// キーを読んでいる間に、フォーカスが外れても隠さずに見送ったか。読み終えたら、下書きにフォーカスを戻すかどうかに使う
     blur_kept_for_key: AtomicBool,
     /// Mawok のアカウントと結ぶため、127.0.0.1 で戻りを待ち受けているタスク（start_mawok_sign_in）
@@ -631,6 +633,8 @@ struct BlurCheck {
     /// AI サービスのキーを読んでいる最中か。macOS はキーチェーンの許可のダイアログを前面に出すので、
     /// フォーカスが外れても、ユーザーがほかへ移ったわけではない（許可に応じている間に下書きが消えないようにする）
     reading_ai_key: bool,
+    /// フォルダーを選ぶ画面を出しているか。画面にフォーカスが移っても、ユーザーがほかへ移ったわけではない
+    picking_folder: bool,
 }
 
 /// 隠すのは、出ていて、一度フォーカスが入った後に外れたままで、それが設定ウィンドウのためではないときだけ
@@ -642,6 +646,7 @@ fn should_hide_on_blur(check: BlurCheck) -> bool {
         && !check.settings_focused
         && !check.settings_opening
         && !check.reading_ai_key
+        && !check.picking_folder
 }
 
 /// 初めての起動として下書きを出すか。設定ファイルがなかったうえで、作れたときだけ。
@@ -687,6 +692,10 @@ fn hide_on_blur(app: &AppHandle) {
             .reading_key
             .load(Ordering::Relaxed)
             > 0,
+        picking_folder: app
+            .state::<ActionState>()
+            .picking_folder
+            .load(Ordering::Relaxed),
     };
     if !should_hide_on_blur(check) {
         if check.reading_ai_key
@@ -2052,6 +2061,51 @@ async fn complete_folder(
     Ok(folder::complete(&base, &home, &input))
 }
 
+/// OS のフォルダーを選ぶ画面を今の作業フォルダーから出し、選んだフォルダーへ移る（change_folder と同じく確かめる）。
+/// 選ばずに閉じたら false。画面を出している間は、フォーカスが外れても下書きを隠さず、閉じたら下書きにフォーカスを戻す
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let home = app.path().home_dir().map_err(|error| {
+        error!("couldn't find the home folder: {error}");
+        folder::FolderError::NotFound.code().to_string()
+    })?;
+    let base = app
+        .state::<ActionState>()
+        .folder
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|folder| folder.is_dir())
+        .unwrap_or(home);
+    let Some(window) = main_window(&app) else {
+        return Err("main window not found".to_string());
+    };
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.state::<ActionState>()
+        .picking_folder
+        .store(true, Ordering::Relaxed);
+    app.dialog()
+        .file()
+        .set_directory(&base)
+        .set_parent(&window)
+        .pick_folder(move |picked| {
+            let _ = sender.send(picked);
+        });
+    let picked = receiver.await.ok().flatten();
+    app.state::<ActionState>()
+        .picking_folder
+        .store(false, Ordering::Relaxed);
+    if window.is_visible().unwrap_or(false) && !window.is_focused().unwrap_or(true) {
+        focus::refocus_draft(&app, &window);
+    }
+    let Some(path) = picked.and_then(|picked| picked.into_path().ok()) else {
+        return Ok(false);
+    };
+    change_folder(app, path.to_string_lossy().into_owned()).await?;
+    Ok(true)
+}
+
 /// 下書きウィンドウが隠れている間に終わったアクションを、OS の通知で知らせる。
 /// 文言は画面が表示言語で作る。押しても何もしない（Tauri の通知は、押したことを受け取れない）。
 /// 文言はアクションの名前を含み、利用者が付けた名前なのでログには書かない
@@ -3295,6 +3349,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -3352,6 +3407,7 @@ pub fn run() {
             run_action,
             change_folder,
             complete_folder,
+            pick_folder,
             current_folder,
             begin_action,
             cancel_action,
@@ -3704,6 +3760,7 @@ mod tests {
             settings_focused: false,
             settings_opening: false,
             reading_ai_key: false,
+            picking_folder: false,
         }
     }
 
@@ -3762,6 +3819,15 @@ mod tests {
         // macOS のキーチェーンの許可のダイアログにフォーカスが移っても、隠さない
         assert!(!should_hide_on_blur(BlurCheck {
             reading_ai_key: true,
+            ..blurred()
+        }));
+    }
+
+    #[test]
+    fn keeps_draft_while_picking_folder() {
+        // OS のフォルダーを選ぶ画面にフォーカスが移っても、隠さない
+        assert!(!should_hide_on_blur(BlurCheck {
+            picking_folder: true,
             ..blurred()
         }));
     }
