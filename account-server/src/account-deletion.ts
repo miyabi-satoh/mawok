@@ -6,6 +6,8 @@
  */
 export const DELETE_ACCOUNT_STATEMENTS = [
 	'DELETE FROM checkouts WHERE account_id = (SELECT id FROM accounts WHERE email = ?1)',
+	'DELETE FROM sync_items WHERE account_id = (SELECT id FROM accounts WHERE email = ?1)',
+	'DELETE FROM sync_accounts WHERE account_id = (SELECT id FROM accounts WHERE email = ?1)',
 	// 台帳に残すのは、取引の id・製品・額・日時・取り消したか・MP の取引か・国内の取引かだけ。
 	`UPDATE purchases SET card_country = NULL, buyer_country = NULL, detached_at = unixepoch()
 	 WHERE account_id = (SELECT id FROM accounts WHERE email = ?1)`,
