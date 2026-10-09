@@ -89,7 +89,8 @@ pub struct FolderCompletion {
 }
 
 /// 打ちかけのパスの最後の名前を、当てはまるフォルダーの名前で補う（docs/actions.md「作業フォルダー」）。
-/// 1つなら名前と区切りまで、2つ以上なら共通する所まで補い、候補を返す。大文字と小文字は区別しない。
+/// 大文字と小文字は区別せずに拾う。1つなら実際の名前と区切りに置き換え（大文字と小文字を区別するファイルシステムでも移れるように）、
+/// 2つ以上なら打った所を残して共通する所まで補い、候補を返す。
 /// `.` で始まるフォルダーは、`.` を打ったときだけ候補にする
 pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
     let trimmed = input.trim_start();
@@ -338,6 +339,8 @@ mod tests {
         let completion = complete(&d.home, &d.home, "wo");
         assert_eq!(completion.input, sep("work/"));
         assert!(completion.candidates.is_empty());
+        // 1つなら、打った大文字と小文字を実際の名前に合わせる
+        assert_eq!(complete(&d.home, &d.home, "WO").input, sep("work/"));
         assert_eq!(
             complete(&d.home, &d.home, "work/").input,
             sep("work/inner/")
