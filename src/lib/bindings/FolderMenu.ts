@@ -10,6 +10,6 @@ export type FolderMenu = { current: FolderItem,
  */
 atHome: boolean, 
 /**
- * 最近移ったフォルダー（新しい順。今のフォルダーも含み、消えたものとホームは含まない）
+ * 最近移ったフォルダー（新しい順。今のフォルダーも含み、ホームは含まない。まだあるかは確かめていない）
  */
 recent: Array<FolderItem>, };

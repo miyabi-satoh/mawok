@@ -253,7 +253,7 @@ pub struct FolderMenu {
     pub current: FolderItem,
     /// 今のフォルダーがホームか。ボタンには名前でなく「ホーム」と出す
     pub at_home: bool,
-    /// 最近移ったフォルダー（新しい順。今のフォルダーも含み、消えたものとホームは含まない）
+    /// 最近移ったフォルダー（新しい順。今のフォルダーも含み、ホームは含まない。まだあるかは確かめていない）
     pub recent: Vec<FolderItem>,
 }
 
@@ -288,6 +288,16 @@ pub fn menu(current: &Path, home: &Path, recent: &[PathBuf]) -> FolderMenu {
         current: item(current, home),
         at_home: current == home,
         recent: recent.iter().map(|folder| item(folder, home)).collect(),
+    }
+}
+
+/// 移れなかったフォルダーを最近のフォルダーから外すか。フォルダーでなくなっていたら外す。
+/// 見つからないときは、親のフォルダーがあるとき（フォルダーそのものが消えたとき）だけ外す。外付けのドライブを抜いた・ネットワークの共有がつながっていないだけで消えないようにするため
+pub fn is_gone(error: FolderError, folder: &Path) -> bool {
+    match error {
+        FolderError::NotAFolder => true,
+        FolderError::NotFound => folder.parent().is_some_and(Path::is_dir),
+        FolderError::Network => false,
     }
 }
 
@@ -627,6 +637,18 @@ mod tests {
         assert!(forget(&mut recent, &gone));
         assert!(!forget(&mut recent, &gone));
         assert_eq!(recent, [work]);
+    }
+
+    #[test]
+    fn forgets_only_folders_that_are_gone() {
+        let d = Dirs::new("gone");
+        assert!(is_gone(FolderError::NotFound, &d.home.join("deleted")));
+        assert!(is_gone(FolderError::NotAFolder, &d.home.join("file.txt")));
+        // 親も無い（ドライブを抜いた・共有がつながっていない）ときは残す
+        assert!(!is_gone(
+            FolderError::NotFound,
+            &d.home.join("unplugged/project")
+        ));
     }
 
     #[cfg(not(windows))]
