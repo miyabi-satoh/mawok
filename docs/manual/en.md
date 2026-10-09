@@ -50,6 +50,12 @@ Add actions under "Actions" in Settings.
 - If a command is not found, write its full path.
 :::
 
+Commands run in your home folder. To run them in another folder, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and press `Enter`.
+
+- A relative path starts from the current folder.
+- The title bar shows the folder.
+- Clear the box and press `Enter` to go back to your home folder. Quitting Mawok also goes back to it.
+
 ## Use AI
 
 1. Under "Actions" in Settings, choose a service under "AI service".
@@ -83,6 +89,7 @@ If the text box on the other device is empty, the text goes in as it is; if it h
 | Previous / next in history (wherever the cursor is) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
 | Open the snippet list and insert one | {macos:`Cmd+J`}{windows:`Ctrl+J`} |
 | Open the action list and run one | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
+| Change the folder commands run in | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
 | Cancel an action (while it is running) | `Esc` |
 | Send to paired devices | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
 | Choose destinations | {macos:`Cmd+L`}{windows:`Ctrl+L`} |

@@ -3,4 +3,4 @@
 /**
  * キーで呼べる操作。設定ファイルでキーが重なったときは、並びの先の操作にキーを残す（設定画面の並びは画面側の src/lib/keys.ts が持つ）
  */
-export type DraftAction = "copy" | "send" | "settings" | "snippets" | "actions" | "historyOlder" | "historyNewer" | "sendTargets" | "insertReceived" | "discardReceived";
+export type DraftAction = "copy" | "send" | "settings" | "snippets" | "actions" | "historyOlder" | "historyNewer" | "sendTargets" | "insertReceived" | "discardReceived" | "changeFolder";

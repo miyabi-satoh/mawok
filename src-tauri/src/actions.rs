@@ -100,6 +100,8 @@ pub enum Failure {
     Unexpected,
     /// コマンドを起動できなかった（シェルが見つからないなど）
     CommandNotStarted,
+    /// テキストウィンドウで移った作業フォルダーが、移った後に消えたか移された（folder.rs）
+    FolderMissing,
     /// シェルがコマンドを見つけられなかった（macOS の終了コード 127）。Windows は見分けない（command.rs の NOT_FOUND_EXIT_CODE）
     #[cfg_attr(windows, allow(dead_code))]
     CommandNotFound,
@@ -141,6 +143,7 @@ impl Failure {
             Self::Timeout => "action.timeout",
             Self::Unexpected => "action.unexpected",
             Self::CommandNotStarted => "action.command_not_started",
+            Self::FolderMissing => "action.folder_missing",
             Self::CommandNotFound => "action.command_not_found",
             Self::CommandFailed => "action.command_failed",
             Self::TextNotEmbeddable => "action.text_not_embeddable",

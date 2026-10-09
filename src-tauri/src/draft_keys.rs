@@ -22,10 +22,11 @@ pub enum DraftAction {
     SendTargets,
     InsertReceived,
     DiscardReceived,
+    ChangeFolder,
 }
 
 impl DraftAction {
-    pub const ALL: [DraftAction; 10] = [
+    pub const ALL: [DraftAction; 11] = [
         DraftAction::Copy,
         DraftAction::Send,
         DraftAction::Settings,
@@ -36,6 +37,7 @@ impl DraftAction {
         DraftAction::SendTargets,
         DraftAction::InsertReceived,
         DraftAction::DiscardReceived,
+        DraftAction::ChangeFolder,
     ];
 
     /// 設定ファイルでの項目名
@@ -51,6 +53,7 @@ impl DraftAction {
             DraftAction::SendTargets => "send_targets",
             DraftAction::InsertReceived => "insert_received",
             DraftAction::DiscardReceived => "discard_received",
+            DraftAction::ChangeFolder => "change_folder",
         }
     }
 
@@ -69,6 +72,8 @@ impl DraftAction {
             DraftAction::InsertReceived => "CommandOrControl+KeyI",
             // CommandOrControl+Backspace は入力欄の削除（macOS は行頭まで、Windows は前の単語）と重なる
             DraftAction::DiscardReceived => "CommandOrControl+Shift+Backspace",
+            // D は Directory。どの OS の入力欄でも、編集の操作に使われていない
+            DraftAction::ChangeFolder => "CommandOrControl+KeyD",
         }
     }
 }
@@ -89,6 +94,7 @@ pub struct DraftKeys {
     pub send_targets: String,
     pub insert_received: String,
     pub discard_received: String,
+    pub change_folder: String,
 }
 
 impl Default for DraftKeys {
@@ -105,6 +111,7 @@ impl Default for DraftKeys {
             send_targets: key(DraftAction::SendTargets),
             insert_received: key(DraftAction::InsertReceived),
             discard_received: key(DraftAction::DiscardReceived),
+            change_folder: key(DraftAction::ChangeFolder),
         }
     }
 }
@@ -122,6 +129,7 @@ impl DraftKeys {
             DraftAction::SendTargets => &self.send_targets,
             DraftAction::InsertReceived => &self.insert_received,
             DraftAction::DiscardReceived => &self.discard_received,
+            DraftAction::ChangeFolder => &self.change_folder,
         }
     }
 
@@ -137,6 +145,7 @@ impl DraftKeys {
             DraftAction::SendTargets => &mut self.send_targets,
             DraftAction::InsertReceived => &mut self.insert_received,
             DraftAction::DiscardReceived => &mut self.discard_received,
+            DraftAction::ChangeFolder => &mut self.change_folder,
         }
     }
 

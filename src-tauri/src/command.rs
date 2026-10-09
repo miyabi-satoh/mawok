@@ -329,13 +329,13 @@ impl ProcessTree {
 /// コマンドを実行する。`input` は実行する文（前の空行と後ろの空白と改行を除いたもの）で、行の `{{t}}` と環境変数 `MAWOK_TEXT` にそのまま入れ、
 /// 標準入力には改行を1つ足して `encoding` で書き、閉じる（空なら何も書かずに閉じる）。標準出力も `encoding` で読む。
 /// 終了コードが 0 なら、標準出力から末尾の改行を落としたものを返す。`discard_output` なら標準出力を読み捨て、空の文を返す。
-/// `stopper` で外から止められる
+/// `folder` で動かす。`stopper` で外から止められる
 pub async fn run(
     command: &str,
     input: &str,
     encoding: ActionEncoding,
     discard_output: bool,
-    home: &Path,
+    folder: &Path,
     stopper: Stopper,
 ) -> Result<String, ActionError> {
     // cmd は行の最初の改行より後ろを黙って捨て、1行目だけを実行して成功で終わるので、改行を含む行は実行する前に断る。
@@ -372,7 +372,7 @@ pub async fn run(
         process.env(QUOTED_TEXT_ENV, quote_windows_arg(input));
     }
     process
-        .current_dir(home)
+        .current_dir(folder)
         .stdin(Stdio::piped())
         .stdout(if discard_output {
             Stdio::null()

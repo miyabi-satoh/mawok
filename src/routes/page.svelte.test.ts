@@ -2271,3 +2271,61 @@ describe('書きかけのあるなしを知らせる', () => {
 		expect(reported()).toEqual([]);
 	});
 });
+
+describe('作業フォルダー', () => {
+	let changeResult: () => Promise<unknown>;
+
+	beforeEach(() => {
+		changeResult = () => Promise.resolve(undefined);
+		invoked.mockImplementation((command) => {
+			if (command === 'current_folder') return Promise.resolve('~/notes');
+			if (command === 'change_folder') return changeResult();
+			return Promise.resolve(undefined);
+		});
+		settings.current = view();
+	});
+
+	it('キーで、今のフォルダーを選んだ状態の欄を出し、打ったパスで Enter を押すと移って入力欄に戻る', async () => {
+		const screen = await render(Page);
+		const textarea = screen.getByRole('textbox', { name: m.draft_label() });
+		await textarea.fill('あいう');
+		await userEvent.keyboard('{Meta>}d{/Meta}');
+
+		const input = screen.getByRole('textbox', { name: m.folder_input() });
+		await expect.element(input).toHaveFocus();
+		await expect.element(input).toHaveValue('~/notes');
+		const element = input.element() as HTMLInputElement;
+		expect([element.selectionStart, element.selectionEnd]).toEqual([0, '~/notes'.length]);
+
+		await userEvent.keyboard('work{Enter}');
+
+		await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
+		expect(callsOf(invoked, 'change_folder').at(-1)?.[1]).toEqual({ input: 'work' });
+		await expect.element(textarea).toHaveFocus();
+	});
+
+	it('移れなければ欄を出したまま理由を出し、打ち直すと消す', async () => {
+		changeResult = () => Promise.reject('folder.not_found');
+		const screen = await render(Page);
+		await userEvent.keyboard('{Meta>}d{/Meta}');
+		await expect.element(screen.getByRole('textbox', { name: m.folder_input() })).toHaveFocus();
+
+		await userEvent.keyboard('nowhere{Enter}');
+
+		await expect.element(screen.getByRole('alert')).toHaveTextContent(m.folder_error_not_found());
+		await expect.element(screen.getByRole('dialog')).toBeInTheDocument();
+		await userEvent.keyboard('x');
+		await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+	});
+
+	it('Esc とキーのもう一押しで、移らずに閉じる', async () => {
+		const screen = await render(Page);
+		for (const close of ['{Escape}', '{Meta>}d{/Meta}']) {
+			await userEvent.keyboard('{Meta>}d{/Meta}');
+			await expect.element(screen.getByRole('dialog')).toBeInTheDocument();
+			await userEvent.keyboard(close);
+			await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
+		}
+		expect(commandsCalled()).not.toContain('change_folder');
+	});
+});

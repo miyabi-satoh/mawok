@@ -123,7 +123,8 @@ const DEFAULT_DRAFT_KEYS = {
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
 	sendTargets: 'CommandOrControl+KeyL',
 	insertReceived: 'CommandOrControl+KeyI',
-	discardReceived: 'CommandOrControl+Shift+Backspace'
+	discardReceived: 'CommandOrControl+Shift+Backspace',
+	changeFolder: 'CommandOrControl+KeyD'
 };
 
 /**

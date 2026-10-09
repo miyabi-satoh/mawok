@@ -13,7 +13,8 @@ export const DEFAULT_DRAFT_KEYS: DraftKeys = {
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
 	sendTargets: 'CommandOrControl+KeyL',
 	insertReceived: 'CommandOrControl+KeyI',
-	discardReceived: 'CommandOrControl+Shift+Backspace'
+	discardReceived: 'CommandOrControl+Shift+Backspace',
+	changeFolder: 'CommandOrControl+KeyD'
 };
 
 /** テストで Rust 側から届く設定。既定の値に overrides を重ねる */

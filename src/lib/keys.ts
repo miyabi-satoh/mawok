@@ -43,6 +43,7 @@ export const DRAFT_ACTIONS_IN_SETTINGS = [
 	'settings',
 	'snippets',
 	'actions',
+	'changeFolder',
 	'send',
 	'sendTargets',
 	'copy',
@@ -93,7 +94,8 @@ export function draftActionLabel(action: DraftAction): string {
 		historyNewer: m.settings_key_historyNewer,
 		sendTargets: m.settings_key_sendTargets,
 		insertReceived: m.settings_key_insertReceived,
-		discardReceived: m.settings_key_discardReceived
+		discardReceived: m.settings_key_discardReceived,
+		changeFolder: m.settings_key_changeFolder
 	}[action]();
 }
 
