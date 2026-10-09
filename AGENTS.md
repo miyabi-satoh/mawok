@@ -23,6 +23,7 @@
 
 - 画面と文書で「テキストウィンドウ」「テキスト」（英語は text window・text）と呼ぶものを、コード（識別子・イベント名・メッセージの ID・E2E のファイル名）では draft と呼ぶ。設定ファイルの項目名と、同じ名前で結ぶ Rust・画面との境目の型（SettingsView）のフィールドは、画面に合わせて text の側にする（`text_window_keys`・`textFontFamily` など）。その値を扱う関数・変数・コマンドは draft のままにする（`draftFontFamily`・`set_draft_text_color` など）。コメント・テストの見出しで設定の項目名や画面の文言を挙げるときは、その名前のとおりに書く。
 - 画面の文言は `messages/ja.json`・`messages/en.json`（Paraglide JS）に置く。トレイメニューとエラーの文言は `src-tauri/src/i18n.rs` に置く。
+- 外来語の語末の長音は、OS によらず付ける（フォルダー・サーバー・ブラウザー）。macOS の Finder や選ぶ画面は「フォルダ」だが合わせない。OS で表記を切り替えるアプリは見当たらず、OS をまたぐアプリでは長音を付けるのが多数派のため（VS Code・Firefox など）。
 - 日本語の文言（マニュアルの `docs/manual/ja.md` も含む）で、数字（数が入るプレースホルダーを含む）と、その後の単位の間は、半角の空白でなくノーブレークスペース（U+00A0）にする。見えない文字で、書き直すとふつうの空白に戻りやすいので、`src/lib/messages.test.ts`（画面の文言とマニュアル）と `src-tauri/src/i18n.rs` のテスト（トレイとエラーの文言）が見張る。
 
 ### マニュアル

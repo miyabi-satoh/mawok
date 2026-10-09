@@ -179,7 +179,7 @@ impl Lang {
         }
     }
 
-    /// Mawok のアカウントと結んだあと、窓口から戻ったブラウザに Mawok の待ち受けが返すページの見出しと本文
+    /// Mawok のアカウントと結んだあと、窓口から戻ったブラウザーに Mawok の待ち受けが返すページの見出しと本文
     pub fn mawok_sign_in_page(self, signed_in: bool) -> (&'static str, &'static str) {
         match (self, signed_in) {
             (Lang::En, true) => (
