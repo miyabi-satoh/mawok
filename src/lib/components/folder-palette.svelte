@@ -67,7 +67,7 @@
 		const typed = input;
 		const completion = await oncomplete(typed);
 		if (!completion || edits !== requested || !inputElement) return;
-		const atEnd = inputElement.selectionStart === typed.length;
+		const atEnd = caretAtEnd();
 		const fits = inputElement.scrollWidth <= inputElement.clientWidth;
 		suggestion = atEnd && fits ? suggestionSuffix(typed, completion) : '';
 		suggested = completion.input;
@@ -175,15 +175,21 @@
 		}
 	}
 
-	const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
+	// カーソルが末尾から離れたか。末尾へ戻ったときに続きを出し直すために覚えておく
+	let leftEnd = false;
 
 	/**
-	 * カーソルが末尾から離れたら続きを消す。末尾へ戻す操作（←→・Home・End・押す）のときは出し直す。
-	 * Cmd+← や ↑ のように、離れ方はキーで決めきれないので、離れたかはどのキーの後でも見る
+	 * カーソルが末尾から離れたら続きを消し、末尾へ戻ったら出し直す。
+	 * 動かし方（←→・Home・End・Cmd+←・↑・押すなど）はキーで決めきれないので、キーを離すたびと押すたびにカーソルの位置で見る
 	 */
-	function onCaretMove(returning: boolean) {
-		if (!caretAtEnd()) suggestion = '';
-		else if (returning && !suggestion && candidates.length === 0) void suggest();
+	function onCaretMove() {
+		if (!caretAtEnd()) {
+			suggestion = '';
+			leftEnd = true;
+		} else if (leftEnd) {
+			leftEnd = false;
+			if (candidates.length === 0) void suggest();
+		}
 	}
 </script>
 
@@ -216,10 +222,8 @@
 				}}
 				oncompositionend={() => void suggest()}
 				onkeydown={onKeydown}
-				onkeyup={(event) => {
-					onCaretMove(CARET_KEYS.has(event.key));
-				}}
-				onpointerup={() => onCaretMove(true)}
+				onkeyup={onCaretMove}
+				onpointerup={onCaretMove}
 				bind:this={inputElement}
 				{@attach (element) => {
 					element.focus();
