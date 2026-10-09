@@ -354,7 +354,7 @@ describe('buying credit', () => {
 		expect(done.status).toBe(303);
 		expect(done.headers.get('location')).toBe('/account/?bought=1');
 		expect(await (await request('/account/?bought=1', { cookie })).text()).toContain(
-			'クレジットを買い足しました'
+			'クレジットを購入しました'
 		);
 	});
 });

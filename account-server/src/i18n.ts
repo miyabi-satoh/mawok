@@ -89,7 +89,7 @@ const ja = {
 	approve: 'この PC を登録',
 	linkInvalidTitle: 'このページは開けません',
 	linkInvalid: 'Mawok の設定の「アクション」で「サインイン」を押して、もう一度開いてください。',
-	buyTitle: 'クレジットを買い足す',
+	buyTitle: 'クレジットを購入',
 	// 価格は本番の Stripe の Price と、紹介・規約類に合わせる。
 	confirmTitle: 'お申し込み内容の最終確認',
 	confirmItemLabel: '買うもの',
@@ -122,7 +122,7 @@ const ja = {
 	purchaseNotYet:
 		'支払いをまだ確かめられていません。少ししてから確かめ直してください。買い直す前に、領収のメールが届いていないかも確かめてください。',
 	checkAgain: 'もう一度確かめる',
-	bought: 'クレジットを買い足しました。Mawok の設定に戻ると、残りに反映されます。',
+	bought: 'クレジットを購入しました。Mawok の設定に戻ると、残りに反映されます。',
 	accountTitle: 'アカウント',
 	balance: (percent: number) => `AI アクションのクレジット: 残り ${percent}%`,
 	noBalance: 'AI アクションのクレジットはありません。',
@@ -188,7 +188,7 @@ const en: typeof ja = {
 	approve: 'Link this PC',
 	linkInvalidTitle: 'This page cannot be opened',
 	linkInvalid: 'In Mawok settings, open Actions and click Sign in to open it again.',
-	buyTitle: 'Buy AI action credit',
+	buyTitle: 'Buy credits',
 	confirmTitle: 'Review your order',
 	confirmItemLabel: 'What you buy',
 	confirmItem: 'Mawok AI action credit (does not expire)',
