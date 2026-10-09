@@ -1,11 +1,20 @@
 //! コマンドのアクションを動かすフォルダー（テキストウィンドウで移る作業フォルダー。docs/actions.md「作業フォルダー」）。
-//! 移った先は起動している間だけ覚え、起動し直すとホームフォルダーに戻る
+//! 今のフォルダーは起動している間だけ覚え、起動し直すとホームフォルダーに戻る。最近移ったフォルダーの一覧は、メニューに出すため保存する
 
 use serde::Serialize;
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 
 /// 補うときに足す区切り。Windows は `/` も受けるが、エクスプローラーと同じ `\` を足す
 const SEPARATOR: char = if cfg!(windows) { '\\' } else { '/' };
+
+/// 最近移ったフォルダーを覚える数。メニューで一目で選べる数で、Explorer のアドレスバーの履歴と同じ
+pub const RECENT_LIMIT: usize = 5;
+
+/// 最近のフォルダーを書いておくファイル（app_local_data_dir の中）
+pub const RECENT_FILE_NAME: &str = "recent-folders.json";
+/// ファイルの形の版。形を変えたら上げる。版が合わないファイルは読まずに空の一覧から始める（最近のフォルダーは失っても困らないため）
+const RECENT_VERSION: u8 = 1;
 
 /// 欄の下に並べる候補の上限。それより多いときは、絞り込むよう件数だけを添える
 const CANDIDATE_LIMIT: usize = 100;
@@ -235,6 +244,123 @@ fn common_prefix(names: &[String]) -> &str {
         .min()
         .unwrap_or(first.len());
     &first[..end]
+}
+
+/// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct FolderMenu {
+    pub current: FolderItem,
+    /// 今のフォルダーがホームか。ボタンには名前でなく「ホーム」と出す
+    pub at_home: bool,
+    /// 最近移ったフォルダー（新しい順。今のフォルダーも含み、ホームは含まない。まだあるかは確かめていない）
+    pub recent: Vec<FolderItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+pub struct FolderItem {
+    /// フォルダーの名前（パスの最後）
+    pub name: String,
+    /// タイトルバーと同じ形のパス（display）
+    pub display: String,
+    /// 移るときに change_folder に渡すパス
+    pub path: String,
+}
+
+fn item(path: &Path, home: &Path) -> FolderItem {
+    let display = display(path, home);
+    FolderItem {
+        name: path.file_name().map_or_else(
+            || display.clone(),
+            |name| name.to_string_lossy().into_owned(),
+        ),
+        display,
+        path: path.to_string_lossy().into_owned(),
+    }
+}
+
+/// フォルダーのボタンとメニューに出すものを作る。最近のフォルダーがまだあるかは確かめない。
+/// つながらないネットワークのフォルダーがあると、確かめ終わるまでボタンが出ないため。消えたものは、選んで移れなかったときに外す（forget）
+pub fn menu(current: &Path, home: &Path, recent: &[PathBuf]) -> FolderMenu {
+    FolderMenu {
+        current: item(current, home),
+        at_home: current == home,
+        recent: recent.iter().map(|folder| item(folder, home)).collect(),
+    }
+}
+
+/// 移れなかったフォルダーを最近のフォルダーから外すか。フォルダーでなくなっていたら外す。
+/// 見つからないときは、本当に無く、親があるとき（フォルダーそのものが消えたか、親がファイルに置き換わったとき）だけ外す。
+/// 外付けのドライブを抜いた・ネットワークの共有がつながっていない・読む権限が無いだけで消えないようにするため。
+/// macOS のドライブや共有のそのもの（`/Volumes/USB`）は、外れると親の `/Volumes` だけが残るので外さない。
+/// 親はリンクの先まで見る。共有を指すリンク（`~/nas`）の中のフォルダーを、共有が切れただけで外さないため
+pub fn is_gone(error: FolderError, folder: &Path) -> bool {
+    match error {
+        FolderError::NotAFolder => true,
+        FolderError::NotFound => {
+            matches!(
+                folder.metadata(),
+                Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
+            ) && folder
+                .parent()
+                .is_some_and(|parent| parent != Path::new("/Volumes") && parent.metadata().is_ok())
+        }
+        FolderError::Network => false,
+    }
+}
+
+/// 移れなかったフォルダーを、最近のフォルダーから外す。外したら true
+pub fn forget(recent: &mut Vec<PathBuf>, folder: &Path) -> bool {
+    let before = recent.len();
+    recent.retain(|known| known != folder);
+    recent.len() != before
+}
+
+/// 移った先を、最近のフォルダーの先頭に入れる。ホームは入れない（メニューの「ホームフォルダーに戻る」で戻れる）
+pub fn remember(recent: &mut Vec<PathBuf>, folder: &Path, home: &Path) {
+    if folder == home {
+        return;
+    }
+    recent.retain(|known| known != folder);
+    recent.insert(0, folder.to_path_buf());
+    recent.truncate(RECENT_LIMIT);
+}
+
+#[derive(Serialize, serde::Deserialize)]
+struct RecentFile {
+    version: u8,
+    folders: Vec<String>,
+}
+
+/// 最近のフォルダーを読む。無い・読めない・形が違うときは空にする（覚え直せば済むものなので、利用者に知らせない）
+pub fn load_recent(path: &Path) -> Vec<PathBuf> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<RecentFile>(&text).ok())
+        .filter(|file| file.version == RECENT_VERSION)
+        .map(|file| {
+            let mut folders: Vec<PathBuf> = file.folders.into_iter().map(PathBuf::from).collect();
+            folders.truncate(RECENT_LIMIT);
+            folders
+        })
+        .unwrap_or_default()
+}
+
+/// 最近のフォルダーを書く。名前を文字列にできないフォルダー（Windows の壊れた名前など）は書かない
+pub fn save_recent(path: &Path, recent: &[PathBuf]) -> std::io::Result<()> {
+    let file = RecentFile {
+        version: RECENT_VERSION,
+        folders: recent
+            .iter()
+            .filter_map(|folder| folder.to_str().map(str::to_string))
+            .collect(),
+    };
+    let json = serde_json::to_string(&file).expect("recent folders are serializable");
+    crate::atomic_file::write(path, json.as_bytes())
 }
 
 /// `.` を除き、`..` を一つ前の名前と打ち消す。ルートより上へは戻らない
@@ -483,6 +609,72 @@ mod tests {
             complete(&d.home, &d.home, &quoted).input,
             format!("{}{SEPARATOR}", d.work.display())
         );
+    }
+
+    #[test]
+    fn remembers_recent_folders_newest_first_without_home() {
+        let home = Path::new("/home/someone");
+        let mut recent = Vec::new();
+        for name in ["a", "b", "a", "c", "d", "e", "f"] {
+            remember(&mut recent, &home.join(name), home);
+        }
+        remember(&mut recent, home, home);
+        assert_eq!(
+            recent,
+            ["f", "e", "d", "c", "a"].map(|name| home.join(name))
+        );
+    }
+
+    #[test]
+    fn saves_and_loads_recent_folders() {
+        let d = Dirs::new("recent");
+        let file = d.home.join(RECENT_FILE_NAME);
+        assert!(load_recent(&file).is_empty());
+        save_recent(&file, std::slice::from_ref(&d.work)).unwrap();
+        assert_eq!(load_recent(&file), std::slice::from_ref(&d.work));
+        fs::write(&file, "{").unwrap();
+        assert!(load_recent(&file).is_empty());
+    }
+
+    #[test]
+    fn menu_lists_recent_folders_and_forgets_missing_ones() {
+        let home = Path::new("/home/someone");
+        let work = home.join("work");
+        let gone = home.join("gone");
+        let mut recent = vec![gone.clone(), work.clone()];
+        let menu = menu(&work, home, &recent);
+        assert_eq!(menu.current.name, "work");
+        assert!(!menu.at_home);
+        assert_eq!(menu.recent.len(), 2);
+        assert!(forget(&mut recent, &gone));
+        assert!(!forget(&mut recent, &gone));
+        assert_eq!(recent, [work]);
+    }
+
+    #[test]
+    fn forgets_only_folders_that_are_gone() {
+        let d = Dirs::new("gone");
+        assert!(is_gone(FolderError::NotFound, &d.home.join("deleted")));
+        assert!(is_gone(FolderError::NotAFolder, &d.home.join("file.txt")));
+        assert!(is_gone(
+            FolderError::NotFound,
+            &d.home.join("file.txt/project")
+        ));
+        // 親も無い（ドライブを抜いた・共有がつながっていない）ときは残す
+        assert!(!is_gone(
+            FolderError::NotFound,
+            Path::new("/Volumes/mawok-unplugged")
+        ));
+        #[cfg(unix)]
+        {
+            let link = d.home.join("nas");
+            std::os::unix::fs::symlink(d.home.join("unplugged"), &link).unwrap();
+            assert!(!is_gone(FolderError::NotFound, &link.join("project")));
+        }
+        assert!(!is_gone(
+            FolderError::NotFound,
+            &d.home.join("unplugged/project")
+        ));
     }
 
     #[cfg(not(windows))]

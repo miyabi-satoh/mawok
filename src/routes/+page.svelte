@@ -13,6 +13,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { onMount, tick } from 'svelte';
+	import FolderButton from '$lib/components/folder-button.svelte';
 	import FolderPalette from '$lib/components/folder-palette.svelte';
 	import SendTargetPalette from '$lib/components/send-target-palette.svelte';
 	import TextPalette, { type PaletteAction } from '$lib/components/text-palette.svelte';
@@ -46,6 +47,7 @@
 	import { EVENTS } from '$lib/bindings/constants';
 	import type { ReceivedDraft } from '$lib/bindings/ReceivedDraft';
 	import type { FolderCompletion } from '$lib/bindings/FolderCompletion';
+	import type { FolderMenu } from '$lib/bindings/FolderMenu';
 	import { coalescedSaver } from '$lib/saver';
 	import { folderErrorMessage } from '$lib/folder-errors';
 	import {
@@ -454,6 +456,29 @@
 		await restoreSelection();
 	}
 
+	// 左下のフォルダーのボタンに出す、今のフォルダーと最近のフォルダー。移るたびに取り直す
+	let folderMenu = $state<FolderMenu | null>(null);
+
+	function refreshFolderMenu() {
+		void invoke<FolderMenu>('folder_menu')
+			.then((menu) => (folderMenu = menu))
+			.catch(() => {});
+	}
+
+	/** フォルダーのボタンのメニューで移る。移れなければ、理由を下書きの下に出す */
+	async function moveFolderFromMenu(move: () => Promise<unknown>) {
+		// 前に移れなかった理由は、移り直すときに消す。ほかの理由（アクションの失敗など）は残す
+		if (errorTitle === m.folder_change_failed()) error = '';
+		try {
+			await move();
+		} catch (failure) {
+			errorTitle = m.folder_change_failed();
+			error = folderErrorMessage(failure);
+		}
+		refreshFolderMenu();
+		textarea?.focus();
+	}
+
 	/** 打ったパスへ作業フォルダーを移す。移れたら欄を閉じ、移れなければ欄の下に出す文言を返す */
 	async function changeFolder(input: string): Promise<string | null> {
 		try {
@@ -461,6 +486,7 @@
 		} catch (error) {
 			return folderErrorMessage(error);
 		}
+		refreshFolderMenu();
 		await closeFolder();
 		return null;
 	}
@@ -912,6 +938,7 @@
 		]).then((fns) => {
 			// 読み込みが終わる前に届いた下書きは、知らせを取り逃がしているので、ここで取りに行く
 			takeReceived();
+			refreshFolderMenu();
 			// 読み込みが終わる前に表示されると shown を取り逃がすので、表示中かを Rust 側に確かめる。
 			// 表示中なら Rust 側が WebView にキーボードのフォーカスを移すので、ここでは表示時の処理をする
 			invoke<boolean>('page_ready').then((active) => {
@@ -937,45 +964,88 @@
 		ボタンはマウスで使うもので、Tab では移らない（tabindex="-1"）。下書きのキーは入力欄で受けているので、
 		フォーカスがボタンに移ると Esc や Cmd+Enter が効かなくなる
 	-->
-	<!-- 履歴の前・次。覚えている履歴がなければ、使えないボタンで入力欄を狭めないよう列ごと出さない -->
-	{#if showButtons && draftHistory.hasEntries}
-		<div class="flex justify-between">
-			<Button
-				tabindex={-1}
-				variant="ghost"
-				size="sm"
-				disabled={!draftHistory.canGoOlder || sending || running !== null}
-				title={settings.current?.textWindowKeys.historyOlder
-					? m.draft_history_older_hint_key({
-							keys: formatKeys(
-								settings.current.textWindowKeys.historyOlder,
-								settings.current.platform
-							)
-						})
-					: m.draft_history_older_hint()}
-				onclick={() => stepHistory('older')}
-			>
-				<ChevronLeftIcon data-icon="inline-start" />
-				{m.draft_history_older()}
-			</Button>
-			<Button
-				tabindex={-1}
-				variant="ghost"
-				size="sm"
-				disabled={!draftHistory.canGoNewer || sending || running !== null}
-				title={settings.current?.textWindowKeys.historyNewer
-					? m.draft_history_newer_hint_key({
-							keys: formatKeys(
-								settings.current.textWindowKeys.historyNewer,
-								settings.current.platform
-							)
-						})
-					: m.draft_history_newer_hint()}
-				onclick={() => stepHistory('newer')}
-			>
-				{m.draft_history_newer()}
-				<ChevronRightIcon data-icon="inline-end" />
-			</Button>
+	<!--
+		上の並び。履歴の前・次を左にまとめ、道具を右に寄せる（ブラウザや Finder のツールバーと同じ並び）。設定は、ツールバーの慣れた位置の右端に置く。
+		前・次は、覚えている履歴がなければ使えないので出さない。
+		列が狭いとき（最小の幅の近く）は、定型文とアクションをアイコンだけにする
+	-->
+	{#if showButtons && settings.current}
+		{@const platform = settings.current.platform}
+		{@const keys = settings.current.textWindowKeys}
+		<div class="@container flex items-center gap-1">
+			{#if draftHistory.hasEntries}
+				<Button
+					tabindex={-1}
+					variant="ghost"
+					size="sm"
+					disabled={!draftHistory.canGoOlder || sending || running !== null}
+					title={settings.current?.textWindowKeys.historyOlder
+						? m.draft_history_older_hint_key({
+								keys: formatKeys(
+									settings.current.textWindowKeys.historyOlder,
+									settings.current.platform
+								)
+							})
+						: m.draft_history_older_hint()}
+					onclick={() => stepHistory('older')}
+				>
+					<ChevronLeftIcon data-icon="inline-start" />
+					{m.draft_history_older()}
+				</Button>
+				<Button
+					tabindex={-1}
+					variant="ghost"
+					size="sm"
+					disabled={!draftHistory.canGoNewer || sending || running !== null}
+					title={settings.current?.textWindowKeys.historyNewer
+						? m.draft_history_newer_hint_key({
+								keys: formatKeys(
+									settings.current.textWindowKeys.historyNewer,
+									settings.current.platform
+								)
+							})
+						: m.draft_history_newer_hint()}
+					onclick={() => stepHistory('newer')}
+				>
+					{m.draft_history_newer()}
+					<ChevronRightIcon data-icon="inline-end" />
+				</Button>
+			{/if}
+			<div class="ml-auto flex items-center gap-1">
+				<Button
+					tabindex={-1}
+					variant="ghost"
+					size="sm"
+					title={keyHint(m.draft_snippets_hint(), keys.snippets, platform)}
+					disabled={sending || running !== null}
+					onclick={openSnippets}
+				>
+					<TextQuoteIcon data-icon="inline-start" />
+					<span class="@max-[30rem]:sr-only">{m.draft_snippets()}</span>
+				</Button>
+				<Button
+					tabindex={-1}
+					variant="ghost"
+					size="sm"
+					title={keyHint(m.draft_actions_hint(), keys.actions, platform)}
+					disabled={sending || running !== null}
+					onclick={openActions}
+				>
+					<SparklesIcon data-icon="inline-start" />
+					<span class="@max-[30rem]:sr-only">{m.draft_actions()}</span>
+				</Button>
+				<Button
+					tabindex={-1}
+					variant="ghost"
+					size="icon-sm"
+					aria-label={m.draft_settings()}
+					title={keyHint(m.draft_settings_hint(), keys.settings, platform)}
+					disabled={running !== null}
+					onclick={() => invoke('open_settings_window')}
+				>
+					<SettingsIcon />
+				</Button>
+			</div>
 		</div>
 	{/if}
 	<!--
@@ -1064,43 +1134,20 @@
 		{@const platform = settings.current.platform}
 		{@const keys = settings.current.textWindowKeys}
 		<!--
-			キーを添えるのはコピーだけ。ほかは狭い窓に文字を詰め込まないよう、マウスを重ねたときの説明に出す。
-			列が狭いとき（最小の幅の近く）は、定型文とアクションをアイコンだけにする。英語でコピーのキーが3つだと、はみ出していた
+			下の並び。左に今のフォルダー、右に送る・コピー。キーを添えるのはコピーだけで、ほかは狭い窓に文字を詰め込まないよう、
+			マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
 		-->
 		<div class="@container flex items-center gap-1">
-			<Button
-				tabindex={-1}
-				variant="ghost"
-				size="icon-sm"
-				aria-label={m.draft_settings()}
-				title={keyHint(m.draft_settings_hint(), keys.settings, platform)}
-				disabled={running !== null}
-				onclick={() => invoke('open_settings_window')}
-			>
-				<SettingsIcon />
-			</Button>
-			<Button
-				tabindex={-1}
-				variant="ghost"
-				size="sm"
-				title={keyHint(m.draft_snippets_hint(), keys.snippets, platform)}
-				disabled={sending || running !== null}
-				onclick={openSnippets}
-			>
-				<TextQuoteIcon data-icon="inline-start" />
-				<span class="@max-[30rem]:sr-only">{m.draft_snippets()}</span>
-			</Button>
-			<Button
-				tabindex={-1}
-				variant="ghost"
-				size="sm"
-				title={keyHint(m.draft_actions_hint(), keys.actions, platform)}
-				disabled={sending || running !== null}
-				onclick={openActions}
-			>
-				<SparklesIcon data-icon="inline-start" />
-				<span class="@max-[30rem]:sr-only">{m.draft_actions()}</span>
-			</Button>
+			{#if folderMenu}
+				<FolderButton
+					menu={folderMenu}
+					disabled={sending || running !== null}
+					onopen={refreshFolderMenu}
+					onchange={(path) => moveFolderFromMenu(() => invoke('change_folder', { input: path }))}
+					onpick={() => moveFolderFromMenu(() => invoke('pick_folder'))}
+					onclose={() => textarea?.focus()}
+				/>
+			{/if}
 			{#if hasPairedDevice}
 				<!-- 本体でチェックした機器へ送り、▼で送り先の一覧を開く -->
 				<div class="ml-auto flex">

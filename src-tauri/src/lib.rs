@@ -130,12 +130,16 @@ struct ActionState {
     client: OnceLock<reqwest::Client>,
     /// テキストウィンドウで移った作業フォルダー。None ならホームフォルダー（folder.rs）
     folder: Mutex<Option<PathBuf>>,
+    /// 最近移ったフォルダー（folder.rs の remember）。最初に使うときにファイルから読む
+    recent_folders: Mutex<Option<Vec<PathBuf>>>,
     /// アクションに振った番号の最大。起動中ずっと増やすので、窓を読み込み直しても番号は戻らない
     last_request: AtomicU64,
     /// 走っているアクションと、取り消した番号
     requests: Mutex<ActionRequests>,
     /// AI サービスのキーをキーチェーンから読んでいる数。読んでいる間は、フォーカスが外れても下書きを隠さない
     reading_key: AtomicUsize,
+    /// フォルダーを選ぶ画面を出しているか。出している間は、フォーカスが外れても下書きを隠さない（pick_folder）
+    picking_folder: AtomicBool,
     /// キーを読んでいる間に、フォーカスが外れても隠さずに見送ったか。読み終えたら、下書きにフォーカスを戻すかどうかに使う
     blur_kept_for_key: AtomicBool,
     /// Mawok のアカウントと結ぶため、127.0.0.1 で戻りを待ち受けているタスク（start_mawok_sign_in）
@@ -631,6 +635,8 @@ struct BlurCheck {
     /// AI サービスのキーを読んでいる最中か。macOS はキーチェーンの許可のダイアログを前面に出すので、
     /// フォーカスが外れても、ユーザーがほかへ移ったわけではない（許可に応じている間に下書きが消えないようにする）
     reading_ai_key: bool,
+    /// フォルダーを選ぶ画面を出しているか。画面にフォーカスが移っても、ユーザーがほかへ移ったわけではない
+    picking_folder: bool,
 }
 
 /// 隠すのは、出ていて、一度フォーカスが入った後に外れたままで、それが設定ウィンドウのためではないときだけ
@@ -642,6 +648,7 @@ fn should_hide_on_blur(check: BlurCheck) -> bool {
         && !check.settings_focused
         && !check.settings_opening
         && !check.reading_ai_key
+        && !check.picking_folder
 }
 
 /// 初めての起動として下書きを出すか。設定ファイルがなかったうえで、作れたときだけ。
@@ -687,6 +694,10 @@ fn hide_on_blur(app: &AppHandle) {
             .reading_key
             .load(Ordering::Relaxed)
             > 0,
+        picking_folder: app
+            .state::<ActionState>()
+            .picking_folder
+            .load(Ordering::Relaxed),
     };
     if !should_hide_on_blur(check) {
         if check.reading_ai_key
@@ -1924,15 +1935,27 @@ fn refocus_draft_after_key_prompt(app: &AppHandle) {
     if !kept || !cfg!(target_os = "macos") {
         return;
     }
-    let Some(window) = main_window(app) else {
-        return;
-    };
-    if window.is_visible().unwrap_or(false)
-        && !window.is_focused().unwrap_or(true)
-        && !is_settings_focused(app)
-    {
-        info!("refocus the draft after reading the AI key");
-        focus::refocus_draft(app, &window);
+    refocus_draft_on_main_thread(app, "reading the AI key");
+}
+
+/// 出ている下書きにフォーカスが無く、設定ウィンドウにも無ければ、下書きにフォーカスを戻す。
+/// macOS のパネルの操作（make_key_window）はメインスレッドでしか行えないので、async のコマンドから呼ばれてもメインスレッドに移して行う
+fn refocus_draft_on_main_thread(app: &AppHandle, after: &'static str) {
+    let handle = app.clone();
+    let result = app.run_on_main_thread(move || {
+        let Some(window) = main_window(&handle) else {
+            return;
+        };
+        if window.is_visible().unwrap_or(false)
+            && !window.is_focused().unwrap_or(true)
+            && !is_settings_focused(&handle)
+        {
+            info!("refocus the draft after {after}");
+            focus::refocus_draft(&handle, &window);
+        }
+    });
+    if let Err(error) = result {
+        error!("refocus the draft: couldn't run on the main thread: {error}");
     }
 }
 
@@ -2017,6 +2040,11 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
         .unwrap_or_else(|| home.clone());
     let resolved = folder::resolve(&base, &home, &input).map_err(|error| {
         info!("couldn't change the working folder: {}", error.code());
+        // メニューの最近のフォルダーから選んで、消えていたら外す（メニューは、あるかを確かめずに出すため）
+        let input = std::path::Path::new(input.trim());
+        if folder::is_gone(error, input) {
+            forget_folder(&app, input);
+        }
         error.code().to_string()
     })?;
     let title = if resolved == home {
@@ -2024,6 +2052,7 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
     } else {
         format!("{APP_NAME} — {}", folder::display(&resolved, &home))
     };
+    remember_folder(&app, &resolved, &home);
     *state.folder.lock().unwrap() = (resolved != home).then_some(resolved);
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         if let Err(error) = window.set_title(&title) {
@@ -2032,6 +2061,67 @@ async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
     }
     info!("changed the working folder");
     Ok(())
+}
+
+fn recent_folders_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_local_data_dir()
+        .ok()
+        .map(|dir| dir.join(folder::RECENT_FILE_NAME))
+}
+
+/// 最近のフォルダーを、まだ読んでいなければファイルから読んでから渡す
+fn with_recent_folders<T>(app: &AppHandle, f: impl FnOnce(&mut Vec<PathBuf>) -> T) -> T {
+    let state = app.state::<ActionState>();
+    let mut recent = state.recent_folders.lock().unwrap();
+    let recent = recent.get_or_insert_with(|| {
+        recent_folders_path(app)
+            .map(|path| folder::load_recent(&path))
+            .unwrap_or_default()
+    });
+    f(recent)
+}
+
+/// 移った先を最近のフォルダーに入れて書く。書けなくても移るのは止めない（次に覚え直せる）
+fn remember_folder(app: &AppHandle, folder: &std::path::Path, home: &std::path::Path) {
+    let recent = with_recent_folders(app, |recent| {
+        folder::remember(recent, folder, home);
+        recent.clone()
+    });
+    if let Some(path) = recent_folders_path(app) {
+        if let Err(error) = folder::save_recent(&path, &recent) {
+            warn!("couldn't save the recent folders: {error}");
+        }
+    }
+}
+
+/// 移れなかったフォルダーを最近のフォルダーから外して書く
+fn forget_folder(app: &AppHandle, folder: &std::path::Path) {
+    let Some(recent) = with_recent_folders(app, |recent| {
+        folder::forget(recent, folder).then(|| recent.clone())
+    }) else {
+        return;
+    };
+    if let Some(path) = recent_folders_path(app) {
+        if let Err(error) = folder::save_recent(&path, &recent) {
+            warn!("couldn't save the recent folders: {error}");
+        }
+    }
+}
+
+/// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの（folder.rs の menu）
+#[tauri::command]
+fn folder_menu(app: AppHandle) -> Result<folder::FolderMenu, String> {
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    let current = app
+        .state::<ActionState>()
+        .folder
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| home.clone());
+    let recent = with_recent_folders(&app, |recent| recent.clone());
+    Ok(folder::menu(&current, &home, &recent))
 }
 
 /// 欄に打ちかけのパスを、今の作業フォルダーから見て補う（folder.rs の complete）。
@@ -2050,6 +2140,50 @@ async fn complete_folder(
         .clone()
         .unwrap_or_else(|| home.clone());
     Ok(folder::complete(&base, &home, &input))
+}
+
+/// OS のフォルダーを選ぶ画面を今の作業フォルダーから出し、選んだフォルダーへ移る（change_folder と同じく確かめる）。
+/// 選ばずに閉じたら false。画面を出している間は、フォーカスが外れても下書きを隠さず、閉じたら下書きにフォーカスを戻す
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let home = app.path().home_dir().map_err(|error| {
+        error!("couldn't find the home folder: {error}");
+        folder::FolderError::NotFound.code().to_string()
+    })?;
+    // フォルダーがあるかは、ロックを放してから確かめる。つながらないネットワークのフォルダーで、ほかのコマンドを待たせないため
+    let moved_to = app.state::<ActionState>().folder.lock().unwrap().clone();
+    let base = moved_to.filter(|folder| folder.is_dir()).unwrap_or(home);
+    let Some(window) = main_window(&app) else {
+        return Err("main window not found".to_string());
+    };
+    // 選ぶ画面を開くまでの間に押し直されても、2つ目は開かない。2つ開くと、先に閉じた方で印が外れ、残った方の裏で下書きが隠れるため
+    if app
+        .state::<ActionState>()
+        .picking_folder
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .is_err()
+    {
+        return Ok(false);
+    }
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_directory(&base)
+        .set_parent(&window)
+        .pick_folder(move |picked| {
+            let _ = sender.send(picked);
+        });
+    let picked = receiver.await.ok().flatten();
+    app.state::<ActionState>()
+        .picking_folder
+        .store(false, Ordering::Relaxed);
+    refocus_draft_on_main_thread(&app, "picking a folder");
+    let Some(path) = picked.and_then(|picked| picked.into_path().ok()) else {
+        return Ok(false);
+    };
+    change_folder(app, path.to_string_lossy().into_owned()).await?;
+    Ok(true)
 }
 
 /// 下書きウィンドウが隠れている間に終わったアクションを、OS の通知で知らせる。
@@ -3295,6 +3429,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -3352,6 +3487,8 @@ pub fn run() {
             run_action,
             change_folder,
             complete_folder,
+            folder_menu,
+            pick_folder,
             current_folder,
             begin_action,
             cancel_action,
@@ -3704,6 +3841,7 @@ mod tests {
             settings_focused: false,
             settings_opening: false,
             reading_ai_key: false,
+            picking_folder: false,
         }
     }
 
@@ -3762,6 +3900,15 @@ mod tests {
         // macOS のキーチェーンの許可のダイアログにフォーカスが移っても、隠さない
         assert!(!should_hide_on_blur(BlurCheck {
             reading_ai_key: true,
+            ..blurred()
+        }));
+    }
+
+    #[test]
+    fn keeps_draft_while_picking_folder() {
+        // OS のフォルダーを選ぶ画面にフォーカスが移っても、隠さない
+        assert!(!should_hide_on_blur(BlurCheck {
+            picking_folder: true,
             ..blurred()
         }));
     }

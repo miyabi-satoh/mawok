@@ -31,6 +31,9 @@ arboard = { version = "3.6.1", default-features = false }
 # 下書きが隠れている間に終わったアクションを知らせる（lib.rs の notify_action_finished）
 tauri-plugin-notification = "2.4.0"
 tauri-plugin-window-state = "2.4.1"
+# テキストウィンドウでコマンドを動かすフォルダーを、OS のフォルダーを選ぶ画面で選ぶ（lib.rs の pick_folder）。Rust 側からだけ使うので、画面へ口は開けない。
+# 2.8 は tauri 2.12 を求めるので、tauri を 2.11 に留めている間は 2.7 に留める
+tauri-plugin-dialog = "~2.7.1"
 sys-locale = "0.3.2"
 log = "0.4.34"
 tauri-plugin-log = "2.9.2"
