@@ -440,14 +440,7 @@ export function proConfirmPage(
 		[t.confirmPriceLabel, t.proPrice(plan)],
 		[
 			t.confirmPaymentLabel,
-			t.proPayment(
-				plan,
-				trial,
-				region,
-				billingDate(lang, region, firstPaymentDay),
-				firstPaymentDay,
-				PRO_TRIAL_DAYS
-			)
+			t.proPayment(plan, trial, region, billingDate(lang, region, firstPaymentDay), PRO_TRIAL_DAYS)
 		],
 		[t.confirmDeliveryLabel, t.proDelivery(trial)],
 		[t.proCancelLabel, t.proCancel[region](LEGAL_PAGES.tokushoho)]

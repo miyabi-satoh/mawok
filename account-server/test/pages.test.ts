@@ -89,7 +89,7 @@ describe('proConfirmPage', () => {
 					if (trial) {
 						expect(page).toContain(`${day} に最初の ${amount}を支払い、`);
 						expect(page).toContain(
-							`それまでの 14 日間は無料で、2026/1/29 より前に解約すれば、支払いは生じません。`
+							`それまでの 14 日間は無料で、その日より前に解約すれば、支払いは生じません。`
 						);
 						expect(page).toContain('試用の間は付かず、最初の支払いの後から付きます。');
 					} else {
@@ -118,7 +118,7 @@ describe('proConfirmPage', () => {
 			await proConfirmPage('en', 'a@example.com', 'monthly', 'overseas', { trial: true, now })
 		);
 		expect(trial).toContain(
-			'due on January 29, 2026 (Japan time), followed by payments of the same amount every month. The 14 days until then are free: cancel before January 29, 2026 and you will not be charged. Choose how to pay on the next page.'
+			'due on January 29, 2026 (Japan time), followed by payments of the same amount every month. The 14 days until then are free: cancel before that date and you will not be charged. Choose how to pay on the next page.'
 		);
 		const paid = String(
 			await proConfirmPage('en', 'a@example.com', 'yearly', 'domestic', { trial: false, now })
