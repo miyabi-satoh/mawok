@@ -1457,14 +1457,16 @@ describe('設定画面の機器', () => {
 	it('鍵を作り直す前に確かめる', async () => {
 		const screen = await renderAt(m.settings_category_devices);
 
-		await screen.getByRole('button', { name: m.settings_devices_reset_key() }).click();
+		await screen
+			.getByRole('button', { name: m.settings_devices_reset_key_start(), exact: true })
+			.click();
 		await expect
 			.element(
 				screen.getByRole('alertdialog', { name: m.settings_devices_reset_key_confirm_title() })
 			)
 			.toBeVisible();
 		expect(invoked).not.toHaveBeenCalledWith('reset_account_key', undefined);
-		await screen.getByRole('button', { name: m.settings_devices_reset_key() }).nth(1).click();
+		await screen.getByRole('button', { name: m.settings_devices_reset_key(), exact: true }).click();
 		expect(invoked).toHaveBeenCalledWith('reset_account_key', undefined);
 	});
 

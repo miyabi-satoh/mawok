@@ -548,6 +548,19 @@
 </script>
 
 <!-- 記録中の表示。ホットキーと下書きの操作で同じ形にする -->
+<!-- 鍵を待つ状態と持つ状態で、同じ形の行をいちばん下に置く。ほかの機器を締め出す操作なので、押す前に何が起きるかを説明に書く -->
+{#snippet resetKeyRow(description: string)}
+	<SettingsRow>
+		<Field.Field orientation="horizontal" class="min-h-8">
+			<Field.Title>{m.settings_devices_reset_key()}</Field.Title>
+			<Button variant="destructive" onclick={() => (resetKeyOpen = true)}>
+				{m.settings_devices_reset_key_start()}
+			</Button>
+		</Field.Field>
+		<Field.Description class="leading-snug">{description}</Field.Description>
+	</SettingsRow>
+{/snippet}
+
 {#snippet recordingStatus()}
 	<div class="flex items-center gap-1">
 		<div
@@ -1241,19 +1254,17 @@
 								>
 							</SettingsRow>
 						{:else if panel === 'needsPairing'}
+							<!-- 鍵を持つ状態の「ほかの機器を加える」と同じく、題名を左、操作を右、説明を下に置く -->
 							<SettingsRow>
-								<Field.Description class="leading-snug">
-									{m.settings_devices_needs_pairing()}
-								</Field.Description>
 								<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-									<Field.Label for="pairing-code">{m.settings_devices_join()}</Field.Label>
+									<Field.Title>{m.settings_devices_join_title()}</Field.Title>
 									<div class="flex gap-2">
 										<Input
-											id="pairing-code"
 											class="w-32 font-mono text-sm"
 											inputmode="numeric"
 											autocomplete="off"
 											maxlength={6}
+											aria-label={m.settings_devices_join()}
 											bind:value={joinCode}
 										/>
 										<Button
@@ -1265,17 +1276,11 @@
 										</Button>
 									</div>
 								</Field.Field>
-								<div class="flex flex-wrap items-baseline gap-x-1 text-xs text-muted-foreground">
-									<span>{m.settings_devices_reset_key_hint()}</span>
-									<Button
-										variant="link"
-										class="h-auto p-0 text-xs"
-										onclick={() => (resetKeyOpen = true)}
-									>
-										{m.settings_devices_reset_key()}
-									</Button>
-								</div>
+								<Field.Description class="leading-snug">
+									{m.settings_devices_needs_pairing()}
+								</Field.Description>
 							</SettingsRow>
+							{@render resetKeyRow(m.settings_devices_reset_key_description_needs_pairing())}
 						{:else if panel === 'ready'}
 							{#if view.devices.length > 0}
 								{@const labels = deviceLabels(view.devices)}
@@ -1345,15 +1350,7 @@
 										: m.settings_devices_offer_description()}
 								</Field.Description>
 							</SettingsRow>
-							<SettingsRow>
-								<Button
-									variant="link"
-									class="h-auto w-fit p-0"
-									onclick={() => (resetKeyOpen = true)}
-								>
-									{m.settings_devices_reset_key()}
-								</Button>
-							</SettingsRow>
+							{@render resetKeyRow(m.settings_devices_reset_key_description_ready())}
 						{/if}
 					</SettingsSection>
 				</Tabs.Content>
