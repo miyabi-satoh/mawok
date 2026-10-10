@@ -928,4 +928,14 @@ describe('buying credit', () => {
 			'クレジットを購入しました'
 		);
 	});
+
+	it('waits on the Pro page after a Pro checkout, and stops reloading in the end', async () => {
+		const { cookie } = await signIn('waiting-title@example.com');
+		const path = '/account/buy/done?next=%2Faccount%2F&pro=1';
+		const waiting = await (await request(path, { cookie })).text();
+		expect(waiting).toContain('<h1>Mawok Pro</h1>');
+		expect(waiting).toContain('http-equiv="refresh"');
+		const gaveUp = await (await request(`${path}&tries=10`, { cookie })).text();
+		expect(gaveUp).not.toContain('http-equiv="refresh"');
+	});
 });

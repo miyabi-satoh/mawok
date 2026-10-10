@@ -121,6 +121,8 @@ const ja = {
 	checkingPurchase: '支払いを確かめています。このままお待ちください。',
 	purchaseNotYet:
 		'支払いをまだ確かめられていません。少ししてから確かめ直してください。買い直す前に、領収のメールが届いていないかも確かめてください。',
+	checkingPro: '申し込みを確かめています。このままお待ちください。',
+	proNotYet: '申し込みをまだ確かめられていません。少ししてから確かめ直してください。',
 	checkAgain: 'もう一度確かめる',
 	bought: 'クレジットを購入しました。Mawok の設定に戻ると、残りに反映されます。',
 	proTitle: 'Mawok Pro',
@@ -251,6 +253,8 @@ const en: typeof ja = {
 	checkingPurchase: 'Confirming your payment. Please wait.',
 	purchaseNotYet:
 		"We couldn't confirm your payment yet. Please check again in a moment. Before buying again, check whether a receipt email has arrived.",
+	checkingPro: 'Confirming your subscription. Please wait.',
+	proNotYet: "We couldn't confirm your subscription yet. Please check again in a moment.",
 	checkAgain: 'Check again',
 	bought:
 		'AI action credit has been added. Go back to Mawok settings to see your remaining credit.',
