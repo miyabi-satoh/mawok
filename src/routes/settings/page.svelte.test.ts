@@ -1398,7 +1398,7 @@ describe('設定画面のデバイス', () => {
 		};
 	});
 
-	it('同じ名前のデバイスは公開鍵の先頭4文字で見分け、一覧から消す操作はそのデバイスに対して行う', async () => {
+	it('同じ名前のデバイスは公開鍵の先頭4文字で見分け、送信先の切り替えはそのデバイスに対して行う', async () => {
 		const screen = await renderAt(m.settings_category_devices);
 
 		await expect.element(screen.getByLabelText('mac-mini (a1b2)')).toBeChecked();
@@ -1406,10 +1406,6 @@ describe('設定画面のデバイス', () => {
 		expect(invoked).toHaveBeenCalledWith('set_send_targets', {
 			publicKeys: ['de03ffff', 'c3d4ffff']
 		});
-
-		await screen.getByRole('button', { name: m.settings_devices_remove() }).nth(1).click();
-
-		expect(invoked).toHaveBeenCalledWith('forget_device', { publicKey: 'a1b2ffff' });
 	});
 
 	it('デバイスが見つかっていなければ、その理由を出す', async () => {

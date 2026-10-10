@@ -1294,11 +1294,12 @@ impl Lan {
         self.refresh();
     }
 
-    /// 一覧から忘れたデバイスは、次の名乗りで再び生存確認できるようにする。
-    pub fn forget_device(&self, public_key: &[u8]) {
-        self.seen.lock().unwrap().remove(public_key);
-        self.rejected.lock().unwrap().remove(public_key);
-        self.discovering.lock().unwrap().remove(public_key);
+    /// アカウントの鍵が替わった・消えたときに、見つけたデバイスを全部忘れる。前の鍵で確かめた相手なので、
+    /// 新しい鍵を持つデバイスだけを、次の名乗りから見つけ直す
+    pub fn forget_devices(&self) {
+        self.seen.lock().unwrap().clear();
+        self.rejected.lock().unwrap().clear();
+        self.discovering.lock().unwrap().clear();
     }
 
     /// 相手に出ているコードを入れて組み合わせる。コードを出している相手を名乗りで探すので、終わるまで数秒かかる
@@ -1923,7 +1924,7 @@ mod tests {
     }
 
     #[test]
-    fn forgetting_a_device_allows_its_next_hello_to_be_probed() {
+    fn forgetting_devices_allows_their_next_hello_to_be_probed() {
         let lan = Lan::new(
             PathBuf::from("unused-device-key"),
             "test".to_string(),
@@ -1940,7 +1941,7 @@ mod tests {
             .insert(public_key.clone(), Instant::now());
         lan.discovering.lock().unwrap().insert(public_key.clone());
 
-        lan.forget_device(&public_key);
+        lan.forget_devices();
 
         assert!(!lan.seen.lock().unwrap().contains_key(&public_key));
         assert!(!lan.rejected.lock().unwrap().contains_key(&public_key));

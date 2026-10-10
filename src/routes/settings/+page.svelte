@@ -1293,21 +1293,13 @@
 												<Field.Label for={`send-to-${device.publicKey}`}>
 													{labels.get(device.publicKey) ?? device.name}
 												</Field.Label>
-												<div class="flex items-center gap-2">
-													<Switch
-														id={`send-to-${device.publicKey}`}
-														bind:checked={
-															() => device.sendTo,
-															(sendTo) => setDeviceSendTo(device.publicKey, sendTo)
-														}
-													/>
-													<Button
-														variant="outline"
-														onclick={() => run('forget_device', { publicKey: device.publicKey })}
-													>
-														{m.settings_devices_remove()}
-													</Button>
-												</div>
+												<Switch
+													id={`send-to-${device.publicKey}`}
+													bind:checked={
+														() => device.sendTo,
+														(sendTo) => setDeviceSendTo(device.publicKey, sendTo)
+													}
+												/>
 											</Field.Field>
 										{/each}
 									</div>

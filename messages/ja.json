@@ -155,7 +155,6 @@
 	"settings_devices_joining": "追加しています…",
 	"settings_devices_list_title": "送信先のデバイス",
 	"settings_devices_empty": "追加したデバイスが同じネットワークにあると、ここに表示されます。",
-	"settings_devices_remove": "一覧から削除",
 	"settings_devices_join_title": "コードを入力",
 	"settings_devices_reset_key_start": "解除",
 	"settings_devices_reset_key_description_needs_pairing": "コードを表示できるデバイスが手元に無いときに使います。解除すると、このデバイスから追加し直せます。",

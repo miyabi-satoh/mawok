@@ -1859,6 +1859,7 @@ async fn refresh_account_key(
         *app.state::<AppState>().account_key.lock().unwrap() = None;
         *app.state::<AppState>().account_key_status.lock().unwrap() =
             account_key::Status::NeedsPairing;
+        forget_devices(app);
         app.state::<Arc<lan::Lan>>().refresh();
         apply_config(app);
         return;
@@ -1923,6 +1924,7 @@ async fn clear_account_key(app: &AppHandle) {
     if let Err(error) = run_blocking(account_key::clear).await {
         warn!("couldn't clear the account key: {error:?}");
     }
+    forget_devices(app);
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(app);
 }
@@ -2045,6 +2047,7 @@ async fn reset_account_key(app: AppHandle) -> Result<(), String> {
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
     *app.state::<AppState>().account_key_id.lock().unwrap() = Some(account_key::key_id(&key));
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
+    forget_devices(&app);
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(&app);
     Ok(())
@@ -2858,23 +2861,22 @@ async fn join_pairing(
         .map_err(|error| lan_failure("couldn't pair", error))
 }
 
-#[tauri::command]
-fn forget_device(
-    app: AppHandle,
-    lan: tauri::State<'_, Arc<lan::Lan>>,
-    public_key: String,
-) -> Result<(), String> {
-    info!("forget a device");
-    update_config(&app, |config| {
-        config
-            .devices
-            .retain(|device| device.public_key != public_key)
-    })?;
-    if let Some(key) = lan::from_hex(&public_key) {
-        lan.forget_device(&key);
+/// アカウントの鍵が替わった・消えたときに、デバイスの一覧を空にする。一覧は「今の鍵で確かめた相手」なので、
+/// 前の鍵の相手を残すと、送れない送信先が並ぶ。新しい鍵を持つデバイスは、次の名乗りで一覧に戻る
+fn forget_devices(app: &AppHandle) {
+    let empty = app
+        .state::<AppState>()
+        .config
+        .lock()
+        .unwrap()
+        .devices
+        .is_empty();
+    if !empty {
+        if let Err(error) = update_config(app, |config| config.devices.clear()) {
+            warn!("couldn't clear the devices: {error}");
+        }
     }
-    lan.refresh();
-    Ok(())
+    app.state::<Arc<lan::Lan>>().forget_devices();
 }
 
 /// 送れなかったときに画面へ渡すもの。一部のデバイスにだけ届かなかったら、符号は `lan.partial` で、届かなかったデバイスの公開鍵を添える
@@ -4053,7 +4055,6 @@ pub fn run() {
             cancel_pairing,
             set_devices_open,
             join_pairing,
-            forget_device,
             send_draft,
             probe_devices,
             set_send_targets,
