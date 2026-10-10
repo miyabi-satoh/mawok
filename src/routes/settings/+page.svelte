@@ -1282,9 +1282,10 @@
 							</SettingsRow>
 							{@render resetKeyRow(m.settings_devices_reset_key_description_needs_pairing())}
 						{:else if panel === 'ready'}
-							{#if view.devices.length > 0}
-								{@const labels = deviceLabels(view.devices)}
-								<SettingsRow>
+							<SettingsRow>
+								<Field.Title>{m.settings_devices_list_title()}</Field.Title>
+								{#if view.devices.length > 0}
+									{@const labels = deviceLabels(view.devices)}
 									<!-- 同じ名前のデバイスは、送信先の一覧と同じく公開鍵の先頭4文字で見分ける。 -->
 									<div class="flex flex-col gap-3">
 										{#each view.devices as device (device.publicKey)}
@@ -1310,14 +1311,12 @@
 											</Field.Field>
 										{/each}
 									</div>
-								</SettingsRow>
-							{:else}
-								<SettingsRow>
+								{:else}
 									<Field.Description class="leading-snug"
 										>{m.settings_devices_empty()}</Field.Description
 									>
-								</SettingsRow>
-							{/if}
+								{/if}
+							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<Field.Title>{m.settings_devices_offer()}</Field.Title>
