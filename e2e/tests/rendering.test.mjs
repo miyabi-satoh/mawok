@@ -39,7 +39,8 @@ import { waitFor } from '../lib/wait.mjs';
 // 描かれ方。画面の状態ごとに、テーマ (ライト・ダーク) × 言語 (日本語・英語) と、最小の大きさ × 言語で、
 // 重なり・はみ出し・省略・潰れを lib/rendering.mjs で調べ、画面を e2e/screenshots/ に撮る。
 // 撮った画面は人とエージェントが目で見る (バランスや余白の不揃いは機械では決めにくいため)。
-// 状態を作るのに要る設定は config.toml で入れる。送信先の機器は架空のもの (送ると失敗する)。
+// 状態を作るのに要る設定は config.toml で入れる。送信先の機器は架空のもの
+// (E2E のアプリは Pro でないので、送るとつなぐ前に断られる)。
 // アクションは一覧を開いて撮るだけで、選ばない。この機の資格情報管理に本物のキーがあれば、選んだ時点で
 // AI サービスへ送ってしまうため (画面の invoke は差し替えられず、送る手前で止める口もない)。
 // 同じ理由で、アクションに失敗したときの知らせと、届いた下書きの知らせ (相手の機器が要る) は撮らない
@@ -77,7 +78,7 @@ const TEST_CONFIG = {
 		{
 			name: 'MacBook Air',
 			publicKey: 'ab'.repeat(32),
-			// 文書用のアドレス (TEST-NET-1) なので、どこにも繋がらず、つなぐのを待つ間 (3 秒) は「送信中…」のまま
+			// 文書用のアドレス (TEST-NET-1) なので、どこにも繋がらない
 			address: '192.0.2.1',
 			sendTo: true
 		}
@@ -156,36 +157,6 @@ async function closePalette(client) {
 		() => readPaletteOpen(client),
 		(open) => !open,
 		{ label: '一覧が閉じる' }
-	);
-}
-
-const readSending = (client) =>
-	client.execute(() => document.querySelector('main textarea').readOnly);
-
-/**
- * 送っている最中にする (送っている間は入力欄が readOnly になる)。キーは前面のウィンドウに届かないことがあるので、
- * 「送信」ボタン (送信先の▼とつながった左側) を押す。押す前後に前の送信が終わると新しい送信が始まらないので、
- * 送っている最中でなく押せるなら、待つたびに押し直す
- */
-async function startSending(client) {
-	await waitFor(
-		async () => {
-			if (await readSending(client)) return true;
-			const sendButton = await client.$('main button.rounded-r-none');
-			if (await sendButton.isEnabled()) await sendButton.click();
-			return readSending(client);
-		},
-		(sending) => sending,
-		{ label: '送っている最中になる' }
-	);
-}
-
-/** 送り終わる (架空の機器なので失敗して終わる) まで待つ */
-async function waitSendingDone(client) {
-	await waitFor(
-		() => readSending(client),
-		(sending) => !sending,
-		{ label: '送り終わる', timeout: 10000 }
 	);
 }
 
@@ -341,32 +312,26 @@ test.describe('描かれ方', () => {
 		await inspectDraft(client, 'send-targets', { overlays: ['[role="dialog"]'] });
 	});
 
-	test('下書き: 送っている最中', async () => {
-		// つなぐのを待つのは 3 秒なので、撮るたびに送り直す (前の回の送信がまだ続いていれば、そのまま撮る)
-		await inspectDraft(client, 'sending', { prepare: () => startSending(client) });
-		await waitSendingDone(client);
-	});
+	// 送っている最中の画面は撮らない。E2E のアプリは Pro でなく、送信はつなぐ前に断られるため。
+	// 「送信中…」の文言と、その間のボタンが押せない見た目は、手での確認で見る
 
 	test('下書き: 送れなかったときのエラー', async () => {
-		// 架空の機器へ送る。どこにもつながらないので失敗する。エラーは表示言語を替えると消えるので、
-		// 撮るたびに、出ていなければ送り直す。前のテストの失敗の知らせが出たままのこともあるので、
-		// 最初の1回は知らせがあるかではなく、送り始めてから送り終わるまでを見届ける
-		const sendAndFail = async () => {
-			await startSending(client);
-			await waitSendingDone(client);
-			await client.$('[role="alert"]').waitForDisplayed({ timeout: 5000 });
-		};
-		await sendAndFail();
+		// Pro でないので、送るとすぐエラーが出る。エラーは表示言語を替えると消えるので、
+		// 撮るたびに、出ていなければ送り直す
+		// 隠れている帯や消えかけの古い帯に当たらないよう、出ている帯があるかで見る
+		const readAlertShown = () =>
+			client.execute(() =>
+				[...document.querySelectorAll('[role="alert"]')].some(
+					(alert) => alert.checkVisibility() && alert.getBoundingClientRect().height > 0
+				)
+			);
 		await inspectDraft(client, 'send-error', {
 			overlays: ['[role="alert"]'],
 			prepare: async () => {
-				// 隠れている帯や消えかけの古い帯に当たらないよう、出ている帯があるかで見る
-				const shown = await client.execute(() =>
-					[...document.querySelectorAll('[role="alert"]')].some(
-						(alert) => alert.checkVisibility() && alert.getBoundingClientRect().height > 0
-					)
-				);
-				if (!shown) await sendAndFail();
+				if (await readAlertShown()) return;
+				// 「送信」ボタン (送信先の▼とつながった左側)。キーは前面のウィンドウに届かないことがあるので押す
+				await client.$('main button.rounded-r-none').click();
+				await waitFor(readAlertShown, (shown) => shown, { label: '送れなかったエラーが出る' });
 			}
 		});
 	});
