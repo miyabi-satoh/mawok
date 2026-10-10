@@ -70,12 +70,13 @@ When you choose Mawok, you do not need an API key. What you use is deducted from
 
 ## Send to other devices
 
-You can send text to Mawok on another device you own on the same network.
+You can send text to Mawok on another device you own on the same network. This requires Pro.
 
 Pair the devices once first.
 
-1. On one device, select "Show a code" under "Devices" in Settings.
-2. On the other device, enter the code and select "Pair".
+1. On both devices, sign in to the same Mawok account under "Actions" in Settings.
+2. On one device, select "Show a code" under "Devices" in Settings.
+3. On the other device, enter the code and select "Pair".
 
 {macos:If asked to allow access to the local network, allow it.}{windows:If asked to allow access through the firewall, allow it.}
 

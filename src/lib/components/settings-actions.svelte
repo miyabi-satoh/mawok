@@ -329,6 +329,7 @@
 					<SettingsMawokAccount
 						call={editor.call}
 						signedIn={hasKey}
+						proAvailable={view.proAvailable}
 						onchanged={() => checkKey(view.aiService)}
 					/>
 				</div>

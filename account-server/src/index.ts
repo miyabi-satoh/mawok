@@ -188,9 +188,9 @@ async function appAccount(c: Context<App>): Promise<string | undefined> {
 app.get('/v1/balance', async (c) => {
 	const accountId = await appAccount(c);
 	if (!accountId) return c.json({ error: 'unauthorized' }, 401);
-	const account = await c.env.DB.prepare('SELECT email FROM accounts WHERE id = ?')
+	const account = await c.env.DB.prepare('SELECT id, email FROM accounts WHERE id = ?')
 		.bind(accountId)
-		.first<{ email: string }>();
+		.first<{ id: string; email: string }>();
 	// 無料の分を取りこぼしていれば、ここで付け直す (→ src/credits.ts)。
 	await grantFreeStatement(c.env, accountId).run();
 	const pro = await proOf(c.env, accountId);
@@ -198,6 +198,7 @@ app.get('/v1/balance', async (c) => {
 	const { remaining, percent } = await balance(c.env, accountId);
 	const { renews: _renews, displayUntil: _displayUntil, ...proResponse } = pro;
 	return c.json({
+		account_id: account?.id,
 		email: account?.email,
 		remaining_percent: remaining > 0 ? percent : 0,
 		pro: proResponse

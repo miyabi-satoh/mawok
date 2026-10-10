@@ -1124,6 +1124,23 @@
 				</Tabs.Content>
 				<Tabs.Content value="devices">
 					<SettingsSection>
+						{#if !view.proAvailable}
+							<SettingsRow>
+								<Field.Description class="leading-snug">
+									{view.mawokAccountSignedIn
+										? m.settings_devices_pro_description()
+										: m.settings_devices_pro_sign_in()}
+								</Field.Description>
+								<Button
+									variant="outline"
+									size="sm"
+									class="w-fit"
+									onclick={() => run('open_mawok_pro_page')}
+								>
+									{m.settings_devices_pro_buy()}
+								</Button>
+							</SettingsRow>
+						{/if}
 						{#if view.pairedDevices.length > 0}
 							{@const labels = deviceLabels(view.pairedDevices)}
 							<SettingsRow>
@@ -1170,7 +1187,7 @@
 										</Button>
 									</div>
 								{:else}
-									<Button variant="outline" onclick={startPairing}>
+									<Button variant="outline" disabled={!view.proAvailable} onclick={startPairing}>
 										{m.settings_devices_offer_start()}
 									</Button>
 								{/if}
@@ -1199,11 +1216,12 @@
 										inputmode="numeric"
 										autocomplete="off"
 										maxlength={6}
+										disabled={!view.proAvailable}
 										bind:value={joinCode}
 									/>
 									<Button
 										variant="outline"
-										disabled={joining || joinCode.length !== 6}
+										disabled={!view.proAvailable || joining || joinCode.length !== 6}
 										onclick={joinPairing}
 									>
 										{joining ? m.settings_devices_joining() : m.settings_devices_join_submit()}

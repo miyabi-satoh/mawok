@@ -19,6 +19,15 @@ const listened = vi.mocked(listen);
 let signedIn: boolean;
 let status: unknown;
 
+function accountStatus(remainingPercent = 42, pro = false) {
+	return {
+		email: 'me@example.com',
+		accountId: '0123456789abcdef0123456789abcdef',
+		remainingPercent,
+		pro: { active: pro, until: null, plan: null, trial: false }
+	};
+}
+
 /** MAWOK_SIGN_IN_ENDED を受け取る関数。画面が listen したときに受け取る */
 function signInEnded(signedInNow: boolean, id = 1) {
 	const handler = listened.mock.calls.findLast(
@@ -40,7 +49,7 @@ describe('設定画面の Mawok のアカウント', () => {
 		invoked.mockReset();
 		listened.mockClear();
 		signedIn = false;
-		status = { email: 'me@example.com', remainingPercent: 42 };
+		status = accountStatus();
 		invoked.mockImplementation((command) => {
 			switch (command) {
 				case 'has_ai_key':
@@ -80,7 +89,7 @@ describe('設定画面の Mawok のアカウント', () => {
 		await expect
 			.element(screen.getByText(m.settings_mawok_remaining({ percent: 42 })))
 			.toBeVisible();
-		resolve({ email: 'me@example.com', remainingPercent: 97 });
+		resolve(accountStatus(97));
 		await expect
 			.element(screen.getByText(m.settings_mawok_remaining({ percent: 97 })))
 			.toBeVisible();
@@ -101,6 +110,28 @@ describe('設定画面の Mawok のアカウント', () => {
 			.toBeVisible();
 		await screen.getByRole('button', { name: m.settings_mawok_buy() }).click();
 		expect(callsOf(invoked, 'open_mawok_buy_page')).toHaveLength(1);
+	});
+
+	it('Pro ならその状態を出す', async () => {
+		signedIn = true;
+		status = accountStatus(42, true);
+		const screen = await openActions();
+		await expect.element(screen.getByText(m.settings_mawok_pro())).toBeVisible();
+	});
+
+	it('窓口につながらなくても、猶予中の Pro を出す', async () => {
+		invoked.mockImplementation((command) => {
+			if (command === 'has_ai_key') return Promise.resolve(true);
+			if (command === 'mawok_account_status') return Promise.reject('account.unreachable');
+			return Promise.resolve(undefined);
+		});
+		settings.current = settingsView({
+			aiService: 'mawok',
+			aiConsent: 'mawok',
+			proAvailable: true
+		});
+		const screen = await openActions();
+		await expect.element(screen.getByText(m.settings_mawok_pro())).toBeVisible();
 	});
 
 	it('結べなかったら、もう一度サインインするよう出す', async () => {

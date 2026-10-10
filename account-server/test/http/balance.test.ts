@@ -52,6 +52,7 @@ describe('balance', () => {
 			.bind(account)
 			.run();
 		expect(await (await app('/v1/balance', token)).json()).toMatchObject({
+			account_id: account,
 			pro: { active: true, until: 4102444000, plan: 'yearly', trial: false }
 		});
 	});

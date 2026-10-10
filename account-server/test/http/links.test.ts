@@ -36,11 +36,8 @@ describe('linking Mawok', () => {
 		expect(
 			await env.DB.prepare('SELECT 1 FROM app_tokens WHERE token_hash = ?').bind(token).first()
 		).toBeNull();
-		expect(await (await app('/v1/balance', token)).json()).toEqual({
-			email,
-			remaining_percent: 100,
-			pro: { active: false, until: null, plan: null, trial: false }
-		});
+		// 答えの形は test/http/balance.test.ts が見る。ここは、替えたトークンでこのアカウントに届くことだけを見る。
+		expect(await (await app('/v1/balance', token)).json()).toMatchObject({ email });
 		// 窓口の画面で、どの機器の Mawok かが分かる。
 		expect(await (await request('/account/', { cookie })).text()).toContain('Taro の MacBook（');
 	});

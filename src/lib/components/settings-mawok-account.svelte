@@ -18,8 +18,14 @@
 	let {
 		call,
 		signedIn,
+		proAvailable,
 		onchanged
-	}: { call: Call; signedIn: boolean | null | undefined; onchanged: () => void } = $props();
+	}: {
+		call: Call;
+		signedIn: boolean | null | undefined;
+		proAvailable: boolean;
+		onchanged: () => void;
+	} = $props();
 
 	/** 続いているサインインの申し込み。null ならサインインの途中でない */
 	let signingIn = $state<MawokSignIn | null>(null);
@@ -141,6 +147,13 @@
 	{/if}
 </Field.Content>
 {#if signedIn === true}
+	{#if status?.pro.active || proAvailable}
+		<Field.Content>
+			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+				<Field.Title>{m.settings_mawok_pro()}</Field.Title>
+			</Field.Field>
+		</Field.Content>
+	{/if}
 	<Field.Content>
 		<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 			<Field.Title>

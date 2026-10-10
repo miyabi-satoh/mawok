@@ -1386,7 +1386,12 @@ describe('設定画面の機器', () => {
 	];
 
 	beforeEach(() => {
-		settings.current = { ...view(), pairedDevices: devices };
+		settings.current = {
+			...view(),
+			pairedDevices: devices,
+			proAvailable: true,
+			mawokAccountSignedIn: true
+		};
 	});
 
 	it('同じ名前の機器は公開鍵の先頭4文字で見分け、解除はその機器に対して行う', async () => {
@@ -1409,6 +1414,26 @@ describe('設定画面の機器', () => {
 
 		await expect.element(description).toBeVisible();
 		expect(description.elements()).toHaveLength(1);
+	});
+
+	it('Pro でなければペアリングを止め、サインイン前の案内を出す', async () => {
+		settings.current = { ...view(), pairedDevices: devices };
+		const screen = await renderAt(m.settings_category_devices);
+
+		await expect.element(screen.getByText(m.settings_devices_pro_sign_in())).toBeVisible();
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_devices_offer_start() }))
+			.toBeDisabled();
+		await expect.element(screen.getByLabelText(m.settings_devices_join())).toBeDisabled();
+	});
+
+	it('Pro でないサインイン済みの人には料金のページを開く操作を出す', async () => {
+		settings.current = { ...view(), mawokAccountSignedIn: true };
+		const screen = await renderAt(m.settings_category_devices);
+
+		await expect.element(screen.getByText(m.settings_devices_pro_description())).toBeVisible();
+		await screen.getByRole('button', { name: m.settings_devices_pro_buy() }).click();
+		await vi.waitFor(() => expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1));
 	});
 
 	it('コードの残り秒を減らし、取り消すとタイマーを止める', async () => {

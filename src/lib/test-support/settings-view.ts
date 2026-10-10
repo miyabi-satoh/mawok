@@ -60,6 +60,8 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		actions: [],
 		pairedDevices: [],
 		deviceName: 'desk-pc',
+		proAvailable: false,
+		mawokAccountSignedIn: false,
 		version: '0.1.0',
 		locale: 'ja',
 		platform: 'macos',

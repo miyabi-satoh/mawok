@@ -7,6 +7,9 @@ describe('lanErrorMessage', () => {
 		expect(lanErrorMessage('lan.unreachable')).toBe(m.lan_error_unreachable());
 		expect(lanErrorMessage('lan.wrong_code')).toBe(m.lan_error_wrong_code());
 		expect(lanErrorMessage('lan.internal')).toBe(m.lan_error_internal());
+		expect(lanErrorMessage('lan.pro_required')).toBe(m.lan_error_pro_required());
+		expect(lanErrorMessage('lan.receiver_pro_required')).toBe(m.lan_error_receiver_pro_required());
+		expect(lanErrorMessage('lan.account_mismatch')).toBe(m.lan_error_account_mismatch());
 	});
 
 	it('符号でなければ、受け取った文字列をそのまま出す', () => {

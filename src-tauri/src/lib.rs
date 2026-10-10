@@ -22,6 +22,7 @@ mod menu_tracking;
 #[cfg(not(target_os = "macos"))]
 mod package;
 mod placement;
+mod pro;
 mod secrets;
 mod text;
 // 境目の型は、Windows でもテストで書き出す。Windows では書き出すだけで使わない
@@ -40,7 +41,7 @@ use std::{
         Arc, Mutex, OnceLock,
     },
     thread,
-    time::{Instant, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use log::{error, info, warn};
@@ -167,6 +168,7 @@ type AbortAction = Box<dyn Fn() + Send>;
 /// 設定と、トレイに出す問題。設定画面から変えると、ここと設定ファイルの両方を更新する
 struct AppState {
     config_path: PathBuf,
+    pro_state_path: PathBuf,
     /// アプリのバージョン。ログの先頭に出しているものと同じ出どころにして、突き合わせられるようにする
     version: String,
     /// OS の言語設定から決めた言語。表示言語が「システム」のときに使う
@@ -179,6 +181,10 @@ struct AppState {
     settings_opening: AtomicBool,
     /// 現在選んでいる AI サービスのキーが資格情報管理にあるか。None は未確認。
     ai_key_available: Mutex<Option<(AiService, bool)>>,
+    /// 最後に窓口が答えた Pro の状態。通信できない間は、期限の7日後までだけ使う。
+    pro_state: Mutex<Option<pro::State>>,
+    /// 資格情報管理で Mawok のアカウントトークンを読めたか。Pro の案内をサインイン前と区別する。
+    mawok_account_signed_in: AtomicBool,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -272,6 +278,10 @@ struct SettingsView {
     paired_devices: Vec<PairedDevice>,
     /// 組み合わせるときに相手へ名乗る、この機器の名前
     device_name: String,
+    /// 機器の間の送受信を使える Pro か
+    pro_available: bool,
+    /// Mawok のアカウントトークンを資格情報管理から読めたか
+    mawok_account_signed_in: bool,
     punctuation_style: PunctuationStyle,
     char_widths: CharWidths,
     /// コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
@@ -313,6 +323,12 @@ fn settings_view(state: &AppState) -> SettingsView {
         )
     };
     let lang = Lang::resolve(config.language, state.system_lang);
+    let pro_available = state
+        .pro_state
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|pro| pro.available_at(pro::now()));
     SettingsView {
         revision,
         locale: lang.code(),
@@ -344,6 +360,8 @@ fn settings_view(state: &AppState) -> SettingsView {
         snippets: config.snippets,
         paired_devices: config.paired_devices,
         device_name: state.device_name.clone(),
+        pro_available,
+        mawok_account_signed_in: state.mawok_account_signed_in.load(Ordering::Relaxed),
         punctuation_style: config.punctuation_style,
         char_widths: config.char_widths,
         exclude_from_clipboard_history: config.exclude_from_clipboard_history,
@@ -1566,6 +1584,10 @@ async fn read_callback(
 async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
+    if let Err(error) = clear_pro_state(app).await {
+        error!("couldn't clear the previous Pro state: {error}");
+        return false;
+    }
     let saved = run_blocking(move || secrets::write(AiService::Mawok.credential_user(), &token))
         .await
         .and_then(|result| result)
@@ -1574,7 +1596,14 @@ async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
     if saved {
         app.state::<AppState>()
             .remember_ai_key(AiService::Mawok, true);
+        app.state::<AppState>()
+            .mawok_account_signed_in
+            .store(true, Ordering::Relaxed);
         apply_config(app);
+        let refresh_app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = refresh_mawok_account_status(&refresh_app).await;
+        });
     }
     saved
 }
@@ -1621,30 +1650,95 @@ fn reopen_mawok_sign_in_page(app: AppHandle) -> Result<(), String> {
 }
 
 /// Mawok のアカウントのメールアドレスと残り。サインインしていなければ None。
-/// トークンが窓口で外されていれば、手元のトークンも消して None を返す
+/// Pro の状態もこの問い合わせで更新する。トークンが窓口で外されていれば、手元のトークンも消して None を返す
 #[tauri::command]
 async fn mawok_account_status(app: AppHandle) -> Result<Option<account::AccountStatus>, String> {
+    refresh_mawok_account_status(&app).await
+}
+
+async fn refresh_mawok_account_status(
+    app: &AppHandle,
+) -> Result<Option<account::AccountStatus>, String> {
     let token = match run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await? {
-        Ok(token) => token,
-        Err(secrets::ReadError::NotFound) => return Ok(None),
+        Ok(token) => {
+            let was_signed_in = app
+                .state::<AppState>()
+                .mawok_account_signed_in
+                .swap(true, Ordering::Relaxed);
+            if !was_signed_in {
+                apply_config(app);
+            }
+            token
+        }
+        Err(secrets::ReadError::NotFound) => {
+            clear_pro_state(app).await?;
+            return Ok(None);
+        }
         Err(secrets::ReadError::Unreadable(detail)) => {
             error!("couldn't read the Mawok account token: {detail}");
+            app.state::<AppState>()
+                .mawok_account_signed_in
+                .store(false, Ordering::Relaxed);
+            apply_config(app);
             return Err(actions::Failure::KeyUnreadable.code().to_string());
         }
     };
-    let client = http_client(&app)?;
+    let client = http_client(app)?;
     match account::status(&client, &token).await {
-        Ok(status) => Ok(Some(status)),
+        Ok(status) => {
+            remember_pro_state(app, &status).await;
+            Ok(Some(status))
+        }
         Err(account::AccountError::SignedOut) => {
             info!("the Mawok account token was removed on the account page");
-            forget_mawok_token(&app).await?;
+            forget_mawok_token(app).await?;
             Ok(None)
         }
         Err(account::AccountError::Other(detail)) => {
             warn!("couldn't ask the Mawok account: {detail}");
+            // オフラインの猶予が過ぎていれば、開いている設定画面でもすぐペアリングを止める。
+            apply_config(app);
             Err("account.unreachable".to_string())
         }
     }
+}
+
+const PRO_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// 起動直後と6時間ごとに窓口へ確かめる。トークンが無いときは、問い合わせずに状態を片付ける。
+fn start_periodic_pro_checks(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(PRO_CHECK_INTERVAL);
+        loop {
+            interval.tick().await;
+            if let Err(error) = refresh_mawok_account_status(&app).await {
+                info!("couldn't refresh the Pro state: {error}");
+            }
+        }
+    });
+}
+
+/// 窓口が答えた状態は、次の起動でオフライン猶予を使えるよう別の状態ファイルに置く。保存に失敗しても、今回の窓口の答えは使う。
+async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus) {
+    let state = pro::State::from_status(status.account_id.clone(), &status.pro, pro::now());
+    let path = app.state::<AppState>().pro_state_path.clone();
+    *app.state::<AppState>().pro_state.lock().unwrap() = Some(state.clone());
+    if let Err(error) = run_blocking(move || pro::save(&path, &state)).await {
+        warn!("couldn't save the Pro state: {error}");
+    }
+    apply_config(app);
+}
+
+/// サインインするアカウントが替わったとき、前のアカウントの猶予を使わないよう、メモリーと状態ファイルの両方を先に消す。
+async fn clear_pro_state(app: &AppHandle) -> Result<(), String> {
+    let path = app.state::<AppState>().pro_state_path.clone();
+    *app.state::<AppState>().pro_state.lock().unwrap() = None;
+    app.state::<AppState>()
+        .mawok_account_signed_in
+        .store(false, Ordering::Relaxed);
+    run_blocking(move || pro::clear(&path)).await??;
+    apply_config(app);
+    Ok(())
 }
 
 /// 手元のトークンを消し、サインインしていない状態にする
@@ -1656,7 +1750,7 @@ async fn forget_mawok_token(app: &AppHandle) -> Result<(), String> {
         .inspect_err(|error| error!("couldn't delete the Mawok account token: {error}"))?;
     app.state::<AppState>()
         .remember_ai_key(AiService::Mawok, false);
-    apply_config(app);
+    clear_pro_state(app).await?;
     Ok(())
 }
 
@@ -1680,6 +1774,12 @@ async fn sign_out_mawok(app: AppHandle) -> Result<(), String> {
 fn open_mawok_buy_page(app: AppHandle) -> Result<(), String> {
     let lang = app.state::<AppState>().lang();
     open_page(&app, &account::buy_page_url(lang.code()))
+}
+
+/// Pro の料金ページをブラウザーで開く。機器の画面の案内にも使う。
+#[tauri::command]
+fn open_mawok_pro_page(app: AppHandle) -> Result<(), String> {
+    open_page(&app, &account::pro_page_url())
 }
 
 /// 失敗したときに画面へ渡すもの。code は符号（actions.rs の Failure::code）。
@@ -2296,6 +2396,20 @@ impl lan::Host for AppHandle {
         });
         true
     }
+
+    fn pro_account_tag(&self) -> Option<[u8; 32]> {
+        self.state::<AppState>()
+            .pro_state
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|pro| pro.available_at(pro::now()))
+            .map(pro::State::account_tag)
+    }
+}
+
+fn pro_account_tag(app: &AppHandle) -> Option<[u8; 32]> {
+    <AppHandle as lan::Host>::pro_account_tag(app)
 }
 
 /// 組み合わせと送信の失敗を、画面に渡す符号にする。画面は符号から案内を出す（src/lib/lan-errors.ts）。
@@ -2322,8 +2436,14 @@ struct PairingOffer {
 
 /// コードを出して、組み合わせる相手が入れるのを待つ。コードと画面表示用の残り秒を返す
 #[tauri::command]
-fn start_pairing(lan: tauri::State<'_, Arc<lan::Lan>>) -> Result<PairingOffer, String> {
+fn start_pairing(
+    app: AppHandle,
+    lan: tauri::State<'_, Arc<lan::Lan>>,
+) -> Result<PairingOffer, String> {
     info!("start pairing");
+    if pro_account_tag(&app).is_none() {
+        return Err(lan::Failure::ProRequired.code().to_string());
+    }
     let (code, remaining_seconds) = lan
         .start_pairing()
         .map_err(|error| lan_failure("couldn't start pairing", error))?;
@@ -2341,8 +2461,15 @@ fn cancel_pairing(lan: tauri::State<'_, Arc<lan::Lan>>) {
 
 /// 相手に出ているコードを入れて組み合わせる。相手を探すので数秒かかるため、メインスレッドを止めない
 #[tauri::command]
-async fn join_pairing(lan: tauri::State<'_, Arc<lan::Lan>>, code: String) -> Result<(), String> {
+async fn join_pairing(
+    app: AppHandle,
+    lan: tauri::State<'_, Arc<lan::Lan>>,
+    code: String,
+) -> Result<(), String> {
     info!("join pairing");
+    if pro_account_tag(&app).is_none() {
+        return Err(lan::Failure::ProRequired.code().to_string());
+    }
     let lan = Arc::clone(lan.inner());
     run_blocking(move || lan.join_pairing(&code))
         .await?
@@ -2478,6 +2605,8 @@ fn send_and_hide(
 ) -> Result<bool, SendFailure> {
     let sent = !text.is_empty();
     if sent {
+        let account_tag = pro_account_tag(app)
+            .ok_or_else(|| SendFailure::from(lan::Failure::ProRequired.code().to_string()))?;
         if app
             .state::<AppState>()
             .config
@@ -2496,7 +2625,9 @@ fn send_and_hide(
             return Err(lan::Failure::NoTarget.code().to_string().into());
         }
         // 送るのは整える前の入力欄の中身。整えるのは、受け取った側がコピーするとき
-        let results = on_each_device(app, &targets, |lan, key, saved| lan.send(key, saved, text));
+        let results = on_each_device(app, &targets, |lan, key, saved| {
+            lan.send(key, saved, Some(account_tag), text)
+        });
         let mut reached = Vec::new();
         let mut failures = Vec::new();
         for (device, result) in results {
@@ -2553,9 +2684,11 @@ fn send_and_hide(
 #[tauri::command]
 async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
     run_blocking(move || {
+        let account_tag =
+            pro_account_tag(&app).ok_or_else(|| lan::Failure::ProRequired.code().to_string())?;
         let targets = paired_targets(&app, |_| true);
         let reached: Vec<(String, IpAddr)> = on_each_device(&app, &targets, |lan, key, saved| {
-            lan.probe(key, saved)
+            lan.probe(key, saved, Some(account_tag))
                 // つながらないのはよくあること（電源が入っていないなど）なので、細かい中身だけログに残す
                 .inspect_err(|error| info!("probe: {}", error.detail))
                 .ok()
@@ -2564,12 +2697,12 @@ async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
         .filter_map(|(device, address)| Some((device.public_key.clone(), address?)))
         .collect();
         remember_addresses(&app, &reached);
-        reached
+        Ok(reached
             .into_iter()
             .map(|(public_key, _)| public_key)
-            .collect()
+            .collect())
     })
-    .await
+    .await?
 }
 
 /// 送信先のチェックを覚える。渡した公開鍵の機器にチェックを入れ、ほかは外す
@@ -3169,6 +3302,10 @@ impl Drop for OpeningGuard {
 
 fn open_settings(app: &AppHandle) {
     info!("open settings");
+    let pro_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = refresh_mawok_account_status(&pro_app).await;
+    });
     hide_draft_for_settings(app);
     focus::before_show(app);
     #[cfg(target_os = "macos")]
@@ -3476,6 +3613,7 @@ pub fn run() {
             mawok_account_status,
             sign_out_mawok,
             open_mawok_buy_page,
+            open_mawok_pro_page,
             run_action,
             change_folder,
             complete_folder,
@@ -3614,6 +3752,14 @@ pub fn run() {
             }
 
             let config_path = app.path().app_config_dir()?.join(config::FILE_NAME);
+            let pro_state_path = app.path().app_config_dir()?.join(pro::STATE_FILE_NAME);
+            let pro_state = match pro::load(&pro_state_path) {
+                Ok(state) => state,
+                Err(error) => {
+                    warn!("couldn't read the Pro state: {error}");
+                    None
+                }
+            };
             // 読むとファイルができるので、その前に見る
             let config_missing = config::is_missing(&config_path);
             let (mut config, config_problem) = config::load_or_create(&config_path);
@@ -3652,6 +3798,7 @@ pub fn run() {
             let device_name = lan::device_name();
             app.manage(AppState {
                 config_path,
+                pro_state_path,
                 version: app.package_info().version.to_string(),
                 system_lang: Lang::system(),
                 device_name: device_name.clone(),
@@ -3659,6 +3806,8 @@ pub fn run() {
                 problems: Mutex::new(problems),
                 settings_opening: AtomicBool::new(false),
                 ai_key_available: Mutex::new(None),
+                pro_state: Mutex::new(pro_state),
+                mawok_account_signed_in: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]
@@ -3677,6 +3826,7 @@ pub fn run() {
             let lan = lan::Lan::new(key_path, device_name, Arc::new(app.handle().clone()));
             app.manage(Arc::clone(&lan));
             lan.refresh();
+            start_periodic_pro_checks(app.handle().clone());
             #[cfg(target_os = "macos")]
             updater::start_periodic_checks(app.handle());
             // 初めての起動では下書きを一度出す。常駐するだけで何も出ないと、入ったのか分からず、

@@ -31,7 +31,7 @@ const TCP_PORT: u16 = 47626;
 /// 名乗りを送り合う UDP のポート
 const UDP_PORT: u16 = 47625;
 /// 名乗りの先頭の印。形を変えたら数字を上げる
-const HELLO: &str = "mawok1";
+const HELLO: &str = "mawok2";
 /// 名乗りの間隔。コードを出している間は、相手がすぐ見つけられるよう短くする
 const HELLO_INTERVAL: Duration = Duration::from_secs(3);
 const OFFER_HELLO_INTERVAL: Duration = Duration::from_secs(1);
@@ -66,6 +66,11 @@ const KIND_SEND: u8 = 2;
 const KIND_PING: u8 = 3;
 /// 受け取った側が、最後まで受け取れたことを返す印
 const ACK: &[u8] = b"ok";
+/// 本文の前に、同じ Pro のアカウントかを確かめ終えたことを返す。
+const READY: &[u8] = b"ready";
+const REJECT_PRO_REQUIRED: &[u8] = b"pro_required";
+const REJECT_ACCOUNT_MISMATCH: &[u8] = b"account_mismatch";
+const ACCOUNT_TAG_LEN: usize = 32;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -81,6 +86,12 @@ pub enum Failure {
     Unreachable,
     /// つながったが、相手が受け取らなかった（相手で組み合わせを解いた、途中で切れたなど）
     Refused,
+    /// この機器で Pro を使えない
+    ProRequired,
+    /// 相手の機器で Pro を使えない
+    ReceiverProRequired,
+    /// 相手が別の Mawok アカウントに結ばれている
+    AccountMismatch,
     TooLong,
     /// 入れたコードが6桁の数字でない
     BadCode,
@@ -98,6 +109,9 @@ impl Failure {
             Self::NoTarget => "lan.no_target",
             Self::Unreachable => "lan.unreachable",
             Self::Refused => "lan.refused",
+            Self::ProRequired => "lan.pro_required",
+            Self::ReceiverProRequired => "lan.receiver_pro_required",
+            Self::AccountMismatch => "lan.account_mismatch",
             Self::TooLong => "lan.too_long",
             Self::BadCode => "lan.bad_code",
             Self::WrongCode => "lan.wrong_code",
@@ -159,6 +173,8 @@ pub trait Host: Send + Sync + 'static {
     /// 組み合わせた機器から下書きが届いた。そのときまだ組み合わせてあって受け入れたら true。
     /// 解除と食い違わないよう、組み合わせたままかの確かめと受け入れは、設定を押さえたまま行う
     fn on_received(&self, from: &[u8], text: String) -> bool;
+    /// この機器で使える Pro のアカウントの印。無ければ、相手の下書きは受け取らない。
+    fn pro_account_tag(&self) -> Option<[u8; ACCOUNT_TAG_LEN]>;
 }
 
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -423,19 +439,49 @@ fn send_text(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
     remote_public: &[u8],
+    account_tag: &[u8; ACCOUNT_TAG_LEN],
     text: &str,
-) -> Result<()> {
+) -> std::result::Result<(), LanError> {
     if text.len() > MAX_TEXT_BYTES {
-        return Err("the draft is too long to send".to_string());
+        return Err(LanError::new(
+            Failure::TooLong,
+            "the draft is too long to send",
+        ));
     }
-    let mut transport = handshake_as_sender(stream, key, remote_public)?;
+    let mut transport =
+        handshake_as_sender(stream, key, remote_public).fail_as(Failure::Refused)?;
+    transport_write(&mut transport, account_tag, stream).fail_as(Failure::Refused)?;
+    match transport_read(&mut transport, stream)
+        .fail_as(Failure::Refused)?
+        .as_slice()
+    {
+        READY => {}
+        REJECT_PRO_REQUIRED => {
+            return Err(LanError::new(
+                Failure::ReceiverProRequired,
+                "the receiving device is not Pro",
+            ));
+        }
+        REJECT_ACCOUNT_MISMATCH => {
+            return Err(LanError::new(
+                Failure::AccountMismatch,
+                "the receiving device uses another account",
+            ));
+        }
+        _ => {
+            return Err(LanError::new(
+                Failure::Refused,
+                "the receiving device refused",
+            ))
+        }
+    }
     // 1通に入りきらない分は分けて送り、空の1通で終わりを伝える
     for chunk in text.as_bytes().chunks(NOISE_MAX - TAG_LEN) {
-        transport_write(&mut transport, chunk, stream)?;
+        transport_write(&mut transport, chunk, stream).fail_as(Failure::Refused)?;
     }
-    transport_write(&mut transport, &[], stream)?;
-    if transport_read(&mut transport, stream)? != ACK {
-        return Err("unexpected reply".to_string());
+    transport_write(&mut transport, &[], stream).fail_as(Failure::Refused)?;
+    if transport_read(&mut transport, stream).fail_as(Failure::Refused)? != ACK {
+        return Err(LanError::new(Failure::Refused, "unexpected reply"));
     }
     Ok(())
 }
@@ -446,9 +492,23 @@ fn receive_text(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
     is_paired: impl Fn(&[u8]) -> bool,
+    account_tag: Option<[u8; ACCOUNT_TAG_LEN]>,
     deliver: impl FnOnce(&[u8], String) -> bool,
 ) -> Result<Vec<u8>> {
     let (mut transport, remote) = handshake_as_receiver(stream, key, is_paired)?;
+    let remote_tag = transport_read(&mut transport, stream)?;
+    let accepted = match account_tag {
+        None => {
+            transport_write(&mut transport, REJECT_PRO_REQUIRED, stream)?;
+            return Err("this device is not Pro".to_string());
+        }
+        Some(own) if remote_tag.as_slice() != own => {
+            transport_write(&mut transport, REJECT_ACCOUNT_MISMATCH, stream)?;
+            return Err("the devices use different accounts".to_string());
+        }
+        Some(_) => READY,
+    };
+    transport_write(&mut transport, accepted, stream)?;
     let mut bytes = Vec::new();
     loop {
         let chunk = transport_read(&mut transport, stream)?;
@@ -467,6 +527,36 @@ fn receive_text(
     }
     transport_write(&mut transport, ACK, stream)?;
     Ok(remote)
+}
+
+/// 生存確認も送信と同じ Pro・アカウントの判定を通す。送信先の一覧が、実際に送れる機器だけを選べるようにする。
+fn probe_peer(
+    stream: &mut (impl Read + Write),
+    key: &DeviceKey,
+    remote_public: &[u8],
+    account_tag: &[u8; ACCOUNT_TAG_LEN],
+) -> std::result::Result<(), LanError> {
+    let mut transport =
+        handshake_as_sender(stream, key, remote_public).fail_as(Failure::Unreachable)?;
+    transport_write(&mut transport, account_tag, stream).fail_as(Failure::Unreachable)?;
+    match transport_read(&mut transport, stream)
+        .fail_as(Failure::Unreachable)?
+        .as_slice()
+    {
+        READY => Ok(()),
+        REJECT_PRO_REQUIRED => Err(LanError::new(
+            Failure::ReceiverProRequired,
+            "the receiving device is not Pro",
+        )),
+        REJECT_ACCOUNT_MISMATCH => Err(LanError::new(
+            Failure::AccountMismatch,
+            "the receiving device uses another account",
+        )),
+        _ => Err(LanError::new(
+            Failure::Refused,
+            "the receiving device refused",
+        )),
+    }
 }
 
 /// 名乗りを送る先。各インターフェースのサブネットのブロードキャストと 255.255.255.255
@@ -690,6 +780,7 @@ impl Lan {
                     stream,
                     &key,
                     |remote| self.is_paired(remote),
+                    self.host.pro_account_tag(),
                     |remote, text| self.host.on_received(remote, text),
                 )?;
                 info!("lan: received a draft");
@@ -697,9 +788,16 @@ impl Lan {
                 Ok(())
             }
             KIND_PING => {
-                // 握手が通れば、動いていて組み合わせた本人だと相手に分かる。送る下書きはないので、ここで切る
-                let (_, from) =
+                // 生存確認でも、実際に送れる同じ Pro のアカウントかを確かめる
+                let (mut transport, from) =
                     handshake_as_receiver(stream, &key, |remote| self.is_paired(remote))?;
+                let remote_tag = transport_read(&mut transport, stream)?;
+                let reply = match self.host.pro_account_tag() {
+                    None => REJECT_PRO_REQUIRED,
+                    Some(own) if remote_tag.as_slice() != own => REJECT_ACCOUNT_MISMATCH,
+                    Some(_) => READY,
+                };
+                transport_write(&mut transport, reply, stream)?;
                 self.seen.lock().unwrap().insert(from, ip);
                 Ok(())
             }
@@ -893,6 +991,7 @@ impl Lan {
         &self,
         remote_public: &[u8],
         saved: Option<IpAddr>,
+        account_tag: Option<[u8; ACCOUNT_TAG_LEN]>,
         text: &str,
     ) -> std::result::Result<IpAddr, LanError> {
         // 送れない長さなら、相手につなぐ前にやめる
@@ -902,11 +1001,13 @@ impl Lan {
                 "the draft is too long to send",
             ));
         }
+        let account_tag = account_tag
+            .ok_or_else(|| LanError::new(Failure::ProRequired, "this device is not Pro"))?;
         let key = self.key().fail_as(Failure::Internal)?;
         let ip = self.locate(remote_public, saved)?;
         let mut stream = connect_for(ip, KIND_SEND)?;
         // つながった後に切られたのは、相手が受け取らなかったとみなす（相手で組み合わせを解いた、途中で切れたなど）
-        send_text(&mut stream, &key, remote_public, text).fail_as(Failure::Refused)?;
+        send_text(&mut stream, &key, remote_public, &account_tag, text)?;
         Ok(ip)
     }
 
@@ -916,11 +1017,14 @@ impl Lan {
         &self,
         remote_public: &[u8],
         saved: Option<IpAddr>,
+        account_tag: Option<[u8; ACCOUNT_TAG_LEN]>,
     ) -> std::result::Result<IpAddr, LanError> {
+        let account_tag = account_tag
+            .ok_or_else(|| LanError::new(Failure::ProRequired, "this device is not Pro"))?;
         let key = self.key().fail_as(Failure::Internal)?;
         let ip = self.locate(remote_public, saved)?;
         let mut stream = connect_for(ip, KIND_PING)?;
-        handshake_as_sender(&mut stream, &key, remote_public).fail_as(Failure::Unreachable)?;
+        probe_peer(&mut stream, &key, remote_public, &account_tag)?;
         Ok(ip)
     }
 
@@ -948,6 +1052,8 @@ impl Lan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ACCOUNT_TAG: [u8; ACCOUNT_TAG_LEN] = [7; ACCOUNT_TAG_LEN];
 
     /// つながった TCP の両端
     fn connected() -> (TcpStream, TcpStream) {
@@ -1013,6 +1119,7 @@ mod tests {
                 &mut server,
                 &receiver_key,
                 |remote| remote == sender_public,
+                Some(ACCOUNT_TAG),
                 |_, text| {
                     delivered = Some(text);
                     true
@@ -1023,7 +1130,7 @@ mod tests {
         // 1通に入りきらない長さでも、分けて送って元に戻る
         let text = format!("{}\n末尾", "あ".repeat(30_000));
 
-        send_text(&mut client, &sender, &receiver.public, &text).unwrap();
+        send_text(&mut client, &sender, &receiver.public, &ACCOUNT_TAG, &text).unwrap();
 
         let (from, delivered) = received.join().unwrap();
         assert_eq!(from.unwrap(), sender.public);
@@ -1066,10 +1173,23 @@ mod tests {
         let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
         let (mut client, mut server) = connected();
         let receiver_public = receiver.public.clone();
-        let received =
-            thread::spawn(move || receive_text(&mut server, &receiver, |_| false, |_, _| true));
+        let received = thread::spawn(move || {
+            receive_text(
+                &mut server,
+                &receiver,
+                |_| false,
+                Some(ACCOUNT_TAG),
+                |_, _| true,
+            )
+        });
 
-        let sent = send_text(&mut client, &sender, &receiver_public, "secret");
+        let sent = send_text(
+            &mut client,
+            &sender,
+            &receiver_public,
+            &ACCOUNT_TAG,
+            "secret",
+        );
 
         assert!(sent.is_err());
         assert!(received.join().unwrap().is_err());
@@ -1088,6 +1208,7 @@ mod tests {
                 &mut server,
                 &receiver,
                 |_| true,
+                Some(ACCOUNT_TAG),
                 |_, _| {
                     counted.fetch_add(1, Ordering::Relaxed);
                     false
@@ -1095,12 +1216,72 @@ mod tests {
             )
         });
 
-        let sent = send_text(&mut client, &sender, &receiver_public, "secret");
+        let sent = send_text(
+            &mut client,
+            &sender,
+            &receiver_public,
+            &ACCOUNT_TAG,
+            "secret",
+        );
 
         // 受け入れられなければ、相手には受け取れたと返さない
         assert!(sent.is_err());
         assert!(received.join().unwrap().is_err());
         assert_eq!(deliveries.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn refuses_a_sender_from_another_account_before_receiving_its_text() {
+        let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
+        let (mut client, mut server) = connected();
+        let receiver_public = receiver.public.clone();
+        let received = thread::spawn(move || {
+            receive_text(
+                &mut server,
+                &receiver,
+                |_| true,
+                Some(ACCOUNT_TAG),
+                |_, _| panic!("a mismatched account must not deliver text"),
+            )
+        });
+
+        let sent = send_text(
+            &mut client,
+            &sender,
+            &receiver_public,
+            &[8; ACCOUNT_TAG_LEN],
+            "secret",
+        );
+
+        assert_eq!(sent.unwrap_err().failure, Failure::AccountMismatch);
+        assert!(received.join().unwrap().is_err());
+    }
+
+    #[test]
+    fn refuses_a_sender_when_the_receiver_is_not_pro() {
+        let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
+        let (mut client, mut server) = connected();
+        let receiver_public = receiver.public.clone();
+        let received = thread::spawn(move || {
+            receive_text(
+                &mut server,
+                &receiver,
+                |_| true,
+                None,
+                |_, _| panic!("a non-Pro receiver must not deliver text"),
+            )
+        });
+
+        let sent = send_text(
+            &mut client,
+            &sender,
+            &receiver_public,
+            &ACCOUNT_TAG,
+            "secret",
+        );
+
+        assert_eq!(sent.unwrap_err().failure, Failure::ReceiverProRequired);
+        assert!(received.join().unwrap().is_err());
     }
 
     #[test]
@@ -1110,6 +1291,9 @@ mod tests {
             Failure::NoTarget,
             Failure::Unreachable,
             Failure::Refused,
+            Failure::ProRequired,
+            Failure::ReceiverProRequired,
+            Failure::AccountMismatch,
             Failure::TooLong,
             Failure::BadCode,
             Failure::WrongCode,
