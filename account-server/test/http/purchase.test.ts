@@ -928,4 +928,14 @@ describe('buying credit', () => {
 			'クレジットを購入しました'
 		);
 	});
+
+	it('names what is being bought while it waits for the payment', async () => {
+		const { cookie } = await signIn('waiting-title@example.com');
+		const credits = await request('/account/buy/done?next=%2Faccount%2F&session_id=cs_none', {
+			cookie
+		});
+		expect(await credits.text()).toContain('<h1>クレジットを購入</h1>');
+		const pro = await request('/account/buy/done?next=%2Faccount%2F&pro=1', { cookie });
+		expect(await pro.text()).toContain('<h1>Mawok Pro</h1>');
+	});
 });

@@ -1101,7 +1101,12 @@ accountApp.get('/buy/done', async (c) => {
 		const retry = new URL(c.req.url);
 		retry.searchParams.set('tries', String(tries + 1));
 		return c.html(
-			checkingPurchasePage(lang, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
+			checkingPurchasePage(
+				lang,
+				messages[lang].proTitle,
+				`${retry.pathname}${retry.search}`,
+				tries < PURCHASE_CHECKS
+			)
 		);
 	}
 	const bought = await c.env.DB.prepare(
@@ -1120,7 +1125,12 @@ accountApp.get('/buy/done', async (c) => {
 	const retry = new URL(c.req.url);
 	retry.searchParams.set('tries', String(tries + 1));
 	return c.html(
-		checkingPurchasePage(lang, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
+		checkingPurchasePage(
+			lang,
+			messages[lang].buyTitle,
+			`${retry.pathname}${retry.search}`,
+			tries < PURCHASE_CHECKS
+		)
 	);
 });
 

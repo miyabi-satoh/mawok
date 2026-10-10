@@ -525,13 +525,18 @@ export function homePage(
  * 支払いから戻った先で、残高が付くのを待つ画面。`autoRetry` の間は数秒おきに開き直す。
  * 待っても付かなければ、確かめ直す手段を出す (買えたか分からないまま買い直さないように)。
  */
-export function checkingPurchasePage(lang: Lang, retryUrl: string, autoRetry: boolean) {
+export function checkingPurchasePage(
+	lang: Lang,
+	title: string,
+	retryUrl: string,
+	autoRetry: boolean
+) {
 	const t = messages[lang];
 	return page(
 		lang,
-		t.buyTitle,
+		title,
 		html`${autoRetry ? html`<meta http-equiv="refresh" content="3;url=${retryUrl}" />` : ''}
-			<h1>${t.buyTitle}</h1>
+			<h1>${title}</h1>
 			<p>${autoRetry ? t.checkingPurchase : t.purchaseNotYet}</p>
 			${autoRetry ? '' : html`<p><a href="${retryUrl}">${t.checkAgain}</a></p>`}`
 	);
