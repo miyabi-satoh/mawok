@@ -1,8 +1,6 @@
 <script lang="ts">
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
-	import CloudIcon from '@lucide/svelte/icons/cloud';
-	import CloudOffIcon from '@lucide/svelte/icons/cloud-off';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -18,6 +16,7 @@
 	import { deviceLabels } from '$lib/devices';
 	import { devicesPanel } from '$lib/devices-panel';
 	import { errorCode } from '$lib/errors';
+	import SyncToggle from '$lib/components/sync-toggle.svelte';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
 	import SettingsActions from '$lib/components/settings-actions.svelte';
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
@@ -1187,23 +1186,13 @@
 												}
 											/>
 											{#if view.proAvailable}
-												<Button
-													variant="ghost"
-													size="icon"
-													class="size-8"
-													aria-label={m.settings_sync()}
-													aria-pressed={replacement.sync}
-													onclick={() => {
-														replacement.sync = !replacement.sync;
+												<SyncToggle
+													pressed={replacement.sync}
+													onchange={(sync) => {
+														replacement.sync = sync;
 														replacements.save();
 													}}
-												>
-													{#if replacement.sync}
-														<CloudIcon class="size-4" />
-													{:else}
-														<CloudOffIcon class="size-4" />
-													{/if}
-												</Button>
+												/>
 											{/if}
 											<Button
 												variant="ghost"
@@ -1256,23 +1245,14 @@
 								>
 									{#snippet trailing(row)}
 										{#if view.proAvailable}
-											<Button
-												variant="ghost"
-												size="icon"
-												class="size-8"
-												aria-label={m.settings_sync()}
-												aria-pressed={row.sync}
-												onclick={() => {
-													row.sync = !row.sync;
+											<SyncToggle
+												pressed={row.sync}
+												name={row.name}
+												onchange={(sync) => {
+													row.sync = sync;
 													snippets.save();
 												}}
-											>
-												{#if row.sync}
-													<CloudIcon class="size-4" />
-												{:else}
-													<CloudOffIcon class="size-4" />
-												{/if}
-											</Button>
+											/>
 										{/if}
 									{/snippet}
 								</ReorderableRows>

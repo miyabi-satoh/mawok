@@ -333,7 +333,9 @@ describe('設定画面の定型文', () => {
 			snippets: snippetRows([confirm])
 		};
 		const screen = await renderAt(m.settings_category_snippets);
-		const syncButton = screen.getByRole('button', { name: m.settings_sync() });
+		const syncButton = screen.getByRole('button', {
+			name: m.settings_sync_item({ name: confirm.name })
+		});
 
 		expect(syncButton.element().getAttribute('aria-pressed')).toBe('true');
 		await syncButton.click();
@@ -1678,6 +1680,18 @@ describe('設定画面のアクション', () => {
 			.element(screen.getByText(m.settings_ai_key_absent(), { exact: true }))
 			.toBeVisible();
 		expect(invoked).toHaveBeenCalledWith('has_ai_key', undefined);
+	});
+
+	it('定型文があっても、アクションの分類を開くと一覧を出す', async () => {
+		// 定型文の一覧は分類を開く前から描かれている。並べ替えの部品が2つ目でも作れることを見る
+		settings.current = {
+			...view(),
+			snippets: [{ id: 'snippet-0', name: '確認', body: '以上です。', sync: true }],
+			actions: [ai('要約', 'まとめて')]
+		};
+		const screen = await renderAt(m.settings_category_actions);
+
+		await expect.element(screen.getByText('要約', { exact: true })).toBeVisible();
 	});
 
 	it('AI サービスの選択肢を「使わない」から表示し、選んだサービスの説明を出す', async () => {

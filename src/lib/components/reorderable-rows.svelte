@@ -1,15 +1,18 @@
+<script module lang="ts">
+	import { overrideItemIdKeyNameBeforeInitialisingDndZones } from 'svelte-dnd-action';
+
+	// 設定の ID は保存前に空になりうるので、ドラッグの識別子には画面だけの key を使う。
+	// 一覧が1つでも描かれた後に呼ぶと例外になるので、部品を作るたびでなく、読み込んだときに一度だけ呼ぶ
+	overrideItemIdKeyNameBeforeInitialisingDndZones('key');
+</script>
+
 <script
 	lang="ts"
 	generics="T extends { id: string; name: string } & Record<K, string>, K extends string = never"
 >
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
-	import {
-		dragHandle,
-		dragHandleZone,
-		overrideItemIdKeyNameBeforeInitialisingDndZones,
-		type DndEvent
-	} from 'svelte-dnd-action';
+	import { dragHandle, dragHandleZone, type DndEvent } from 'svelte-dnd-action';
 	import { flip } from 'svelte/animate';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import type { SvelteSet } from 'svelte/reactivity';
@@ -22,9 +25,6 @@
 	import { matchedIds, shownRows } from '$lib/list-filter';
 	import { REORDER_FLIP_DURATION } from '$lib/reorder';
 	import type { Row, RowList } from '$lib/row-list.svelte';
-
-	// 設定の ID は保存前に空になりうるので、ドラッグの識別子には画面だけの key を使う。
-	overrideItemIdKeyNameBeforeInitialisingDndZones('key');
 
 	/**
 	 * 名前と本文の組を並べて編集する一覧（定型文・アクション）。ふだんは1件1行（grip・名前と本文の頭・「…」メニュー）で見せ、

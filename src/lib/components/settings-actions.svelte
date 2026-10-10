@@ -1,7 +1,6 @@
 <script lang="ts">
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
-	import CloudIcon from '@lucide/svelte/icons/cloud';
-	import CloudOffIcon from '@lucide/svelte/icons/cloud-off';
+	import SyncToggle from '$lib/components/sync-toggle.svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { untrack } from 'svelte';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
@@ -197,23 +196,14 @@
 				>
 					{#snippet trailing(row)}
 						{#if view.proAvailable}
-							<Button
-								variant="ghost"
-								size="icon"
-								class="size-8"
-								aria-label={m.settings_sync()}
-								aria-pressed={row.sync}
-								onclick={() => {
-									row.sync = !row.sync;
+							<SyncToggle
+								pressed={row.sync}
+								name={row.name || row.command}
+								onchange={(sync) => {
+									row.sync = sync;
 									editor.actions.save();
 								}}
-							>
-								{#if row.sync}
-									<CloudIcon class="size-4" />
-								{:else}
-									<CloudOffIcon class="size-4" />
-								{/if}
-							</Button>
+							/>
 						{/if}
 						<Switch
 							aria-label={row.name || row.command
