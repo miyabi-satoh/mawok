@@ -733,17 +733,20 @@ enum DiscoverySource {
     Authenticated,
 }
 
+/// 見つけ済みの機器の場所だけを書き換える。まだ見つけていない機器は、生存確認が通ってから覚える
+/// （先に覚えると、生存確認が失敗したときに見つけ済みの扱いになり、試し直さなくなる）
 fn remember_seen_address(
     seen: &mut HashMap<Vec<u8>, IpAddr>,
     remote_public: &[u8],
     ip: IpAddr,
-    source: DiscoverySource,
 ) -> bool {
-    let known = seen.contains_key(remote_public);
-    if known || matches!(source, DiscoverySource::Authenticated) {
-        seen.insert(remote_public.to_vec(), ip);
+    match seen.get_mut(remote_public) {
+        Some(address) => {
+            *address = ip;
+            true
+        }
+        None => false,
     }
-    known
 }
 
 fn discovery_is_rejected(source: DiscoverySource, rejected_at: Option<Instant>) -> bool {
@@ -1129,7 +1132,11 @@ impl Lan {
             Hello::Want(_, tag) => {
                 if self.host.pro_account_tag().is_some_and(|own| own == tag) {
                     *self.wanted.lock().unwrap() = Some(Instant::now());
-                    if self.devices_open.load(Ordering::Relaxed) && !self.offering() {
+                    // ペアリングの握手の間は、相手がまだ want を名乗っている。済んだ後に次のコードを出さない
+                    if self.devices_open.load(Ordering::Relaxed)
+                        && !self.offering()
+                        && !self.pairing.load(Ordering::Relaxed)
+                    {
                         let _ = self.start_pairing(true);
                     }
                 }
@@ -1154,7 +1161,7 @@ impl Lan {
             return;
         }
         let mut seen = self.seen.lock().unwrap();
-        let known = remember_seen_address(&mut seen, &remote_public, ip, source);
+        let known = remember_seen_address(&mut seen, &remote_public, ip);
         drop(seen);
         if matches!(source, DiscoverySource::Authenticated) {
             self.host.on_device_address_seen(&remote_public, ip);
@@ -1891,30 +1898,15 @@ mod tests {
         let authenticated: IpAddr = "192.168.0.4".parse().unwrap();
         let mut seen = HashMap::from([(public_key.clone(), old)]);
 
-        assert!(remember_seen_address(
-            &mut seen,
-            &public_key,
-            announced,
-            DiscoverySource::Announcement,
-        ));
+        assert!(remember_seen_address(&mut seen, &public_key, announced));
         assert_eq!(seen[&public_key], announced);
+        assert!(remember_seen_address(&mut seen, &public_key, authenticated));
+        assert_eq!(seen[&public_key], authenticated);
 
+        // まだ見つけていない機器は、生存確認が通るまで覚えない
         let unknown = vec![5; 32];
-        assert!(!remember_seen_address(
-            &mut seen,
-            &unknown,
-            announced,
-            DiscoverySource::Announcement,
-        ));
+        assert!(!remember_seen_address(&mut seen, &unknown, authenticated));
         assert!(!seen.contains_key(&unknown));
-
-        assert!(!remember_seen_address(
-            &mut seen,
-            &unknown,
-            authenticated,
-            DiscoverySource::Authenticated,
-        ));
-        assert_eq!(seen[&unknown], authenticated);
     }
 
     #[test]

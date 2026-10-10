@@ -170,7 +170,7 @@
 	"lan_error_unreachable": "Couldn't connect to the other device. Check that Mawok is running on it, it's on the same network, and neither device's firewall or local network permission blocks it.",
 	"lan_error_refused": "The other device didn't accept the text. Check that Mawok is running on it.",
 	"lan_error_pro_required": "This feature is available with Pro. You can subscribe under Account in Settings.",
-	"lan_error_needs_pairing": "This device hasn't been added for sending between devices yet. Enter a code under Devices in Settings.",
+	"lan_error_needs_pairing": "This device isn't ready to send between devices. Open Devices in Settings and follow the instructions there.",
 	"lan_error_receiver_pro_required": "Sign in to a Pro account on the receiving device.",
 	"lan_error_account_mismatch": "The receiving device is signed in to another account. Sign in to the same account.",
 	"lan_error_too_long": "The text is too long to send (up to 1 MB).",
