@@ -1126,6 +1126,20 @@ describe('組み合わせた機器へ送る', () => {
 		await expect.element(textarea).toHaveValue('git status');
 	});
 
+	it('この機器が Pro でなければ、送信先の一覧に案内を出す', async () => {
+		settings.current = { ...view(), pairedDevices: [device] };
+		invoked.mockImplementation((command) => {
+			if (command === 'probe_devices') return Promise.reject('lan.pro_required');
+			return Promise.resolve(undefined);
+		});
+		const screen = await render(Page);
+
+		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
+
+		await expect.element(screen.getByText(m.lan_error_pro_required())).toBeVisible();
+		expect(callsOf(invoked, 'probe_devices')).toHaveLength(1);
+	});
+
 	it('一部の機器に届かなかったら、隠さずに届かなかった機器の名前を出す', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
 		settings.current = { ...view(), pairedDevices: [device, windows] };

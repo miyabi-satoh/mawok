@@ -9,7 +9,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{account::ProStatus, atomic_file};
+use crate::{account::ProStatus, atomic_file, lan};
 
 pub const STATE_FILE_NAME: &str = "pro-state.json";
 const GRACE_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -19,16 +19,14 @@ pub struct State {
     pub account_id: String,
     pub until: Option<u64>,
     pub active: bool,
-    pub checked_at: u64,
 }
 
 impl State {
-    pub fn from_status(account_id: String, pro: &ProStatus, checked_at: u64) -> Self {
+    pub fn from_status(account_id: String, pro: &ProStatus) -> Self {
         Self {
             account_id,
             until: pro.until,
             active: pro.active,
-            checked_at,
         }
     }
 
@@ -41,7 +39,7 @@ impl State {
     }
 
     /// LAN へはアカウントIDをそのまま流さず、同じアカウントでだけ同じになる固定長の印にする。
-    pub fn account_tag(&self) -> [u8; 32] {
+    pub fn account_tag(&self) -> [u8; lan::ACCOUNT_TAG_LEN] {
         Sha256::digest(self.account_id.as_bytes()).into()
     }
 }
@@ -86,7 +84,6 @@ mod tests {
             account_id: "account".to_string(),
             until: Some(1_000),
             active: true,
-            checked_at: 900,
         };
         assert!(state.available_at(1_000));
         assert!(state.available_at(1_000 + GRACE_SECONDS));
@@ -99,7 +96,6 @@ mod tests {
             account_id: "account".to_string(),
             until: Some(10_000),
             active: false,
-            checked_at: 900,
         };
         assert!(!state.available_at(1_000));
     }
@@ -110,7 +106,6 @@ mod tests {
             account_id: "account".to_string(),
             until: None,
             active: true,
-            checked_at: 0,
         };
         assert_ne!(state.account_tag().as_slice(), state.account_id.as_bytes());
         assert_eq!(state.account_tag(), state.account_tag());

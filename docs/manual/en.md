@@ -63,10 +63,10 @@ From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and p
 ## Use AI
 
 1. Under "Actions" in Settings, choose a service under "AI service".
-2. If you choose Mawok, select "Sign in", sign in on the page that opens, then click "Link this PC". For another service, enter its API key.
+2. If you choose Mawok, select "Sign in" under "Account" in Settings, sign in on the page that opens, then click "Link this PC". For another service, enter its API key.
 3. Read the explanation of what is sent, then select "Agree".
 
-When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy credits" on the same screen to open the purchase page in your browser.
+When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy credits" under "Account" in Settings to open the purchase page in your browser.
 
 ## Send to other devices
 
@@ -74,7 +74,7 @@ You can send text to Mawok on another device you own on the same network. This r
 
 Pair the devices once first.
 
-1. On both devices, sign in to the same Mawok account under "Actions" in Settings.
+1. On both devices, sign in to the same Mawok account under "Account" in Settings.
 2. On one device, select "Show a code" under "Devices" in Settings.
 3. On the other device, enter the code and select "Pair".
 
@@ -164,12 +164,12 @@ Changes you make directly take effect after you restart the app. The file contai
 ## Uninstalling
 
 ::: macos
-1. Under "Actions" in Settings, choose "Remove" if you entered an API key, or "Sign out" if you signed in to Mawok.
+1. Under "Actions" in Settings, choose "Remove" if you entered an API key. Under "Account", choose "Sign out" if you signed in to Mawok.
 2. Choose "Quit" in the menu bar menu, then move `/Applications/Mawok.app` to the Trash.
 3. To also remove settings and history, delete `~/Library/Application Support/com.amiiby.mawok/` and `~/Library/Logs/com.amiiby.mawok/`.
 :::
 
 ::: windows
-1. Under "Actions" in Settings, choose "Remove" if you entered an API key, or "Sign out" if you signed in to Mawok.
+1. Under "Actions" in Settings, choose "Remove" if you entered an API key. Under "Account", choose "Sign out" if you signed in to Mawok.
 2. Uninstall Mawok from "Apps" in Windows "Settings". The Microsoft Store version also removes settings and history.
 :::

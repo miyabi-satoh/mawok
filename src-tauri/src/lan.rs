@@ -70,7 +70,7 @@ const ACK: &[u8] = b"ok";
 const READY: &[u8] = b"ready";
 const REJECT_PRO_REQUIRED: &[u8] = b"pro_required";
 const REJECT_ACCOUNT_MISMATCH: &[u8] = b"account_mismatch";
-const ACCOUNT_TAG_LEN: usize = 32;
+pub const ACCOUNT_TAG_LEN: usize = 32;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -450,31 +450,7 @@ fn send_text(
     }
     let mut transport =
         handshake_as_sender(stream, key, remote_public).fail_as(Failure::Refused)?;
-    transport_write(&mut transport, account_tag, stream).fail_as(Failure::Refused)?;
-    match transport_read(&mut transport, stream)
-        .fail_as(Failure::Refused)?
-        .as_slice()
-    {
-        READY => {}
-        REJECT_PRO_REQUIRED => {
-            return Err(LanError::new(
-                Failure::ReceiverProRequired,
-                "the receiving device is not Pro",
-            ));
-        }
-        REJECT_ACCOUNT_MISMATCH => {
-            return Err(LanError::new(
-                Failure::AccountMismatch,
-                "the receiving device uses another account",
-            ));
-        }
-        _ => {
-            return Err(LanError::new(
-                Failure::Refused,
-                "the receiving device refused",
-            ))
-        }
-    }
+    confirm_peer_account(&mut transport, stream, account_tag, Failure::Refused)?;
     // 1通に入りきらない分は分けて送り、空の1通で終わりを伝える
     for chunk in text.as_bytes().chunks(NOISE_MAX - TAG_LEN) {
         transport_write(&mut transport, chunk, stream).fail_as(Failure::Refused)?;
@@ -484,6 +460,50 @@ fn send_text(
         return Err(LanError::new(Failure::Refused, "unexpected reply"));
     }
     Ok(())
+}
+
+/// 印を送って、相手が同じ Pro のアカウントを受け入れたかを返す。本文と生存確認で同じ返事にする。
+fn confirm_peer_account(
+    transport: &mut TransportState,
+    stream: &mut (impl Read + Write),
+    account_tag: &[u8; ACCOUNT_TAG_LEN],
+    transport_failure: Failure,
+) -> std::result::Result<(), LanError> {
+    transport_write(transport, account_tag, stream).fail_as(transport_failure)?;
+    match transport_read(transport, stream)
+        .fail_as(transport_failure)?
+        .as_slice()
+    {
+        READY => Ok(()),
+        REJECT_PRO_REQUIRED => Err(LanError::new(
+            Failure::ReceiverProRequired,
+            "the receiving device is not Pro",
+        )),
+        REJECT_ACCOUNT_MISMATCH => Err(LanError::new(
+            Failure::AccountMismatch,
+            "the receiving device uses another account",
+        )),
+        _ => Err(LanError::new(
+            Failure::Refused,
+            "the receiving device refused",
+        )),
+    }
+}
+
+/// 相手の印を照らし、本文を読む前に暗号化した返事を返す。
+fn answer_peer_account(
+    transport: &mut TransportState,
+    stream: &mut (impl Read + Write),
+    account_tag: Option<[u8; ACCOUNT_TAG_LEN]>,
+) -> Result<&'static [u8]> {
+    let remote_tag = transport_read(transport, stream)?;
+    let reply = match account_tag {
+        None => REJECT_PRO_REQUIRED,
+        Some(own) if remote_tag.as_slice() != own => REJECT_ACCOUNT_MISMATCH,
+        Some(_) => READY,
+    };
+    transport_write(transport, reply, stream)?;
+    Ok(reply)
 }
 
 /// 下書きを受け取る。組み合わせた相手でなければ、中身を受け取る前に切る。
@@ -496,19 +516,12 @@ fn receive_text(
     deliver: impl FnOnce(&[u8], String) -> bool,
 ) -> Result<Vec<u8>> {
     let (mut transport, remote) = handshake_as_receiver(stream, key, is_paired)?;
-    let remote_tag = transport_read(&mut transport, stream)?;
-    let accepted = match account_tag {
-        None => {
-            transport_write(&mut transport, REJECT_PRO_REQUIRED, stream)?;
-            return Err("this device is not Pro".to_string());
-        }
-        Some(own) if remote_tag.as_slice() != own => {
-            transport_write(&mut transport, REJECT_ACCOUNT_MISMATCH, stream)?;
-            return Err("the devices use different accounts".to_string());
-        }
-        Some(_) => READY,
-    };
-    transport_write(&mut transport, accepted, stream)?;
+    match answer_peer_account(&mut transport, stream, account_tag)? {
+        READY => {}
+        REJECT_PRO_REQUIRED => return Err("this device is not Pro".to_string()),
+        REJECT_ACCOUNT_MISMATCH => return Err("the devices use different accounts".to_string()),
+        _ => unreachable!(),
+    }
     let mut bytes = Vec::new();
     loop {
         let chunk = transport_read(&mut transport, stream)?;
@@ -538,25 +551,7 @@ fn probe_peer(
 ) -> std::result::Result<(), LanError> {
     let mut transport =
         handshake_as_sender(stream, key, remote_public).fail_as(Failure::Unreachable)?;
-    transport_write(&mut transport, account_tag, stream).fail_as(Failure::Unreachable)?;
-    match transport_read(&mut transport, stream)
-        .fail_as(Failure::Unreachable)?
-        .as_slice()
-    {
-        READY => Ok(()),
-        REJECT_PRO_REQUIRED => Err(LanError::new(
-            Failure::ReceiverProRequired,
-            "the receiving device is not Pro",
-        )),
-        REJECT_ACCOUNT_MISMATCH => Err(LanError::new(
-            Failure::AccountMismatch,
-            "the receiving device uses another account",
-        )),
-        _ => Err(LanError::new(
-            Failure::Refused,
-            "the receiving device refused",
-        )),
-    }
+    confirm_peer_account(&mut transport, stream, account_tag, Failure::Unreachable)
 }
 
 /// 名乗りを送る先。各インターフェースのサブネットのブロードキャストと 255.255.255.255
@@ -791,15 +786,17 @@ impl Lan {
                 // 生存確認でも、実際に送れる同じ Pro のアカウントかを確かめる
                 let (mut transport, from) =
                     handshake_as_receiver(stream, &key, |remote| self.is_paired(remote))?;
-                let remote_tag = transport_read(&mut transport, stream)?;
-                let reply = match self.host.pro_account_tag() {
-                    None => REJECT_PRO_REQUIRED,
-                    Some(own) if remote_tag.as_slice() != own => REJECT_ACCOUNT_MISMATCH,
-                    Some(_) => READY,
-                };
-                transport_write(&mut transport, reply, stream)?;
+                let reply =
+                    answer_peer_account(&mut transport, stream, self.host.pro_account_tag())?;
                 self.seen.lock().unwrap().insert(from, ip);
-                Ok(())
+                match reply {
+                    READY => Ok(()),
+                    REJECT_PRO_REQUIRED => Err("this device is not Pro".to_string()),
+                    REJECT_ACCOUNT_MISMATCH => {
+                        Err("the devices use different accounts".to_string())
+                    }
+                    _ => unreachable!(),
+                }
             }
             other => Err(format!("unknown request {other}")),
         }

@@ -1671,7 +1671,20 @@ async fn refresh_mawok_account_status(
             .load(Ordering::SeqCst)
             != generation
     };
+    let exists = run_blocking(|| secrets::exists(AiService::Mawok.credential_user()))
+        .await?
+        .inspect_err(|error| warn!("couldn't check the Mawok account token: {error}"))?;
+    if stale() {
+        // 資格情報を確かめている間にサインインかサインアウトがあった。前の結果では、今の状態に触らない。
+        return Ok(None);
+    }
+    if !exists {
+        clear_pro_state(app).await?;
+        return Ok(None);
+    }
+    let reading = ReadingAiKey::start(app);
     let read = run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await?;
+    drop(reading);
     if stale() {
         // 読んでいる間にサインインかサインアウトがあった。前のトークンの結果では、今の状態に触らない。
         return Ok(None);
@@ -1742,7 +1755,7 @@ fn start_periodic_pro_checks(app: AppHandle) {
 
 /// 窓口が答えた状態は、次の起動でオフライン猶予を使えるよう別の状態ファイルに置く。保存に失敗しても、今回の窓口の答えは使う。
 async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus, generation: usize) {
-    let state = pro::State::from_status(status.account_id.clone(), &status.pro, pro::now());
+    let state = pro::State::from_status(status.account_id.clone(), &status.pro);
     let path = app.state::<AppState>().pro_state_path.clone();
     *app.state::<AppState>().pro_state.lock().unwrap() = Some(state.clone());
     let saved_path = path.clone();
@@ -1774,7 +1787,10 @@ async fn clear_pro_state(app: &AppHandle) -> Result<(), String> {
     app.state::<AppState>()
         .mawok_account_signed_in
         .store(false, Ordering::Relaxed);
-    run_blocking(move || pro::clear(&path)).await??;
+    match run_blocking(move || pro::clear(&path)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) | Err(error) => warn!("couldn't clear the Pro state: {error}"),
+    }
     apply_config(app);
     Ok(())
 }
@@ -2435,7 +2451,7 @@ impl lan::Host for AppHandle {
         true
     }
 
-    fn pro_account_tag(&self) -> Option<[u8; 32]> {
+    fn pro_account_tag(&self) -> Option<[u8; lan::ACCOUNT_TAG_LEN]> {
         self.state::<AppState>()
             .pro_state
             .lock()
@@ -2446,7 +2462,7 @@ impl lan::Host for AppHandle {
     }
 }
 
-fn pro_account_tag(app: &AppHandle) -> Option<[u8; 32]> {
+fn pro_account_tag(app: &AppHandle) -> Option<[u8; lan::ACCOUNT_TAG_LEN]> {
     <AppHandle as lan::Host>::pro_account_tag(app)
 }
 
@@ -3340,10 +3356,6 @@ impl Drop for OpeningGuard {
 
 fn open_settings(app: &AppHandle) {
     info!("open settings");
-    let pro_app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let _ = refresh_mawok_account_status(&pro_app).await;
-    });
     hide_draft_for_settings(app);
     focus::before_show(app);
     #[cfg(target_os = "macos")]

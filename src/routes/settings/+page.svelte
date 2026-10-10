@@ -11,11 +11,13 @@
 	import { clamp } from '$lib/clamp';
 	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '$lib/color';
 	import { EVENTS } from '$lib/bindings/constants';
+	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import type { PairingOffer } from '$lib/bindings/PairingOffer';
 	import { deviceLabels } from '$lib/devices';
 	import { errorCode } from '$lib/errors';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
 	import SettingsActions from '$lib/components/settings-actions.svelte';
+	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SettingsUpdate from '$lib/components/settings-update.svelte';
@@ -76,8 +78,36 @@
 	const callSettings = commandCaller(settingsFailed, showError);
 	/** アクションのコマンドを呼ぶ。失敗したら、アクションの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
 	const callActions = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
+	const callAccount = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
+	const callQuietly = commandCaller(
+		() => '',
+		() => {}
+	);
 	/** 組み合わせのコマンドを呼ぶ。Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする */
 	const callLan = commandCaller(lanErrorMessage, showError);
+	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
+	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
+	let refreshingMawokAccountStatus = false;
+
+	async function refreshMawokAccountStatus() {
+		if (refreshingMawokAccountStatus) return;
+		refreshingMawokAccountStatus = true;
+		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「アカウント」の欄が出す。
+		const result = await callQuietly<AccountStatus | null>('mawok_account_status');
+		refreshingMawokAccountStatus = false;
+		mawokAccountStatus = result.ok ? result.value : null;
+	}
+
+	// 窓口で買い足したり Pro を申し込んだりして戻ったとき、設定を開き直さず表示を更新する。
+	$effect(() => {
+		const onFocus = () => void refreshMawokAccountStatus();
+		window.addEventListener('focus', onFocus);
+		return () => window.removeEventListener('focus', onFocus);
+	});
+
+	function openAccount() {
+		category = 'account';
+	}
 
 	/** 設定を変えるコマンドを呼び、できたかを返す。変わった設定は settings-changed で届き、画面に反映される */
 	async function run(command: string, args?: Record<string, unknown>) {
@@ -462,6 +492,7 @@
 	/** 設定ウィンドウは隠して作られるので、画面を描いてから表示させる */
 	function showWindow() {
 		invoke('show_settings_window');
+		void refreshMawokAccountStatus();
 	}
 </script>
 
@@ -1119,7 +1150,12 @@
 				<Tabs.Content value="actions">
 					<!-- 開いたときだけ描く。キーがあるかの確認でキーチェーンの許可を求められうるため -->
 					{#if category === 'actions'}
-						<SettingsActions {view} editor={actionsEditor} />
+						<SettingsActions
+							{view}
+							editor={actionsEditor}
+							{mawokAccountStatus}
+							onopenaccount={openAccount}
+						/>
 					{/if}
 				</Tabs.Content>
 				<Tabs.Content value="devices">
@@ -1131,14 +1167,20 @@
 										? m.settings_devices_pro_description()
 										: m.settings_devices_pro_sign_in()}
 								</Field.Description>
-								<Button
-									variant="outline"
-									size="sm"
-									class="w-fit"
-									onclick={() => run('open_mawok_pro_page')}
-								>
-									{m.settings_devices_pro_buy()}
-								</Button>
+								{#if view.mawokAccountSignedIn}
+									<Button
+										variant="outline"
+										size="sm"
+										class="w-fit"
+										onclick={() => run('open_mawok_pro_page')}
+									>
+										{m.settings_devices_pro_buy()}
+									</Button>
+								{:else}
+									<Button variant="outline" size="sm" class="w-fit" onclick={openAccount}>
+										{m.settings_account_open()}
+									</Button>
+								{/if}
 							</SettingsRow>
 						{/if}
 						{#if view.pairedDevices.length > 0}
@@ -1235,6 +1277,21 @@
 							</Field.Description>
 						</SettingsRow>
 					</SettingsSection>
+				</Tabs.Content>
+				<Tabs.Content value="account">
+					{#if category === 'account'}
+						<SettingsSection>
+							<SettingsRow>
+								<SettingsMawokAccount
+									call={callAccount}
+									signedIn={view.mawokAccountSignedIn}
+									status={mawokAccountStatus}
+									proAvailable={view.proAvailable}
+									onchanged={refreshMawokAccountStatus}
+								/>
+							</SettingsRow>
+						</SettingsSection>
+					{/if}
 				</Tabs.Content>
 				<Tabs.Content value="about">
 					<SettingsSection>
