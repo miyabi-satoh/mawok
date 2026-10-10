@@ -114,9 +114,10 @@
 				<Field.Title>{m.settings_mawok_pro()}</Field.Title>
 			</Field.Field>
 		</Field.Content>
-	{:else}
+	{:else if status !== undefined}
+		<!-- 答えが来るまでは出さない。Pro の人がサインインした直後に、料金の案内が一瞬出るのを避ける -->
 		<Field.Content>
-			<Button variant="outline" onclick={() => call('open_mawok_pro_page')}>
+			<Button variant="outline" class="w-fit" onclick={() => call('open_mawok_pro_page')}>
 				{m.settings_devices_pro_buy()}
 			</Button>
 		</Field.Content>

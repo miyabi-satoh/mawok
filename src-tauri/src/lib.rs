@@ -1782,7 +1782,7 @@ async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus, ge
     apply_config(app);
 }
 
-/// サインインするアカウントが替わったとき、前のアカウントの猶予を使わないよう、メモリーと状態ファイルの両方を先に消す。
+/// サインインしていない状態にする。アカウントが替わったときに前のアカウントの猶予を使わないよう、メモリーと状態ファイルの両方を消す。
 async fn clear_pro_state(app: &AppHandle) {
     let path = app.state::<AppState>().pro_state_path.clone();
     app.state::<AppState>()
