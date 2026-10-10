@@ -11,15 +11,23 @@
 	import { m } from '$lib/paraglide/messages';
 
 	/**
-	 * AI サービスの「Mawok」のアカウント（docs/account-server.md「Mawok の側」）。キーの欄の代わりに出す。
-	 * signedIn はトークンがあるか（キーの確かめと同じく、まだ確かめていなければ undefined、確かめられなかったときは null）。
+	 * Mawok のアカウント（docs/account-server.md「Mawok の側」）。
+	 * signedIn はトークンがあるか。status は設定ウィンドウを載せたときに問い合わせた答え。
 	 * サインインやサインアウトで変わったら onchanged で知らせ、呼んだ側に確かめ直してもらう
 	 */
 	let {
 		call,
 		signedIn,
+		status,
+		proAvailable,
 		onchanged
-	}: { call: Call; signedIn: boolean | null | undefined; onchanged: () => void } = $props();
+	}: {
+		call: Call;
+		signedIn: boolean | null | undefined;
+		status: AccountStatus | null | undefined;
+		proAvailable: boolean;
+		onchanged: () => void | Promise<void>;
+	} = $props();
 
 	/** 続いているサインインの申し込み。null ならサインインの途中でない */
 	let signingIn = $state<MawokSignIn | null>(null);
@@ -27,47 +35,6 @@
 	let signInFailed = $state(false);
 	/** 申し込みを頼んで、答えを待っている。続けて押して申し込みを重ねないよう、その間はボタンを止める */
 	let starting = $state(false);
-	/** 窓口に問い合わせたアカウントの様子。undefined はまだ答えが無い。null は問い合わせられなかった */
-	let status = $state<AccountStatus | null | undefined>(undefined);
-	/** 窓口に問い合わせている。問い合わせを重ねないよう、その間の問い合わせ直しは見送る */
-	let loading = false;
-
-	// サインインしていると分かったら、残りを問い合わせる。設定の「アクション」を開くたびに問い合わせ直す
-	$effect(() => {
-		if (signedIn !== true) {
-			status = undefined;
-			return;
-		}
-		refreshStatus();
-	});
-
-	// 窓口で買い足して戻ってきたときに、開き直さなくても残りが変わるよう、ウィンドウに戻るたびに問い合わせ直す。
-	// 答えが来るまでは前の表示を残し、ウィンドウを行き来するたびに行が消えないようにする
-	$effect(() => {
-		if (signedIn !== true) return;
-		const onFocus = () => {
-			if (!loading) refreshStatus();
-		};
-		window.addEventListener('focus', onFocus);
-		return () => window.removeEventListener('focus', onFocus);
-	});
-
-	async function refreshStatus() {
-		loading = true;
-		const result = await call<AccountStatus | null>('mawok_account_status');
-		loading = false;
-		if (!result.ok) {
-			status = null;
-			return;
-		}
-		// 窓口でトークンが外されていた。手元のトークンも消えたので、確かめ直してもらう
-		if (result.value === null) {
-			onchanged();
-			return;
-		}
-		status = result.value;
-	}
-
 	// 出している申し込みの終わりだけを受ける。やり直す前の申し込みの終わりで、表示を戻さないように
 	$effect(() => {
 		const unlisten = listen<MawokSignInEnded>(EVENTS.MAWOK_SIGN_IN_ENDED, (event) => {
@@ -141,6 +108,20 @@
 	{/if}
 </Field.Content>
 {#if signedIn === true}
+	{#if status?.pro.active || proAvailable}
+		<Field.Content>
+			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+				<Field.Title>{m.settings_mawok_pro()}</Field.Title>
+			</Field.Field>
+		</Field.Content>
+	{:else if status !== undefined}
+		<!-- 答えが来るまでは出さない。Pro の人がサインインした直後に、料金の案内が一瞬出るのを避ける -->
+		<Field.Content>
+			<Button variant="outline" class="w-fit" onclick={() => call('open_mawok_pro_page')}>
+				{m.settings_devices_pro_buy()}
+			</Button>
+		</Field.Content>
+	{/if}
 	<Field.Content>
 		<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 			<Field.Title>

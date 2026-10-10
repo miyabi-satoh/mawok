@@ -1,3 +1,4 @@
+import CircleUserRoundIcon from '@lucide/svelte/icons/circle-user-round';
 import InfoIcon from '@lucide/svelte/icons/info';
 import KeyboardIcon from '@lucide/svelte/icons/keyboard';
 import LaptopIcon from '@lucide/svelte/icons/laptop';
@@ -18,6 +19,7 @@ export function settingsCategories() {
 		{ value: 'snippets', label: m.settings_category_snippets, icon: TextQuoteIcon },
 		{ value: 'actions', label: m.settings_category_actions, icon: SparklesIcon },
 		{ value: 'devices', label: m.settings_category_devices, icon: LaptopIcon },
+		{ value: 'account', label: m.settings_category_account, icon: CircleUserRoundIcon },
 		{ value: 'about', label: m.settings_category_about, icon: InfoIcon }
 	];
 }

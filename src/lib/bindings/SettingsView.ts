@@ -62,7 +62,15 @@ pairedDevices: Array<PairedDevice>,
 /**
  * 組み合わせるときに相手へ名乗る、この機器の名前
  */
-deviceName: string, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
+deviceName: string, 
+/**
+ * 機器の間の送受信を使える Pro か
+ */
+proAvailable: boolean, 
+/**
+ * Mawok のアカウントトークンを資格情報管理から読めたか
+ */
+mawokAccountSignedIn: boolean, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
 /**
  * コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
  */

@@ -11,11 +11,13 @@
 	import { clamp } from '$lib/clamp';
 	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '$lib/color';
 	import { EVENTS } from '$lib/bindings/constants';
+	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import type { PairingOffer } from '$lib/bindings/PairingOffer';
 	import { deviceLabels } from '$lib/devices';
 	import { errorCode } from '$lib/errors';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
 	import SettingsActions from '$lib/components/settings-actions.svelte';
+	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SettingsUpdate from '$lib/components/settings-update.svelte';
@@ -78,6 +80,44 @@
 	const callActions = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
 	/** 組み合わせのコマンドを呼ぶ。Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする */
 	const callLan = commandCaller(lanErrorMessage, showError);
+	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
+	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
+	let refreshingMawokAccountStatus = false;
+	/** 問い合わせの通し番号。サインインやサインアウトの前に出した問い合わせの答えを捨てる */
+	let mawokAccountRefresh = 0;
+
+	/** `changed` はサインイン・サインアウトの直後。前のアカウントの様子を出したままにせず、答えが来るまで空にする */
+	async function refreshMawokAccountStatus(changed = false) {
+		if (changed) mawokAccountStatus = undefined;
+		else if (refreshingMawokAccountStatus) return;
+		const refresh = ++mawokAccountRefresh;
+		refreshingMawokAccountStatus = true;
+		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「アカウント」の欄が出す。
+		// 資格情報を読めなかったときは Rust 側がサインインしていない扱いにするので、「サインイン」からやり直せる。
+		let status: AccountStatus | null;
+		try {
+			status = await invoke<AccountStatus | null>('mawok_account_status');
+		} catch {
+			if (refresh !== mawokAccountRefresh) return;
+			refreshingMawokAccountStatus = false;
+			mawokAccountStatus = null;
+			return;
+		}
+		if (refresh !== mawokAccountRefresh) return;
+		refreshingMawokAccountStatus = false;
+		mawokAccountStatus = status;
+	}
+
+	// 窓口で買い足したり Pro を申し込んだりして戻ったとき、設定を開き直さず表示を更新する。
+	$effect(() => {
+		const onFocus = () => void refreshMawokAccountStatus();
+		window.addEventListener('focus', onFocus);
+		return () => window.removeEventListener('focus', onFocus);
+	});
+
+	function openAccount() {
+		category = 'account';
+	}
 
 	/** 設定を変えるコマンドを呼び、できたかを返す。変わった設定は settings-changed で届き、画面に反映される */
 	async function run(command: string, args?: Record<string, unknown>) {
@@ -462,6 +502,7 @@
 	/** 設定ウィンドウは隠して作られるので、画面を描いてから表示させる */
 	function showWindow() {
 		invoke('show_settings_window');
+		void refreshMawokAccountStatus();
 	}
 </script>
 
@@ -1119,11 +1160,39 @@
 				<Tabs.Content value="actions">
 					<!-- 開いたときだけ描く。キーがあるかの確認でキーチェーンの許可を求められうるため -->
 					{#if category === 'actions'}
-						<SettingsActions {view} editor={actionsEditor} />
+						<SettingsActions
+							{view}
+							editor={actionsEditor}
+							{mawokAccountStatus}
+							onopenaccount={openAccount}
+						/>
 					{/if}
 				</Tabs.Content>
 				<Tabs.Content value="devices">
 					<SettingsSection>
+						{#if !view.proAvailable}
+							<SettingsRow>
+								<Field.Description class="leading-snug">
+									{view.mawokAccountSignedIn
+										? m.settings_devices_pro_description()
+										: m.settings_devices_pro_sign_in()}
+								</Field.Description>
+								{#if view.mawokAccountSignedIn}
+									<Button
+										variant="outline"
+										size="sm"
+										class="w-fit"
+										onclick={() => run('open_mawok_pro_page')}
+									>
+										{m.settings_devices_pro_buy()}
+									</Button>
+								{:else}
+									<Button variant="outline" size="sm" class="w-fit" onclick={openAccount}>
+										{m.settings_account_open()}
+									</Button>
+								{/if}
+							</SettingsRow>
+						{/if}
 						{#if view.pairedDevices.length > 0}
 							{@const labels = deviceLabels(view.pairedDevices)}
 							<SettingsRow>
@@ -1170,7 +1239,7 @@
 										</Button>
 									</div>
 								{:else}
-									<Button variant="outline" onclick={startPairing}>
+									<Button variant="outline" disabled={!view.proAvailable} onclick={startPairing}>
 										{m.settings_devices_offer_start()}
 									</Button>
 								{/if}
@@ -1199,11 +1268,12 @@
 										inputmode="numeric"
 										autocomplete="off"
 										maxlength={6}
+										disabled={!view.proAvailable}
 										bind:value={joinCode}
 									/>
 									<Button
 										variant="outline"
-										disabled={joining || joinCode.length !== 6}
+										disabled={!view.proAvailable || joining || joinCode.length !== 6}
 										onclick={joinPairing}
 									>
 										{joining ? m.settings_devices_joining() : m.settings_devices_join_submit()}
@@ -1217,6 +1287,21 @@
 							</Field.Description>
 						</SettingsRow>
 					</SettingsSection>
+				</Tabs.Content>
+				<Tabs.Content value="account">
+					{#if category === 'account'}
+						<SettingsSection>
+							<SettingsRow>
+								<SettingsMawokAccount
+									call={callActions}
+									signedIn={view.mawokAccountSignedIn}
+									status={mawokAccountStatus}
+									proAvailable={view.proAvailable}
+									onchanged={() => refreshMawokAccountStatus(true)}
+								/>
+							</SettingsRow>
+						</SettingsSection>
+					{/if}
 				</Tabs.Content>
 				<Tabs.Content value="about">
 					<SettingsSection>

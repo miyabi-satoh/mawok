@@ -3,7 +3,6 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { untrack } from 'svelte';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
-	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -22,6 +21,7 @@
 	import { focusFirstField } from '$lib/focus-field';
 	import { showsFilter } from '$lib/list-filter';
 	import { AI_SERVICES, aiServiceInfo } from '$lib/ai-services';
+	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import type { ActionEncoding, ActionOutput, AiService, SettingsView } from '$lib/settings.svelte';
 
 	/**
@@ -29,7 +29,17 @@
 	 * 設定画面は、この分類を開いたときだけ描く。キーがあるかの確認はこの分類を開いたときに行う。
 	 * アクションとモデルの編集中の内容は、分類を移っても消えないよう、設定画面の本体が持つ
 	 */
-	let { view, editor }: { view: SettingsView; editor: ActionsEditor } = $props();
+	let {
+		view,
+		editor,
+		mawokAccountStatus,
+		onopenaccount
+	}: {
+		view: SettingsView;
+		editor: ActionsEditor;
+		mawokAccountStatus: AccountStatus | null | undefined;
+		onopenaccount: () => void;
+	} = $props();
 
 	/**
 	 * キーがあるかを確かめた結果と、どの AI サービスのものか。hasKey は確かめられなかったとき null。
@@ -324,13 +334,23 @@
 			</Field.Description>
 			<!-- キーとモデルは選んだ AI サービスのものなので、サービスの下に字下げして置く。区切りの線は引かない -->
 			{#if view.aiService === 'mawok'}
-				<!-- Mawok はキーとモデルの代わりに、アカウントと残りを出す -->
 				<div class="mt-2 flex flex-col gap-5 pl-4">
-					<SettingsMawokAccount
-						call={editor.call}
-						signedIn={hasKey}
-						onchanged={() => checkKey(view.aiService)}
-					/>
+					<Field.Content>
+						<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+							<Field.Title>
+								{view.mawokAccountSignedIn
+									? mawokAccountStatus
+										? m.settings_mawok_remaining({ percent: mawokAccountStatus.remainingPercent })
+										: mawokAccountStatus === null
+											? m.settings_mawok_status_unknown()
+											: ''
+									: m.settings_actions_mawok_sign_in()}
+							</Field.Title>
+							<Button variant="outline" onclick={onopenaccount}>
+								{m.settings_account_open()}
+							</Button>
+						</Field.Field>
+					</Field.Content>
 				</div>
 			{:else if view.aiService !== 'none'}
 				<div class="mt-2 flex flex-col gap-5 pl-4">

@@ -85,6 +85,21 @@ pub struct AccountStatus {
     pub email: String,
     /// 残りの割合（切り上げ。使い切ったときだけ 0）
     pub remaining_percent: u32,
+    /// LAN で同じアカウントかを見分けるための、窓口のランダムなアカウントID
+    pub account_id: String,
+    pub pro: ProStatus,
+}
+
+/// 窓口が答えた Pro の状態。試用中も active になる。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct ProStatus {
+    pub active: bool,
+    pub until: Option<u64>,
+    pub plan: Option<String>,
+    pub trial: bool,
 }
 
 /// 窓口とのやり取りの失敗
@@ -150,7 +165,7 @@ fn bearer(token: &str) -> Result<reqwest::header::HeaderValue, String> {
     Ok(value)
 }
 
-/// アカウントのメールアドレスと残りを問い合わせる
+/// アカウントのメールアドレス、残り、Pro を問い合わせる
 pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStatus, AccountError> {
     let response = client
         .get(format!("{ACCOUNT_URL}/v1/balance"))
@@ -168,6 +183,42 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
         return Err(other(format!("HTTP {}", response.status().as_u16())));
     }
     let body: Value = response.json().await.map_err(other)?;
+    let pro = body
+        .get("pro")
+        .and_then(Value::as_object)
+        .ok_or_else(|| other("the answer has no pro status"))?;
+    let active = pro
+        .get("active")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| other("the Pro status has no active value"))?;
+    let until = match pro.get("until") {
+        Some(Value::Null) | None => None,
+        Some(value) => Some(
+            value
+                .as_u64()
+                .ok_or_else(|| other("the Pro status has an invalid until value"))?,
+        ),
+    };
+    let trial = pro
+        .get("trial")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| other("the Pro status has no trial value"))?;
+    let plan = match pro.get("plan") {
+        Some(Value::Null) | None => None,
+        Some(value) => Some(
+            value
+                .as_str()
+                .filter(|plan| !plan.is_empty())
+                .ok_or_else(|| other("the Pro status has an invalid plan value"))?
+                .to_string(),
+        ),
+    };
+    let account_id = body
+        .get("account_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| other("the answer has no account ID"))?;
     Ok(AccountStatus {
         email: body
             .get("email")
@@ -178,6 +229,13 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
             .get("remaining_percent")
             .and_then(Value::as_u64)
             .map_or(0, |percent| percent.min(100) as u32),
+        account_id,
+        pro: ProStatus {
+            active,
+            until,
+            plan,
+            trial,
+        },
     })
 }
 
@@ -207,6 +265,11 @@ pub fn buy_page_url(lang: &str) -> String {
     } else {
         format!("{ACCOUNT_URL}/account/buy?lang={lang}")
     }
+}
+
+/// Pro の料金は紹介サイトにまとめ、表示言語によらず同じ入口を開く。
+pub fn pro_page_url() -> String {
+    format!("{ACCOUNT_URL}/pricing/")
 }
 
 /// 窓口を通して AI に送る。窓口は Gemini の返事をそのまま返すので、読み方は Gemini と同じ

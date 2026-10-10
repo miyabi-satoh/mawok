@@ -88,7 +88,7 @@ const ja = {
 		`「${name}」をこのアカウントに登録します。登録した PC の Mawok は、アカウントのクレジットで AI アクションを使えます。`,
 	approve: 'この PC を登録',
 	linkInvalidTitle: 'このページは開けません',
-	linkInvalid: 'Mawok の設定の「アクション」で「サインイン」を押して、もう一度開いてください。',
+	linkInvalid: 'Mawok の設定の「アカウント」で「サインイン」を押して、もう一度開いてください。',
 	buyTitle: 'クレジットを購入',
 	// 価格は本番の Stripe の Price と、紹介・規約類に合わせる。
 	confirmTitle: 'お申し込み内容の最終確認',
@@ -234,7 +234,7 @@ const en: typeof ja = {
 		`Link "${name}" to this account. Mawok on a linked PC can use this account's credit for AI actions.`,
 	approve: 'Link this PC',
 	linkInvalidTitle: 'This page cannot be opened',
-	linkInvalid: 'In Mawok settings, open Actions and click Sign in to open it again.',
+	linkInvalid: 'In Mawok settings, open Account and click Sign in to open it again.',
 	buyTitle: 'Buy credits',
 	confirmTitle: 'Review your order',
 	confirmItemLabel: 'What you buy',
