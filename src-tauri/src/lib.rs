@@ -25,6 +25,7 @@ mod package;
 mod placement;
 mod pro;
 mod secrets;
+mod sync;
 mod text;
 // 境目の型は、Windows でもテストで書き出す。Windows では書き出すだけで使わない
 #[cfg(any(target_os = "macos", test))]
@@ -169,6 +170,7 @@ type AbortAction = Box<dyn Fn() + Send>;
 struct AppState {
     config_path: PathBuf,
     pro_state_path: PathBuf,
+    sync_state_path: PathBuf,
     /// アプリのバージョン。ログの先頭に出しているものと同じ出どころにして、突き合わせられるようにする
     version: String,
     /// OS の言語設定から決めた言語。表示言語が「システム」のときに使う
@@ -193,6 +195,12 @@ struct AppState {
     account_key_status: Mutex<account_key::Status>,
     /// 鍵の生成・窓口への登録・資格情報管理への保存を、同じ鍵について一続きにする。
     account_key_refresh: tokio::sync::Mutex<()>,
+    /// 設定か同期の記録を消すたびに進める。通信中の古い結果で、利用者の保存やサインアウト後を戻さない。
+    sync_generation: AtomicUsize,
+    /// 同期の記録を保存する処理と消す処理を直列にする。消した直後に通信中の古い記録が戻らないようにする。
+    sync_commit: tokio::sync::Mutex<()>,
+    sync_schedule: Mutex<SyncSchedule>,
+    sync_debounce: debounce::Debounce,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -200,6 +208,12 @@ struct AppState {
     /// いちばん外のメニューを開いたときに外し、閉じたときに戻す
     #[cfg(target_os = "macos")]
     menu_depth: std::sync::atomic::AtomicUsize,
+}
+
+#[derive(Default)]
+struct SyncSchedule {
+    running: bool,
+    pending: bool,
 }
 
 impl AppState {
@@ -822,11 +836,25 @@ fn get_settings(state: tauri::State<'_, AppState>) -> SettingsView {
 /// 起動時に設定ファイルをそのまま読めなかった場合と、起動した後に壊されていた場合は、上書きする前に元のファイルを写す。
 /// トレイに出す設定ファイルの問題が、この保存で変わったかどうかを返す
 fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<bool, String> {
+    Ok(save_config_if_current(app, None, change)?.expect("unconditional save"))
+}
+
+/// `expected_generation` を指定した同期だけ、利用者の保存と競合していない設定を保存する。
+fn save_config_if_current(
+    app: &AppHandle,
+    expected_generation: Option<usize>,
+    change: impl FnOnce(&mut Config),
+) -> Result<Option<bool>, String> {
     let state = app.state::<AppState>();
     // 起動時の問題を見るのも直すのも、設定のロックの中で行う。ロックの外で見ると、別のスレッドの保存と重なったときに
     // 両方が「起動時に読めなかった」と見て、先の保存が直したファイルを後の保存がもう一度写してしまう。
     // ロックは設定、問題の順に取る
     let mut config = state.config.lock().unwrap();
+    if expected_generation
+        .is_some_and(|generation| state.sync_generation.load(Ordering::SeqCst) != generation)
+    {
+        return Ok(None);
+    }
     // 起動時に読めなかったか、型を直した項目があるか
     let load_problem = match &state.problems.lock().unwrap().config {
         Some(ConfigProblem::Load(problem)) => Some(problem.clone()),
@@ -851,16 +879,17 @@ fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<bool
         info!("backed up the settings file to {}", path.display());
     }
     *config = next;
+    state.sync_generation.fetch_add(1, Ordering::SeqCst);
     // 起動した後に壊されていたファイルを写したときも、写した先を知らせる
     if load_problem.is_none() && backed_up.is_none() {
-        return Ok(false);
+        return Ok(Some(false));
     }
     // 保存できたので、読めなかった問題は解消した。写したなら、写した先を知らせる
     state.problems.lock().unwrap().config = backed_up.and_then(|path| {
         path.file_name()
             .map(|name| ConfigProblem::BackedUp(name.to_string_lossy().into_owned()))
     });
-    Ok(true)
+    Ok(Some(true))
 }
 
 /// 今の設定と問題を、開いているウィンドウとトレイに反映する
@@ -883,6 +912,7 @@ fn save_as_typed(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<()
     if save_config(app, change)? {
         refresh_tray(app);
     }
+    schedule_sync_after_settings_change(app);
     Ok(())
 }
 
@@ -890,6 +920,7 @@ fn save_as_typed(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<()
 fn update_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
     let _ = save_config(app, change)?;
     apply_config(app);
+    schedule_sync_after_settings_change(app);
     Ok(())
 }
 
@@ -1433,6 +1464,153 @@ fn http_client(app: &AppHandle) -> Result<reqwest::Client, String> {
     Ok(state.client.get_or_init(|| client).clone())
 }
 
+/// 設定を続けて変えたときは最後から3秒だけ待ち、1回の同期へまとめる。
+fn schedule_sync_after_settings_change(app: &AppHandle) {
+    let debounce = &app.state::<AppState>().sync_debounce;
+    let app = app.clone();
+    debounce.trigger(Duration::from_secs(3), move || request_sync(&app));
+}
+
+/// 同期は1つだけ走らせ、実行中に届いたきっかけは終わった後の1回へまとめる。
+fn request_sync(app: &AppHandle) {
+    {
+        let state = app.state::<AppState>();
+        let mut schedule = state.sync_schedule.lock().unwrap();
+        if schedule.running {
+            schedule.pending = true;
+            return;
+        }
+        schedule.running = true;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            run_settings_sync(&app).await;
+            let again = {
+                let state = app.state::<AppState>();
+                let mut schedule = state.sync_schedule.lock().unwrap();
+                if schedule.pending {
+                    schedule.pending = false;
+                    true
+                } else {
+                    schedule.running = false;
+                    false
+                }
+            };
+            if !again {
+                break;
+            }
+        }
+    });
+}
+
+async fn run_settings_sync(app: &AppHandle) {
+    let (config, generation, key, key_id, available) = {
+        let state = app.state::<AppState>();
+        // 設定の保存は、設定の排他の中で世代を進める。同じ排他の中で設定と一緒に読む。
+        // 別々に読むと、間に入った保存を見落として、古い設定で上書きしうる
+        let (config, generation) = {
+            let config = state.config.lock().unwrap();
+            (config.clone(), state.sync_generation.load(Ordering::SeqCst))
+        };
+        let key = *state.account_key.lock().unwrap();
+        let key_id = state.account_key_id.lock().unwrap().clone();
+        let available = state
+            .pro_state
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|pro| pro.available_at(pro::now()));
+        (config, generation, key, key_id, available)
+    };
+    if !config.sync_enabled
+        || !available
+        || *app.state::<AppState>().account_key_status.lock().unwrap() != account_key::Status::Ready
+    {
+        return;
+    }
+    let (Some(key), Some(key_id)) = (key, key_id) else {
+        return;
+    };
+    let token = match run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await {
+        Ok(Ok(token)) => token,
+        Ok(Err(error)) => {
+            warn!("couldn't read the Mawok account token for sync: {error:?}");
+            return;
+        }
+        Err(error) => {
+            warn!("couldn't read the Mawok account token for sync: {error}");
+            return;
+        }
+    };
+    let client = match http_client(app) {
+        Ok(client) => client,
+        Err(error) => {
+            warn!("couldn't create a sync client: {error}");
+            return;
+        }
+    };
+    let path = app.state::<AppState>().sync_state_path.clone();
+    let state = run_blocking({
+        let path = path.clone();
+        move || sync::load(&path)
+    })
+    .await
+    .ok()
+    .flatten();
+    match sync::sync_once(&client, &token, &key, &key_id, &config, state).await {
+        Ok(result) => {
+            let app_state = app.state::<AppState>();
+            let _commit = app_state.sync_commit.lock().await;
+            if app
+                .state::<AppState>()
+                .sync_generation
+                .load(Ordering::SeqCst)
+                != generation
+            {
+                request_sync(app);
+                return;
+            }
+            if result.changed {
+                let next = result.config;
+                match save_config_if_current(app, Some(generation), |current| *current = next) {
+                    Ok(Some(_)) => apply_config(app),
+                    Ok(None) => {
+                        request_sync(app);
+                        return;
+                    }
+                    Err(error) => {
+                        warn!("couldn't save settings received by sync: {error}");
+                        return;
+                    }
+                }
+            }
+            if result.reset {
+                let clear_path = path.clone();
+                if let Err(error) = run_blocking(move || sync::clear(&clear_path)).await {
+                    warn!("couldn't clear reset sync state: {error}");
+                }
+            }
+            let state_path = path.clone();
+            let sync_state = result.state;
+            if let Err(error) = run_blocking(move || sync::save(&state_path, &sync_state)).await {
+                warn!("couldn't save sync state: {error}");
+            }
+        }
+        Err(sync::Error::KeyMismatch) => {
+            info!("sync key mismatch; refreshing the account key");
+            let _ = refresh_mawok_account_status(app).await;
+        }
+        Err(sync::Error::SignedOut) => {
+            info!("sync account token was rejected");
+            if let Err(error) = forget_mawok_token(app).await {
+                warn!("couldn't clear a rejected Mawok token: {error}");
+            }
+        }
+        Err(error) => warn!("settings sync failed: {error}"),
+    }
+}
+
 /// サインインを待つ長さ。メールのリンクの期限（送ってから15分）より、送るまでの分だけ長く
 const MAWOK_SIGN_IN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
@@ -1885,6 +2063,7 @@ async fn refresh_account_key(
         *app.state::<AppState>().account_key.lock().unwrap() = None;
         *app.state::<AppState>().account_key_status.lock().unwrap() =
             account_key::Status::NeedsPairing;
+        clear_sync_state(app).await;
         forget_devices(app);
         app.state::<Arc<lan::Lan>>().refresh();
         apply_config(app);
@@ -1930,6 +2109,7 @@ async fn refresh_account_key(
         if !account_key_generation_is_current(app, generation) {
             return;
         }
+        clear_sync_state(app).await;
     }
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
     *app.state::<AppState>().account_key_id.lock().unwrap() =
@@ -1937,6 +2117,20 @@ async fn refresh_account_key(
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(app);
+    request_sync(app);
+}
+
+async fn clear_sync_state(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let _commit = state.sync_commit.lock().await;
+    app.state::<AppState>()
+        .sync_generation
+        .fetch_add(1, Ordering::SeqCst);
+    let path = app.state::<AppState>().sync_state_path.clone();
+    match run_blocking(move || sync::clear(&path)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) | Err(error) => warn!("couldn't clear the sync state: {error}"),
+    }
 }
 
 /// 鍵を置く処理（確かめ・作り直し・ペアリングでの受け取り）と同じ排他を取り、消すのを必ず後にする。
@@ -1947,6 +2141,7 @@ async fn clear_account_key(app: &AppHandle) {
     *app.state::<AppState>().account_key.lock().unwrap() = None;
     *app.state::<AppState>().account_key_id.lock().unwrap() = None;
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::None;
+    clear_sync_state(app).await;
     if let Err(error) = run_blocking(account_key::clear).await {
         warn!("couldn't clear the account key: {error:?}");
     }
@@ -1956,6 +2151,7 @@ async fn clear_account_key(app: &AppHandle) {
 }
 
 const PRO_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 /// 起動直後と6時間ごとに窓口へ確かめる。トークンが無いときは、問い合わせずに状態を片付ける。
 fn start_periodic_pro_checks(app: AppHandle) {
@@ -1966,6 +2162,16 @@ fn start_periodic_pro_checks(app: AppHandle) {
             if let Err(error) = refresh_mawok_account_status(&app).await {
                 info!("couldn't refresh the Pro state: {error}");
             }
+        }
+    });
+}
+
+fn start_periodic_sync(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(SYNC_INTERVAL);
+        loop {
+            interval.tick().await;
+            request_sync(&app);
         }
     });
 }
@@ -2073,9 +2279,11 @@ async fn reset_account_key(app: AppHandle) -> Result<(), String> {
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
     *app.state::<AppState>().account_key_id.lock().unwrap() = Some(account_key::key_id(&key));
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
+    clear_sync_state(&app).await;
     forget_devices(&app);
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(&app);
+    request_sync(&app);
     Ok(())
 }
 
@@ -3741,6 +3949,7 @@ impl Drop for OpeningGuard {
 
 fn open_settings(app: &AppHandle) {
     info!("open settings");
+    request_sync(app);
     hide_draft_for_settings(app);
     focus::before_show(app);
     #[cfg(target_os = "macos")]
@@ -4192,6 +4401,7 @@ pub fn run() {
 
             let config_path = app.path().app_config_dir()?.join(config::FILE_NAME);
             let pro_state_path = app.path().app_config_dir()?.join(pro::STATE_FILE_NAME);
+            let sync_state_path = app.path().app_config_dir()?.join(sync::STATE_FILE_NAME);
             let pro_state = match pro::load(&pro_state_path) {
                 Ok(state) => state,
                 Err(error) => {
@@ -4238,6 +4448,7 @@ pub fn run() {
             app.manage(AppState {
                 config_path,
                 pro_state_path,
+                sync_state_path,
                 version: app.package_info().version.to_string(),
                 system_lang: Lang::system(),
                 device_name: device_name.clone(),
@@ -4252,6 +4463,10 @@ pub fn run() {
                 account_key_id: Mutex::new(None),
                 account_key_status: Mutex::new(account_key::Status::None),
                 account_key_refresh: tokio::sync::Mutex::new(()),
+                sync_generation: AtomicUsize::new(0),
+                sync_commit: tokio::sync::Mutex::new(()),
+                sync_schedule: Mutex::new(SyncSchedule::default()),
+                sync_debounce: debounce::Debounce::default(),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]
@@ -4271,6 +4486,7 @@ pub fn run() {
             app.manage(Arc::clone(&lan));
             lan.refresh();
             start_periodic_pro_checks(app.handle().clone());
+            start_periodic_sync(app.handle().clone());
             #[cfg(target_os = "macos")]
             updater::start_periodic_checks(app.handle());
             // 初めての起動では下書きを一度出す。常駐するだけで何も出ないと、入ったのか分からず、

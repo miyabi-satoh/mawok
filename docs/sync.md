@@ -6,24 +6,26 @@ Pro の Mawok は、同じアカウントのデバイスの間で設定を同期
 
 ## 同期する単位
 
-窓口の1項目は `collection` と `id` で見分ける。
+窓口の1項目は `collection` と `id` で見分ける。設定の同期は、全部を collection `settings` に置き、`id` の頭の1文字で種類を分ける（窓口の `id` は英数字と `_`・`-` の 64 文字までで、collection は `settings` と `history` だけのため）。
 
-| collection | id | 中身 |
+| 種類 | 窓口の id | 中身 |
 | --- | --- | --- |
-| `settings` | 設定の項目名 | その項目の値 |
-| `replacements`・`snippets`・`actions` | 行の `id` | その行（`id` と `sync` を除く） |
-| `order` | `replacements`・`snippets`・`actions` | 同期する行の `id` の並び |
+| 設定の項目 | `s_<項目名>` | その項目の値 |
+| 置き換え辞書の行 | `r_<行の id>` | その行（`id` と `sync` を除く） |
+| 定型文の行 | `n_<行の id>` | 同上 |
+| アクションの行 | `a_<行の id>` | 同上 |
+| 並び | `o_replacements`・`o_snippets`・`o_actions` | 同期する行の `id` の並び |
 
-`settings` の項目は次のとおり。
+設定の項目は次のとおり。
 
 - どのデバイスでも同じ値にする項目: `language`・`theme`・`text_window_always_on_top`・`hide_text_window_on_blur`・`show_text_window_buttons`・`text_history_size`・`trim_trailing_whitespace`・`punctuation_style`・`char_widths`・`exclude_from_clipboard_history`・`text_font_size`・`text_color_light`・`text_color_dark`・`input_guidance`・`ai_service`・`ai_models`。
-- OS ごとに分ける項目: `hotkey`・`text_window_keys`・`text_font_family`。id の後ろに `.macos` か `.windows` を付け、自分の OS の項目だけを読み書きする。キーの名前と入っている書体が OS で違うため。
+- OS ごとに分ける項目: `hotkey`・`text_window_keys`・`text_font_family`。id の後ろに `_macos` か `_windows` を付け（`s_hotkey_macos` など）、自分の OS の項目だけを読み書きする。キーの名前と入っている書体が OS で違うため。
 - 同期しない項目: `autostart`・`devices`・`ai_consent`・`sync_enabled`・`yielded_draft_keys`。AI サービスのキー（OS の資格情報管理）、アカウントと Pro の状態、ウィンドウの位置も同期しない。デバイスに固有か、デバイスごとに本人が決めるものであるため。
 
 行（置き換え辞書・定型文・アクション）は、`sync` が true の行だけを同期する。
 
 - 設定ファイルに書いていない既定のアクションは同期しない。編集して設定ファイルに書かれたときから同期する。既定のアクションの `id` は、アクションごとに決まった値にする。2台で別々に編集しても、同じアクションが2つに増えないため。
-- 並びは `order` の項目で揃える。同期しない行は、手元で直前にある行の後ろに置いたままにする。
+- 並びは、並びの項目（`o_…`）で揃える。同期しない行は、手元で直前にある行の後ろに置いたままにする。
 
 ## 暗号
 
@@ -65,7 +67,7 @@ Pro の Mawok は、同じアカウントのデバイスの間で設定を同期
 
 記録が無いデバイスは、窓口の写し全体を読んでから、次のように合わせる。
 
-- `settings`: 窓口に項目があれば、窓口の値を手元に入れる。無ければ、手元の値を書く。
+- 設定の項目: 窓口に項目があれば、窓口の値を手元に入れる。無ければ、手元の値を書く。
 - 行: 窓口の行と手元の行を両方残す。中身が同じ行（`id` と `sync` を除いて一致）は、手元の行の `id` を窓口の `id` に替えて1つにする。
 - 並び: 窓口の並びの後ろに、手元にだけある行を続ける。
 

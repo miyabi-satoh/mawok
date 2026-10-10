@@ -11,6 +11,10 @@ use crate::{
 pub const AI_PREFIX: &str = "@ai";
 /// コマンドの行や指示文の中で、実行する文に置き換える印
 pub const TEXT_MARK: &str = "{{t}}";
+/// 言語を替えても同じ既定の翻訳アクションを見分けるための ID。
+const DEFAULT_TRANSLATE_ACTION_ID: &str = "6b6a77e6d4f846f2a8bbf953fbd0e0d3";
+/// 言語を替えても同じ既定の並べ替えアクションを見分けるための ID。
+const DEFAULT_SORT_ACTION_ID: &str = "9c4d11698d17426c8e930b8118ffb2f2";
 
 /// 指示文から AI のアクションの行を作る
 fn ai_line(instruction: &str) -> String {
@@ -46,15 +50,21 @@ pub fn default_actions(lang: Lang) -> Vec<Action> {
     };
     [
         (
+            DEFAULT_TRANSLATE_ACTION_ID,
             translate,
             ai_line(translate_instruction),
             ActionEncoding::Utf8,
         ),
-        (sort, "sort".to_string(), sort_encoding),
+        (
+            DEFAULT_SORT_ACTION_ID,
+            sort,
+            "sort".to_string(),
+            sort_encoding,
+        ),
     ]
     .into_iter()
-    .map(|(name, command, encoding)| Action {
-        id: String::new(),
+    .map(|(id, name, command, encoding)| Action {
+        id: id.to_string(),
         name: name.to_string(),
         command,
         output: ActionOutput::Replace,
@@ -198,6 +208,7 @@ mod tests {
 
     #[test]
     fn has_one_ai_action_and_one_command_action_by_default_in_each_language() {
+        let mut ids: Option<Vec<String>> = None;
         for lang in [Lang::Ja, Lang::En] {
             let actions = default_actions(lang);
             assert_eq!(actions.len(), 2);
@@ -207,6 +218,15 @@ mod tests {
             assert!(ai_instruction(&actions[0].command)
                 .is_some_and(|instruction| !instruction.is_empty()));
             assert_eq!(actions[1].command, "sort");
+            let current = actions
+                .iter()
+                .map(|action| action.id.clone())
+                .collect::<Vec<_>>();
+            if let Some(ref ids) = ids {
+                assert_eq!(current.as_slice(), ids.as_slice());
+            } else {
+                ids = Some(current);
+            }
         }
     }
 

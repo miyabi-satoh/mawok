@@ -230,6 +230,8 @@ pub struct Config {
     /// 割り当てなしのままなら保存しても書かず、書いていない操作として既定のキーを使う扱いを保つ
     pub yielded_draft_keys: Vec<DraftAction>,
     pub autostart: bool,
+    /// Pro の設定同期を使うか。端末ごとの選択なので同期しない。
+    pub sync_enabled: bool,
     pub language: Language,
     pub theme: Theme,
     /// 下書きウィンドウを常に最前面に表示するか
@@ -329,6 +331,7 @@ impl Default for Config {
             text_window_keys: DraftKeys::default(),
             yielded_draft_keys: Vec::new(),
             autostart: true,
+            sync_enabled: true,
             language: Language::default(),
             theme: Theme::default(),
             text_window_always_on_top: true,
@@ -369,6 +372,7 @@ mod key {
     pub const HOTKEY: &str = "hotkey";
     pub const TEXT_WINDOW_KEYS: &str = "text_window_keys";
     pub const AUTOSTART: &str = "autostart";
+    pub const SYNC_ENABLED: &str = "sync_enabled";
     pub const LANGUAGE: &str = "language";
     pub const THEME: &str = "theme";
     pub const TEXT_WINDOW_ALWAYS_ON_TOP: &str = "text_window_always_on_top";
@@ -748,6 +752,7 @@ fn parse(text: &str) -> Result<(Config, Vec<String>, bool), String> {
     let mut config = Config::default();
     reader.read_str(key::HOTKEY, &mut config.hotkey);
     reader.read_bool(key::AUTOSTART, &mut config.autostart);
+    reader.read_bool(key::SYNC_ENABLED, &mut config.sync_enabled);
     reader.read_choice(key::LANGUAGE, &mut config.language);
     reader.read_choice(key::THEME, &mut config.theme);
     reader.read_bool(
@@ -1226,6 +1231,7 @@ fn apply(root: &mut Table, config: &Config, changes: &Changes<'_>) {
     }
     scalar!(key::HOTKEY, hotkey, |v: &String| Value::from(v.clone()));
     scalar!(key::AUTOSTART, autostart, |v: &bool| Value::from(*v));
+    scalar!(key::SYNC_ENABLED, sync_enabled, |v: &bool| Value::from(*v));
     scalar!(key::LANGUAGE, language, |v: &Language| Value::from(
         choice_name(v)
     ));
@@ -1720,6 +1726,7 @@ mod tests {
         let (config, error) = load_or_create(&path);
         assert_eq!(config.hotkey, DEFAULT_HOTKEY);
         assert!(!config.autostart);
+        assert!(config.sync_enabled);
         assert!(config.hide_text_window_on_blur);
         assert!(config.show_text_window_buttons);
         assert!(config.trim_trailing_whitespace);
@@ -2070,6 +2077,17 @@ body = "git status"
     }
 
     #[test]
+    fn reads_and_writes_sync_enabled() {
+        let path = temp_path("sync-enabled");
+        write(&path, "sync_enabled = false\n");
+        let (config, error) = load_or_create(&path);
+        assert!(!config.sync_enabled);
+        assert_eq!(error, None);
+        save(&path, &config).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "sync_enabled = false\n");
+    }
+
+    #[test]
     fn reads_draft_history_size() {
         // 設定ファイルを直接編集して上限を超える値や小数を入れられても収める。0 は履歴を使わない値としてそのまま読む
         let path = temp_path("history-size");
@@ -2130,6 +2148,7 @@ body = "git status"
             // 設定ファイルには書かず、読んだときに決まる
             yielded_draft_keys: Vec::new(),
             autostart: false,
+            sync_enabled: false,
             language: Language::En,
             theme: Theme::Light,
             text_window_always_on_top: false,
