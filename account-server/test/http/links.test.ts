@@ -50,7 +50,9 @@ describe('linking Mawok', () => {
 			next: linkPath(fields)
 		});
 		expect(await linking.text()).toContain('Mawok を使っているこのデバイスで開いてください');
-		expect(String(log.mock.calls.at(-1)?.[0])).toContain('Mawok を使っているデバイスで開いてください');
+		expect(String(log.mock.calls.at(-1)?.[0])).toContain(
+			'Mawok を使っているデバイスで開いてください'
+		);
 		const plain = await postForm('/account/login/email', {
 			email: 'same@example.com',
 			next: '/account/'
