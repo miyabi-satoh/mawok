@@ -12,6 +12,7 @@ const MESSAGES: Record<string, () => string> = {
 	'lan.unreachable': m.lan_error_unreachable,
 	'lan.refused': m.lan_error_refused,
 	'lan.pro_required': m.lan_error_pro_required,
+	'lan.needs_pairing': m.lan_error_needs_pairing,
 	'lan.receiver_pro_required': m.lan_error_receiver_pro_required,
 	'lan.account_mismatch': m.lan_error_account_mismatch,
 	'lan.key_mismatch': m.lan_error_key_mismatch,

@@ -38,6 +38,7 @@ export const EVENTS = {{\n\
 \tDRAFT_HISTORY_CLEARED: {:?},\n\
 \tSNIPPET_ADDED: {:?},\n\
 \tPAIRING_CODE_ENDED: {:?},\n\
+\tPAIRING_CODE_OFFERED: {:?},\n\
 \tDRAFT_RECEIVED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?},\n\
@@ -60,6 +61,7 @@ export const EVENTS = {{\n\
         events::DRAFT_HISTORY_CLEARED,
         events::SNIPPET_ADDED,
         events::PAIRING_CODE_ENDED,
+        events::PAIRING_CODE_OFFERED,
         events::DRAFT_RECEIVED,
         events::SHOWN,
         events::HIDE_REQUESTED,

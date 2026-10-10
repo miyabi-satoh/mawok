@@ -191,6 +191,8 @@ struct AppState {
     account_key: Mutex<Option<[u8; 32]>>,
     account_key_id: Mutex<Option<String>>,
     account_key_status: Mutex<account_key::Status>,
+    /// 鍵の生成・窓口への登録・資格情報管理への保存を、同じ鍵について一続きにする。
+    account_key_refresh: tokio::sync::Mutex<()>,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -1744,7 +1746,7 @@ async fn refresh_mawok_account_status(
             }
             remember_pro_state(app, &status, generation).await;
             if status.pro.active {
-                refresh_account_key(app, &client, &token).await;
+                refresh_account_key(app, &client, &token, generation).await;
             } else {
                 *app.state::<AppState>().account_key_status.lock().unwrap() =
                     account_key::Status::None;
@@ -1797,8 +1799,30 @@ fn use_unverified_account_key(app: &AppHandle, local: Option<[u8; 32]>) {
     apply_config(app);
 }
 
+fn account_key_generation_is_current(app: &AppHandle, generation: usize) -> bool {
+    app.state::<AppState>()
+        .pro_generation
+        .load(Ordering::SeqCst)
+        == generation
+}
+
+fn should_store_account_key(local: Option<&[u8; 32]>) -> bool {
+    local.is_none()
+}
+
 /// Pro の確認の直後に、窓口の鍵の印と資格情報管理の鍵をそろえる。
-async fn refresh_account_key(app: &AppHandle, client: &reqwest::Client, token: &str) {
+/// 鍵を初めて作る流れは、並行した確認どうしで別の鍵を登録しないよう直列にする。
+async fn refresh_account_key(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    token: &str,
+    generation: usize,
+) {
+    let state = app.state::<AppState>();
+    let _refresh = state.account_key_refresh.lock().await;
+    if !account_key_generation_is_current(app, generation) {
+        return;
+    }
     let local = match run_blocking(account_key::load).await {
         Ok(Ok(key)) => key,
         Ok(Err(error)) | Err(error) => {
@@ -1810,16 +1834,27 @@ async fn refresh_account_key(app: &AppHandle, client: &reqwest::Client, token: &
         Ok(key_id) => key_id,
         Err(error) => {
             warn!("couldn't check the account key: {error:?}");
-            use_unverified_account_key(app, local);
+            if account_key_generation_is_current(app, generation) {
+                use_unverified_account_key(app, local);
+            }
             return;
         }
     };
+    if !account_key_generation_is_current(app, generation) {
+        return;
+    }
     *app.state::<AppState>().account_key_id.lock().unwrap() = server.clone();
     if account_key::decide(server.as_deref(), local.as_ref()) == account_key::Status::NeedsPairing {
         if local.is_some() {
+            if !account_key_generation_is_current(app, generation) {
+                return;
+            }
             if let Err(error) = run_blocking(account_key::clear).await {
                 warn!("couldn't discard a mismatched account key: {error:?}");
             }
+        }
+        if !account_key_generation_is_current(app, generation) {
+            return;
         }
         *app.state::<AppState>().account_key.lock().unwrap() = None;
         *app.state::<AppState>().account_key_status.lock().unwrap() =
@@ -1828,6 +1863,7 @@ async fn refresh_account_key(app: &AppHandle, client: &reqwest::Client, token: &
         apply_config(app);
         return;
     }
+    let generated = should_store_account_key(local.as_ref());
     let key = match local {
         Some(key) => key,
         None => match account_key::generate() {
@@ -1843,7 +1879,11 @@ async fn refresh_account_key(app: &AppHandle, client: &reqwest::Client, token: &
         },
     };
     if server.is_none() {
-        if let Err(error) = account::reset_sync(client, token, &account_key::key_id(&key)).await {
+        let reset = account::reset_sync(client, token, &account_key::key_id(&key)).await;
+        if !account_key_generation_is_current(app, generation) {
+            return;
+        }
+        if let Err(error) = reset {
             warn!("couldn't set the account key ID: {error:?}");
             *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::None;
             app.state::<Arc<lan::Lan>>().refresh();
@@ -1851,11 +1891,22 @@ async fn refresh_account_key(app: &AppHandle, client: &reqwest::Client, token: &
             return;
         }
     }
-    if let Err(error) = run_blocking(move || account_key::store(&key)).await {
-        warn!("couldn't store the account key: {error:?}");
+    if !account_key_generation_is_current(app, generation) {
         return;
     }
+    if generated {
+        let key_to_store = key;
+        if let Err(error) = run_blocking(move || account_key::store(&key_to_store)).await {
+            warn!("couldn't store the account key: {error:?}");
+            return;
+        }
+        if !account_key_generation_is_current(app, generation) {
+            return;
+        }
+    }
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
+    *app.state::<AppState>().account_key_id.lock().unwrap() =
+        Some(server.unwrap_or_else(|| account_key::key_id(&key)));
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(app);
@@ -1960,9 +2011,18 @@ async fn sign_out_mawok(app: AppHandle) -> Result<(), String> {
 /// 新しい鍵を窓口へ反映できたときだけ、資格情報管理の鍵を置き換える。
 #[tauri::command]
 async fn reset_account_key(app: AppHandle) -> Result<(), String> {
+    let generation = app
+        .state::<AppState>()
+        .pro_generation
+        .load(Ordering::SeqCst);
     let token = run_blocking(|| secrets::read(AiService::Mawok.credential_user()))
         .await?
         .map_err(|_| "account.sign_in_required".to_string())?;
+    let state = app.state::<AppState>();
+    let _refresh = state.account_key_refresh.lock().await;
+    if !account_key_generation_is_current(&app, generation) {
+        return Ok(());
+    }
     if pro_account_tag(&app).is_none() {
         return Err(lan::Failure::ProRequired.code().to_string());
     }
@@ -1971,7 +2031,13 @@ async fn reset_account_key(app: AppHandle) -> Result<(), String> {
     account::reset_sync(&client, &token, &account_key::key_id(&key))
         .await
         .map_err(|_| "account.unreachable".to_string())?;
+    if !account_key_generation_is_current(&app, generation) {
+        return Ok(());
+    }
     run_blocking(move || account_key::store(&key)).await??;
+    if !account_key_generation_is_current(&app, generation) {
+        return Ok(());
+    }
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
     *app.state::<AppState>().account_key_id.lock().unwrap() = Some(account_key::key_id(&key));
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
@@ -2553,6 +2619,23 @@ fn remember_found_device(devices: &mut Vec<Device>, peer: lan::Peer, address: Ip
     true
 }
 
+/// 握手が通った機器の場所だけを更新する。UDP の名乗りだけでは設定を書き換えない。
+fn remember_device_address(devices: &mut [Device], public_key: &[u8], address: IpAddr) -> bool {
+    let public_key = lan::to_hex(public_key);
+    let address = address.to_string();
+    let Some(device) = devices
+        .iter_mut()
+        .find(|device| device.public_key == public_key)
+    else {
+        return false;
+    };
+    if device.address == address {
+        return false;
+    }
+    device.address = address;
+    true
+}
+
 fn received_device_name(devices: &[Device], public_key: &str) -> String {
     devices
         .iter()
@@ -2581,6 +2664,32 @@ impl lan::Host for AppHandle {
     fn on_pairing_code_ended(&self) {
         // 設定画面は、出していたコードを消す
         let _ = self.emit(events::PAIRING_CODE_ENDED, ());
+    }
+
+    fn on_pairing_code_offered(&self, code: String, remaining_seconds: u64, automatic: bool) {
+        let _ = self.emit(
+            events::PAIRING_CODE_OFFERED,
+            PairingOffer {
+                code,
+                remaining_seconds,
+                automatic,
+            },
+        );
+    }
+
+    fn on_device_address_seen(&self, public_key: &[u8], address: IpAddr) {
+        let changed = {
+            let state = self.state::<AppState>();
+            let mut devices = state.config.lock().unwrap().devices.clone();
+            remember_device_address(&mut devices, public_key, address)
+        };
+        if changed {
+            if let Err(error) = update_config(self, |config| {
+                remember_device_address(&mut config.devices, public_key, address);
+            }) {
+                warn!("lan: couldn't remember a device's address: {error}");
+            }
+        }
     }
 
     fn on_received(&self, from: &[u8], text: String) -> bool {
@@ -2666,13 +2775,14 @@ fn take_received_drafts(state: tauri::State<'_, DraftState>) -> Vec<ReceivedDraf
     std::mem::take(&mut *state.received.lock().unwrap())
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
 #[serde(rename_all = "camelCase")]
 struct PairingOffer {
     code: String,
     remaining_seconds: u64,
+    automatic: bool,
 }
 
 /// コードを出して、組み合わせる相手が入れるのを待つ。コードと画面表示用の残り秒を返す
@@ -2686,25 +2796,26 @@ fn start_pairing(
         return Err(lan::Failure::ProRequired.code().to_string());
     }
     if *app.state::<AppState>().account_key_status.lock().unwrap() != account_key::Status::Ready {
-        return Err(lan::Failure::KeyMismatch.code().to_string());
+        return Err(lan::Failure::NeedsPairing.code().to_string());
     }
-    let (code, remaining_seconds) = lan
-        .start_pairing()
+    let offer = lan
+        .start_pairing(false)
         .map_err(|error| lan_failure("couldn't start pairing", error))?;
     Ok(PairingOffer {
-        code,
-        remaining_seconds,
+        code: offer.code,
+        remaining_seconds: offer.remaining_seconds,
+        automatic: offer.automatic,
     })
 }
 
 /// 今表示しているコード。設定を開いた後、`want` を受けて自動で始めた組み合わせも画面に出す。
 #[tauri::command]
 fn pairing_offer(lan: tauri::State<'_, Arc<lan::Lan>>) -> Option<PairingOffer> {
-    lan.pairing_offer()
-        .map(|(code, remaining_seconds)| PairingOffer {
-            code,
-            remaining_seconds,
-        })
+    lan.pairing_offer().map(|offer| PairingOffer {
+        code: offer.code,
+        remaining_seconds: offer.remaining_seconds,
+        automatic: offer.automatic,
+    })
 }
 
 #[tauri::command]
@@ -2732,7 +2843,7 @@ async fn join_pairing(
     if *app.state::<AppState>().account_key_status.lock().unwrap()
         != account_key::Status::NeedsPairing
     {
-        return Err(lan::Failure::KeyMismatch.code().to_string());
+        return Err(lan::Failure::Internal.code().to_string());
     }
     let lan = Arc::clone(lan.inner());
     run_blocking(move || lan.join_pairing(&code))
@@ -2866,6 +2977,31 @@ fn on_each_device<'a, T: Send>(
     })
 }
 
+fn account_key_failure_for_lan(
+    pro_available: bool,
+    status: account_key::Status,
+    has_account_key: bool,
+) -> Option<lan::Failure> {
+    if !pro_available {
+        Some(lan::Failure::ProRequired)
+    } else if status != account_key::Status::Ready || !has_account_key {
+        Some(lan::Failure::NeedsPairing)
+    } else {
+        None
+    }
+}
+
+fn ready_account_key_for_lan(app: &AppHandle) -> Result<[u8; 32], lan::Failure> {
+    let key = *app.state::<AppState>().account_key.lock().unwrap();
+    let status = *app.state::<AppState>().account_key_status.lock().unwrap();
+    if let Some(failure) =
+        account_key_failure_for_lan(pro_account_tag(app).is_some(), status, key.is_some())
+    {
+        return Err(failure);
+    }
+    Ok(key.expect("a Ready account key is present"))
+}
+
 fn send_and_hide(
     app: &AppHandle,
     text: &str,
@@ -2873,18 +3009,8 @@ fn send_and_hide(
 ) -> Result<bool, SendFailure> {
     let sent = !text.is_empty();
     if sent {
-        let account_key = app
-            .state::<AppState>()
-            .account_key
-            .lock()
-            .unwrap()
-            .to_owned()
-            .ok_or_else(|| SendFailure::from(lan::Failure::ProRequired.code().to_string()))?;
-        if *app.state::<AppState>().account_key_status.lock().unwrap() != account_key::Status::Ready
-            || pro_account_tag(app).is_none()
-        {
-            return Err(lan::Failure::ProRequired.code().to_string().into());
-        }
+        let account_key = ready_account_key_for_lan(app)
+            .map_err(|failure| SendFailure::from(failure.code().to_string()))?;
         if app
             .state::<AppState>()
             .config
@@ -2962,17 +3088,8 @@ fn send_and_hide(
 #[tauri::command]
 async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
     run_blocking(move || {
-        let account_key = app
-            .state::<AppState>()
-            .account_key
-            .lock()
-            .unwrap()
-            .to_owned()
-            .filter(|_| {
-                *app.state::<AppState>().account_key_status.lock().unwrap()
-                    == account_key::Status::Ready
-            })
-            .ok_or_else(|| lan::Failure::ProRequired.code().to_string())?;
+        let account_key =
+            ready_account_key_for_lan(&app).map_err(|failure| failure.code().to_string())?;
         let targets = device_targets(&app, |_| true);
         let reached: Vec<(String, IpAddr)> = on_each_device(&app, &targets, |lan, key, saved| {
             lan.probe(key, saved, Some(account_key))
@@ -3993,7 +4110,9 @@ pub fn run() {
                 // ホットキーの記録中に閉じた場合に、止めていたホットキーを戻す
                 ensure_hotkey_registered(app);
                 // 出していたコードは、画面から見えなくなるので使えなくする
-                app.state::<Arc<lan::Lan>>().cancel_pairing();
+                let lan = app.state::<Arc<lan::Lan>>();
+                lan.set_devices_open(false);
+                lan.cancel_pairing();
             }
             WindowEvent::Destroyed if window.label() == LICENSES_WINDOW => {
                 info!("licenses window closed");
@@ -4098,6 +4217,7 @@ pub fn run() {
                 account_key: Mutex::new(None),
                 account_key_id: Mutex::new(None),
                 account_key_status: Mutex::new(account_key::Status::None),
+                account_key_refresh: tokio::sync::Mutex::new(()),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]
@@ -4404,6 +4524,60 @@ mod tests {
         ));
         assert_eq!(devices[2].public_key, "cc");
         assert!(devices[2].send_to);
+    }
+
+    #[test]
+    fn remembers_an_address_only_for_a_known_device() {
+        let mut devices = vec![Device {
+            name: "desk".to_string(),
+            public_key: "aabb".to_string(),
+            address: "192.168.0.2".to_string(),
+            send_to: false,
+        }];
+
+        assert!(remember_device_address(
+            &mut devices,
+            &[0xaa, 0xbb],
+            "192.168.0.3".parse().unwrap(),
+        ));
+        assert_eq!(devices[0].address, "192.168.0.3");
+        assert!(!devices[0].send_to);
+        assert!(!remember_device_address(
+            &mut devices,
+            &[0xaa, 0xbb],
+            "192.168.0.3".parse().unwrap(),
+        ));
+        assert!(!remember_device_address(
+            &mut devices,
+            &[0xcc],
+            "192.168.0.4".parse().unwrap(),
+        ));
+    }
+
+    #[test]
+    fn distinguishes_missing_keys_from_missing_pro() {
+        assert_eq!(
+            account_key_failure_for_lan(false, account_key::Status::Ready, true),
+            Some(lan::Failure::ProRequired)
+        );
+        assert_eq!(
+            account_key_failure_for_lan(true, account_key::Status::NeedsPairing, false),
+            Some(lan::Failure::NeedsPairing)
+        );
+        assert_eq!(
+            account_key_failure_for_lan(true, account_key::Status::None, false),
+            Some(lan::Failure::NeedsPairing)
+        );
+        assert_eq!(
+            account_key_failure_for_lan(true, account_key::Status::Ready, true),
+            None
+        );
+    }
+
+    #[test]
+    fn only_a_new_account_key_needs_to_be_stored() {
+        assert!(should_store_account_key(None));
+        assert!(!should_store_account_key(Some(&[7; 32])));
     }
 
     #[test]

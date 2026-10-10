@@ -5,7 +5,7 @@
 //! 送るのはアカウントの鍵から導いた事前共有鍵を使う Noise の IKpsk1 で、同じ鍵の相手とだけつながる。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::{self, Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket},
@@ -39,11 +39,21 @@ const OFFER_HELLO_INTERVAL: Duration = Duration::from_secs(1);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// コードを出してから使えなくなるまで
 const OFFER_TTL: Duration = Duration::from_secs(120);
+/// UDP の名乗りは誰でも偽れるので、同じ公開鍵への接続を何度も試さない時間を置く。
+const REJECTED_DISCOVERY_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// コードが使えなくなるまでの残り秒。画面の表示用で、切り上げる（出した直後に 120 と出すため）
 fn offer_remaining_seconds(expires: Instant) -> u64 {
     let remaining = expires.saturating_duration_since(Instant::now());
     remaining.as_millis().div_ceil(1000) as u64
+}
+
+fn hello_interval(offering: bool, wants_pairing: bool) -> Duration {
+    if offering || wants_pairing {
+        OFFER_HELLO_INTERVAL
+    } else {
+        HELLO_INTERVAL
+    }
 }
 
 /// コードを入れてから、コードを出している相手の名乗りを待つ時間。
@@ -91,6 +101,8 @@ pub enum Failure {
     Refused,
     /// この機器で Pro を使えない
     ProRequired,
+    /// Pro だが、まだアカウントの鍵を受け取っていない
+    NeedsPairing,
     /// 相手の機器で Pro を使えない
     ReceiverProRequired,
     /// 相手が別の Mawok アカウントに結ばれている
@@ -115,6 +127,7 @@ impl Failure {
             Self::Unreachable => "lan.unreachable",
             Self::Refused => "lan.refused",
             Self::ProRequired => "lan.pro_required",
+            Self::NeedsPairing => "lan.needs_pairing",
             Self::ReceiverProRequired => "lan.receiver_pro_required",
             Self::AccountMismatch => "lan.account_mismatch",
             Self::KeyMismatch => "lan.key_mismatch",
@@ -172,6 +185,8 @@ pub struct Peer {
 pub trait Host: Send + Sync + 'static {
     /// 出していたコードが使われて、もう使えなくなった（組み合わせの成否は問わない）
     fn on_pairing_code_ended(&self);
+    /// 自動でコードを出した。設定画面は、取り逃がしたときだけ pairing_offer を読み直す。
+    fn on_pairing_code_offered(&self, code: String, remaining_seconds: u64, automatic: bool);
     /// 同じアカウントの機器から下書きが届いた。受け入れたら true。
     fn on_received(&self, from: &[u8], text: String) -> bool;
     /// この機器で使える Pro のアカウントの印。無ければ、相手の下書きは受け取らない。
@@ -184,6 +199,8 @@ pub trait Host: Send + Sync + 'static {
     fn receive_account_key(&self, key: [u8; 32]) -> bool;
     /// 同じアカウントの機器を見つけた。
     fn on_device_found(&self, peer: Peer, address: IpAddr) -> bool;
+    /// 握手が通った機器の場所。名前が分からない場合も、既存の一覧の場所は直せる。
+    fn on_device_address_seen(&self, public_key: &[u8], address: IpAddr);
 }
 
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -700,6 +717,38 @@ fn set_timeouts(stream: &TcpStream) -> Result<()> {
 struct Offer {
     code: String,
     expires: Instant,
+    automatic: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairingOffer {
+    pub code: String,
+    pub remaining_seconds: u64,
+    pub automatic: bool,
+}
+
+#[derive(Clone, Copy)]
+enum DiscoverySource {
+    Announcement,
+    Authenticated,
+}
+
+fn remember_seen_address(
+    seen: &mut HashMap<Vec<u8>, IpAddr>,
+    remote_public: &[u8],
+    ip: IpAddr,
+    source: DiscoverySource,
+) -> bool {
+    let known = seen.contains_key(remote_public);
+    if known || matches!(source, DiscoverySource::Authenticated) {
+        seen.insert(remote_public.to_vec(), ip);
+    }
+    known
+}
+
+fn discovery_is_rejected(source: DiscoverySource, rejected_at: Option<Instant>) -> bool {
+    matches!(source, DiscoverySource::Announcement)
+        && rejected_at.is_some_and(|at| at.elapsed() < REJECTED_DISCOVERY_TTL)
 }
 
 fn should_want_pairing(
@@ -726,11 +775,13 @@ pub struct Lan {
     /// 組み合わせのやり取りの最中か（コードを入れて、出している相手を探している間を含む）。その間は待ち受けを止めない
     pairing: AtomicBool,
     devices_open: AtomicBool,
-    wanted: Mutex<Option<(Instant, IpAddr)>>,
+    wanted: Mutex<Option<Instant>>,
     /// 同じアカウントの機器を、名乗りや受け取りで最後に見た場所（公開鍵ごと）
     seen: Mutex<HashMap<Vec<u8>, IpAddr>>,
-    /// 別のアカウントらしい名乗りへ、10分間は握手を試さない。
+    /// UDP の名乗りだけを根拠に失敗した相手へ、しばらく握手を試さない。
     rejected: Mutex<HashMap<Vec<u8>, Instant>>,
+    /// 生存確認を始めた相手。同じ相手への確認を同時に走らせない。
+    discovering: Mutex<HashSet<Vec<u8>>>,
 }
 
 impl Lan {
@@ -748,6 +799,7 @@ impl Lan {
             wanted: Mutex::new(None),
             seen: Mutex::new(HashMap::new()),
             rejected: Mutex::new(HashMap::new()),
+            discovering: Mutex::new(HashSet::new()),
         })
     }
 
@@ -782,10 +834,10 @@ impl Lan {
                 .lock()
                 .unwrap()
                 .as_ref()
-                .is_some_and(|(at, _)| at.elapsed() < OFFER_TTL)
+                .is_some_and(|at| at.elapsed() < OFFER_TTL)
             && !self.offering()
         {
-            let _ = self.start_pairing();
+            let _ = self.start_pairing(true);
         }
         self.refresh();
     }
@@ -912,7 +964,7 @@ impl Lan {
                     |remote, text| self.host.on_received(remote, text),
                 )?;
                 info!("lan: received a draft");
-                self.start_discovery(from, ip);
+                self.start_discovery(from, ip, DiscoverySource::Authenticated);
                 Ok(())
             }
             KIND_PING => {
@@ -931,7 +983,7 @@ impl Lan {
                 transport_write(&mut transport, reply, stream)?;
                 match reply {
                     READY => {
-                        self.start_discovery(from, ip);
+                        self.start_discovery(from, ip, DiscoverySource::Authenticated);
                         Ok(())
                     }
                     REJECT_PRO_REQUIRED => Err("this device is not Pro".to_string()),
@@ -969,6 +1021,7 @@ impl Lan {
         if !self.host.on_device_found(peer, ip) {
             return Err("couldn't remember the device".into());
         }
+        self.wanted.lock().unwrap().take();
         Ok(())
     }
 
@@ -992,17 +1045,13 @@ impl Lan {
                             .lock()
                             .unwrap()
                             .as_ref()
-                            .is_some_and(|(at, _)| at.elapsed() < OFFER_TTL)
+                            .is_some_and(|at| at.elapsed() < OFFER_TTL)
                     {
-                        let _ = self.start_pairing();
+                        let _ = self.start_pairing(true);
                     }
                 }
             }
-            let interval = if offering {
-                OFFER_HELLO_INTERVAL
-            } else {
-                HELLO_INTERVAL
-            };
+            let interval = hello_interval(offering, self.wants_pairing());
             let due = last.is_none_or(|at| at.elapsed() >= interval);
             if due
                 && (offering
@@ -1079,44 +1128,66 @@ impl Lan {
             }
             Hello::Want(_, tag) => {
                 if self.host.pro_account_tag().is_some_and(|own| own == tag) {
-                    *self.wanted.lock().unwrap() = Some((Instant::now(), ip));
+                    *self.wanted.lock().unwrap() = Some(Instant::now());
                     if self.devices_open.load(Ordering::Relaxed) && !self.offering() {
-                        let _ = self.start_pairing();
+                        let _ = self.start_pairing(true);
                     }
                 }
             }
             Hello::Device(_) | Hello::Offer(_)
                 if self.host.pro_account_tag().is_some() && self.host.account_key().is_some() =>
             {
-                self.start_discovery(key, ip);
+                self.start_discovery(key, ip, DiscoverySource::Announcement);
             }
             _ => {}
         }
     }
 
     /// 同じ公開鍵への生存確認は、名乗りと相手からの生存確認のどちらからでも1回だけ始める。
-    fn start_discovery(self: &Arc<Self>, remote_public: Vec<u8>, ip: IpAddr) {
+    fn start_discovery(
+        self: &Arc<Self>,
+        remote_public: Vec<u8>,
+        ip: IpAddr,
+        source: DiscoverySource,
+    ) {
         if self.host.pro_account_tag().is_none() || self.host.account_key().is_none() {
             return;
         }
-        if self.seen.lock().unwrap().contains_key(&remote_public) {
+        let mut seen = self.seen.lock().unwrap();
+        let known = remember_seen_address(&mut seen, &remote_public, ip, source);
+        drop(seen);
+        if matches!(source, DiscoverySource::Authenticated) {
+            self.host.on_device_address_seen(&remote_public, ip);
+        }
+        if known {
             return;
         }
-        let mut rejected = self.rejected.lock().unwrap();
-        if rejected
-            .get(&remote_public)
-            .is_some_and(|at| at.elapsed() < Duration::from_secs(600))
+        if discovery_is_rejected(
+            source,
+            self.rejected.lock().unwrap().get(&remote_public).copied(),
+        ) {
+            return;
+        }
+        if !self
+            .discovering
+            .lock()
+            .unwrap()
+            .insert(remote_public.clone())
         {
             return;
         }
-        rejected.insert(remote_public.clone(), Instant::now());
-        drop(rejected);
         let lan = Arc::clone(self);
-        thread::spawn(move || lan.probe_discovered(remote_public, ip));
+        thread::spawn(move || lan.probe_discovered(remote_public, ip, source));
     }
 
-    fn probe_discovered(self: Arc<Self>, remote_public: Vec<u8>, ip: IpAddr) {
+    fn probe_discovered(
+        self: Arc<Self>,
+        remote_public: Vec<u8>,
+        ip: IpAddr,
+        source: DiscoverySource,
+    ) {
         let Some(account_key) = self.host.account_key() else {
+            self.discovering.lock().unwrap().remove(&remote_public);
             return;
         };
         let result = (|| {
@@ -1143,20 +1214,32 @@ impl Lan {
                 }
             }
             Err(_) => {
-                self.rejected
-                    .lock()
-                    .unwrap()
-                    .insert(remote_public, Instant::now());
+                if matches!(source, DiscoverySource::Announcement) {
+                    self.rejected
+                        .lock()
+                        .unwrap()
+                        .insert(remote_public.clone(), Instant::now());
+                }
             }
         }
+        self.discovering.lock().unwrap().remove(&remote_public);
     }
 
     /// コードを出して、相手が入れるのを待つ。コードと画面表示用の残り秒を返す
-    pub fn start_pairing(self: &Arc<Self>) -> std::result::Result<(String, u64), LanError> {
-        if self.host.pro_account_tag().is_none() || self.host.account_key().is_none() {
+    pub fn start_pairing(
+        self: &Arc<Self>,
+        automatic: bool,
+    ) -> std::result::Result<PairingOffer, LanError> {
+        if self.host.pro_account_tag().is_none() {
             return Err(LanError::new(
                 Failure::ProRequired,
                 "this device is not ready to pair",
+            ));
+        }
+        if self.host.account_key().is_none() {
+            return Err(LanError::new(
+                Failure::NeedsPairing,
+                "this device does not have an account key",
             ));
         }
         let code = new_code().fail_as(Failure::Internal)?;
@@ -1164,27 +1247,45 @@ impl Lan {
         *self.offer.lock().unwrap() = Some(Offer {
             code: code.clone(),
             expires,
+            automatic,
         });
         // 待ち受けを始められなければ、相手はつなげないので、コードを出さない
         if !self.refresh() {
             *self.offer.lock().unwrap() = None;
             return Err(LanError::new(Failure::Internal, "couldn't start listening"));
         }
-        let remaining_seconds = offer_remaining_seconds(expires);
-        Ok((code, remaining_seconds))
+        let offer = PairingOffer {
+            code,
+            remaining_seconds: offer_remaining_seconds(expires),
+            automatic,
+        };
+        if automatic {
+            self.host.on_pairing_code_offered(
+                offer.code.clone(),
+                offer.remaining_seconds,
+                offer.automatic,
+            );
+        }
+        Ok(offer)
     }
 
     /// 今出しているコード。設定画面を開いた後に `want` を受けて自動で出したコードを画面に表示するために読む。
-    pub fn pairing_offer(&self) -> Option<(String, u64)> {
+    pub fn pairing_offer(&self) -> Option<PairingOffer> {
         let offer = self.offer.lock().unwrap();
         let offer = offer
             .as_ref()
             .filter(|offer| offer.expires > Instant::now())?;
-        Some((offer.code.clone(), offer_remaining_seconds(offer.expires)))
+        Some(PairingOffer {
+            code: offer.code.clone(),
+            remaining_seconds: offer_remaining_seconds(offer.expires),
+            automatic: offer.automatic,
+        })
     }
 
     pub fn cancel_pairing(self: &Arc<Self>) {
-        *self.offer.lock().unwrap() = None;
+        if self.offer.lock().unwrap().take().is_some() {
+            self.host.on_pairing_code_ended();
+        }
         self.refresh();
     }
 
@@ -1192,13 +1293,20 @@ impl Lan {
     pub fn forget_device(&self, public_key: &[u8]) {
         self.seen.lock().unwrap().remove(public_key);
         self.rejected.lock().unwrap().remove(public_key);
+        self.discovering.lock().unwrap().remove(public_key);
     }
 
     /// 相手に出ているコードを入れて組み合わせる。コードを出している相手を名乗りで探すので、終わるまで数秒かかる
     pub fn join_pairing(self: &Arc<Self>, code: &str) -> std::result::Result<(), LanError> {
-        if self.host.pro_account_tag().is_none() || self.host.account_key().is_some() {
+        if self.host.pro_account_tag().is_none() {
             return Err(LanError::new(
                 Failure::ProRequired,
+                "this device is not waiting for an account key",
+            ));
+        }
+        if self.host.account_key().is_some() || self.host.account_key_id().is_none() {
+            return Err(LanError::new(
+                Failure::Internal,
                 "this device is not waiting for an account key",
             ));
         }
@@ -1310,6 +1418,7 @@ impl Lan {
             &crate::account_key::lan_psk(&account_key),
             text,
         )?;
+        self.remember_peer_address(remote_public, ip);
         Ok(ip)
     }
 
@@ -1332,7 +1441,13 @@ impl Lan {
             remote_public,
             &crate::account_key::lan_psk(&account_key),
         )?;
+        self.remember_peer_address(remote_public, ip);
         Ok(ip)
+    }
+
+    fn remember_peer_address(&self, remote_public: &[u8], ip: IpAddr) {
+        self.seen.lock().unwrap().insert(remote_public.to_vec(), ip);
+        self.host.on_device_address_seen(remote_public, ip);
     }
 
     /// 同じアカウントで見つけた機器の場所。名乗りで見た場所がなければ、覚えていた場所
@@ -1369,6 +1484,8 @@ mod tests {
     impl Host for TestHost {
         fn on_pairing_code_ended(&self) {}
 
+        fn on_pairing_code_offered(&self, _: String, _: u64, _: bool) {}
+
         fn on_received(&self, _: &[u8], _: String) -> bool {
             true
         }
@@ -1392,6 +1509,8 @@ mod tests {
         fn on_device_found(&self, _: Peer, _: IpAddr) -> bool {
             true
         }
+
+        fn on_device_address_seen(&self, _: &[u8], _: IpAddr) {}
     }
 
     /// つながった TCP の両端
@@ -1671,6 +1790,7 @@ mod tests {
             Failure::Unreachable,
             Failure::Refused,
             Failure::ProRequired,
+            Failure::NeedsPairing,
             Failure::ReceiverProRequired,
             Failure::AccountMismatch,
             Failure::KeyMismatch,
@@ -1738,6 +1858,81 @@ mod tests {
     }
 
     #[test]
+    fn wants_pairing_every_second() {
+        assert_eq!(hello_interval(false, true), OFFER_HELLO_INTERVAL);
+        assert_eq!(hello_interval(true, false), OFFER_HELLO_INTERVAL);
+        assert_eq!(hello_interval(false, false), HELLO_INTERVAL);
+    }
+
+    #[test]
+    fn pairing_offer_reports_whether_it_is_automatic() {
+        let lan = Lan::new(
+            PathBuf::from("unused-device-key"),
+            "test".to_string(),
+            Arc::new(TestHost),
+        );
+        *lan.offer.lock().unwrap() = Some(Offer {
+            code: "123456".to_string(),
+            expires: Instant::now() + OFFER_TTL,
+            automatic: true,
+        });
+
+        let offer = lan.pairing_offer().unwrap();
+        assert_eq!(offer.code, "123456");
+        assert!(offer.automatic);
+        assert!(offer.remaining_seconds <= OFFER_TTL.as_secs());
+    }
+
+    #[test]
+    fn updates_a_known_device_address_from_announcements_and_handshakes() {
+        let public_key = vec![4; 32];
+        let old: IpAddr = "192.168.0.2".parse().unwrap();
+        let announced: IpAddr = "192.168.0.3".parse().unwrap();
+        let authenticated: IpAddr = "192.168.0.4".parse().unwrap();
+        let mut seen = HashMap::from([(public_key.clone(), old)]);
+
+        assert!(remember_seen_address(
+            &mut seen,
+            &public_key,
+            announced,
+            DiscoverySource::Announcement,
+        ));
+        assert_eq!(seen[&public_key], announced);
+
+        let unknown = vec![5; 32];
+        assert!(!remember_seen_address(
+            &mut seen,
+            &unknown,
+            announced,
+            DiscoverySource::Announcement,
+        ));
+        assert!(!seen.contains_key(&unknown));
+
+        assert!(!remember_seen_address(
+            &mut seen,
+            &unknown,
+            authenticated,
+            DiscoverySource::Authenticated,
+        ));
+        assert_eq!(seen[&unknown], authenticated);
+    }
+
+    #[test]
+    fn only_udp_announcements_observe_the_discovery_backoff() {
+        let recent = Some(Instant::now());
+        assert!(discovery_is_rejected(DiscoverySource::Announcement, recent));
+        assert!(!discovery_is_rejected(
+            DiscoverySource::Authenticated,
+            recent
+        ));
+        assert!(!discovery_is_rejected(DiscoverySource::Announcement, None));
+        assert!(!discovery_is_rejected(
+            DiscoverySource::Announcement,
+            Some(Instant::now() - REJECTED_DISCOVERY_TTL),
+        ));
+    }
+
+    #[test]
     fn forgetting_a_device_allows_its_next_hello_to_be_probed() {
         let lan = Lan::new(
             PathBuf::from("unused-device-key"),
@@ -1753,11 +1948,13 @@ mod tests {
             .lock()
             .unwrap()
             .insert(public_key.clone(), Instant::now());
+        lan.discovering.lock().unwrap().insert(public_key.clone());
 
         lan.forget_device(&public_key);
 
         assert!(!lan.seen.lock().unwrap().contains_key(&public_key));
         assert!(!lan.rejected.lock().unwrap().contains_key(&public_key));
+        assert!(!lan.discovering.lock().unwrap().contains(&public_key));
     }
 
     #[test]

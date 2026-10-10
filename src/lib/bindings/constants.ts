@@ -18,6 +18,7 @@ export const EVENTS = {
 	DRAFT_HISTORY_CLEARED: "draft-history-cleared",
 	SNIPPET_ADDED: "snippet-added",
 	PAIRING_CODE_ENDED: "pairing-code-ended",
+	PAIRING_CODE_OFFERED: "pairing-code-offered",
 	DRAFT_RECEIVED: "draft-received",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested",

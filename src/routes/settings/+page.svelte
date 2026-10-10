@@ -453,26 +453,30 @@
 	});
 
 	$effect(() => {
-		const unlisten = listen(EVENTS.PAIRING_CODE_ENDED, () => {
+		const unlistenEnded = listen(EVENTS.PAIRING_CODE_ENDED, () => {
 			pairingCode = '';
 			pairingAutomatic = false;
 		});
+		const unlistenOffered = listen<PairingOffer>(EVENTS.PAIRING_CODE_OFFERED, ({ payload }) => {
+			showPairingOffer(payload);
+		});
 		return () => {
-			unlisten.then((fn) => fn());
+			unlistenEnded.then((fn) => fn());
+			unlistenOffered.then((fn) => fn());
 		};
 	});
 
 	async function startPairing() {
 		const offer = await callLan<PairingOffer>('start_pairing');
 		if (!offer.ok) return;
-		showPairingOffer(offer.value, false);
+		showPairingOffer(offer.value);
 	}
 
-	function showPairingOffer(offer: PairingOffer, automatic: boolean) {
+	function showPairingOffer(offer: PairingOffer) {
 		pairingRemainingSeconds = offer.remainingSeconds;
 		pairingDeadline = performance.now() + offer.remainingSeconds * 1000;
 		pairingCode = offer.code;
-		pairingAutomatic = automatic;
+		pairingAutomatic = offer.automatic;
 	}
 
 	function cancelPairing() {
@@ -492,15 +496,12 @@
 	$effect(() => {
 		if (category !== 'devices' || settings.current?.accountKeyStatus !== 'ready') return;
 		let active = true;
-		const refreshOffer = async () => {
+		void (async () => {
 			const offer = await invoke<PairingOffer | null>('pairing_offer').catch(() => null);
-			if (active && offer && offer.code !== pairingCode) showPairingOffer(offer, true);
-		};
-		void refreshOffer();
-		const timer = setInterval(() => void refreshOffer(), 1_000);
+			if (active && offer) showPairingOffer(offer);
+		})();
 		return () => {
 			active = false;
-			clearInterval(timer);
 		};
 	});
 
@@ -1320,9 +1321,11 @@
 											<span class="font-mono text-2xl tracking-widest tabular-nums"
 												>{pairingCode}</span
 											>
-											<Button variant="ghost" onclick={cancelPairing}
-												>{m.settings_devices_offer_cancel()}</Button
-											>
+											{#if !pairingAutomatic}
+												<Button variant="ghost" onclick={cancelPairing}
+													>{m.settings_devices_offer_cancel()}</Button
+												>
+											{/if}
 										</div>
 									{:else}
 										<Button variant="outline" onclick={startPairing}
@@ -1332,7 +1335,7 @@
 								</Field.Field>
 								<Field.Description
 									class="leading-snug"
-									role={pairingCode ? 'timer' : undefined}
+									role={pairingCode && !pairingAutomatic ? 'timer' : undefined}
 									aria-live="off"
 								>
 									{pairingCode
