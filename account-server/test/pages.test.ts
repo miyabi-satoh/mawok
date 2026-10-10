@@ -12,7 +12,7 @@ describe('homePage', () => {
 
 	it('says a canceled trial will not be charged in English', async () => {
 		const page = String(
-			await homePage('en', 'a@example.com', { remaining: 1, percent: 1 }, [], 'domestic', {
+			await homePage('en', 'a@example.com', { remaining: 1, percent: 1 }, [], 'overseas', {
 				pro: {
 					active: true,
 					until: 2_000_000_000,
@@ -23,7 +23,7 @@ describe('homePage', () => {
 				}
 			})
 		);
-		expect(page).toContain('Your trial lasts until');
+		expect(page).toContain('Your trial lasts until May 18, 2033 (Japan time)');
 		expect(page).toContain('You will not be charged.');
 	});
 });
@@ -85,10 +85,11 @@ describe('proConfirmPage', () => {
 
 					// 日本の外の買い手には、日本時間の日付だと断る
 					const day = region === 'overseas' ? '2026/1/29 (日本時間)' : '2026/1/29';
+					expect(page.split('(日本時間)').length - 1).toBe(trial && region === 'overseas' ? 1 : 0);
 					if (trial) {
 						expect(page).toContain(`${day} に最初の ${amount}を支払い、`);
 						expect(page).toContain(
-							`それまでの 14 日間は無料で、${day} より前に解約すれば、支払いは生じません。`
+							`それまでの 14 日間は無料で、2026/1/29 より前に解約すれば、支払いは生じません。`
 						);
 						expect(page).toContain('試用の間は付かず、最初の支払いの後から付きます。');
 					} else {
@@ -117,7 +118,7 @@ describe('proConfirmPage', () => {
 			await proConfirmPage('en', 'a@example.com', 'monthly', 'overseas', { trial: true, now })
 		);
 		expect(trial).toContain(
-			'due on January 29, 2026 (Japan time), followed by payments of the same amount every month. The 14 days until then are free: cancel before January 29, 2026 (Japan time) and you will not be charged. Choose how to pay on the next page.'
+			'due on January 29, 2026 (Japan time), followed by payments of the same amount every month. The 14 days until then are free: cancel before January 29, 2026 and you will not be charged. Choose how to pay on the next page.'
 		);
 		const paid = String(
 			await proConfirmPage('en', 'a@example.com', 'yearly', 'domestic', { trial: false, now })

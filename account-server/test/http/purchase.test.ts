@@ -354,6 +354,38 @@ describe('buying credit', () => {
 		).toMatchObject({ revoked_at: expect.any(Number) });
 	});
 
+	it('keeps Pro credit when the later of two paid Pro subscriptions is refunded', async () => {
+		await signIn('duplicate-refund@example.com');
+		const account = await accountId('duplicate-refund@example.com');
+		const first = proInvoiceApi(account);
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account);
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		await webhook(paidInvoice(second.invoiceId));
+		await env.DB.prepare(
+			`INSERT INTO grants (id, account_id, kind, granted, remaining, expires_at, created_at)
+			 VALUES ('grant_duplicate_refund', ?, 'pro', 100, 100, 4_102_444_800, 0)`
+		)
+			.bind(account)
+			.run();
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: second.paymentIntentId, refunded: true } }
+		});
+		expect(
+			await env.DB.prepare('SELECT remaining, revoked FROM grants WHERE id = ?')
+				.bind('grant_duplicate_refund')
+				.first()
+		).toEqual({ remaining: 100, revoked: 0 });
+		expect(
+			await env.DB.prepare('SELECT revoked_at FROM subscriptions WHERE id = ?')
+				.bind(first.subscriptionId)
+				.first()
+		).toEqual({ revoked_at: null });
+	});
+
 	it('keeps Pro credit when a credit purchase is refunded', async () => {
 		await signIn('credit-refund-keeps-pro@example.com');
 		const account = await accountId('credit-refund-keeps-pro@example.com');

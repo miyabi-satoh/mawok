@@ -593,9 +593,14 @@ async function handleStripeEvent(
 				).bind(object.payment_intent),
 				env.DB.prepare(
 					`UPDATE grants SET revoked = revoked + remaining, remaining = 0
-					 WHERE account_id = (SELECT account_id FROM purchases WHERE stripe_payment_intent_id = ?)
-					   AND (SELECT product FROM purchases WHERE stripe_payment_intent_id = ?) = 'mawok-pro'
-					   AND kind = 'pro' AND expires_at > ?`
+					 WHERE account_id = (SELECT account_id FROM purchases WHERE stripe_payment_intent_id = ?1)
+					   AND (SELECT product FROM purchases WHERE stripe_payment_intent_id = ?2) = 'mawok-pro'
+					   AND kind = 'pro' AND expires_at > ?3
+					   -- 二重に払われた片方を返金しても、残るサブスクの Pro で付けた分は取り消さない
+					   AND NOT EXISTS (
+					     SELECT 1 FROM subscriptions
+					     WHERE account_id = grants.account_id AND revoked_at IS NULL AND ${proUntilSql} > ?3
+					       AND id != (SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?2))`
 				).bind(object.payment_intent, object.payment_intent, t),
 				env.DB.prepare(
 					`UPDATE subscriptions SET revoked_at = coalesce(revoked_at, ?)

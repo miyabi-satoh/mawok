@@ -13,6 +13,11 @@ export const LEGAL_PAGES = {
 	tokushoho: 'https://amiiby.com/tokushoho/'
 } as const;
 
+/** 課金や期限の日付。日本の外の買い手には、日本時間の日付だと断る。手元の日付で読むと、期限が1日遅く見えることがある。 */
+function billingDate(lang: Lang, region: SaleRegion | undefined, day: string) {
+	return region === 'overseas' ? messages[lang].japanTime(day) : day;
+}
+
 type Body = HtmlEscapedString | Promise<HtmlEscapedString>;
 
 // 英語は月名で出す。数字だけだと、月と日の順を国によって逆に読む。
@@ -429,13 +434,21 @@ export function proConfirmPage(
 	const t = messages[lang];
 	// 試用は Stripe で申し込みを確定した時刻から数えるので、実際の課金はこの日か、確定が日付をまたげば翌日になる。
 	// 解約の期限として出す日付なので、早い側にずれるぶんには買い手が損をしない。
-	// 日本の外の買い手には、日本時間の日付だと断る。手元の日付で読むと、期限が1日遅く見えることがある。
 	const firstPaymentDay = date(lang, now + PRO_TRIAL_DAYS * 24 * 60 * 60);
-	const firstPaymentDate = region === 'overseas' ? t.japanTime(firstPaymentDay) : firstPaymentDay;
 	const rows: [string, string][] = [
 		[t.confirmItemLabel, t.proItem(plan)],
 		[t.confirmPriceLabel, t.proPrice(plan)],
-		[t.confirmPaymentLabel, t.proPayment(plan, trial, region, firstPaymentDate, PRO_TRIAL_DAYS)],
+		[
+			t.confirmPaymentLabel,
+			t.proPayment(
+				plan,
+				trial,
+				region,
+				billingDate(lang, region, firstPaymentDay),
+				firstPaymentDay,
+				PRO_TRIAL_DAYS
+			)
+		],
 		[t.confirmDeliveryLabel, t.proDelivery(trial)],
 		[t.proCancelLabel, t.proCancel[region](LEGAL_PAGES.tokushoho)]
 	];
@@ -483,6 +496,7 @@ export function homePage(
 	}: { bought?: boolean; pro?: AccountPro; billing?: boolean } = {}
 ) {
 	const t = messages[lang];
+	const proDate = (seconds: number) => billingDate(lang, region, date(lang, seconds));
 	return page(
 		lang,
 		t.accountTitle,
@@ -497,11 +511,11 @@ export function homePage(
 								${
 									!pro.renews
 										? pro.trial
-											? t.proTrialCanceledUntil(date(lang, pro.displayUntil!))
-											: t.proCanceledUntil(pro.plan!, date(lang, pro.displayUntil!))
+											? t.proTrialCanceledUntil(proDate(pro.displayUntil!))
+											: t.proCanceledUntil(pro.plan!, proDate(pro.displayUntil!))
 										: pro.trial
-											? t.proTrialUntil(date(lang, pro.until!))
-											: t.proUntil(pro.plan!, date(lang, pro.until!))
+											? t.proTrialUntil(proDate(pro.until!))
+											: t.proUntil(pro.plan!, proDate(pro.until!))
 								}
 							</p>
 							${billing ? html`<form method="post" action="${ACCOUNT}/billing"><button class="secondary">${t.manageBilling}</button></form>` : ''}`

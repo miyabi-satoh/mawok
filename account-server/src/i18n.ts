@@ -137,12 +137,13 @@ const ja = {
 		trial: boolean,
 		region: SaleRegion,
 		firstPaymentDate: string,
+		cancelBefore: string,
 		trialDays: number
 	) => {
 		const amount = plan === 'yearly' ? '4,800 円' : '480 円';
 		const interval = plan === 'yearly' ? '1 年' : '1 か月';
 		const payment = trial
-			? `${firstPaymentDate} に最初の ${amount}を支払い、その後は ${interval}ごとに同じ額を支払います。それまでの ${trialDays} 日間は無料で、${firstPaymentDate} より前に解約すれば、支払いは生じません。`
+			? `${firstPaymentDate} に最初の ${amount}を支払い、その後は ${interval}ごとに同じ額を支払います。それまでの ${trialDays} 日間は無料で、${cancelBefore} より前に解約すれば、支払いは生じません。`
 			: `申し込みのときに最初の ${amount}を支払い、その後は ${interval}ごとに同じ額を支払います。`;
 		return region === 'domestic'
 			? `${payment}次の画面 (Stripe) で${trial ? 'カードを登録します。' : 'カードで払います。'}`
@@ -284,12 +285,13 @@ const en: typeof ja = {
 		trial: boolean,
 		region: SaleRegion,
 		firstPaymentDate: string,
+		cancelBefore: string,
 		trialDays: number
 	) => {
 		const amount = plan === 'yearly' ? '4,800 yen' : '480 yen';
 		const interval = plan === 'yearly' ? 'year' : 'month';
 		const payment = trial
-			? `Your first payment of ${amount} is due on ${firstPaymentDate}, followed by payments of the same amount every ${interval}. The ${trialDays} days until then are free: cancel before ${firstPaymentDate} and you will not be charged. `
+			? `Your first payment of ${amount} is due on ${firstPaymentDate}, followed by payments of the same amount every ${interval}. The ${trialDays} days until then are free: cancel before ${cancelBefore} and you will not be charged. `
 			: `You pay the first ${amount} when you subscribe, then the same amount every ${interval}. `;
 		return region === 'domestic'
 			? `${payment}${trial ? 'Register your card' : 'Pay by card'} on the next page (Stripe).`
