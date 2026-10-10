@@ -114,6 +114,12 @@
 				<Field.Title>{m.settings_mawok_pro()}</Field.Title>
 			</Field.Field>
 		</Field.Content>
+	{:else}
+		<Field.Content>
+			<Button variant="outline" onclick={() => call('open_mawok_pro_page')}>
+				{m.settings_devices_pro_buy()}
+			</Button>
+		</Field.Content>
 	{/if}
 	<Field.Content>
 		<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">

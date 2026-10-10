@@ -126,6 +126,14 @@ describe('設定画面の Mawok のアカウント', () => {
 		await expect.element(screen.getByText(m.settings_mawok_pro())).toBeVisible();
 	});
 
+	it('Pro でなければ、料金のページを開ける', async () => {
+		signedIn = true;
+		setSettings();
+		const screen = await openAccount();
+		await screen.getByRole('button', { name: m.settings_devices_pro_buy() }).click();
+		expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1);
+	});
+
 	it('窓口につながらなくても、猶予中の Pro を出す', async () => {
 		signedIn = true;
 		invoked.mockImplementation((command) => {

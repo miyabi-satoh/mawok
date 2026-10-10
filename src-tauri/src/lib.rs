@@ -1586,10 +1586,7 @@ async fn read_callback(
 async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    if let Err(error) = clear_pro_state(app).await {
-        error!("couldn't clear the previous Pro state: {error}");
-        return false;
-    }
+    clear_pro_state(app).await;
     let saved = run_blocking(move || secrets::write(AiService::Mawok.credential_user(), &token))
         .await
         .and_then(|result| result)
@@ -1610,7 +1607,7 @@ async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
     saved
 }
 
-/// 続いている申し込み。設定の「アクション」を開き直したときに、サインインの途中であることを出し直す
+/// 続いている申し込み。設定の「アカウント」を開き直したときに、サインインの途中であることを出し直す
 #[tauri::command]
 fn mawok_sign_in_pending(app: AppHandle) -> Option<MawokSignIn> {
     app.state::<ActionState>()
@@ -1679,7 +1676,15 @@ async fn refresh_mawok_account_status(
         return Ok(None);
     }
     if !exists {
-        clear_pro_state(app).await?;
+        let already_cleared = {
+            let state = app.state::<AppState>();
+            state.pro_state.lock().unwrap().is_none()
+                && !state.mawok_account_signed_in.load(Ordering::Relaxed)
+        };
+        if already_cleared {
+            return Ok(None);
+        }
+        clear_pro_state(app).await;
         return Ok(None);
     }
     let reading = ReadingAiKey::start(app);
@@ -1701,7 +1706,7 @@ async fn refresh_mawok_account_status(
             token
         }
         Err(secrets::ReadError::NotFound) => {
-            clear_pro_state(app).await?;
+            clear_pro_state(app).await;
             return Ok(None);
         }
         Err(secrets::ReadError::Unreadable(detail)) => {
@@ -1778,7 +1783,7 @@ async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus, ge
 }
 
 /// サインインするアカウントが替わったとき、前のアカウントの猶予を使わないよう、メモリーと状態ファイルの両方を先に消す。
-async fn clear_pro_state(app: &AppHandle) -> Result<(), String> {
+async fn clear_pro_state(app: &AppHandle) {
     let path = app.state::<AppState>().pro_state_path.clone();
     app.state::<AppState>()
         .pro_generation
@@ -1792,7 +1797,6 @@ async fn clear_pro_state(app: &AppHandle) -> Result<(), String> {
         Ok(Err(error)) | Err(error) => warn!("couldn't clear the Pro state: {error}"),
     }
     apply_config(app);
-    Ok(())
 }
 
 /// 手元のトークンを消し、サインインしていない状態にする
@@ -1804,7 +1808,7 @@ async fn forget_mawok_token(app: &AppHandle) -> Result<(), String> {
         .inspect_err(|error| error!("couldn't delete the Mawok account token: {error}"))?;
     app.state::<AppState>()
         .remember_ai_key(AiService::Mawok, false);
-    clear_pro_state(app).await?;
+    clear_pro_state(app).await;
     Ok(())
 }
 

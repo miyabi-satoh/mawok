@@ -259,7 +259,7 @@
 	"settings_ai_consent_handling_anthropic": "Handling: what you send isn't used to train models and is deleted within 30 days. If automated systems flag it as possibly violating the usage policy, it may be kept for up to 2 years and read by Anthropic's safety team. What you send can't be taken back.",
 	"settings_ai_consent_handling_openai": "Handling: what you send isn't used to train models (unless you turn on data sharing in your OpenAI settings). It's kept for up to 30 days for abuse monitoring and may be read by OpenAI staff. What you send can't be taken back.",
 	"settings_ai_consent_accept": "Agree",
-	"action_error_disabled": "AI isn't set up yet. Under Actions in Settings, choose an AI service and enter its key, or sign in under Account and accept the notice.",
+	"action_error_disabled": "AI isn't set up yet. Under Actions in Settings, choose an AI service and enter its API key, or sign in under Account. Then return to Actions and accept the notice.",
 	"action_error_no_key": "No API key is set. Enter one under Actions in Settings.",
 	"action_error_key_unreadable": "Couldn't read the API key. Allow access to the Keychain or credential store, or enter the key again under Actions in Settings.",
 	"action_error_invalid_key": "The API key is invalid or lacks permission. Check the key under Actions in Settings.",

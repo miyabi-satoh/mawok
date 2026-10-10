@@ -78,11 +78,6 @@
 	const callSettings = commandCaller(settingsFailed, showError);
 	/** アクションのコマンドを呼ぶ。失敗したら、アクションの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
 	const callActions = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
-	const callAccount = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
-	const callQuietly = commandCaller(
-		() => '',
-		() => {}
-	);
 	/** 組み合わせのコマンドを呼ぶ。Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする */
 	const callLan = commandCaller(lanErrorMessage, showError);
 	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
@@ -98,10 +93,19 @@
 		const refresh = ++mawokAccountRefresh;
 		refreshingMawokAccountStatus = true;
 		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「アカウント」の欄が出す。
-		const result = await callQuietly<AccountStatus | null>('mawok_account_status');
+		// 資格情報を読めなかったときは Rust 側がサインインしていない扱いにするので、「サインイン」からやり直せる。
+		let status: AccountStatus | null;
+		try {
+			status = await invoke<AccountStatus | null>('mawok_account_status');
+		} catch {
+			if (refresh !== mawokAccountRefresh) return;
+			refreshingMawokAccountStatus = false;
+			mawokAccountStatus = null;
+			return;
+		}
 		if (refresh !== mawokAccountRefresh) return;
 		refreshingMawokAccountStatus = false;
-		mawokAccountStatus = result.ok ? result.value : null;
+		mawokAccountStatus = status;
 	}
 
 	// 窓口で買い足したり Pro を申し込んだりして戻ったとき、設定を開き直さず表示を更新する。
@@ -1289,7 +1293,7 @@
 						<SettingsSection>
 							<SettingsRow>
 								<SettingsMawokAccount
-									call={callAccount}
+									call={callActions}
 									signedIn={view.mawokAccountSignedIn}
 									status={mawokAccountStatus}
 									proAvailable={view.proAvailable}
