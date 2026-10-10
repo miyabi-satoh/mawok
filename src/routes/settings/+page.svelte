@@ -1311,9 +1311,6 @@
 											</Field.Field>
 										{/each}
 									</div>
-									<Field.Description class="leading-snug"
-										>{m.settings_devices_list_description()}</Field.Description
-									>
 								{:else}
 									<Field.Description class="leading-snug"
 										>{m.settings_devices_empty()}</Field.Description
