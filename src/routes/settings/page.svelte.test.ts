@@ -1432,7 +1432,7 @@ describe('設定画面のデバイス', () => {
 		await vi.waitFor(() => expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1));
 	});
 
-	it('鍵がないデバイスでは、コードを入れて加えられる', async () => {
+	it('鍵がないデバイスでは、コードを入力して追加できる', async () => {
 		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
 		const screen = await renderAt(m.settings_category_devices);
 

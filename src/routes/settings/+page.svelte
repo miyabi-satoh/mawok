@@ -547,8 +547,7 @@
 	}
 </script>
 
-<!-- 記録中の表示。ホットキーと下書きの操作で同じ形にする -->
-<!-- 鍵を待つ状態と持つ状態で、同じ形の行をいちばん下に置く。ほかのデバイスを締め出す操作なので、押す前に何が起きるかを説明に書く -->
+<!-- 鍵を待つ状態と持つ状態で、同じ形の行をいちばん下に置く -->
 {#snippet resetKeyRow(description?: string)}
 	<SettingsRow>
 		<Field.Field orientation="horizontal" class="min-h-8">
@@ -563,6 +562,7 @@
 	</SettingsRow>
 {/snippet}
 
+<!-- 記録中の表示。ホットキーと下書きの操作で同じ形にする -->
 {#snippet recordingStatus()}
 	<div class="flex items-center gap-1">
 		<div
@@ -1256,7 +1256,7 @@
 								>
 							</SettingsRow>
 						{:else if panel === 'needsPairing'}
-							<!-- 鍵を持つ状態の「ほかのデバイスを加える」と同じく、題名を左、操作を右、説明を下に置く -->
+							<!-- 鍵を持つ状態の「デバイスを追加」と同じく、題名を左、操作を右、説明を下に置く -->
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 									<Field.Title>{m.settings_devices_join_title()}</Field.Title>

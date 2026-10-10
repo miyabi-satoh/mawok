@@ -5,6 +5,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>組み合わせた自分のデバイスと下書きを送り合うために、同じネットワークのデバイスを探します。</string>
+	<string>追加した自分のデバイスとテキストを送り合うために、同じネットワークのデバイスを探します。</string>
 </dict>
 </plist>
