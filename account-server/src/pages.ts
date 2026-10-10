@@ -15,9 +15,11 @@ export const LEGAL_PAGES = {
 
 type Body = HtmlEscapedString | Promise<HtmlEscapedString>;
 
+// 英語は月名で出す。数字だけだと、月と日の順を国によって逆に読む。
 function date(lang: Lang, seconds: number) {
 	return new Date(seconds * 1000).toLocaleDateString(lang === 'ja' ? 'ja-JP' : 'en-US', {
-		timeZone: 'Asia/Tokyo'
+		timeZone: 'Asia/Tokyo',
+		...(lang === 'en' && { year: 'numeric', month: 'long', day: 'numeric' })
 	});
 }
 
@@ -425,7 +427,11 @@ export function proConfirmPage(
 	{ trial, now }: { trial: boolean; now: number }
 ) {
 	const t = messages[lang];
-	const firstPaymentDate = date(lang, now + PRO_TRIAL_DAYS * 24 * 60 * 60);
+	// 試用は Stripe で申し込みを確定した時刻から数えるので、実際の課金はこの日か、確定が日付をまたげば翌日になる。
+	// 解約の期限として出す日付なので、早い側にずれるぶんには買い手が損をしない。
+	// 日本の外の買い手には、日本時間の日付だと断る。手元の日付で読むと、期限が1日遅く見えることがある。
+	const firstPaymentDay = date(lang, now + PRO_TRIAL_DAYS * 24 * 60 * 60);
+	const firstPaymentDate = region === 'overseas' ? t.japanTime(firstPaymentDay) : firstPaymentDay;
 	const rows: [string, string][] = [
 		[t.confirmItemLabel, t.proItem(plan)],
 		[t.confirmPriceLabel, t.proPrice(plan)],

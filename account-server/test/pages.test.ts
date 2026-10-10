@@ -83,10 +83,13 @@ describe('proConfirmPage', () => {
 					);
 					expect(page).toContain('次の更新日より前に解約すれば、次の期間の請求はありません。');
 
+					// 日本の外の買い手には、日本時間の日付だと断る
+					const day = region === 'overseas' ? '2026/1/29 (日本時間)' : '2026/1/29';
 					if (trial) {
-						expect(page).toContain('最初の 14 日間は無料です。');
-						expect(page).toContain('2026/1/29 に最初の');
-						expect(page).toContain('2026/1/29 より前に解約すれば、支払いは生じません。');
+						expect(page).toContain(`${day} に最初の ${amount}を支払い、`);
+						expect(page).toContain(
+							`それまでの 14 日間は無料で、${day} より前に解約すれば、支払いは生じません。`
+						);
 						expect(page).toContain('試用の間は付かず、最初の支払いの後から付きます。');
 					} else {
 						expect(page).toContain(`申し込みのときに最初の ${amount}を支払い、`);
@@ -107,5 +110,21 @@ describe('proConfirmPage', () => {
 				}
 			}
 		}
+	});
+
+	it('joins the English sentences, and writes the date with the month name', async () => {
+		const trial = String(
+			await proConfirmPage('en', 'a@example.com', 'monthly', 'overseas', { trial: true, now })
+		);
+		expect(trial).toContain(
+			'due on January 29, 2026 (Japan time), followed by payments of the same amount every month. The 14 days until then are free: cancel before January 29, 2026 (Japan time) and you will not be charged. Choose how to pay on the next page.'
+		);
+		const paid = String(
+			await proConfirmPage('en', 'a@example.com', 'yearly', 'domestic', { trial: false, now })
+		);
+		expect(paid).toContain(
+			'You pay the first 4,800 yen when you subscribe, then the same amount every year. Pay by card on the next page (Stripe).'
+		);
+		expect(paid).not.toContain('free');
 	});
 });

@@ -142,7 +142,7 @@ const ja = {
 		const amount = plan === 'yearly' ? '4,800 円' : '480 円';
 		const interval = plan === 'yearly' ? '1 年' : '1 か月';
 		const payment = trial
-			? `最初の ${trialDays} 日間は無料です。${firstPaymentDate} に最初の ${amount}を支払い、その後は ${interval}ごとに同じ額を支払います。${firstPaymentDate} より前に解約すれば、支払いは生じません。無料の試用は、1つのアカウントにつき 1 回だけです。`
+			? `${firstPaymentDate} に最初の ${amount}を支払い、その後は ${interval}ごとに同じ額を支払います。それまでの ${trialDays} 日間は無料で、${firstPaymentDate} より前に解約すれば、支払いは生じません。`
 			: `申し込みのときに最初の ${amount}を支払い、その後は ${interval}ごとに同じ額を支払います。`;
 		return region === 'domestic'
 			? `${payment}次の画面 (Stripe) で${trial ? 'カードを登録します。' : 'カードで払います。'}`
@@ -152,6 +152,7 @@ const ja = {
 		trial
 			? '申し込みが済むとすぐ、このアカウントで Pro を使えます。毎月の AI アクションのクレジットは、試用の間は付かず、最初の支払いの後から付きます。'
 			: '支払いが済むとすぐ、このアカウントで Pro を使えます。',
+	japanTime: (date: string) => `${date} (日本時間)`,
 	proCancelLabel: '解約と返金',
 	proCancel: {
 		domestic: (tokushoho: string) =>
@@ -160,7 +161,7 @@ const ja = {
 			`解約はアカウントのページの「支払いを管理する」からいつでもできます。次の更新日より前に解約すれば、次の期間の請求はありません。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。購入から 60 日以内は、[Link の返金ポリシー](${LINK_REFUND_POLICY})で返金されることがあります。`
 	} as Record<SaleRegion, (tokushoho: string) => string>,
 	proCheckoutNote:
-		'解約するまで自動で更新します。解約は Mawok のアカウントのページからでき、支払い済みの期間の終わりまで使えます。支払い済みの期間は返金できません。',
+		'解約するまで自動で更新します。解約は Mawok のアカウントのページからでき、支払い済みの期間の終わりまで使えます。支払い済みの期間は、こちらの誤りによる請求などを除き、返金できません。',
 	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
 		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} に自動で更新されます。`,
 	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
@@ -288,7 +289,7 @@ const en: typeof ja = {
 		const amount = plan === 'yearly' ? '4,800 yen' : '480 yen';
 		const interval = plan === 'yearly' ? 'year' : 'month';
 		const payment = trial
-			? `The first ${trialDays} days are free. Your first payment of ${amount} is due on ${firstPaymentDate}, followed by payments of the same amount every ${interval}. Cancel before ${firstPaymentDate} and you will not be charged. Each account is eligible for one free trial. `
+			? `Your first payment of ${amount} is due on ${firstPaymentDate}, followed by payments of the same amount every ${interval}. The ${trialDays} days until then are free: cancel before ${firstPaymentDate} and you will not be charged. `
 			: `You pay the first ${amount} when you subscribe, then the same amount every ${interval}. `;
 		return region === 'domestic'
 			? `${payment}${trial ? 'Register your card' : 'Pay by card'} on the next page (Stripe).`
@@ -298,6 +299,7 @@ const en: typeof ja = {
 		trial
 			? 'Pro is available on this account as soon as you subscribe. Monthly AI action credit is not added during the trial; it begins after your first payment.'
 			: 'Pro is available on this account as soon as payment is complete.',
+	japanTime: (date: string) => `${date} (Japan time)`,
 	proCancelLabel: 'Cancellation and refunds',
 	proCancel: {
 		domestic: (tokushoho: string) =>
@@ -306,7 +308,7 @@ const en: typeof ja = {
 			`You can cancel at any time from Manage billing on your account page. Cancel before the next renewal date and you will not be charged for the next period. After cancellation, you can keep using Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})). Within 60 days of purchase, you may get a refund under [Link's refund policy](${LINK_REFUND_POLICY}).`
 	},
 	proCheckoutNote:
-		'It renews automatically until you cancel. You can cancel from your Mawok account page and continue using it until the end of the paid period. Paid periods are non-refundable.',
+		'It renews automatically until you cancel. You can cancel from your Mawok account page and continue using it until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side.',
 	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
 		`Pro (${plan}): renews automatically on ${date}.`,
 	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
