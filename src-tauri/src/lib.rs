@@ -185,6 +185,8 @@ struct AppState {
     pro_state: Mutex<Option<pro::State>>,
     /// 資格情報管理で Mawok のアカウントトークンを読めたか。Pro の案内をサインイン前と区別する。
     mawok_account_signed_in: AtomicBool,
+    /// Pro の状態を消すたびに進める。問い合わせている間にサインアウトやアカウントの替わりがあったら、その答えを捨てる。
+    pro_generation: AtomicUsize,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -1684,9 +1686,23 @@ async fn refresh_mawok_account_status(
         }
     };
     let client = http_client(app)?;
-    match account::status(&client, &token).await {
+    let generation = app
+        .state::<AppState>()
+        .pro_generation
+        .load(Ordering::SeqCst);
+    let answer = account::status(&client, &token).await;
+    if app
+        .state::<AppState>()
+        .pro_generation
+        .load(Ordering::SeqCst)
+        != generation
+    {
+        // 前のトークンへの答え。今のアカウントの状態にも、今のトークンにも触らない。
+        return Ok(None);
+    }
+    match answer {
         Ok(status) => {
-            remember_pro_state(app, &status).await;
+            remember_pro_state(app, &status, generation).await;
             Ok(Some(status))
         }
         Err(account::AccountError::SignedOut) => {
@@ -1719,12 +1735,25 @@ fn start_periodic_pro_checks(app: AppHandle) {
 }
 
 /// 窓口が答えた状態は、次の起動でオフライン猶予を使えるよう別の状態ファイルに置く。保存に失敗しても、今回の窓口の答えは使う。
-async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus) {
+async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus, generation: usize) {
     let state = pro::State::from_status(status.account_id.clone(), &status.pro, pro::now());
     let path = app.state::<AppState>().pro_state_path.clone();
     *app.state::<AppState>().pro_state.lock().unwrap() = Some(state.clone());
-    if let Err(error) = run_blocking(move || pro::save(&path, &state)).await {
+    let saved_path = path.clone();
+    if let Err(error) = run_blocking(move || pro::save(&saved_path, &state)).await {
         warn!("couldn't save the Pro state: {error}");
+    }
+    if app
+        .state::<AppState>()
+        .pro_generation
+        .load(Ordering::SeqCst)
+        != generation
+    {
+        // 保存している間に消された。消した後の状態に合わせ直す。
+        *app.state::<AppState>().pro_state.lock().unwrap() = None;
+        if let Ok(Err(error)) = run_blocking(move || pro::clear(&path)).await {
+            warn!("couldn't clear the Pro state: {error}");
+        }
     }
     apply_config(app);
 }
@@ -1732,6 +1761,9 @@ async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus) {
 /// サインインするアカウントが替わったとき、前のアカウントの猶予を使わないよう、メモリーと状態ファイルの両方を先に消す。
 async fn clear_pro_state(app: &AppHandle) -> Result<(), String> {
     let path = app.state::<AppState>().pro_state_path.clone();
+    app.state::<AppState>()
+        .pro_generation
+        .fetch_add(1, Ordering::SeqCst);
     *app.state::<AppState>().pro_state.lock().unwrap() = None;
     app.state::<AppState>()
         .mawok_account_signed_in
@@ -3808,6 +3840,7 @@ pub fn run() {
                 ai_key_available: Mutex::new(None),
                 pro_state: Mutex::new(pro_state),
                 mawok_account_signed_in: AtomicBool::new(false),
+                pro_generation: AtomicUsize::new(0),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]
