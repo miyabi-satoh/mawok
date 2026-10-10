@@ -522,22 +522,26 @@ export function homePage(
 }
 
 /**
- * 支払いから戻った先で、残高が付くのを待つ画面。`autoRetry` の間は数秒おきに開き直す。
+ * 支払いから戻った先で、残高が付く (Pro なら有効になる) のを待つ画面。`autoRetry` の間は数秒おきに開き直す。
  * 待っても付かなければ、確かめ直す手段を出す (買えたか分からないまま買い直さないように)。
  */
 export function checkingPurchasePage(
 	lang: Lang,
-	title: string,
+	pro: boolean,
 	retryUrl: string,
 	autoRetry: boolean
 ) {
 	const t = messages[lang];
+	const title = pro ? t.proTitle : t.buyTitle;
+	// Pro は試用で始まると支払いも領収のメールも無いので、支払いでなく申し込みを確かめると言う。
+	const checking = pro ? t.checkingPro : t.checkingPurchase;
+	const notYet = pro ? t.proNotYet : t.purchaseNotYet;
 	return page(
 		lang,
 		title,
 		html`${autoRetry ? html`<meta http-equiv="refresh" content="3;url=${retryUrl}" />` : ''}
 			<h1>${title}</h1>
-			<p>${autoRetry ? t.checkingPurchase : t.purchaseNotYet}</p>
+			<p>${autoRetry ? checking : notYet}</p>
 			${autoRetry ? '' : html`<p><a href="${retryUrl}">${t.checkAgain}</a></p>`}`
 	);
 }

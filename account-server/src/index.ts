@@ -1084,7 +1084,7 @@ accountApp.post('/buy', async (c) => {
 });
 
 /**
- * 支払いから戻った先。webhook が届いて残高が付くのを待ち、付いたら予約を外して `next` へ進む。
+ * 支払いから戻った先。webhook が届いて残高が付く (Pro なら有効になる) のを待ち、付いたら予約を外して `next` へ進む。
  * 予約を外すのは、次の買い足しで、払い終えた支払いの画面へ送らないため。
  */
 accountApp.get('/buy/done', async (c) => {
@@ -1101,12 +1101,7 @@ accountApp.get('/buy/done', async (c) => {
 		const retry = new URL(c.req.url);
 		retry.searchParams.set('tries', String(tries + 1));
 		return c.html(
-			checkingPurchasePage(
-				lang,
-				messages[lang].proTitle,
-				`${retry.pathname}${retry.search}`,
-				tries < PURCHASE_CHECKS
-			)
+			checkingPurchasePage(lang, true, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
 		);
 	}
 	const bought = await c.env.DB.prepare(
@@ -1125,12 +1120,7 @@ accountApp.get('/buy/done', async (c) => {
 	const retry = new URL(c.req.url);
 	retry.searchParams.set('tries', String(tries + 1));
 	return c.html(
-		checkingPurchasePage(
-			lang,
-			messages[lang].buyTitle,
-			`${retry.pathname}${retry.search}`,
-			tries < PURCHASE_CHECKS
-		)
+		checkingPurchasePage(lang, false, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
 	);
 });
 

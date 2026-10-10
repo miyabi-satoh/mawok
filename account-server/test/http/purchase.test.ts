@@ -935,7 +935,16 @@ describe('buying credit', () => {
 			cookie
 		});
 		expect(await credits.text()).toContain('<h1>クレジットを購入</h1>');
-		const pro = await request('/account/buy/done?next=%2Faccount%2F&pro=1', { cookie });
-		expect(await pro.text()).toContain('<h1>Mawok Pro</h1>');
+		const pro = await (
+			await request('/account/buy/done?next=%2Faccount%2F&pro=1', { cookie })
+		).text();
+		expect(pro).toContain('<h1>Mawok Pro</h1>');
+		expect(pro).toContain('申し込みを確かめています');
+		// Pro は試用で始まると支払いも領収のメールも無いので、クレジット向けの案内を出さない。
+		const gaveUp = await (
+			await request('/account/buy/done?next=%2Faccount%2F&pro=1&tries=10', { cookie })
+		).text();
+		expect(gaveUp).toContain('申し込みをまだ確かめられていません');
+		expect(gaveUp).not.toContain('買い直す');
 	});
 });
