@@ -4,8 +4,8 @@
  */
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
-import server from '../../src/index';
-import { app, linkApp, linkPath, newLink, postForm, request, signIn } from '../helpers';
+import { app as server } from '../../src/index';
+import { accountId, app, linkApp, linkPath, newLink, postForm, request, signIn } from '../helpers';
 
 type Guard =
 	/** `Authorization: Bearer` のアプリ用のトークン。無い・知らない・外したものは 401。 */
@@ -72,6 +72,34 @@ const ENTRIES: Entry[] = [
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ user: 'x' })
+			})
+	},
+	{
+		route: 'GET /v1/sync',
+		guards: ['token', 'limit-account'],
+		send: (s) => app('/v1/sync', s.token)
+	},
+	{
+		route: 'PUT /v1/sync',
+		guards: ['token', 'limit-account'],
+		send: (s) =>
+			app('/v1/sync', s.token, {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					key_id: 'a'.repeat(16),
+					items: [{ collection: 'settings', id: 'x', base_seq: null, deleted: true }]
+				})
+			})
+	},
+	{
+		route: 'POST /v1/sync/reset',
+		guards: ['token', 'limit-account'],
+		send: (s) =>
+			app('/v1/sync/reset', s.token, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ key_id: 'a'.repeat(16) })
 			})
 	},
 	{
@@ -269,10 +297,10 @@ describe('guards', () => {
 	});
 
 	// 上限は時計に合わせた区切りごとに数えるので (wrangler.jsonc の ratelimits)、送る途中で区切りをまたぐと
-	// 上限に届かないことがある。またいでも片側で上限 (いちばん大きい 10) を超えるよう、その2倍より多く送る。
+	// 上限に届かないことがある。またいでも片側で上限 (いちばん大きい 60) を超えるよう、その2倍より多く送る。
 	async function sendUntilLimited(send: () => Promise<Response>): Promise<number[]> {
 		const statuses: number[] = [];
-		for (let n = 0; n < 21 && !statuses.includes(429); n++) statuses.push((await send()).status);
+		for (let n = 0; n < 121 && !statuses.includes(429); n++) statuses.push((await send()).status);
 		return statuses;
 	}
 
@@ -289,14 +317,29 @@ describe('guards', () => {
 	});
 
 	it('limits each account', async () => {
-		const { cookie } = await signIn('guard-limit@example.com');
-		const other = await signIn('guard-limit-other@example.com');
-		for (const entry of guarded('limit-account')) {
+		for (const [index, entry] of guarded('limit-account').entries()) {
+			const email = `guard-limit-${index}@example.com`;
+			const first = await linkApp(email);
+			const other = await linkApp(`guard-limit-other-${index}@example.com`);
+			for (const accountEmail of [email, `guard-limit-other-${index}@example.com`]) {
+				await env.DB.prepare(
+					`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
+					 VALUES (?, ?, 'monthly', 4102444800, 'trialing', 0)`
+				)
+					.bind(`guard_${accountEmail}`, await accountId(accountEmail))
+					.run();
+			}
 			// 送り主 (IP) は毎回変わる。
-			const statuses = await sendUntilLimited(() => entry.send({ cookie }));
+			const statuses = await sendUntilLimited(() =>
+				entry.send({ cookie: first.cookie, token: first.token })
+			);
 			expect(statuses, entry.route).toContain(429);
 			expect(statuses[0], entry.route).not.toBe(429);
-			expect((await entry.send({ cookie: other.cookie })).status, entry.route).not.toBe(429);
+			expect(
+				(await entry.send({ cookie: other.cookie, token: other.token })).status,
+				entry.route
+			).not.toBe(429);
 		}
-	});
+		// 同期の上限 (60) に当たるまで入口ごとに送るので、既定の 5 秒では遅い CI の機械で足りない。
+	}, 60_000);
 });

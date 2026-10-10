@@ -29,6 +29,16 @@ describe('deleting an account', () => {
 		)
 			.bind(account)
 			.run();
+		await env.DB.batch([
+			env.DB.prepare(
+				`INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes)
+					 VALUES (?, 'aaaaaaaaaaaaaaaa', 1, 0, 1)`
+			).bind(account),
+			env.DB.prepare(
+				`INSERT INTO sync_items (account_id, collection, id, seq, deleted, data, updated_at)
+					 VALUES (?, 'settings', 'one', 1, 0, x'01', 0)`
+			).bind(account)
+		]);
 		geminiAnswers();
 		await sendAi(token);
 		vi.restoreAllMocks();
@@ -37,6 +47,12 @@ describe('deleting an account', () => {
 			await env.DB.prepare('SELECT 1 FROM accounts WHERE id = ?').bind(account).first()
 		).toBeNull();
 		expect(await grantsOf(account)).toEqual([]);
+		expect(
+			await env.DB.prepare('SELECT 1 FROM sync_accounts WHERE account_id = ?').bind(account).first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare('SELECT 1 FROM sync_items WHERE account_id = ?').bind(account).first()
+		).toBeNull();
 		expect((await app('/v1/balance', token)).status).toBe(401);
 		expect(await (await request('/account/', { cookie })).text()).toContain(
 			'action="/account/login/email"'

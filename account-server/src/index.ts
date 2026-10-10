@@ -59,6 +59,15 @@ import {
 } from './stripe';
 import { currentAccount, endSession, startSession } from './session';
 import {
+	getSync,
+	hasSyncPro,
+	purgeSync,
+	putSync,
+	resetSync,
+	SYNC_REQUEST_BYTES,
+	syncQuery
+} from './sync';
+import {
 	isEmail,
 	normalizeEmail,
 	formString,
@@ -98,7 +107,7 @@ const IN_FLIGHT_TTL = 120;
 
 type App = { Bindings: Env };
 // `/account` と `/account/` を同じ画面にする (紹介のページは末尾に `/` を付けてリンクする)。
-const app = new Hono<App>({ strict: false });
+export const app = new Hono<App>({ strict: false });
 
 // 値付けの値が欠けていれば、どの入口も DB に書く前に止める (→ docs/account-server.md「値付けの値」)。
 // サインインのリンクを使ってから 500 になるような、やり直せない途中で止まらないように。
@@ -204,6 +213,55 @@ app.delete('/v1/token', async (c) => {
 			.run();
 	}
 	return c.body(null, 204);
+});
+
+// ---- Pro の設定と履歴の同期 ----
+
+/** 同期の入口の共通の認可と、アカウントごとの書き込み上限。 */
+async function syncAccount(c: Context<App>): Promise<string | Response> {
+	const accountId = await appAccount(c);
+	if (!accountId) return c.json({ error: 'unauthorized' }, 401);
+	if (await limited(c, c.env.SYNC_LIMITER, accountId))
+		return c.json({ error: 'rate_limited' }, 429);
+	if (!(await hasSyncPro(c.env, accountId))) return c.json({ error: 'pro_required' }, 403);
+	return accountId;
+}
+
+app.get('/v1/sync', async (c) => {
+	const accountId = await syncAccount(c);
+	if (accountId instanceof Response) return accountId;
+	const query = syncQuery({
+		since: c.req.query('since'),
+		limit: c.req.query('limit'),
+		rebuild: c.req.query('rebuild')
+	});
+	if (!query) return c.json({ error: 'invalid_request' }, 400);
+	return c.json(await getSync(c.env, accountId, query));
+});
+
+app.put('/v1/sync', async (c) => {
+	const accountId = await syncAccount(c);
+	if (accountId instanceof Response) return accountId;
+	const contentLength = Number(c.req.header('content-length'));
+	if (Number.isFinite(contentLength) && contentLength > SYNC_REQUEST_BYTES)
+		return c.json({ error: 'too_large', limit: 'request' }, 413);
+	const result = await putSync(c.env, accountId, await c.req.json().catch(() => undefined));
+	if (result.ok) return c.json({ seq: result.seq, items: result.items });
+	if (result.error === 'invalid_request') return c.json({ error: result.error }, 400);
+	if (result.error === 'key_mismatch') return c.json({ error: result.error }, 409);
+	if (result.error === 'too_large')
+		return c.json({ error: result.error, limit: result.limit }, 413);
+	if (result.error === 'conflict')
+		return c.json({ error: result.error, conflicts: result.conflicts }, 409);
+	return c.json({ error: 'invalid_request' }, 400);
+});
+
+app.post('/v1/sync/reset', async (c) => {
+	const accountId = await syncAccount(c);
+	if (accountId instanceof Response) return accountId;
+	const result = await resetSync(c.env, accountId, await c.req.json().catch(() => undefined));
+	if (!result) return c.json({ error: 'invalid_request' }, 400);
+	return c.json(result);
 });
 
 /**
@@ -1187,4 +1245,9 @@ accountApp.post('/billing', async (c) => {
 
 app.route(ACCOUNT, accountApp);
 
-export default app;
+/** 1日ごとに、期限が過ぎた同期の暗号文と消した記録を掃除する。 */
+export function scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+	ctx.waitUntil(purgeSync(env));
+}
+
+export default { fetch: app.fetch, scheduled } satisfies ExportedHandler<Env>;
