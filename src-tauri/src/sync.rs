@@ -1079,7 +1079,7 @@ pub async fn sync_once_with<T: SyncTransport>(
         }
         return Ok(SyncResult {
             // 同じ値を入れ直しただけなら、変わっていない。設定ファイルを書き直して次の同期を呼ばないため
-            changed: result.config != *config,
+            changed: result.changed && result.config != *config,
             config: result.config,
             state: result.state,
             reset: reset_seen,
