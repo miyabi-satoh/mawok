@@ -77,7 +77,7 @@ const ja = {
 		`${email} に届いたリンクを開いてください。リンクは ${minutes} 分で切れます。`,
 	mailSentHint: '届かないときは、迷惑メールのフォルダも確かめてください。',
 	mailSentSameComputer:
-		'リンクは、Mawok を使っているこのデバイス で開いてください。ほかのデバイスで開くと、このデバイス を登録できません。',
+		'リンクは、Mawok を使っているこのデバイスで開いてください。ほかのデバイスで開くと、このデバイスを登録できません。',
 	signIn: 'サインインする',
 	linkUnusableTitle: 'リンクが使えません',
 	linkUnusable: 'リンクの期限が切れたか、もう使われています。サインインをやり直してください。',
@@ -85,8 +85,8 @@ const ja = {
 	signOut: 'サインアウト',
 	linkTitle: 'デバイスを登録',
 	linkConfirm: (name: string) =>
-		`「${name}」をこのアカウントに登録します。登録したデバイス の Mawok は、アカウントのクレジットで AI アクションを使えます。`,
-	approve: 'このデバイス を登録',
+		`「${name}」をこのアカウントに登録します。登録したデバイスの Mawok は、アカウントのクレジットで AI アクションを使えます。`,
+	approve: 'このデバイスを登録',
 	linkInvalidTitle: 'このページは開けません',
 	linkInvalid: 'Mawok の設定の「アカウント」で「サインイン」を押して、もう一度開いてください。',
 	buyTitle: 'クレジットを購入',
@@ -174,7 +174,7 @@ const ja = {
 	balance: (percent: number) => `AI アクションのクレジット: 残り ${percent}%`,
 	noBalance: 'AI アクションのクレジットはありません。',
 	appsTitle: '登録しているデバイス',
-	appsNone: '登録しているデバイス はありません。',
+	appsNone: '登録しているデバイスはありません。',
 	appLinkedAt: (name: string, date: string) => `${name}（${date} に登録）`,
 	unlink: '登録を解除',
 	tooManyConnectsTitle: 'しばらくお待ちください',
@@ -189,7 +189,7 @@ const ja = {
 	mailBody: (link: string, minutes: number, linking: boolean) =>
 		[
 			'Mawok のアカウントにサインインするには、次のリンクを開いてください。',
-			...(linking ? ['デバイスを登録するには、Mawok を使っているデバイス で開いてください。'] : []),
+			...(linking ? ['デバイスを登録するには、Mawok を使っているデバイスで開いてください。'] : []),
 			'',
 			link,
 			'',

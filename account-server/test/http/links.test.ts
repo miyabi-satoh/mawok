@@ -125,7 +125,7 @@ describe('app tokens', () => {
 		expect((await postForm('/account/apps/unlink', { id }, cookie)).status).toBe(303);
 		expect((await app('/v1/balance', token)).status).toBe(401);
 		expect(await (await request('/account/', { cookie })).text()).toContain(
-			'登録しているデバイス はありません'
+			'登録しているデバイスはありません'
 		);
 	});
 });
