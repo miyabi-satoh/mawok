@@ -1454,7 +1454,7 @@ describe('設定画面のデバイス', () => {
 		await expect.element(screen.getByText(m.settings_devices_not_ready())).toBeVisible();
 	});
 
-	it('鍵を作り直す前に確かめる', async () => {
+	it('すべてのデバイスの接続を解除する前に確かめる', async () => {
 		const screen = await renderAt(m.settings_category_devices);
 
 		await screen
@@ -1466,7 +1466,10 @@ describe('設定画面のデバイス', () => {
 			)
 			.toBeVisible();
 		expect(invoked).not.toHaveBeenCalledWith('reset_account_key', undefined);
-		await screen.getByRole('button', { name: m.settings_devices_reset_key(), exact: true }).click();
+		await screen
+			.getByRole('alertdialog')
+			.getByRole('button', { name: m.settings_devices_reset_key_start(), exact: true })
+			.click();
 		expect(invoked).toHaveBeenCalledWith('reset_account_key', undefined);
 	});
 
