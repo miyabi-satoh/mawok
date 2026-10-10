@@ -88,12 +88,18 @@
 	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
 	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
 	let refreshingMawokAccountStatus = false;
+	/** 問い合わせの通し番号。サインインやサインアウトの前に出した問い合わせの答えを捨てる */
+	let mawokAccountRefresh = 0;
 
-	async function refreshMawokAccountStatus() {
-		if (refreshingMawokAccountStatus) return;
+	/** `changed` はサインイン・サインアウトの直後。前のアカウントの様子を出したままにせず、答えが来るまで空にする */
+	async function refreshMawokAccountStatus(changed = false) {
+		if (changed) mawokAccountStatus = undefined;
+		else if (refreshingMawokAccountStatus) return;
+		const refresh = ++mawokAccountRefresh;
 		refreshingMawokAccountStatus = true;
 		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「アカウント」の欄が出す。
 		const result = await callQuietly<AccountStatus | null>('mawok_account_status');
+		if (refresh !== mawokAccountRefresh) return;
 		refreshingMawokAccountStatus = false;
 		mawokAccountStatus = result.ok ? result.value : null;
 	}
@@ -1287,7 +1293,7 @@
 									signedIn={view.mawokAccountSignedIn}
 									status={mawokAccountStatus}
 									proAvailable={view.proAvailable}
-									onchanged={refreshMawokAccountStatus}
+									onchanged={() => refreshMawokAccountStatus(true)}
 								/>
 							</SettingsRow>
 						</SettingsSection>
