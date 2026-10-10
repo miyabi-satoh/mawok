@@ -159,7 +159,7 @@
 	"settings_devices_join_title": "Add this device",
 	"settings_devices_reset_key_start": "Reset",
 	"settings_devices_reset_key_description_needs_pairing": "Use this when you don't have a device that already uses Mawok. Other devices can't send or receive until you enter a code from this device on them again.",
-	"settings_devices_reset_key_description_ready": "Locks out your other devices. To keep using a device, enter a code from this device on it again.",
+	"settings_devices_reset_key_description_ready": "Disconnects all your other devices. To keep using a device, enter a code from this device on it again.",
 	"settings_devices_reset_key": "Reset key",
 	"settings_devices_reset_key_confirm_title": "Reset the key?",
 	"settings_devices_reset_key_confirm_description": "Other devices can't send or receive until you enter a code from this device on them again.",

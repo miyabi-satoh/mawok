@@ -159,7 +159,7 @@
 	"settings_devices_join_title": "このデバイスを追加",
 	"settings_devices_reset_key_start": "作り直す",
 	"settings_devices_reset_key_description_needs_pairing": "使っているデバイスが手元に無いときに使います。ほかのデバイスは、このデバイスに出るコードを入力し直すまで送受信できなくなります。",
-	"settings_devices_reset_key_description_ready": "ほかのデバイスを締め出します。使い続けるデバイスは、このデバイスに出るコードを入力して追加し直します。",
+	"settings_devices_reset_key_description_ready": "ほかのデバイスとの接続を、すべて解除します。使い続けるデバイスは、このデバイスに出るコードを入力して追加し直します。",
 	"settings_devices_reset_key": "鍵を作り直す",
 	"settings_devices_reset_key_confirm_title": "鍵を作り直しますか？",
 	"settings_devices_reset_key_confirm_description": "ほかのデバイスは、このデバイスに出るコードを入力し直すまで、送受信できなくなります。",
