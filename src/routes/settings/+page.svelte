@@ -1311,6 +1311,9 @@
 											</Field.Field>
 										{/each}
 									</div>
+									<Field.Description class="leading-snug"
+										>{m.settings_devices_list_description()}</Field.Description
+									>
 								{:else}
 									<Field.Description class="leading-snug"
 										>{m.settings_devices_empty()}</Field.Description
@@ -1444,7 +1447,7 @@
 					>{m.settings_devices_offer_cancel()}</AlertDialog.Cancel
 				>
 				<AlertDialog.Action disabled={resettingKey} onclick={resetAccountKey}>
-					{m.settings_devices_reset_key()}
+					{m.settings_devices_reset_key_start()}
 				</AlertDialog.Action>
 			</AlertDialog.Footer>
 		</AlertDialog.Content>
