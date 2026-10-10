@@ -9,6 +9,9 @@ const WEBHOOK_TOLERANCE = 300;
 /** 同じ Stripe のアカウントで売るほかの製品の webhook と見分ける印。Checkout Session の metadata に付ける。 */
 export const PRODUCT = 'mawok-ai';
 
+/** Pro の無料試用の日数。最終確認と Stripe Checkout で同じ日数を出す。 */
+export const PRO_TRIAL_DAYS = 14;
+
 /** Stripe が断った頼み。`status` が 409 なら、同じ Idempotency-Key の頼みを Stripe が処理している最中。 */
 export class StripeError extends Error {
 	constructor(
@@ -210,7 +213,7 @@ export async function createProCheckoutSession(
 		'managed_payments[enabled]': String(managedPayments)
 	});
 	if (buyerCountry) params.set('subscription_data[metadata][buyer_country]', buyerCountry);
-	if (trial) params.set('subscription_data[trial_period_days]', '14');
+	if (trial) params.set('subscription_data[trial_period_days]', String(PRO_TRIAL_DAYS));
 	if (!managedPayments) {
 		params.set('payment_method_types[0]', 'card');
 		params.set('line_items[0][tax_rates][0]', config.taxRateId);

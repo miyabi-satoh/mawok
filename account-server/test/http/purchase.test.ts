@@ -130,19 +130,45 @@ describe('buying credit', () => {
 		};
 	}
 
-	it('shows a Pro trial confirmation for a selected plan', async () => {
+	it('shows a Pro trial confirmation for a selected plan, and gives Checkout the same note with or without a trial', async () => {
 		const { cookie } = await signIn('pro-offer@example.com');
 		const confirmation = await (await request('/account/buy?plan=monthly', { cookie })).text();
-		expect(confirmation).toContain('Mawok Pro（月額）');
-		expect(confirmation).toContain('480 円/月（税込み）');
-		expect(confirmation).toContain('14 日間は無料');
-		expect(confirmation).toContain('解約と返金');
-		expect(confirmation).toContain('アカウントのページからいつでもできます');
-		expect(confirmation).toContain('支払い済みの期間の終わりまで Pro を使えます');
+		// 文言の出し分けは test/pages.test.ts が見る。ここは、初めての申し込みが試用つきの画面に届くことだけを見る。
+		expect(confirmation).toMatch(/\d{4}\/\d{1,2}\/\d{1,2} に最初の 480 円を支払い/);
 		expect(confirmation.indexOf('解約と返金')).toBeLessThan(
 			confirmation.indexOf('申し込みを確定して支払いへ')
 		);
 		expect(confirmation).toMatch(/name="plan"\s+value="monthly"/);
+
+		const stripe = vi
+			.spyOn(globalThis, 'fetch')
+			.mockImplementation(async () =>
+				Response.json({ id: `cs_${crypto.randomUUID()}`, url: 'https://checkout.stripe.test/pro' })
+			);
+		expect(
+			(await postForm('/account/buy', { next: '/account/', plan: 'monthly' }, cookie)).status
+		).toBe(303);
+		const trialNote = new URLSearchParams(String(stripe.mock.calls[0][1]!.body)).get(
+			'custom_text[submit][message]'
+		);
+
+		const account = await accountId('pro-offer@example.com');
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
+			 VALUES ('sub_pro_offer', ?, 'monthly', 0, 'canceled', 0)`
+		)
+			.bind(account)
+			.run();
+		await env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(account).run();
+		expect(
+			(await postForm('/account/buy', { next: '/account/', plan: 'monthly' }, cookie)).status
+		).toBe(303);
+		const noTrialNote = new URLSearchParams(String(stripe.mock.calls[1][1]!.body)).get(
+			'custom_text[submit][message]'
+		);
+		expect(noTrialNote).toBe(trialNote);
+		expect(noTrialNote).not.toContain('無料');
+		expect(noTrialNote).toContain('解約するまで自動で更新します。');
 	});
 
 	it('shows the trial charge date, then renewal or cancellation on the account page', async () => {
@@ -326,6 +352,38 @@ describe('buying credit', () => {
 				.bind(subscriptionId)
 				.first<{ revoked_at: number | null }>()
 		).toMatchObject({ revoked_at: expect.any(Number) });
+	});
+
+	it('keeps Pro credit when the later of two paid Pro subscriptions is refunded', async () => {
+		await signIn('duplicate-refund@example.com');
+		const account = await accountId('duplicate-refund@example.com');
+		const first = proInvoiceApi(account);
+		await webhook(paidInvoice(first.invoiceId));
+		vi.restoreAllMocks();
+		const second = proInvoiceApi(account);
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		await webhook(paidInvoice(second.invoiceId));
+		await env.DB.prepare(
+			`INSERT INTO grants (id, account_id, kind, granted, remaining, expires_at, created_at)
+			 VALUES ('grant_duplicate_refund', ?, 'pro', 100, 100, 4_102_444_800, 0)`
+		)
+			.bind(account)
+			.run();
+		await webhook({
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: second.paymentIntentId, refunded: true } }
+		});
+		expect(
+			await env.DB.prepare('SELECT remaining, revoked FROM grants WHERE id = ?')
+				.bind('grant_duplicate_refund')
+				.first()
+		).toEqual({ remaining: 100, revoked: 0 });
+		expect(
+			await env.DB.prepare('SELECT revoked_at FROM subscriptions WHERE id = ?')
+				.bind(first.subscriptionId)
+				.first()
+		).toEqual({ revoked_at: null });
 	});
 
 	it('keeps Pro credit when a credit purchase is refunded', async () => {
