@@ -139,7 +139,9 @@ describe('設定画面の置き換え辞書', () => {
 			proAvailable: true
 		};
 		const screen = await renderAt(m.settings_category_copy);
-		const syncButton = screen.getByRole('button', { name: m.settings_sync() });
+		const syncButton = screen.getByRole('button', {
+			name: m.settings_sync_item({ name: '濃度' })
+		});
 
 		expect(syncButton.element().getAttribute('aria-pressed')).toBe('true');
 		await syncButton.click();
@@ -151,9 +153,13 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	it('Pro でなければ同期の印を出さない', async () => {
+		settings.current = view([replacement('replacement-0', '濃度', 'Node.js')]);
 		const screen = await renderAt(m.settings_category_copy);
 
-		expect(screen.getByRole('button', { name: m.settings_sync() }).elements()).toHaveLength(0);
+		await expect.element(screen.getByRole('textbox').first()).toBeVisible();
+		expect(
+			screen.getByRole('button', { name: m.settings_sync_item({ name: '濃度' }) }).elements()
+		).toHaveLength(0);
 	});
 
 	it('設定ファイルにある辞書を表に出す', async () => {

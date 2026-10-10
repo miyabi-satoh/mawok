@@ -1188,6 +1188,7 @@
 											{#if view.proAvailable}
 												<SyncToggle
 													pressed={replacement.sync}
+													name={replacement.from}
 													onchange={(sync) => {
 														replacement.sync = sync;
 														replacements.save();
