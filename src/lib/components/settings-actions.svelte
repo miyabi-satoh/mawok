@@ -1,5 +1,7 @@
 <script lang="ts">
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import CloudIcon from '@lucide/svelte/icons/cloud';
+	import CloudOffIcon from '@lucide/svelte/icons/cloud-off';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { untrack } from 'svelte';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
@@ -175,6 +177,9 @@
 		<p id="actions-description" class="settings-lead">
 			{m.settings_actions_description({ mark: TEXT_MARK })}
 		</p>
+		{#if view.proAvailable}
+			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
+		{/if}
 		<SettingsSection>
 			<SettingsRow>
 				{#if showsFilter(editor.actions.rows.length, editor.filter)}
@@ -191,6 +196,25 @@
 					searchText={(row) => [row.name, row.command]}
 				>
 					{#snippet trailing(row)}
+						{#if view.proAvailable}
+							<Button
+								variant="ghost"
+								size="icon"
+								class="size-8"
+								aria-label={m.settings_sync()}
+								aria-pressed={row.sync}
+								onclick={() => {
+									row.sync = !row.sync;
+									editor.actions.save();
+								}}
+							>
+								{#if row.sync}
+									<CloudIcon class="size-4" />
+								{:else}
+									<CloudOffIcon class="size-4" />
+								{/if}
+							</Button>
+						{/if}
 						<Switch
 							aria-label={row.name || row.command
 								? m.settings_actions_enabled({ name: row.name || row.command })
@@ -206,7 +230,7 @@
 					{/snippet}
 					{#snippet body(row)}
 						<div class="flex flex-col gap-1.5">
-							<span id="action-{row.id}-body" class="text-xs text-muted-foreground">
+							<span id="action-{row.key}-body" class="text-xs text-muted-foreground">
 								{m.settings_actions_command()}
 							</span>
 							<!--
@@ -220,10 +244,10 @@
 								autocomplete="off"
 								autocapitalize="off"
 								spellcheck={false}
-								aria-labelledby="action-{row.id}-body"
+								aria-labelledby="action-{row.key}-body"
 								aria-describedby={view.platform === 'windows' &&
 								hasDelayedExpansionChars(row.command)
-									? `actions-description action-${row.id}-special`
+									? `actions-description action-${row.key}-special`
 									: 'actions-description'}
 								bind:value={
 									() => row.command,
@@ -234,14 +258,14 @@
 								}
 							/>
 							{#if view.platform === 'windows' && hasDelayedExpansionChars(row.command)}
-								<p id="action-{row.id}-special" class="text-xs leading-snug text-muted-foreground">
+								<p id="action-{row.key}-special" class="text-xs leading-snug text-muted-foreground">
 									{m.settings_actions_command_special_chars({ mark: TEXT_MARK })}
 								</p>
 							{/if}
 						</div>
 						<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 							<Field.Title
-								id="action-{row.id}-output"
+								id="action-{row.key}-output"
 								class="text-xs font-normal text-muted-foreground"
 							>
 								{m.settings_actions_output()}
@@ -250,7 +274,7 @@
 								type="single"
 								variant="outline"
 								size="sm"
-								aria-labelledby="action-{row.id}-output"
+								aria-labelledby="action-{row.key}-output"
 								bind:value={
 									() => row.output,
 									(output) => {
@@ -269,14 +293,14 @@
 						{#if aiInstruction(row.command) === null}
 							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 								<Field.Title
-									id="action-{row.id}-encoding"
+									id="action-{row.key}-encoding"
 									class="text-xs font-normal text-muted-foreground"
 								>
 									{m.settings_actions_encoding()}
 								</Field.Title>
 								<NativeSelect.Root
 									size="sm"
-									aria-labelledby="action-{row.id}-encoding"
+									aria-labelledby="action-{row.key}-encoding"
 									bind:value={
 										() => row.encoding,
 										(encoding) => {

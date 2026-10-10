@@ -12,8 +12,8 @@ describe('空の行', () => {
 	});
 
 	it('置き換え辞書は、空白だけの語も空とみなさない', () => {
-		expect(isBlankReplacement({ from: '', to: '', enabled: true })).toBe(true);
-		expect(isBlankReplacement({ from: ' ', to: '', enabled: true })).toBe(false);
-		expect(isBlankReplacement({ from: '', to: '、', enabled: false })).toBe(false);
+		expect(isBlankReplacement({ from: '', to: '' })).toBe(true);
+		expect(isBlankReplacement({ from: ' ', to: '' })).toBe(false);
+		expect(isBlankReplacement({ from: '', to: '、' })).toBe(false);
 	});
 });

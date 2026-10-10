@@ -43,15 +43,32 @@ function view(
 	});
 }
 
-/** set_replacements が呼ばれたときに渡された辞書を、呼ばれた順に並べたもの */
-function savedReplacements(): Replacement[][] {
+function replacement(
+	id: string,
+	from: string,
+	to: string,
+	enabled = true,
+	sync = true
+): Replacement {
+	return { id, from, to, enabled, sync };
+}
+
+/** set_replacements が呼ばれたときに渡された辞書（ID と同期の値を含む）。 */
+function savedReplacementPayloads(): Replacement[][] {
 	return callsOf(invoked, 'set_replacements').map(
 		([, args]) => (args as { replacements: Replacement[] }).replacements
 	);
 }
 
+/** 既存の置き換え辞書の振る舞いのテスト用に、今回追加した同期用の値を除く。 */
+function savedReplacements() {
+	return savedReplacementPayloads().map((rows) =>
+		rows.map((row) => ({ from: row.from, to: row.to, enabled: row.enabled }))
+	);
+}
+
 /** set_replacements に最後に渡された辞書。呼ばれていなければ null */
-function lastSavedReplacements(): Replacement[] | null {
+function lastSavedReplacements() {
 	return savedReplacements().at(-1) ?? null;
 }
 
@@ -92,17 +109,55 @@ async function renderAt(category: () => string) {
 	return screen;
 }
 
+/** 保存コマンドは、Rust が空の ID を補った行を返す。 */
+function savedRows(command: string, args: unknown) {
+	const key =
+		command === 'set_replacements'
+			? 'replacements'
+			: command === 'set_snippets'
+				? 'snippets'
+				: command === 'set_actions'
+					? 'actions'
+					: null;
+	if (!key) return undefined;
+	const rows = (args as Record<string, Array<{ id: string }>>)[key];
+	return rows.map((row, index) => ({ ...row, id: row.id || `${key}-${index}` }));
+}
+
 beforeEach(() => {
 	invoked.mockClear();
-	invoked.mockImplementation(() => Promise.resolve(undefined));
+	invoked.mockImplementation((command, args) => Promise.resolve(savedRows(command, args)));
 	vi.mocked(listen).mockReset();
 	vi.mocked(listen).mockImplementation(() => Promise.resolve(() => {}));
 	settings.current = view();
 });
 
 describe('設定画面の置き換え辞書', () => {
+	it('Pro では同期の印を出し、押すとその行の値を保存する', async () => {
+		settings.current = {
+			...view([{ from: '濃度', to: 'Node.js', enabled: true, id: 'replacement-id', sync: true }]),
+			proAvailable: true
+		};
+		const screen = await renderAt(m.settings_category_copy);
+		const syncButton = screen.getByRole('button', { name: m.settings_sync() });
+
+		expect(syncButton.element().getAttribute('aria-pressed')).toBe('true');
+		await syncButton.click();
+		expect(syncButton.element().getAttribute('aria-pressed')).toBe('false');
+
+		expect(savedReplacementPayloads().at(-1)).toEqual([
+			{ id: 'replacement-id', from: '濃度', to: 'Node.js', enabled: true, sync: false }
+		]);
+	});
+
+	it('Pro でなければ同期の印を出さない', async () => {
+		const screen = await renderAt(m.settings_category_copy);
+
+		expect(screen.getByRole('button', { name: m.settings_sync() }).elements()).toHaveLength(0);
+	});
+
 	it('設定ファイルにある辞書を表に出す', async () => {
-		settings.current = view([{ from: '濃度', to: 'Node.js', enabled: true }]);
+		settings.current = view([replacement('replacement-0', '濃度', 'Node.js')]);
 		const screen = await renderAt(m.settings_category_copy);
 
 		await expect.element(screen.getByLabelText(m.settings_replacements_from())).toHaveValue('濃度');
@@ -112,11 +167,9 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	const sixReplacements = () =>
-		['a', 'b', 'c', 'd', 'e', '濃度'].map((from) => ({
-			from,
-			to: from.toUpperCase(),
-			enabled: true
-		}));
+		['a', 'b', 'c', 'd', 'e', '濃度'].map((from) =>
+			replacement(`replacement-${from}`, from, from.toUpperCase())
+		);
 
 	it('絞り込んだ行の前の文字列を書き換えて当たらなくなっても、語を変えるまで出したままにする', async () => {
 		settings.current = view(sixReplacements());
@@ -157,7 +210,7 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	it('打った内容をそのつど保存する', async () => {
-		settings.current = view([{ from: '滑ると', to: 'svelte', enabled: true }]);
+		settings.current = view([replacement('replacement-0', '滑ると', 'svelte')]);
 		const screen = await renderAt(m.settings_category_copy);
 		await screen.getByRole('button', { name: m.settings_replacements_add() }).click();
 
@@ -173,8 +226,8 @@ describe('設定画面の置き換え辞書', () => {
 
 	it('スイッチを切ると、その行だけを無効にして保存する', async () => {
 		settings.current = view([
-			{ from: '濃度', to: 'Node.js', enabled: true },
-			{ from: '滑ると', to: 'svelte', enabled: true }
+			replacement('replacement-0', '濃度', 'Node.js'),
+			replacement('replacement-1', '滑ると', 'svelte')
 		]);
 		const screen = await renderAt(m.settings_category_copy);
 
@@ -189,8 +242,8 @@ describe('設定画面の置き換え辞書', () => {
 
 	it('削除すると、その行を除いて保存する', async () => {
 		settings.current = view([
-			{ from: '濃度', to: 'Node.js', enabled: true },
-			{ from: '滑ると', to: 'svelte', enabled: true }
+			replacement('replacement-0', '濃度', 'Node.js'),
+			replacement('replacement-1', '滑ると', 'svelte')
 		]);
 		const screen = await renderAt(m.settings_category_copy);
 
@@ -202,7 +255,7 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	it('保存が終わる前に打ち足しても、保存を重ねず、終わってから最後の内容で保存し直す', async () => {
-		settings.current = view([{ from: '仮', to: '', enabled: true }]);
+		settings.current = view([replacement('replacement-0', '仮', '')]);
 		// 最初の保存だけ、わざと終わらせずに待たせる。
 		// mockImplementationOnce だと、設定ウィンドウを表示する show_settings_window に先に使われてしまう
 		let finishFirst: (() => void) | undefined;
@@ -256,16 +309,49 @@ describe('設定画面の下書きの履歴', () => {
 });
 
 describe('設定画面の定型文', () => {
+	type SnippetContent = Pick<Snippet, 'name' | 'body'>;
+	const snippetRows = (rows: SnippetContent[]): Snippet[] =>
+		rows.map((row, index) => ({ id: `snippet-${index}`, sync: true, ...row }));
+
 	/** set_snippets に最後に渡された定型文。呼ばれていなければ null */
-	function lastSavedSnippets(): Snippet[] | null {
+	function lastSavedSnippets(): SnippetContent[] | null {
 		const last = callsOf(invoked, 'set_snippets').at(-1);
-		return last ? (last[1] as { snippets: Snippet[] }).snippets : null;
+		return last
+			? (last[1] as { snippets: Snippet[] }).snippets.map((snippet) => ({
+					name: snippet.name,
+					body: snippet.body
+				}))
+			: null;
 	}
 
 	const confirm = { name: '確認', body: '一つずつ質問してください。\n以上です。' };
 
+	it('Pro では同期の印を出し、押すと定型文の値を保存する', async () => {
+		settings.current = {
+			...view(),
+			proAvailable: true,
+			snippets: snippetRows([confirm])
+		};
+		const screen = await renderAt(m.settings_category_snippets);
+		const syncButton = screen.getByRole('button', { name: m.settings_sync() });
+
+		expect(syncButton.element().getAttribute('aria-pressed')).toBe('true');
+		await syncButton.click();
+		expect(syncButton.element().getAttribute('aria-pressed')).toBe('false');
+		expect(callsOf(invoked, 'set_snippets').at(-1)?.[1]).toEqual({
+			snippets: [
+				{
+					id: 'snippet-0',
+					name: confirm.name,
+					body: confirm.body,
+					sync: false
+				}
+			]
+		});
+	});
+
 	it('設定ファイルにある定型文を、名前と本文の欄に出す', async () => {
-		settings.current = { ...view(), snippets: [confirm] };
+		settings.current = { ...view(), snippets: snippetRows([confirm]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
 		// 閉じた行には、名前と本文の1行目を出す
@@ -297,7 +383,7 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('空の行が残っていれば、追加しても足さずにその行へ戻り、分類を離れると捨てる', async () => {
-		settings.current = { ...view(), snippets: [confirm] };
+		settings.current = { ...view(), snippets: snippetRows([confirm]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
 		await screen.getByRole('button', { name: m.settings_snippets_add() }).click();
@@ -309,7 +395,7 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('名前と本文を打つと、そのつど保存する', async () => {
-		settings.current = { ...view(), snippets: [confirm] };
+		settings.current = { ...view(), snippets: snippetRows([confirm]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
 		await screen.getByRole('button', { name: m.settings_snippets_add() }).click();
@@ -324,14 +410,15 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('下書きウィンドウから足した定型文を、開いている画面の並びにも足し、並び全体を保存し直す', async () => {
-		settings.current = { ...view(), snippets: [confirm] };
+		settings.current = { ...view(), snippets: snippetRows([confirm]) };
 		// 前のテストで描いた画面の受け口を呼ばないよう、この画面の分だけにする
 		vi.mocked(listen).mockClear();
 		const screen = await renderAt(m.settings_category_snippets);
 
 		const added = { name: '', body: 'よろしくお願いします' };
 		for (const [name, handler] of vi.mocked(listen).mock.calls) {
-			if (name === EVENTS.SNIPPET_ADDED) handler({ event: name, id: 0, payload: added });
+			if (name === EVENTS.SNIPPET_ADDED)
+				handler({ event: name, id: 0, payload: snippetRows([added])[0] });
 		}
 		await openRows(screen);
 
@@ -342,7 +429,10 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('削除すると、その1件を除いて保存する', async () => {
-		settings.current = { ...view(), snippets: [confirm, { name: '状態', body: 'git status' }] };
+		settings.current = {
+			...view(),
+			snippets: snippetRows([confirm, { name: '状態', body: 'git status' }])
+		};
 		const screen = await renderAt(m.settings_category_snippets);
 
 		// 2件目を消す。1件目を消してしまう取り違えを見つけるため
@@ -357,7 +447,7 @@ describe('設定画面の定型文', () => {
 		const a = { name: 'A', body: 'a' };
 		const b = { name: 'B', body: 'b' };
 		const c = { name: 'C', body: 'c' };
-		settings.current = { ...view(), snippets: [a, b, c] };
+		settings.current = { ...view(), snippets: snippetRows([a, b, c]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
 		// 1件目を1つ下げる → [B, A, C]
@@ -372,7 +462,7 @@ describe('設定画面の定型文', () => {
 		const a = { name: 'A', body: 'a' };
 		const b = { name: 'B', body: 'b' };
 		const c = { name: 'C', body: 'c' };
-		settings.current = { ...view(), snippets: [a, b, c] };
+		settings.current = { ...view(), snippets: snippetRows([a, b, c]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
 		// 3件目を1つ上げる → [A, C, B]
@@ -385,7 +475,7 @@ describe('設定画面の定型文', () => {
 		const a = { name: 'A', body: 'a' };
 		const b = { name: 'B', body: 'b' };
 		const c = { name: 'C', body: 'c' };
-		settings.current = { ...view(), snippets: [a, b, c] };
+		settings.current = { ...view(), snippets: snippetRows([a, b, c]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
 		// 3件目を先頭へ → [C, A, B]
@@ -400,10 +490,10 @@ describe('設定画面の定型文', () => {
 	it('先頭の行では上への移動を、末尾の行では下への移動を押せなくする', async () => {
 		settings.current = {
 			...view(),
-			snippets: [
+			snippets: snippetRows([
 				{ name: 'A', body: 'a' },
 				{ name: 'B', body: 'b' }
-			]
+			])
 		};
 		const screen = await renderAt(m.settings_category_snippets);
 
@@ -431,11 +521,11 @@ describe('設定画面の定型文', () => {
 	it('移動したら、動かした行の「…」にフォーカスを戻す', async () => {
 		settings.current = {
 			...view(),
-			snippets: [
+			snippets: snippetRows([
 				{ name: 'A', body: 'a' },
 				{ name: 'B', body: 'b' },
 				{ name: 'C', body: 'c' }
-			]
+			])
 		};
 		const screen = await renderAt(m.settings_category_snippets);
 
@@ -448,7 +538,7 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('メニューの中の Esc は、メニューだけを閉じ、設定ウィンドウは閉じない', async () => {
-		settings.current = { ...view(), snippets: [{ name: 'A', body: 'a' }] };
+		settings.current = { ...view(), snippets: snippetRows([{ name: 'A', body: 'a' }]) };
 		const screen = await renderAt(m.settings_category_snippets);
 		await screen.getByRole('button', { name: m.settings_row_menu({ name: 'A' }) }).click();
 		await expect.element(screen.getByRole('menu')).toBeVisible();
@@ -460,7 +550,7 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('メニューを開いた直後、フォーカスがまだメニューに移っていなくても、Esc で設定ウィンドウを閉じない', async () => {
-		settings.current = { ...view(), snippets: [{ name: 'A', body: 'a' }] };
+		settings.current = { ...view(), snippets: snippetRows([{ name: 'A', body: 'a' }]) };
 		const screen = await renderAt(m.settings_category_snippets);
 		await screen.getByRole('button', { name: m.settings_row_menu({ name: 'A' }) }).click();
 		await expect.element(screen.getByRole('menu')).toBeVisible();
@@ -473,7 +563,7 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('メニューを Esc で閉じた直後の次の Esc では、設定ウィンドウを閉じる', async () => {
-		settings.current = { ...view(), snippets: [{ name: 'A', body: 'a' }] };
+		settings.current = { ...view(), snippets: snippetRows([{ name: 'A', body: 'a' }]) };
 		const screen = await renderAt(m.settings_category_snippets);
 		await screen.getByRole('button', { name: m.settings_row_menu({ name: 'A' }) }).click();
 		await expect.element(screen.getByRole('menu')).toBeVisible();
@@ -485,7 +575,11 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('メニューを開いたままでも、Cmd+W では設定ウィンドウを閉じる', async () => {
-		settings.current = { ...view(), platform: 'macos', snippets: [{ name: 'A', body: 'a' }] };
+		settings.current = {
+			...view(),
+			platform: 'macos',
+			snippets: snippetRows([{ name: 'A', body: 'a' }])
+		};
 		const screen = await renderAt(m.settings_category_snippets);
 		await screen.getByRole('button', { name: m.settings_row_menu({ name: 'A' }) }).click();
 		await expect.element(screen.getByRole('menu')).toBeVisible();
@@ -498,11 +592,11 @@ describe('設定画面の定型文', () => {
 	it('削除したら、次の行の「…」に、末尾なら前の行の「…」にフォーカスを移す', async () => {
 		settings.current = {
 			...view(),
-			snippets: [
+			snippets: snippetRows([
 				{ name: 'A', body: 'a' },
 				{ name: 'B', body: 'b' },
 				{ name: 'C', body: 'c' }
-			]
+			])
 		};
 		const screen = await renderAt(m.settings_category_snippets);
 
@@ -518,7 +612,7 @@ describe('設定画面の定型文', () => {
 	});
 
 	it('1件だけなら、メニューに移動を出さず削除だけにする', async () => {
-		settings.current = { ...view(), snippets: [{ name: 'A', body: 'a' }] };
+		settings.current = { ...view(), snippets: snippetRows([{ name: 'A', body: 'a' }]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
 		await screen.getByRole('button', { name: m.settings_row_menu({ name: 'A' }) }).click();
@@ -1275,7 +1369,7 @@ describe('設定画面のサイドバー', () => {
 	});
 
 	it('分類を切り替えても、打ちかけの内容は残る', async () => {
-		settings.current = view([{ from: '仮', to: '', enabled: true }]);
+		settings.current = view([replacement('replacement-0', '仮', '')]);
 		const screen = await renderAt(m.settings_category_copy);
 		await screen.getByLabelText(m.settings_replacements_from()).fill('濃度');
 
@@ -1559,8 +1653,10 @@ describe('設定画面のアクション', () => {
 
 	beforeEach(() => {
 		responses = { has_ai_key: false };
-		invoked.mockImplementation((command) =>
-			command in responses ? Promise.resolve(responses[command]) : Promise.resolve(undefined)
+		invoked.mockImplementation((command, args) =>
+			command in responses
+				? Promise.resolve(responses[command])
+				: Promise.resolve(savedRows(command, args))
 		);
 	});
 
@@ -1619,7 +1715,7 @@ describe('設定画面のアクション', () => {
 
 	it('キーを保存すると、了解だけのダイアログを出し、了解を保存する', async () => {
 		settings.current = { ...view(), aiService: 'gemini' };
-		invoked.mockImplementation((command) => {
+		invoked.mockImplementation((command, args) => {
 			if (command === 'set_ai_key') {
 				responses.has_ai_key = true;
 				settings.current = { ...settings.current!, aiConsent: null };
@@ -1631,7 +1727,7 @@ describe('設定画面のアクション', () => {
 			}
 			return command in responses
 				? Promise.resolve(responses[command])
-				: Promise.resolve(undefined);
+				: Promise.resolve(savedRows(command, args));
 		});
 		const screen = await renderAt(m.settings_category_actions);
 
@@ -1681,14 +1777,14 @@ describe('設定画面のアクション', () => {
 			aiModels: { gemini: 'custom-model' }
 		};
 		responses.has_ai_key = true;
-		invoked.mockImplementation((command) => {
+		invoked.mockImplementation((command, args) => {
 			if (command === 'set_ai_key') {
 				settings.current = { ...settings.current!, aiConsent: null };
 				return Promise.resolve(undefined);
 			}
 			return command in responses
 				? Promise.resolve(responses[command])
-				: Promise.resolve(undefined);
+				: Promise.resolve(savedRows(command, args));
 		});
 		const screen = await renderAt(m.settings_category_actions);
 
@@ -1762,17 +1858,20 @@ describe('設定画面のアクション', () => {
 		const saved = callsOf(invoked, 'set_actions').map(
 			([, args]) => (args as { actions: Action[] }).actions
 		);
-		expect(saved.at(-1)).toEqual([ai('要約', '要約してください。')]);
+		// 最初の保存で Rust（のモック）が振った ID を、続きの保存でも渡す
+		expect(saved.at(-1)).toEqual([{ ...ai('要約', '要約してください。'), id: 'actions-0' }]);
 		expect(saved.every((actions) => actions.length === 1)).toBe(true);
 	});
 
 	it('説明は並びの上に一度だけ出し、Windows の ! と ^ の注意は {{t}} のあるシェルの行にだけ出す', async () => {
 		const command = (text: string): Action => ({
+			id: '',
 			name: '',
 			command: text,
 			output: 'replace',
 			encoding: 'utf-8',
-			enabled: true
+			enabled: true,
+			sync: true
 		});
 		// 注意を出す行と出さない行を1つずつ。どの行に出すかの決まりは hasDelayedExpansionChars の単体テストで見る
 		const actions = [command('echo {{t}}!'), command('echo {{t}}')];
@@ -1823,7 +1922,15 @@ describe('設定画面のアクション', () => {
 				([, args]) => (args as { actions: Action[] }).actions
 			);
 			expect(saved.at(-1)).toEqual([
-				{ name: '', command: 'tr a-z A-Z', output: 'none', encoding: 'shift_jis', enabled: true }
+				{
+					id: 'actions-0',
+					name: '',
+					command: 'tr a-z A-Z',
+					output: 'none',
+					encoding: 'shift_jis',
+					enabled: true,
+					sync: true
+				}
 			]);
 		});
 

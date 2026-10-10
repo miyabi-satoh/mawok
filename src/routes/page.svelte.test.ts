@@ -6,7 +6,7 @@ import { userEvent } from 'vitest/browser';
 import { draftGuidance } from '$lib/guidance';
 import { m } from '$lib/paraglide/messages';
 import { type Platform } from '$lib/keys';
-import { settings, type Action, type SettingsView } from '$lib/settings.svelte';
+import { settings, type Action, type SettingsView, type Snippet } from '$lib/settings.svelte';
 import { EVENTS } from '$lib/bindings/constants';
 import { callsOf } from '$lib/test-support/calls';
 import { newAction as commandAction } from '$lib/action-target';
@@ -31,6 +31,10 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 const invoked = vi.mocked(invoke);
+
+function snippet(id: string, name: string, body: string): Snippet {
+	return { id, name, body, sync: true };
+}
 
 /** Rust 側から届くイベントを起こす */
 function emit(
@@ -535,8 +539,8 @@ describe('下書きの履歴', () => {
 });
 
 describe('定型文', () => {
-	const confirm = { name: '確認', body: '一つずつ質問してください。\n以上です。' };
-	const status = { name: '', body: 'git status' };
+	const confirm = snippet('confirm', '確認', '一つずつ質問してください。\n以上です。');
+	const status = snippet('status', '', 'git status');
 
 	beforeEach(() => {
 		invoked.mockImplementation((command) =>
@@ -623,7 +627,7 @@ describe('定型文', () => {
 	it('絞り込みを変えたら、先頭を選んだ状態に戻す', async () => {
 		settings.current = {
 			...view(),
-			snippets: [confirm, status, { name: 'git diff', body: 'git diff' }]
+			snippets: [confirm, status, snippet('diff', 'git diff', 'git diff')]
 		};
 		const screen = await render(Page);
 		const textarea = await openAt(screen, '', 0);
@@ -762,7 +766,9 @@ describe('定型文', () => {
 		await options.nth(2).click();
 
 		await vi.waitFor(() =>
-			expect(addedSnippets()).toEqual([{ name: '', body: 'よろしく\nお願いします' }])
+			expect(addedSnippets()).toEqual([
+				{ id: '', name: '', body: 'よろしく\nお願いします', sync: true }
+			])
 		);
 		await expect.element(screen.getByText(m.draft_snippet_registered())).toBeInTheDocument();
 		expect(screen.getByRole('combobox').elements()).toHaveLength(0);
@@ -795,7 +801,9 @@ describe('定型文', () => {
 			.toMatchTextContent(m.snippets_register_selection());
 		await screen.getByRole('option').nth(2).click();
 
-		await vi.waitFor(() => expect(addedSnippets()).toEqual([{ name: '', body: 'いう' }]));
+		await vi.waitFor(() =>
+			expect(addedSnippets()).toEqual([{ id: '', name: '', body: 'いう', sync: true }])
+		);
 		expect(selectionOf(textarea)).toEqual([1, 3]);
 	});
 
@@ -814,7 +822,9 @@ describe('定型文', () => {
 			.toMatchTextContent(m.snippets_register_draft_named({ name: '挨拶' }));
 		await userEvent.keyboard('{Enter}');
 
-		await vi.waitFor(() => expect(addedSnippets()).toEqual([{ name: '挨拶', body: 'あいう' }]));
+		await vi.waitFor(() =>
+			expect(addedSnippets()).toEqual([{ id: '', name: '挨拶', body: 'あいう', sync: true }])
+		);
 	});
 
 	it('当たる定型文があれば、Enter では定型文を差し込み、登録しない', async () => {
@@ -898,7 +908,7 @@ describe('定型文', () => {
 	});
 
 	it('差し込むと、履歴をたどっている途中ならそこでやめる', async () => {
-		settings.current = { ...view(), snippets: [{ name: '管理者で', body: 'sudo ' }] };
+		settings.current = { ...view(), snippets: [snippet('sudo', '管理者で', 'sudo ')] };
 		const screen = await render(Page);
 		const textarea = screen.getByRole('textbox');
 		await textarea.fill('git status');
@@ -1385,7 +1395,7 @@ describe('下書きのボタン', () => {
 		invoked.mockImplementation((command) =>
 			Promise.resolve(command === 'commit' ? true : undefined)
 		);
-		settings.current = { ...view(), snippets: [{ name: '確認', body: '以上です。' }] };
+		settings.current = { ...view(), snippets: [snippet('confirm', '確認', '以上です。')] };
 	});
 
 	type Screen = Awaited<ReturnType<typeof render>>;
@@ -1929,11 +1939,13 @@ describe('アクション', () => {
 
 		const call = await pick();
 		expect(call.args.action).toEqual({
+			id: '',
 			name: '',
 			command: '@ai 関西弁に',
 			output: 'replace',
 			encoding: 'utf-8',
-			enabled: true
+			enabled: true,
+			sync: true
 		});
 		await expect
 			.element(screen.getByText(m.draft_running_action({ action: '@ai 関西弁に' })))
@@ -1953,7 +1965,15 @@ describe('アクション', () => {
 		settings.current = {
 			...settings.current!,
 			actions: [
-				{ name: '日付', command: 'date', output: 'insert', encoding: 'utf-8', enabled: true }
+				{
+					id: 'date',
+					name: '日付',
+					command: 'date',
+					output: 'insert',
+					encoding: 'utf-8',
+					enabled: true,
+					sync: true
+				}
 			]
 		};
 		const screen = await render(Page);
@@ -1976,11 +1996,13 @@ describe('アクション', () => {
 			...settings.current!,
 			actions: [
 				{
+					id: 'record',
 					name: '記録',
 					command: 'cat >> ~/log.txt',
 					output: 'none',
 					encoding: 'utf-8',
-					enabled: true
+					enabled: true,
+					sync: true
 				}
 			]
 		};

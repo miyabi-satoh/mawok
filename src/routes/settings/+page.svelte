@@ -1,6 +1,8 @@
 <script lang="ts">
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
+	import CloudIcon from '@lucide/svelte/icons/cloud';
+	import CloudOffIcon from '@lucide/svelte/icons/cloud-off';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -126,6 +128,15 @@
 		return (await callSettings(command, args)).ok;
 	}
 
+	/** 行の保存で Rust が足した ID を、入力中の行を作り直さず画面側へ戻す。 */
+	async function saveItems<T>(
+		command: string,
+		args: Record<string, unknown>
+	): Promise<T[] | undefined> {
+		const result = await callSettings<T[]>(command, args);
+		return result.ok ? result.value : undefined;
+	}
+
 	/** 全角・半角の行。カタカナは全角に揃えるだけ（Rust 側の KatakanaWidth） */
 	const charWidthRows: { kind: keyof CharWidths; label: () => string; half: boolean }[] = [
 		{ kind: 'alphabet', label: m.settings_char_width_alphabet, half: true },
@@ -236,8 +247,14 @@
 	const replacements = new RowList<Replacement>(
 		settings.current?.replacements ?? [],
 		(rows) =>
-			run('set_replacements', {
-				replacements: rows.map(({ from, to, enabled }) => ({ from, to, enabled }))
+			saveItems<Replacement>('set_replacements', {
+				replacements: rows.map(({ id, from, to, enabled, sync }) => ({
+					id,
+					from,
+					to,
+					enabled,
+					sync
+				}))
 			}),
 		isBlankReplacement
 	);
@@ -251,7 +268,10 @@
 	/** 定型文。打っている途中に Rust 側からの反映で打ち消されないよう、辞書と同じく画面側で持つ */
 	const snippets = new RowList<Snippet>(
 		settings.current?.snippets ?? [],
-		(rows) => run('set_snippets', { snippets: rows.map(({ name, body }) => ({ name, body })) }),
+		(rows) =>
+			saveItems<Snippet>('set_snippets', {
+				snippets: rows.map(({ id, name, body, sync }) => ({ id, name, body, sync }))
+			}),
 		isBlankSnippet
 	);
 
@@ -259,7 +279,7 @@
 	const expandedSnippets = new SvelteSet<string>();
 	let snippetFilter = $state('');
 	let replacementFilter = $state('');
-	/** 絞り込みに当たった置き換え辞書の行の id。語を変えたときにだけ求め直す。null なら絞り込んでいない */
+	/** 絞り込みに当たった置き換え辞書の行の画面用 key。語を変えたときにだけ求め直す。null なら絞り込んでいない */
 	const replacementMatches = $derived(
 		matchedIds(
 			() => replacements.rows,
@@ -272,9 +292,9 @@
 	function addSnippet() {
 		// 名前も本文も空の1件は一覧に出ないだけなので、書きかけのまま保存してよい。足した行は、書けるよう開いておく
 		snippetFilter = '';
-		const row = snippets.addBlank({ name: '', body: '' });
-		expandedSnippets.add(row.id);
-		focusFirstField(`row-${row.id}`);
+		const row = snippets.addBlank({ id: '', name: '', body: '', sync: true });
+		expandedSnippets.add(row.key);
+		focusFirstField(`row-${row.key}`);
 	}
 
 	// 下書きウィンドウから定型文を足したら、開いている設定画面の並びにも足す。
@@ -419,8 +439,8 @@
 	function addReplacement() {
 		// 置き換える前の文字列が空の行は何もしないので、書きかけのまま保存してよい
 		replacementFilter = '';
-		const row = replacements.addBlank({ from: '', to: '', enabled: true });
-		focusFirstField(`replacement-${row.id}`);
+		const row = replacements.addBlank({ id: '', from: '', to: '', enabled: true, sync: true });
+		focusFirstField(`replacement-${row.key}`);
 	}
 
 	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分のデバイスへ送る」） */
@@ -1115,6 +1135,11 @@
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<Field.Title>{m.settings_replacements()}</Field.Title>
 							</Field.Field>
+							{#if view.proAvailable}
+								<p class="text-xs leading-snug text-muted-foreground">
+									{m.settings_sync_description()}
+								</p>
+							{/if}
 							{#if showsFilter(replacements.rows.length, replacementFilter)}
 								<ListFilter
 									label={m.settings_replacements_filter()}
@@ -1126,8 +1151,8 @@
 							{:else if shownReplacements.length > 0}
 								<!-- 1行が1件。並び順は登録した順で、画面では入れ替えられない -->
 								<div class="flex flex-col gap-2">
-									{#each shownReplacements as replacement (replacement.id)}
-										<div id="replacement-{replacement.id}" class="flex items-center gap-2">
+									{#each shownReplacements as replacement (replacement.key)}
+										<div id="replacement-{replacement.key}" class="flex items-center gap-2">
 											<Input
 												class="text-sm"
 												aria-label={m.settings_replacements_from()}
@@ -1161,6 +1186,25 @@
 													}
 												}
 											/>
+											{#if view.proAvailable}
+												<Button
+													variant="ghost"
+													size="icon"
+													class="size-8"
+													aria-label={m.settings_sync()}
+													aria-pressed={replacement.sync}
+													onclick={() => {
+														replacement.sync = !replacement.sync;
+														replacements.save();
+													}}
+												>
+													{#if replacement.sync}
+														<CloudIcon class="size-4" />
+													{:else}
+														<CloudOffIcon class="size-4" />
+													{/if}
+												</Button>
+											{/if}
 											<Button
 												variant="ghost"
 												size="icon"
@@ -1190,6 +1234,11 @@
 									})
 								: m.settings_snippets_description_no_key()}
 						</p>
+						{#if view.proAvailable}
+							<p class="text-xs leading-snug text-muted-foreground">
+								{m.settings_sync_description()}
+							</p>
+						{/if}
 						<SettingsSection>
 							<SettingsRow>
 								{#if showsFilter(snippets.rows.length, snippetFilter)}
@@ -1204,7 +1253,29 @@
 									preview={(row) => firstLine(row.body)}
 									query={snippetFilter}
 									searchText={(row) => [row.name, row.body]}
-								/>
+								>
+									{#snippet trailing(row)}
+										{#if view.proAvailable}
+											<Button
+												variant="ghost"
+												size="icon"
+												class="size-8"
+												aria-label={m.settings_sync()}
+												aria-pressed={row.sync}
+												onclick={() => {
+													row.sync = !row.sync;
+													snippets.save();
+												}}
+											>
+												{#if row.sync}
+													<CloudIcon class="size-4" />
+												{:else}
+													<CloudOffIcon class="size-4" />
+												{/if}
+											</Button>
+										{/if}
+									{/snippet}
+								</ReorderableRows>
 								<Button variant="outline" size="sm" class="w-fit" onclick={addSnippet}>
 									<PlusIcon data-icon="inline-start" />
 									{m.settings_snippets_add()}

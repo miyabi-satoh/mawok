@@ -19,8 +19,8 @@ describe('matchesFilter', () => {
 
 describe('matchedIds と shownRows', () => {
 	const rows = [
-		{ id: 'a', text: '確認' },
-		{ id: 'b', text: 'git status' }
+		{ key: 'a', text: '確認' },
+		{ key: 'b', text: 'git status' }
 	];
 
 	it('語が空白だけなら絞り込まず、すべてを出す', () => {

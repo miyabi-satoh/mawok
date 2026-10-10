@@ -74,6 +74,8 @@
 	"settings_replacements_to": "置き換えた後の文字列",
 	"settings_replacements_enabled": "この行を使う",
 	"settings_replacements_remove": "この行を削除",
+	"settings_sync": "同期する",
+	"settings_sync_description": "印をオフにした項目は、ほかのデバイスと同期しません。",
 	"settings_snippets_description": "テキストウィンドウで {key} を押すと、定型文を挿入できます。",
 	"settings_snippets_add": "追加",
 	"settings_snippets_name": "定型文の名前",

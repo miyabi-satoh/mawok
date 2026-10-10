@@ -74,6 +74,8 @@
 	"settings_replacements_to": "Replace with",
 	"settings_replacements_enabled": "Use this row",
 	"settings_replacements_remove": "Remove this row",
+	"settings_sync": "Sync",
+	"settings_sync_description": "Items with the mark turned off aren't synced to your other devices.",
 	"settings_snippets_description": "Press {key} in the text window to insert a snippet.",
 	"settings_snippets_add": "Add",
 	"settings_snippets_name": "Snippet name",

@@ -338,7 +338,9 @@
 	async function registerSnippet(name: string, body: string) {
 		await closeSnippets();
 		try {
-			const added = await invoke<boolean>('add_snippet', { snippet: { name, body } });
+			const added = await invoke<boolean>('add_snippet', {
+				snippet: { id: '', name, body, sync: true }
+			});
 			showNotice(added ? m.draft_snippet_registered() : m.draft_snippet_already_registered());
 		} catch (e) {
 			errorTitle = m.draft_snippet_register_failed();

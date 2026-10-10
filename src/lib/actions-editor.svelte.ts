@@ -15,7 +15,7 @@ import type { Action, AiService, SettingsView } from '$lib/settings.svelte';
  */
 export class ActionsEditor {
 	readonly actions: RowList<Action>;
-	/** 開いている行の id と、絞り込みの語。分類を移っても保つ */
+	/** 開いている行の画面用 key と、絞り込みの語。分類を移っても保つ */
 	readonly expanded = new SvelteSet<string>();
 	filter = $state('');
 	model = $state('');
@@ -31,16 +31,20 @@ export class ActionsEditor {
 		this.#actionsLocale = view?.locale;
 		this.actions = new RowList(
 			view?.actions ?? [],
-			(rows) =>
-				this.call('set_actions', {
-					actions: rows.map(({ name, command, output, encoding, enabled }) => ({
+			async (rows) => {
+				const result = await this.call<Action[]>('set_actions', {
+					actions: rows.map(({ id, name, command, output, encoding, enabled, sync }) => ({
+						id,
 						name,
 						command,
 						output,
 						encoding,
-						enabled
+						enabled,
+						sync
 					}))
-				}),
+				});
+				return result.ok ? result.value : undefined;
+			},
 			isBlankAction
 		);
 		if (view) {
@@ -75,15 +79,15 @@ export class ActionsEditor {
 	}
 
 	/**
-	 * 書くための空の1件を開き、その id を返す。空の行が残っていればそれを使う。
+	 * 書くための空の1件を開き、その画面用 key を返す。空の行が残っていればそれを使う。
 	 * コマンドが空の1件は一覧に出ないだけなので、書きかけのまま保存してよい
 	 */
 	addAction(): string {
 		// 足した行が絞り込みで隠れないよう、絞り込みを解く
 		this.filter = '';
 		const row = this.actions.addBlank(newAction('', ''));
-		this.expanded.add(row.id);
-		return row.id;
+		this.expanded.add(row.key);
+		return row.key;
 	}
 
 	async addDefaultActions() {

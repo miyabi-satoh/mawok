@@ -2,11 +2,11 @@ import { untrack } from 'svelte';
 import { reorder } from '$lib/reorder';
 import { coalescedSaver } from '$lib/saver';
 
-/** 一覧の1行。id は each の key に使うだけで、Rust 側へは渡さない */
-export type Row<T> = T & { id: string };
+/** 一覧の1行。key は画面の要素を保つためだけに使い、設定の id は Rust 側へ渡す。 */
+export type Row<T> = T & { key: string };
 
 function withId<T extends object>(item: T): Row<T> {
-	return { ...item, id: crypto.randomUUID() };
+	return { ...item, key: crypto.randomUUID() };
 }
 
 /**
@@ -16,7 +16,7 @@ function withId<T extends object>(item: T): Row<T> {
  * 欄がすべて空の行（isBlank）は、足した直後の書きかけとして保存はするが、溜めない。
  * 「追加」は空の行が残っていればそれを使い、写すときと dropBlanks で捨てる
  */
-export class RowList<T extends object> {
+export class RowList<T extends { id: string }> {
 	rows = $state<Row<T>[]>([]);
 	/** 行を変えたら呼ぶ。保存が重なっても古い内容で上書きしない（coalescedSaver） */
 	readonly save: () => Promise<void>;
@@ -26,13 +26,21 @@ export class RowList<T extends object> {
 
 	constructor(
 		items: T[],
-		save: (rows: Row<T>[]) => Promise<unknown>,
+		save: (rows: Row<T>[]) => Promise<T[] | undefined>,
 		isBlank: (item: T) => boolean
 	) {
 		this.#isBlank = isBlank;
 		// 前に開いたときに足したまま閉じた空の行は、写さない。次に保存したときに設定からも消える
 		this.rows = items.filter((item) => !isBlank(item)).map(withId);
-		const saver = coalescedSaver(() => save(this.rows));
+		const saver = coalescedSaver(async () => {
+			const submitted = this.rows.map((row) => ({ ...row }));
+			const saved = await save(submitted);
+			if (!saved) return;
+			for (const [index, item] of saved.entries()) {
+				const row = this.rows.find((current) => current.key === submitted[index]?.key);
+				if (row) row.id = item.id;
+			}
+		});
 		this.save = () => {
 			this.#edited = true;
 			return saver();
@@ -41,17 +49,18 @@ export class RowList<T extends object> {
 
 	/**
 	 * まだ画面で変えていなければ、Rust 側の今の中身を写し直す。保存はしない。
-	 * 同じ位置の行は id を引き継ぐ。開いている行は id で覚えているので、作り直すと閉じてしまう
+	 * 同じ設定 ID の行は key を引き継ぐ。開いている行は key で覚えているので、作り直すと閉じてしまう
 	 */
 	recopy(items: T[]) {
 		if (this.#edited) return;
 		// 呼び出し元の effect が、行の並びの変化で走り直さないよう、今の行は追わずに読む
-		const ids = untrack(() => this.rows.map((row) => row.id));
+		const previous = untrack(() => this.rows);
 		this.rows = items
 			.filter((item) => !this.#isBlank(item))
-			.map((item, i) => {
-				const id = ids[i];
-				return id ? { ...item, id } : withId(item);
+			.map((item, index) => {
+				const key =
+					previous.find((row) => row.id !== '' && row.id === item.id)?.key ?? previous[index]?.key;
+				return key ? { ...item, key } : withId(item);
 			});
 	}
 
