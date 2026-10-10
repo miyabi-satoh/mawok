@@ -1129,16 +1129,14 @@ impl Lan {
             Hello::Offer(_) if self.pairing.load(Ordering::Relaxed) => {
                 *self.offer_seen.lock().unwrap() = Some(ip)
             }
-            Hello::Want(_, tag) => {
-                if self.host.pro_account_tag().is_some_and(|own| own == tag) {
-                    *self.wanted.lock().unwrap() = Some(Instant::now());
-                    // ペアリングの握手の間は、相手がまだ want を名乗っている。済んだ後に次のコードを出さない
-                    if self.devices_open.load(Ordering::Relaxed)
-                        && !self.offering()
-                        && !self.pairing.load(Ordering::Relaxed)
-                    {
-                        let _ = self.start_pairing(true);
-                    }
+            Hello::Want(_, tag) if self.host.pro_account_tag().is_some_and(|own| own == tag) => {
+                *self.wanted.lock().unwrap() = Some(Instant::now());
+                // ペアリングの握手の間は、相手がまだ want を名乗っている。済んだ後に次のコードを出さない
+                if self.devices_open.load(Ordering::Relaxed)
+                    && !self.offering()
+                    && !self.pairing.load(Ordering::Relaxed)
+                {
+                    let _ = self.start_pairing(true);
                 }
             }
             Hello::Device(_) | Hello::Offer(_)
