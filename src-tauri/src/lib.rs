@@ -1912,7 +1912,11 @@ async fn refresh_account_key(
     apply_config(app);
 }
 
+/// 鍵を置く処理（確かめ・作り直し・ペアリングでの受け取り）と同じ排他を取り、消すのを必ず後にする。
+/// 取らないと、サインアウトと重なった保存が、消した後に鍵を書き戻す
 async fn clear_account_key(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let _refresh = state.account_key_refresh.lock().await;
     *app.state::<AppState>().account_key.lock().unwrap() = None;
     *app.state::<AppState>().account_key_id.lock().unwrap() = None;
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::None;
@@ -2747,7 +2751,10 @@ impl lan::Host for AppHandle {
     }
 
     fn receive_account_key(&self, key: [u8; 32]) -> bool {
-        if account_key::store(&key).is_err() {
+        // LAN のスレッドから呼ばれる（非同期の文脈ではない）。握手の間にサインアウトしていたら置かない
+        let state = self.state::<AppState>();
+        let _refresh = state.account_key_refresh.blocking_lock();
+        if pro_account_tag(self).is_none() || account_key::store(&key).is_err() {
             return false;
         }
         *self.state::<AppState>().account_key.lock().unwrap() = Some(key);
