@@ -146,15 +146,19 @@ impl State {
 
     /// 窓口と揃った。
     fn settle(&mut self, name: String, seq: u64, value: &Value) {
-        self.retired.remove(&name);
-        self.ignored.remove(&name);
-        self.items.insert(
+        self.settle_seen(
             name,
             Seen {
                 seq,
                 hash: hash_plain(value),
             },
         );
+    }
+
+    fn settle_seen(&mut self, name: String, seen: Seen) {
+        self.retired.remove(&name);
+        self.ignored.remove(&name);
+        self.items.insert(name, seen);
     }
 
     /// 窓口で消えた・同期から外れた。
@@ -598,25 +602,64 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
         }
         Some(Kind::Replacement(id)) => apply_row(&mut config.replacements, id, value),
         Some(Kind::Snippet(id)) => apply_row(&mut config.snippets, id, value),
-        Some(Kind::Action(id)) => {
-            let rows = synced_actions(config);
-            apply_row(rows, id, value)
-        }
+        Some(Kind::Action(id)) => apply_action_row(config, id, value),
         Some(Kind::Order("replacements")) => apply_order(&mut config.replacements, value),
         Some(Kind::Order("snippets")) => apply_order(&mut config.snippets, value),
-        Some(Kind::Order("actions")) => apply_order(synced_actions(config), value),
+        // 入れられない並びのために、既定のアクションを書き出さない
+        Some(Kind::Order("actions")) => {
+            order_ids(value).is_some() && apply_order(synced_actions(config), value)
+        }
         _ => false,
     }
 }
 
+/// アクションの行。既定のアクションのままのデバイスでは、同期しない既定のアクションだけを設定に書き出す
+/// （docs/sync.md「同期する単位」）。同期する行は、届いたものだけにする。
 fn synced_actions(config: &mut Config) -> &mut Vec<Action> {
     config.actions.get_or_insert_with(|| {
-        actions::default_actions(match config.language {
+        let lang = match config.language {
             Language::Ja => crate::i18n::Lang::Ja,
             Language::En => crate::i18n::Lang::En,
             Language::System => crate::i18n::Lang::system(),
-        })
+        };
+        let mut defaults = actions::default_actions(lang);
+        defaults.retain(|action| !action.sync);
+        defaults
     })
+}
+
+fn apply_action_row(config: &mut Config, id: &str, value: &Value) -> bool {
+    // 入れられない行のために、既定のアクションを書き出さない
+    if parse::<Action>(value).is_none() {
+        return false;
+    }
+    let rows = synced_actions(config);
+    let is_new = rows.iter().all(|row| row.id != id);
+    if !apply_row(rows, id, value) {
+        return false;
+    }
+    if is_new {
+        seat_default_action(rows);
+    }
+    true
+}
+
+/// 末尾に足した行が既定のアクションなら、既定の並びで次にある同期しない既定のアクションの前へ動かす。
+/// 同期しない行は直前の行の後ろに置く決まりなので、並びが届いたときに、既定の並びのとおりに付いて動く。
+fn seat_default_action(rows: &mut Vec<Action>) {
+    let defaults = actions::default_actions(crate::i18n::Lang::En);
+    let Some(added) = rows.last() else {
+        return;
+    };
+    let follower = defaults
+        .iter()
+        .position(|default| default.id == added.id)
+        .and_then(|position| defaults.get(position + 1))
+        .and_then(|next| rows.iter().position(|row| row.id == next.id && !row.sync));
+    if let Some(index) = follower {
+        let row = rows.pop().expect("a row was just added");
+        rows.insert(index, row);
+    }
 }
 
 fn set_if<T>(target: &mut T, value: Option<T>) -> bool {
@@ -729,9 +772,12 @@ fn apply_row<T: SyncRow>(rows: &mut Vec<T>, id: &str, value: &Value) -> bool {
     true
 }
 
+fn order_ids(value: &Value) -> Option<Vec<String>> {
+    parse::<Vec<String>>(value).filter(|ids| ids.iter().all(|id| valid_id(id)))
+}
+
 fn apply_order<T: SyncRow>(rows: &mut Vec<T>, value: &Value) -> bool {
-    let Some(order) = parse::<Vec<String>>(value).filter(|ids| ids.iter().all(|id| valid_id(id)))
-    else {
+    let Some(order) = order_ids(value) else {
         return false;
     };
     let mut leading = Vec::new();
@@ -817,10 +863,13 @@ fn detached(config: &Config, item: &ItemKey) -> bool {
             .iter()
             .any(|row| row.id == id && !row.sync),
         Some(Kind::Snippet(id)) => config.snippets.iter().any(|row| row.id == id && !row.sync),
-        Some(Kind::Action(id)) => config
-            .actions
-            .as_ref()
-            .is_some_and(|rows| rows.iter().any(|row| row.id == id && !row.sync)),
+        Some(Kind::Action(id)) => match &config.actions {
+            Some(rows) => rows.iter().any(|row| row.id == id && !row.sync),
+            // 既定のアクションのままでも、同期しない既定のアクションは手元の行
+            None => actions::default_actions(crate::i18n::Lang::En)
+                .iter()
+                .any(|row| row.id == id && !row.sync),
+        },
         _ => false,
     }
 }
@@ -855,7 +904,7 @@ enum Incoming<'a> {
     Deleted,
     Detached,
     Value(&'a Value),
-    /// 復号できない・知らない `v`。
+    /// 復号できない・知らない `v`（`decrypt` が平文を返さない）。
     Unreadable,
 }
 
@@ -865,7 +914,6 @@ impl RemoteItem {
             return Incoming::Deleted;
         }
         match &self.plain {
-            Some(plain) if plain.v != VERSION => Incoming::Unreadable,
             Some(plain) if plain.detached => Incoming::Detached,
             Some(Plain {
                 value: Some(value), ..
@@ -925,6 +973,159 @@ pub fn reconcile(
     )
 }
 
+/// まだ見ていない、この版が扱う項目か。
+fn is_new(state: &State, remote: &RemoteItem) -> bool {
+    let name = remote.key.name();
+    kind(&remote.key).is_some()
+        && !state.conflicts.contains(&name)
+        && state.seen_seq(&name).is_none_or(|seq| remote.seq > seq)
+}
+
+/// 窓口の1項目を、決まりに照らして手元の設定と記録に入れる。手元の設定を変えたかを返す。
+fn receive(
+    config: &mut Config,
+    state: &mut State,
+    local_items: &BTreeMap<ItemKey, Value>,
+    initial: bool,
+    remote: &RemoteItem,
+) -> bool {
+    if !is_new(state, remote) {
+        return false;
+    }
+    let name = remote.key.name();
+    let mut changed = false;
+    // 同期から外した手元の行は、同じ id の項目が届いても、中身も `sync` も変えない（docs/sync.md「同期する単位」）。
+    if detached(config, &remote.key) {
+        match state.items.get_mut(&name) {
+            // 外した印をまだ書いていない。ほかのデバイスの写しを切り離すため、届いた項目の上に印を書く
+            Some(seen) if !matches!(remote.incoming(), Incoming::Detached) => {
+                seen.seq = remote.seq;
+            }
+            // 届いた `seq` は置いておき、印を付け直したときの `base_seq` にする
+            _ => state.retire(name, remote.seq),
+        }
+        return changed;
+    }
+    let previous = state.items.get(&name).cloned();
+    // 記録がある項目（前の回に自分が書いた項目）は、初めての同期でも、いつもの決まりで比べる。
+    // 窓口の値を無条件に入れると、書いた後に手元で変えた値を巻き戻す
+    if initial && previous.is_none() {
+        match remote.incoming() {
+            Incoming::Value(value) => {
+                if apply_value(config, &remote.key, value) {
+                    changed = true;
+                    state.settle(name, remote.seq, value);
+                } else {
+                    state.ignored.insert(name, remote.seq);
+                }
+            }
+            Incoming::Detached => {
+                changed |= detach_local(config, &remote.key);
+                state.retire(name, remote.seq);
+            }
+            Incoming::Deleted => {
+                changed |= remove_local(config, &remote.key);
+                state.retire(name, remote.seq);
+            }
+            Incoming::Unreadable => {
+                state.ignored.insert(name, remote.seq);
+            }
+        }
+        return changed;
+    }
+    // 並びは、同じ回に届いた行を入れる前の手元の並びで比べる。
+    // 入れた後で比べると、届いた行の分だけ並びが変わって見え、手元を変えていないのに食い違いになる
+    let current = if matches!(kind(&remote.key), Some(Kind::Order(_))) {
+        local_items.get(&remote.key).cloned()
+    } else {
+        config_items(config).get(&remote.key).cloned()
+    };
+    let local_unchanged = match (&previous, &current) {
+        (Some(seen), Some(value)) => seen.hash == hash_plain(value),
+        (None, None) => true,
+        _ => false,
+    };
+    match remote.incoming() {
+        Incoming::Deleted => {
+            if current.is_none() {
+                // 手元でも消したか、外している。記録が無ければ、もともと持っていない行
+                if previous.is_some() {
+                    state.retire(name, remote.seq);
+                }
+            } else if local_unchanged {
+                changed |= remove_local(config, &remote.key);
+                state.retire(name, remote.seq);
+            } else {
+                state.conflicts.insert(name);
+            }
+        }
+        Incoming::Detached => {
+            changed |= detach_local(config, &remote.key);
+            state.retire(name, remote.seq);
+        }
+        Incoming::Unreadable => {
+            state.ignored.insert(name, remote.seq);
+        }
+        Incoming::Value(value) => {
+            if !is_known_value(config, &remote.key, value) {
+                state.ignored.insert(name, remote.seq);
+            } else if local_unchanged {
+                changed |= apply_value(config, &remote.key, value);
+                state.settle(name, remote.seq, value);
+            } else if current.as_ref() == Some(value) {
+                state.settle(name, remote.seq, value);
+            } else {
+                state.ignored.remove(&name);
+                state.conflicts.insert(name);
+            }
+        }
+    }
+    changed
+}
+
+/// 同じ回に届いたホットキーとキー操作を入れる。片方ずつ今の手元と照らすと、キーを入れ替えた組
+/// （操作から外したキーをホットキーにする など）を、重なりとして読み捨ててしまう。
+/// 組でも検査を通らなければ、両方を読み捨てて、手元はどちらも変えない
+fn receive_key_pair(
+    config: &mut Config,
+    state: &mut State,
+    local_items: &BTreeMap<ItemKey, Value>,
+    initial: bool,
+    hotkey: &RemoteItem,
+    keys: &RemoteItem,
+) -> bool {
+    let before = (config.clone(), state.clone());
+    // キー操作は、これから替わるホットキーとは照らさずに入れ、ホットキーを入れた後で照らし直す
+    let local_hotkey = std::mem::take(&mut config.hotkey);
+    let mut changed = receive(config, state, local_items, initial, keys);
+    config.hotkey = local_hotkey;
+    changed |= receive(config, state, local_items, initial, hotkey);
+    let ignored = [hotkey, keys]
+        .iter()
+        .any(|item| state.ignored.get(&item.key.name()) == Some(&item.seq));
+    let keys_settled = state
+        .items
+        .get(&keys.key.name())
+        .is_some_and(|seen| seen.seq == keys.seq);
+    let consistent = match keys.incoming() {
+        Incoming::Value(value) if keys_settled => apply_value(config, &keys.key, value),
+        _ => crate::draft_keys::check_hotkey(
+            &config.text_window_keys,
+            &config.hotkey,
+            Platform::current(),
+        )
+        .is_ok(),
+    };
+    if ignored || !consistent {
+        (*config, *state) = before;
+        for item in [hotkey, keys] {
+            state.ignored.insert(item.key.name(), item.seq);
+        }
+        return false;
+    }
+    changed
+}
+
 /// `initial` は、この同期が「初めての同期」か。`conflict` を受けて当て直す間も、同じ決まりで合わせる。
 fn reconcile_as(
     local: &Config,
@@ -951,101 +1152,27 @@ fn reconcile_as(
             item.seq,
         )
     });
-    for remote in &sorted {
-        let Some(item_kind) = kind(&remote.key) else {
-            continue;
-        };
-        let name = remote.key.name();
-        if state.conflicts.contains(&name)
-            || state.seen_seq(&name).is_some_and(|seq| remote.seq <= seq)
-        {
-            continue;
-        }
-        // 同期から外した手元の行は、同じ id の項目が届いても、中身も `sync` も変えない（docs/sync.md「同期する単位」）。
-        if detached(&config, &remote.key) {
-            match state.items.get_mut(&name) {
-                // 外した印をまだ書いていない。ほかのデバイスの写しを切り離すため、届いた項目の上に印を書く
-                Some(seen) if !matches!(remote.incoming(), Incoming::Detached) => {
-                    seen.seq = remote.seq;
-                }
-                // 届いた `seq` は置いておき、印を付け直したときの `base_seq` にする
-                _ => state.retire(name, remote.seq),
+    // ホットキーとキー操作は互いに重なりを見るので、同じ回に両方が届いたら、組にして入れる
+    let position = |key: ItemKey| {
+        sorted.iter().position(|item| {
+            item.key == key && is_new(&state, item) && matches!(item.incoming(), Incoming::Value(_))
+        })
+    };
+    let pair = position(hotkey_item()).zip(position(text_window_keys_item()));
+    for (index, remote) in sorted.iter().enumerate() {
+        match pair {
+            Some((hotkey, keys)) if index == hotkey.min(keys) => {
+                changed |= receive_key_pair(
+                    &mut config,
+                    &mut state,
+                    &local_items,
+                    initial,
+                    &sorted[hotkey],
+                    &sorted[keys],
+                );
             }
-            continue;
-        }
-        let previous = state.items.get(&name).cloned();
-        // 記録がある項目（前の回に自分が書いた項目）は、初めての同期でも、いつもの決まりで比べる。
-        // 窓口の値を無条件に入れると、書いた後に手元で変えた値を巻き戻す
-        if initial && previous.is_none() {
-            match remote.incoming() {
-                Incoming::Value(value) => {
-                    if apply_value(&mut config, &remote.key, value) {
-                        changed = true;
-                        state.settle(name, remote.seq, value);
-                    } else {
-                        state.ignored.insert(name, remote.seq);
-                    }
-                }
-                Incoming::Detached => {
-                    changed |= detach_local(&mut config, &remote.key);
-                    state.retire(name, remote.seq);
-                }
-                Incoming::Deleted => {
-                    changed |= remove_local(&mut config, &remote.key);
-                    state.retire(name, remote.seq);
-                }
-                Incoming::Unreadable => {
-                    state.ignored.insert(name, remote.seq);
-                }
-            }
-            continue;
-        }
-        // 並びは、同じ回に届いた行を入れる前の手元の並びで比べる。
-        // 入れた後で比べると、届いた行の分だけ並びが変わって見え、手元を変えていないのに食い違いになる
-        let current = if matches!(item_kind, Kind::Order(_)) {
-            local_items.get(&remote.key).cloned()
-        } else {
-            config_items(&config).get(&remote.key).cloned()
-        };
-        let local_unchanged = match (&previous, &current) {
-            (Some(seen), Some(value)) => seen.hash == hash_plain(value),
-            (None, None) => true,
-            _ => false,
-        };
-        match remote.incoming() {
-            Incoming::Deleted => {
-                if current.is_none() {
-                    // 手元でも消したか、外している。記録が無ければ、もともと持っていない行
-                    if previous.is_some() {
-                        state.retire(name, remote.seq);
-                    }
-                } else if local_unchanged {
-                    changed |= remove_local(&mut config, &remote.key);
-                    state.retire(name, remote.seq);
-                } else {
-                    state.conflicts.insert(name);
-                }
-            }
-            Incoming::Detached => {
-                changed |= detach_local(&mut config, &remote.key);
-                state.retire(name, remote.seq);
-            }
-            Incoming::Unreadable => {
-                state.ignored.insert(name, remote.seq);
-            }
-            Incoming::Value(value) => {
-                if !is_known_value(&config, &remote.key, value) {
-                    state.ignored.insert(name, remote.seq);
-                } else if local_unchanged {
-                    changed |= apply_value(&mut config, &remote.key, value);
-                    state.settle(name, remote.seq, value);
-                } else if current.as_ref() == Some(value) {
-                    state.settle(name, remote.seq, value);
-                } else {
-                    state.ignored.remove(&name);
-                    state.conflicts.insert(name);
-                }
-            }
+            Some((hotkey, keys)) if index == hotkey.max(keys) => {}
+            _ => changed |= receive(&mut config, &mut state, &local_items, initial, remote),
         }
     }
     if initial {
@@ -1341,10 +1468,12 @@ pub fn merge_written(previous: Option<State>, written: &State, reset: bool, key_
     let mut state = previous
         .filter(|state| !reset && state.key_id == key_id)
         .unwrap_or_else(|| State::new(key_id));
+    let order = ItemKey::new(SETTINGS, "o_").name();
     for (name, seen) in &written.items {
-        state.retired.remove(name);
-        state.ignored.remove(name);
-        state.items.insert(name.clone(), seen.clone());
+        // 書いた並びは、届いた並びに手元の行を足したもの。手元には入っていないので、次の回に読み直して合わせる
+        if !name.starts_with(&order) {
+            state.settle_seen(name.clone(), seen.clone());
+        }
     }
     for (name, seq) in &written.retired {
         state.retire(name.clone(), *seq);
@@ -2169,25 +2298,6 @@ mod tests {
     }
 
     #[test]
-    fn unknown_version_is_ignored_without_a_write() {
-        let local = Config::default();
-        let item = RemoteItem {
-            key: ItemKey::new(SETTINGS, "s_theme"),
-            seq: 2,
-            deleted: false,
-            plain: Some(Plain {
-                v: VERSION + 1,
-                value: Some(json!("dark")),
-                detached: false,
-            }),
-        };
-        let result = reconcile(&local, Some(recorded(&local)), &[item], "key", 2);
-        assert_eq!(result.config, local);
-        assert!(result.state.ignored.contains_key("settings\0s_theme"));
-        assert!(!result.writes.iter().any(|write| write.key.id == "s_theme"));
-    }
-
-    #[test]
     fn initial_sync_keeps_distinct_rows_from_both_devices() {
         let id = "e".repeat(32);
         let remote_id = "f".repeat(32);
@@ -2603,68 +2713,169 @@ mod tests {
     }
 
     #[test]
-    fn default_actions_gain_a_received_row() {
+    fn an_unknown_plaintext_version_is_unreadable() {
+        let future = serde_json::to_vec(&json!({ "v": VERSION + 1, "value": "dark" })).unwrap();
+        assert!(decode_plain(&future).is_none());
+    }
+
+    fn default_action(index: usize, lang: crate::i18n::Lang) -> Action {
+        actions::default_actions(lang).swap_remove(index)
+    }
+
+    /// 既定のアクションのままのデバイスが、初めての同期でない回と初めての同期で受け取る
+    fn receive_actions(items: &[RemoteItem]) -> [Reconcile; 2] {
         let local = Config::default();
-        let key = row_key('a', 'a');
-        let row = json!({
-            "name": "同期したアクション",
-            "command": "echo synced",
-            "output": "insert",
-            "encoding": "utf-8",
-            "enabled": true,
-        });
-        let result = reconcile(
-            &local,
-            Some(recorded(&local)),
-            &[remote(SETTINGS, &key.id, 2, row)],
-            "key",
-            2,
-        );
-        let defaults = actions::default_actions(crate::i18n::Lang::system());
-        let ids: Vec<_> = result
-            .config
-            .actions
-            .as_ref()
-            .unwrap()
-            .iter()
-            .map(|action| action.id.clone())
-            .collect();
-        let mut expected: Vec<_> = defaults.iter().map(|action| action.id.clone()).collect();
-        expected.push("a".repeat(32));
-        assert_eq!(ids, expected);
-        // 設定に書き出した既定のアクションは、ここから同期する
-        assert!(result
-            .writes
-            .iter()
-            .any(|write| write.key.id == "o_actions"));
+        [Some(recorded(&local)), None].map(|state| reconcile(&local, state, items, "key", 9))
     }
 
     #[test]
-    fn default_actions_follow_a_received_order() {
+    fn default_actions_from_another_device_do_not_conflict_with_the_local_defaults() {
+        let sort = default_action(1, crate::i18n::Lang::system());
+        // 相手は、英訳を別の表示言語で持ち、並べ替えを同期する行にして、別の文字コードで書いている
+        for lang in [crate::i18n::Lang::Ja, crate::i18n::Lang::En] {
+            let translate = Action {
+                enabled: false,
+                ..default_action(0, lang)
+            };
+            let their_sort = Action {
+                encoding: crate::config::ActionEncoding::ShiftJis,
+                output: crate::config::ActionOutput::Insert,
+                sync: true,
+                ..sort.clone()
+            };
+            let items = [
+                remote(
+                    SETTINGS,
+                    &row_id('a', &their_sort.id),
+                    2,
+                    row_value(&their_sort),
+                ),
+                remote(
+                    SETTINGS,
+                    &row_id('a', &translate.id),
+                    3,
+                    row_value(&translate),
+                ),
+                remote(
+                    SETTINGS,
+                    "o_actions",
+                    4,
+                    json!([translate.id, their_sort.id]),
+                ),
+            ];
+            for result in receive_actions(&items) {
+                assert!(result.state.conflicts.is_empty(), "{lang:?}");
+                assert_eq!(
+                    result.config.actions,
+                    Some(vec![translate.clone(), sort.clone()]),
+                    "{lang:?}"
+                );
+                assert!(
+                    !result
+                        .writes
+                        .iter()
+                        .any(|write| write.key.id.starts_with("a_")),
+                    "{lang:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_default_action_deleted_on_another_device_does_not_come_back() {
+        let sort = default_action(1, crate::i18n::Lang::system());
+        let translate = default_action(0, crate::i18n::Lang::En);
+        let custom = Action {
+            id: "a".repeat(32),
+            name: "自作".into(),
+            command: "echo".into(),
+            ..Action::default()
+        };
+        let items = [
+            deleted(&ItemKey::new(SETTINGS, row_id('a', &translate.id)), 2),
+            remote(SETTINGS, &row_id('a', &custom.id), 3, row_value(&custom)),
+            remote(SETTINGS, "o_actions", 4, json!([custom.id])),
+        ];
+        for result in receive_actions(&items) {
+            assert_eq!(
+                result.config.actions,
+                Some(vec![sort.clone(), custom.clone()])
+            );
+            let written = |prefix: &str| {
+                result
+                    .writes
+                    .iter()
+                    .any(|write| write.key.id.starts_with(prefix))
+            };
+            assert!(!written("a_") && !written("o_actions"));
+        }
+    }
+
+    #[test]
+    fn an_unusable_action_item_leaves_the_default_actions_unwritten() {
+        let items = [
+            remote(
+                SETTINGS,
+                &row_id('a', &"a".repeat(32)),
+                2,
+                json!("not a row"),
+            ),
+            remote(SETTINGS, "o_actions", 3, json!("not an order")),
+        ];
+        for result in receive_actions(&items) {
+            assert_eq!(result.config.actions, None);
+        }
+    }
+
+    #[test]
+    fn a_swapped_hotkey_and_key_arriving_together_are_both_applied() {
         let local = Config::default();
-        let mut ids: Vec<_> = actions::default_actions(crate::i18n::Lang::En)
-            .into_iter()
-            .map(|action| action.id)
-            .collect();
-        ids.reverse();
-        let result = reconcile(
-            &local,
-            Some(recorded(&local)),
-            &[remote(SETTINGS, "o_actions", 2, json!(ids))],
-            "key",
-            2,
-        );
+        let copy = local.text_window_keys.get(DraftAction::Copy).to_string();
+        // 相手は、コピーのキーを替えてから、空いたキーをホットキーにした
+        let mut theirs = local.clone();
+        *theirs.text_window_keys.get_mut(DraftAction::Copy) = "Alt+KeyP".into();
+        theirs.hotkey = copy.clone();
+        let their_items = config_items(&theirs);
+        let item = |key: ItemKey, seq| remote(SETTINGS, &key.id, seq, their_items[&key].clone());
+        // どちらが先に届いても同じ
+        for (hotkey_seq, keys_seq) in [(2, 3), (3, 2)] {
+            let result = reconcile(
+                &local,
+                Some(recorded(&local)),
+                &[
+                    item(hotkey_item(), hotkey_seq),
+                    item(text_window_keys_item(), keys_seq),
+                ],
+                "key",
+                3,
+            );
+            assert_eq!(result.config.hotkey, copy);
+            assert_eq!(result.config.text_window_keys, theirs.text_window_keys);
+            assert!(result.state.ignored.is_empty());
+            assert!(result.writes.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_hotkey_and_keys_that_overlap_each_other_are_both_ignored() {
+        let local = Config::default();
+        let items = [
+            remote(SETTINGS, &hotkey_item().id, 2, json!("Alt+KeyP")),
+            remote(
+                SETTINGS,
+                &text_window_keys_item().id,
+                3,
+                json!({ "copy": "Alt+KeyP" }),
+            ),
+        ];
+        let result = reconcile(&local, Some(recorded(&local)), &items, "key", 3);
+        assert_eq!(result.config, local);
+        assert_eq!(result.state.ignored.get(&hotkey_item().name()), Some(&2));
         assert_eq!(
-            result
-                .config
-                .actions
-                .unwrap()
-                .into_iter()
-                .map(|action| action.id)
-                .collect::<Vec<_>>(),
-            ids
+            result.state.ignored.get(&text_window_keys_item().name()),
+            Some(&3)
         );
-        assert!(result.state.conflicts.is_empty());
+        assert!(result.writes.is_empty());
     }
 
     #[test]
@@ -2980,6 +3191,59 @@ mod tests {
         assert_eq!(result.config.theme, Theme::Light);
         assert_eq!(second.written("s_theme")[0].plain, Some(json!("light")));
         assert_eq!(result.config.language, Language::En, "the server wins");
+        assert!(result.state.conflicts.is_empty());
+    }
+
+    #[test]
+    fn discarding_a_result_leaves_the_written_order_to_be_read_again() {
+        let named = |id: char, name: &str| Snippet {
+            name: name.into(),
+            ..snippet(id, name.into())
+        };
+        // 初めての同期。窓口には相手の行と並びがあり、手元には手元だけの行がある
+        let local = Config {
+            snippets: vec![named('f', "手元")],
+            ..Config::default()
+        };
+        let theirs = Config {
+            snippets: vec![named('e', "相手2"), named('d', "相手1")],
+            ..Config::default()
+        };
+        let their_items = config_items(&theirs);
+        let ids = [
+            row_id('n', &"d".repeat(32)),
+            row_id('n', &"e".repeat(32)),
+            "o_snippets".to_string(),
+        ];
+        let arrivals: Vec<_> = ids
+            .into_iter()
+            .zip(2..)
+            .map(|(id, seq)| {
+                let key = ItemKey::new(SETTINGS, id);
+                remote(SETTINGS, &key.id, seq, their_items[&key].clone())
+            })
+            .collect();
+        let mut first = FakeTransport::reading([read(4, arrivals.clone())]).after_seq(4);
+        let discarded = run(&mut first, &local, None).unwrap();
+        // 書いた並びは、届いた並びの後ろに手元の行を足したもの
+        assert_eq!(first.written("o_snippets").len(), 1);
+
+        let record = merge_written(None, &discarded.written, false, "key");
+        let mut copy: Vec<_> = arrivals
+            .into_iter()
+            .filter(|item| item.key.id != "o_snippets")
+            .collect();
+        copy.extend(first.stored.clone());
+        let mut second = FakeTransport::reading([read(first.seq, copy)]).after_seq(first.seq);
+        let result = run(&mut second, &local, Some(record)).unwrap();
+        let names: Vec<_> = result
+            .config
+            .snippets
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(names, ["相手2", "相手1", "手元"]);
+        assert!(second.written("o_snippets").is_empty());
         assert!(result.state.conflicts.is_empty());
     }
 

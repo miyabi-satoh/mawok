@@ -123,4 +123,19 @@ describe('RowList の空の行', () => {
 			expect(save).toHaveBeenLastCalledWith(received.map((row) => expect.objectContaining(row)))
 		);
 	});
+
+	it('足した直後で設定 ID の無い行の key を、届いた行に渡さない', () => {
+		const { rows, save } = list([{ id: 'a', name: 'A' }]);
+		// 保存の答えがまだで、足した行に設定 ID が無い
+		save.mockImplementation(() => new Promise<undefined>(() => {}));
+		const [added] = rows.add({ id: '', name: '書きかけ' });
+		rows.recopy(
+			[
+				{ id: 'a', name: 'A' },
+				{ id: 'b', name: '届いた行' }
+			],
+			true
+		);
+		expect(rows.rows[1].key).not.toBe(added.key);
+	});
 });

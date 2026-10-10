@@ -68,7 +68,9 @@ export class RowList<T extends { id: string }> {
 			// 画面に出ている書きかけの空の行は、足した直後に写し直しても残す
 			.filter((item) => !this.#isBlank(item) || (force && keyOf(item) !== undefined))
 			.map((item, index) => {
-				const byPosition = previous[index]?.key;
+				// 届いた行を入れるときは、足した直後でまだ設定 ID の無い行の key を別の行に渡さない
+				// （開いた状態やフォーカスが、届いた行へ移る）
+				const byPosition = force && previous[index]?.id === '' ? undefined : previous[index]?.key;
 				const key =
 					keyOf(item) ?? (byPosition && !used.includes(byPosition) ? byPosition : undefined);
 				if (!key) return withId(item);

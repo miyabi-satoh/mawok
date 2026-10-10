@@ -29,7 +29,8 @@ pub fn ai_instruction(command: &str) -> Option<&str> {
 
 /// 既定のアクション。設定ファイルにアクションの項目がないときに、今の表示言語で使う。
 /// AI の見本（英訳）と、どの OS にも入っているコマンドの見本（`sort`。標準入力を並べ替えて返す）を1つずつ。
-/// Windows の `sort` はシステムの文字コードで読み書きするので、Shift_JIS にする
+/// Windows の `sort` はシステムの文字コードで読み書きするので、Shift_JIS にする。
+/// 文字コードの既定が OS で違うコマンドの見本は、同期しない行にしておく（docs/sync.md「同期する単位」）
 pub fn default_actions(lang: Lang) -> Vec<Action> {
     let (translate, translate_instruction, sort) = match lang {
         Lang::Ja => (
@@ -54,23 +55,25 @@ pub fn default_actions(lang: Lang) -> Vec<Action> {
             translate,
             ai_line(translate_instruction),
             ActionEncoding::Utf8,
+            true,
         ),
         (
             DEFAULT_SORT_ACTION_ID,
             sort,
             "sort".to_string(),
             sort_encoding,
+            false,
         ),
     ]
     .into_iter()
-    .map(|(id, name, command, encoding)| Action {
+    .map(|(id, name, command, encoding, sync)| Action {
         id: id.to_string(),
         name: name.to_string(),
         command,
         output: ActionOutput::Replace,
         encoding,
         enabled: true,
-        sync: true,
+        sync,
     })
     .collect()
 }
@@ -205,6 +208,17 @@ impl ActionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_command_sample_is_kept_out_of_sync() {
+        for lang in [Lang::Ja, Lang::En] {
+            let synced: Vec<_> = default_actions(lang)
+                .into_iter()
+                .map(|action| (action.command == "sort", action.sync))
+                .collect();
+            assert_eq!(synced, [(false, true), (true, false)]);
+        }
+    }
 
     #[test]
     fn has_one_ai_action_and_one_command_action_by_default_in_each_language() {
