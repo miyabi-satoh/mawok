@@ -10,6 +10,7 @@ describe('lanErrorMessage', () => {
 		expect(lanErrorMessage('lan.pro_required')).toBe(m.lan_error_pro_required());
 		expect(lanErrorMessage('lan.receiver_pro_required')).toBe(m.lan_error_receiver_pro_required());
 		expect(lanErrorMessage('lan.account_mismatch')).toBe(m.lan_error_account_mismatch());
+		expect(lanErrorMessage('lan.key_mismatch')).toBe(m.lan_error_key_mismatch());
 	});
 
 	it('符号でなければ、受け取った文字列をそのまま出す', () => {

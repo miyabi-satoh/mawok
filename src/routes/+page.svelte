@@ -78,10 +78,10 @@
 	// 入力欄の上下に操作のボタンを出すか
 	const showButtons = $derived(settings.current?.showTextWindowButtons ?? true);
 
-	// 組み合わせた機器があるときだけ、送るキーとボタンを使える（docs/lan.md「同じ LAN の自分の機器へ送る」）
-	const pairedDevices = $derived(settings.current?.pairedDevices ?? []);
-	const hasPairedDevice = $derived(pairedDevices.length > 0);
-	const deviceNames = $derived(deviceLabels(pairedDevices));
+	// 同じアカウントの機器が見つかっているときだけ、送るキーとボタンを使える。
+	const devices = $derived(settings.current?.devices ?? []);
+	const hasDevice = $derived(devices.length > 0);
+	const deviceNames = $derived(deviceLabels(devices));
 	// 送信先の一覧を出しているか
 	let targetsOpen = $state(false);
 
@@ -197,7 +197,7 @@
 	let errorTitle = $state('');
 	// 残高が尽きたときだけ、料金ページを開く操作を帯に添える。帯の文から決めるので、ほかの失敗で文が変わればボタンも消える
 	const noCredit = $derived(error === m.action_error_no_credit());
-	// 組み合わせた機器へ送っている最中か。つないで送り終えるまで数秒かかることがあり、その間は書き換えさせない
+	// 同じアカウントの機器へ送っている最中か。つないで送り終えるまで数秒かかることがあり、その間は書き換えさせない
 	let sending = $state(false);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	// 隠す操作（コピーする・しない）の完了待ち。重ねて受け付けると、Esc の直後の Cmd+Enter でコピーしてしまう
@@ -610,10 +610,10 @@
 		return hideWith('commit', m.copy_failed());
 	}
 
-	/** 組み合わせた機器の下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
+	/** 同じアカウントの機器の下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
 	function send() {
 		// 送信先にチェックした機器がなければ、送らずに一覧を開いて選んでもらう
-		if (!pairedDevices.some((device) => device.sendTo)) {
+		if (!devices.some((device) => device.sendTo)) {
 			targetsOpen = true;
 			return;
 		}
@@ -823,7 +823,7 @@
 	}
 
 	/**
-	 * キーに割り当てた操作を呼ぶ。今は使えない操作（組み合わせた機器がないときの送る、
+	 * キーに割り当てた操作を呼ぶ。今は使えない操作（機器が見つかっていないときの送る、
 	 * 届いた下書きがないときの差し込むなど）なら何もせず false を返す
 	 */
 	function runAction(action: DraftAction): boolean {
@@ -832,7 +832,7 @@
 				commit();
 				return true;
 			case 'send':
-				if (!hasPairedDevice) return false;
+				if (!hasDevice) return false;
 				send();
 				return true;
 			case 'settings':
@@ -854,7 +854,7 @@
 				return true;
 			case 'sendTargets':
 				// ▼のボタンと同じく、送っている最中は開かない
-				if (!hasPairedDevice || sending) return false;
+				if (!hasDevice || sending) return false;
 				targetsOpen = true;
 				return true;
 			case 'insertReceived':
@@ -1148,7 +1148,7 @@
 					onclose={() => textarea?.focus()}
 				/>
 			{/if}
-			{#if hasPairedDevice}
+			{#if hasDevice}
 				<!-- 本体でチェックした機器へ送り、▼で送信先の一覧を開く -->
 				<div class="ml-auto flex">
 					<Button
@@ -1181,7 +1181,7 @@
 			<Button
 				tabindex={-1}
 				size="sm"
-				class={hasPairedDevice ? '' : 'ml-auto'}
+				class={hasDevice ? '' : 'ml-auto'}
 				disabled={running !== null}
 				onclick={commit}
 			>
@@ -1311,10 +1311,10 @@
 			onclose={closeFolder}
 		/>
 	{/if}
-	{#if targetsOpen && hasPairedDevice && settings.current}
+	{#if targetsOpen && hasDevice && settings.current}
 		<!-- 一覧を出している間は、フォーカスが一覧にあるので、入力欄のキーは効かない -->
 		<SendTargetPalette
-			devices={pairedDevices}
+			{devices}
 			platform={settings.current.platform}
 			targetsKey={settings.current.textWindowKeys.sendTargets}
 			onsend={sendToTargets}

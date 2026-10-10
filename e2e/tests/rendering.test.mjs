@@ -74,7 +74,7 @@ const TEST_CONFIG = {
 			body: '本文も長めにしておきます。'.repeat(8)
 		}
 	],
-	pairedDevices: [
+	devices: [
 		{
 			name: 'MacBook Air',
 			publicKey: 'ab'.repeat(32),

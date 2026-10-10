@@ -239,7 +239,7 @@ describe('EXE 版のファイルがある環境', () => {
 		config = await beginTestConfig({
 			language: 'ja',
 			autostart: false,
-			pairedDevices: [PLACEHOLDER_DEVICE]
+			devices: [PLACEHOLDER_DEVICE]
 		});
 		logMark = markLog(LOG_FILE);
 		await launchInPackage(pkg, CDP_PORT);

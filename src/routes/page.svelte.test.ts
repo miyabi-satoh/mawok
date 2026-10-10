@@ -922,7 +922,7 @@ describe('定型文', () => {
 	});
 });
 
-describe('組み合わせた機器へ送る', () => {
+describe('見つけた同じアカウントの機器へ送る', () => {
 	const device = { name: 'Mac', publicKey: 'ab', address: '', sendTo: true };
 
 	/** Rust 側に溜まっている、届いた下書き（take_received_drafts で渡す） */
@@ -938,10 +938,10 @@ describe('組み合わせた機器へ送る', () => {
 			}
 			return Promise.resolve(command === 'send_draft' || command === 'commit' ? true : undefined);
 		});
-		settings.current = { ...view(), pairedDevices: [device] };
+		settings.current = { ...view(), devices: [device] };
 	});
 
-	/** 組み合わせた機器から下書きが届く。Rust 側に溜めてから、画面に知らせる */
+	/** 同じアカウントの機器から下書きが届く。Rust 側に溜めてから、画面に知らせる */
 	function receive(...drafts: { from: string; text: string }[]) {
 		pending.push(...drafts);
 		emit(EVENTS.DRAFT_RECEIVED);
@@ -952,7 +952,7 @@ describe('組み合わせた機器へ送る', () => {
 	const sendButton = (screen: Screen) =>
 		screen.getByRole('button', { name: m.draft_send(), exact: true });
 
-	it('組み合わせた機器がなければ、送るのボタンを出さない', async () => {
+	it('機器が見つかっていなければ、送るのボタンを出さない', async () => {
 		settings.current = view();
 		const screen = await render(Page);
 
@@ -974,7 +974,7 @@ describe('組み合わせた機器へ送る', () => {
 	});
 
 	it('送るキーで送る', async () => {
-		settings.current = { ...view('windows'), pairedDevices: [device] };
+		settings.current = { ...view('windows'), devices: [device] };
 		const screen = await render(Page);
 		const textarea = screen.getByRole('textbox');
 
@@ -1112,7 +1112,7 @@ describe('組み合わせた機器へ送る', () => {
 	});
 
 	it('送信先にチェックした機器がなければ、送らずに送信先の一覧を開く', async () => {
-		settings.current = { ...view(), pairedDevices: [{ ...device, sendTo: false }] };
+		settings.current = { ...view(), devices: [{ ...device, sendTo: false }] };
 		const screen = await render(Page);
 		const textarea = screen.getByRole('textbox');
 
@@ -1127,7 +1127,7 @@ describe('組み合わせた機器へ送る', () => {
 	});
 
 	it('この機器が Pro でなければ、送信先の一覧に案内を出す', async () => {
-		settings.current = { ...view(), pairedDevices: [device] };
+		settings.current = { ...view(), devices: [device] };
 		invoked.mockImplementation((command) => {
 			if (command === 'probe_devices') return Promise.reject('lan.pro_required');
 			return Promise.resolve(undefined);
@@ -1142,7 +1142,7 @@ describe('組み合わせた機器へ送る', () => {
 
 	it('一部の機器に届かなかったら、隠さずに届かなかった機器の名前を出す', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), pairedDevices: [device, windows] };
+		settings.current = { ...view(), devices: [device, windows] };
 		invoked.mockImplementation((command) =>
 			command === 'send_draft'
 				? Promise.reject({ code: 'lan.partial', devices: ['cd'] })
@@ -1163,7 +1163,7 @@ describe('組み合わせた機器へ送る', () => {
 
 	it('送信先の一覧では、つながらない機器はチェックできず、Enter でチェックした機器へ送る', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), pairedDevices: [device, windows] };
+		settings.current = { ...view(), devices: [device, windows] };
 		invoked.mockImplementation((command) => {
 			// Mac（ab）だけがつながる
 			if (command === 'probe_devices') return Promise.resolve(['ab']);
@@ -1195,7 +1195,7 @@ describe('組み合わせた機器へ送る', () => {
 
 	it('送信先の一覧でチェックを外すと、設定に覚える', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), pairedDevices: [device, windows] };
+		settings.current = { ...view(), devices: [device, windows] };
 		invoked.mockImplementation((command) =>
 			Promise.resolve(command === 'probe_devices' ? ['ab', 'cd'] : undefined)
 		);
@@ -1212,7 +1212,7 @@ describe('組み合わせた機器へ送る', () => {
 
 	it('設定に反映される前に続けて押しても、前に押したチェックを消さない', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), pairedDevices: [device, windows] };
+		settings.current = { ...view(), devices: [device, windows] };
 		// set_send_targets を呼んでも settings-changed は届かない（設定は古いまま）
 		invoked.mockImplementation((command) =>
 			Promise.resolve(command === 'probe_devices' ? ['ab', 'cd'] : undefined)
@@ -1235,7 +1235,7 @@ describe('組み合わせた機器へ送る', () => {
 
 	it('続けて押したチェックは、前の保存が終わってから押した順に覚える', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), pairedDevices: [device, windows] };
+		settings.current = { ...view(), devices: [device, windows] };
 		let finishFirst: () => void = () => {};
 		let saveCount = 0;
 		invoked.mockImplementation((command) => {
@@ -1263,7 +1263,7 @@ describe('組み合わせた機器へ送る', () => {
 
 	it('前の保存が失敗したら、後に押した分の保存では、戻したチェックを書き戻さない', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), pairedDevices: [device, windows] };
+		settings.current = { ...view(), devices: [device, windows] };
 		let failFirst: () => void = () => {};
 		let saveCount = 0;
 		invoked.mockImplementation((command) => {
@@ -1315,7 +1315,7 @@ describe('組み合わせた機器へ送る', () => {
 	});
 
 	it('送信先を覚えられなければ、チェックを戻して知らせる', async () => {
-		settings.current = { ...view(), pairedDevices: [device] };
+		settings.current = { ...view(), devices: [device] };
 		invoked.mockImplementation((command) => {
 			if (command === 'set_send_targets') return Promise.reject('permission denied');
 			return Promise.resolve(command === 'probe_devices' ? ['ab'] : undefined);
@@ -1592,7 +1592,7 @@ describe('キー操作', () => {
 	});
 
 	it('送信先の一覧を開くキーで一覧を出し、もう一度押すと閉じる', async () => {
-		settings.current = { ...view(), pairedDevices: [device] };
+		settings.current = { ...view(), devices: [device] };
 		const screen = await render(Page);
 		await screen.getByRole('textbox').click();
 
@@ -1650,7 +1650,7 @@ describe('キー操作', () => {
 	});
 
 	it('一覧を開いている間も、ほかの操作のキーの既定の動作を止める', async () => {
-		settings.current = { ...view(), pairedDevices: [device] };
+		settings.current = { ...view(), devices: [device] };
 		const screen = await render(Page);
 		await screen.getByRole('textbox').click();
 		await userEvent.keyboard('{Meta>}j{/Meta}');
@@ -1686,7 +1686,7 @@ describe('キー操作', () => {
 		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('commit', { text: 'git status' }));
 	});
 
-	it('組み合わせた機器がなければ、送信先の一覧を開くキーでは何もしない', async () => {
+	it('機器が見つかっていなければ、送信先の一覧を開くキーでは何もしない', async () => {
 		const screen = await render(Page);
 		await screen.getByRole('textbox').click();
 
@@ -1697,7 +1697,7 @@ describe('キー操作', () => {
 	});
 
 	it('届いた下書きを、差し込むキーで差し込み、捨てるキーで捨てる', async () => {
-		settings.current = { ...view(), pairedDevices: [device] };
+		settings.current = { ...view(), devices: [device] };
 		const screen = await render(Page);
 		const textarea = screen.getByRole('textbox');
 		await textarea.fill('draft ');
@@ -2223,7 +2223,7 @@ describe('アクション', () => {
 
 	it('実行している間に届いた下書きは、終わってから知らせる', async () => {
 		const device = { name: 'Mac', publicKey: 'aa', address: '192.168.0.2', sendTo: true };
-		settings.current = { ...settings.current!, pairedDevices: [device] };
+		settings.current = { ...settings.current!, devices: [device] };
 		invoked.mockImplementation((command, args) => {
 			if (command === 'take_received_drafts')
 				return Promise.resolve([{ from: 'Mac', text: 'hello' }]);

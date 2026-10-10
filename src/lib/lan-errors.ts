@@ -3,7 +3,7 @@ import type { SendFailure } from '$lib/bindings/SendFailure';
 import { m } from '$lib/paraglide/messages';
 
 /**
- * 組み合わせと送信で Rust 側が返す、失敗の種類の符号（src-tauri/src/lan.rs の Failure::code）。
+ * ペアリングと送信で Rust 側が返す、失敗の種類の符号（src-tauri/src/lan.rs の Failure::code）。
  * 詳しい中身は Rust 側でログに残し、画面には何をすればよいかの案内だけを出す
  */
 const MESSAGES: Record<string, () => string> = {
@@ -14,6 +14,7 @@ const MESSAGES: Record<string, () => string> = {
 	'lan.pro_required': m.lan_error_pro_required,
 	'lan.receiver_pro_required': m.lan_error_receiver_pro_required,
 	'lan.account_mismatch': m.lan_error_account_mismatch,
+	'lan.key_mismatch': m.lan_error_key_mismatch,
 	'lan.too_long': m.lan_error_too_long,
 	'lan.bad_code': m.lan_error_bad_code,
 	'lan.wrong_code': m.lan_error_wrong_code,
@@ -33,7 +34,7 @@ export function isPartialSend(error: unknown): error is PartialSend {
 }
 
 /**
- * 組み合わせと送信のエラーを、画面に出す案内にする。符号でなければ、受け取った文字列をそのまま出す。
+ * ペアリングと送信のエラーを、画面に出す案内にする。符号でなければ、受け取った文字列をそのまま出す。
  * 送信のエラーは `{ code, devices }` の形で届くので、符号を取り出して同じように扱う
  */
 export function lanErrorMessage(error: unknown): string {

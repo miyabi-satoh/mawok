@@ -10,10 +10,10 @@
 	import { errorCode } from '$lib/errors';
 	import { isImeKey, toDraftKey, type Platform } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
-	import type { PairedDevice } from '$lib/settings.svelte';
+	import type { Device } from '$lib/settings.svelte';
 
 	type Props = {
-		devices: PairedDevice[];
+		devices: Device[];
 		platform: Platform;
 		/** 一覧を開くキー。開いている間に押すと閉じる。空文字は割り当てなし */
 		targetsKey: string;
@@ -60,17 +60,17 @@
 	// この一覧で押したチェック（公開鍵ごと）。設定の反映（settings-changed）を待たずに続けて押しても、
 	// 前に押した分を古い設定で上書きしないよう、押した状態をここで先に持つ
 	const pressed = new SvelteMap<string, boolean>();
-	const sendTo = (device: PairedDevice) => pressed.get(device.publicKey) ?? device.sendTo;
+	const sendTo = (device: Device) => pressed.get(device.publicKey) ?? device.sendTo;
 	// 保存は押した順に1つずつ行う。同時に投げると、後に押した分が先に書き終わり、前に押した古い状態で上書きされうる
 	let saving: Promise<unknown> = Promise.resolve();
 	// この一覧で最後に保存できた送信先の公開鍵。設定の反映（settings-changed）より先に分かる
 	let saved: Set<string> | null = null;
-	const canCheck = (device: PairedDevice) => reachable?.has(device.publicKey) ?? false;
+	const canCheck = (device: Device) => reachable?.has(device.publicKey) ?? false;
 	// つながらない機器は、チェックを覚えていても送らないので、外れて見せる
-	const isChecked = (device: PairedDevice) => sendTo(device) && canCheck(device);
+	const isChecked = (device: Device) => sendTo(device) && canCheck(device);
 
 	/** チェックを入れ外しして、設定に覚える。つながらない機器や、確かめている間は変えない */
-	function toggle(device: PairedDevice) {
+	function toggle(device: Device) {
 		if (!canCheck(device)) return;
 		const next = !sendTo(device);
 		pressed.set(device.publicKey, next);

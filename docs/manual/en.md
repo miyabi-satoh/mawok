@@ -72,11 +72,11 @@ When you choose Mawok, you do not need an API key. What you use is deducted from
 
 You can send text to Mawok on another device you own on the same network. This requires Pro.
 
-Pair the devices once first.
+1. On your first device, sign in to Mawok under "Account" in Settings.
+2. From the second device onward, sign in to the same Mawok account on the new device, then open "Devices" in Settings.
+3. Enter the code shown under "Devices" in Settings on a device you already use, then select "Add" on the new device.
 
-1. On both devices, sign in to the same Mawok account under "Account" in Settings.
-2. On one device, select "Show a code" under "Devices" in Settings.
-3. On the other device, enter the code and select "Pair".
+Devices signed in to the same account appear automatically under "Devices" in Settings when they are on the same network. To keep other devices out, select "Reset key" under "Devices" in Settings, then add the devices you still use again.
 
 {macos:If asked to allow access to the local network, allow it.}{windows:If asked to allow access through the firewall, allow it.}
 
@@ -121,7 +121,7 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 ## What is sent and privacy
 
 - Mawok does not send usage statistics or error reports.
-- It sends your text outside the app only when you run an AI action (to the AI service you chose) or send it to another device (to your paired device).
+- It sends your text outside the app only when you run an AI action (to the AI service you chose) or send it to another device (to another device you own on the same account).
 - Before you choose an AI service and select "Agree", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
 
 ## Settings file
@@ -155,7 +155,7 @@ Changes you make directly take effect after you restart the app. The file contai
 | `[text_window_keys]`             | The default keys in "Keyboard shortcuts" | Keys in the text window, per action, such as `copy` and `history_older`. An empty string means unassigned |
 | `[[replacements]]`               | None                             | One replacement entry (`from`, `to`, `enabled`)                          |
 | `[[snippets]]`                   | None                             | One snippet (`name`, `body`)                                             |
-| `[[paired_devices]]`             | None                             | Paired devices (pair them under "Devices" in Settings)                   |
+| `[[devices]]`                    | None                             | Devices found on the same account                                         |
 | `ai_service`                     | `"none"`                         | AI service used for AI actions (`"none"`, `"mawok"`, `"gemini"`, `"anthropic"`, `"openai"`) |
 | `ai_consent`                     | None                             | AI services whose notice about what is sent and how it is handled you accepted |
 | `[ai_models]`                    | Default model for each AI service | AI model, per AI service (`gemini = "…"`, `anthropic = "…"`, and so on)  |

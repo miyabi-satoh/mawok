@@ -1,4 +1,4 @@
-import type { PairedDevice } from '$lib/settings.svelte';
+import type { Device } from '$lib/settings.svelte';
 
 /**
  * 文の中に並べる機器名を、ハイフンのところで改行させない。living-room-pc が「living-」と「room-pc」に分かれると読みにくいため。
@@ -12,10 +12,10 @@ export function unbrokenAtHyphens(name: string): string {
 const KEY_PREFIX_LENGTH = 4;
 
 /**
- * 組み合わせた機器の表示名。名前はコンピューター名なので、同じ名前の機器が2台以上あるときだけ、
+ * 見つけた同じアカウントの機器の表示名。名前はコンピューター名なので、同じ名前の機器が2台以上あるときだけ、
  * 名前の後ろに公開鍵の先頭4文字を添えて見分ける（docs/lan.md「同じ LAN の自分の機器へ送る」）
  */
-export function deviceLabels(devices: PairedDevice[]): Map<string, string> {
+export function deviceLabels(devices: Device[]): Map<string, string> {
 	const counts = new Map<string, number>();
 	for (const device of devices) {
 		counts.set(device.name, (counts.get(device.name) ?? 0) + 1);

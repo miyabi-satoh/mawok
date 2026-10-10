@@ -2471,6 +2471,7 @@ dependencies = [
  "block2",
  "encoding_rs",
  "getrandom 0.4.3",
+ "hkdf",
  "if-addrs",
  "keyring-core",
  "libc",
