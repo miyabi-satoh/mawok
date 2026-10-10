@@ -423,9 +423,9 @@
 		focusFirstField(`replacement-${row.id}`);
 	}
 
-	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分の機器へ送る」） */
+	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分のデバイスへ送る」） */
 	let pairingCode = $state('');
-	/** `want` を受けて自動で出したコードか。相手の機器に出す案内だけを替える。 */
+	/** `want` を受けて自動で出したコードか。相手のデバイスに出す案内だけを替える。 */
 	let pairingAutomatic = $state(false);
 	/** 相手に出ているコードを入れる欄 */
 	let joinCode = $state('');
@@ -548,7 +548,7 @@
 </script>
 
 <!-- 記録中の表示。ホットキーと下書きの操作で同じ形にする -->
-<!-- 鍵を待つ状態と持つ状態で、同じ形の行をいちばん下に置く。ほかの機器を締め出す操作なので、押す前に何が起きるかを説明に書く -->
+<!-- 鍵を待つ状態と持つ状態で、同じ形の行をいちばん下に置く。ほかのデバイスを締め出す操作なので、押す前に何が起きるかを説明に書く -->
 {#snippet resetKeyRow(description: string)}
 	<SettingsRow>
 		<Field.Field orientation="horizontal" class="min-h-8">
@@ -1254,7 +1254,7 @@
 								>
 							</SettingsRow>
 						{:else if panel === 'needsPairing'}
-							<!-- 鍵を持つ状態の「ほかの機器を加える」と同じく、題名を左、操作を右、説明を下に置く -->
+							<!-- 鍵を持つ状態の「ほかのデバイスを加える」と同じく、題名を左、操作を右、説明を下に置く -->
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 									<Field.Title>{m.settings_devices_join_title()}</Field.Title>
@@ -1285,7 +1285,7 @@
 							{#if view.devices.length > 0}
 								{@const labels = deviceLabels(view.devices)}
 								<SettingsRow>
-									<!-- 同じ名前の機器は、送信先の一覧と同じく公開鍵の先頭4文字で見分ける。 -->
+									<!-- 同じ名前のデバイスは、送信先の一覧と同じく公開鍵の先頭4文字で見分ける。 -->
 									<div class="flex flex-col gap-3">
 										{#each view.devices as device (device.publicKey)}
 											<Field.Field orientation="horizontal">

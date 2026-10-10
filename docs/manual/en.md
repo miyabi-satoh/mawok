@@ -63,7 +63,7 @@ From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and p
 ## Use AI
 
 1. Under "Actions" in Settings, choose a service under "AI service".
-2. If you choose Mawok, select "Sign in" under "Account" in Settings, sign in on the page that opens, then click "Link this PC". For another service, enter its API key.
+2. If you choose Mawok, select "Sign in" under "Account" in Settings, sign in on the page that opens, then click "Link this device". For another service, enter its API key.
 3. Under "Actions" in Settings, read the explanation of what is sent, then select "Agree".
 
 When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy credits" under "Account" in Settings to open the purchase page in your browser.

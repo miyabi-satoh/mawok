@@ -922,7 +922,7 @@ describe('定型文', () => {
 	});
 });
 
-describe('見つけた同じアカウントの機器へ送る', () => {
+describe('見つけた同じアカウントのデバイスへ送る', () => {
 	const device = { name: 'Mac', publicKey: 'ab', address: '', sendTo: true };
 
 	/** Rust 側に溜まっている、届いた下書き（take_received_drafts で渡す） */
@@ -941,7 +941,7 @@ describe('見つけた同じアカウントの機器へ送る', () => {
 		settings.current = { ...view(), devices: [device] };
 	});
 
-	/** 同じアカウントの機器から下書きが届く。Rust 側に溜めてから、画面に知らせる */
+	/** 同じアカウントのデバイスから下書きが届く。Rust 側に溜めてから、画面に知らせる */
 	function receive(...drafts: { from: string; text: string }[]) {
 		pending.push(...drafts);
 		emit(EVENTS.DRAFT_RECEIVED);
@@ -952,7 +952,7 @@ describe('見つけた同じアカウントの機器へ送る', () => {
 	const sendButton = (screen: Screen) =>
 		screen.getByRole('button', { name: m.draft_send(), exact: true });
 
-	it('機器が見つかっていなければ、送るのボタンを出さない', async () => {
+	it('デバイスが見つかっていなければ、送るのボタンを出さない', async () => {
 		settings.current = view();
 		const screen = await render(Page);
 
@@ -1111,7 +1111,7 @@ describe('見つけた同じアカウントの機器へ送る', () => {
 		await expect.element(textarea).toHaveValue('git status');
 	});
 
-	it('送信先にチェックした機器がなければ、送らずに送信先の一覧を開く', async () => {
+	it('送信先にチェックしたデバイスがなければ、送らずに送信先の一覧を開く', async () => {
 		settings.current = { ...view(), devices: [{ ...device, sendTo: false }] };
 		const screen = await render(Page);
 		const textarea = screen.getByRole('textbox');
@@ -1126,7 +1126,7 @@ describe('見つけた同じアカウントの機器へ送る', () => {
 		await expect.element(textarea).toHaveValue('git status');
 	});
 
-	it('この機器が Pro でなければ、送信先の一覧に案内を出す', async () => {
+	it('このデバイスが Pro でなければ、送信先の一覧に案内を出す', async () => {
 		settings.current = { ...view(), devices: [device] };
 		invoked.mockImplementation((command) => {
 			if (command === 'probe_devices') return Promise.reject('lan.pro_required');
@@ -1140,7 +1140,7 @@ describe('見つけた同じアカウントの機器へ送る', () => {
 		expect(callsOf(invoked, 'probe_devices')).toHaveLength(1);
 	});
 
-	it('一部の機器に届かなかったら、隠さずに届かなかった機器の名前を出す', async () => {
+	it('一部のデバイスに届かなかったら、隠さずに届かなかったデバイスの名前を出す', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
 		settings.current = { ...view(), devices: [device, windows] };
 		invoked.mockImplementation((command) =>
@@ -1161,7 +1161,7 @@ describe('見つけた同じアカウントの機器へ送る', () => {
 		await expect.element(textarea).toHaveValue('git status');
 	});
 
-	it('送信先の一覧では、つながらない機器はチェックできず、Enter でチェックした機器へ送る', async () => {
+	it('送信先の一覧では、つながらないデバイスはチェックできず、Enter でチェックしたデバイスへ送る', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
 		settings.current = { ...view(), devices: [device, windows] };
 		invoked.mockImplementation((command) => {
@@ -1181,7 +1181,7 @@ describe('見つけた同じアカウントの機器へ送る', () => {
 		await expect.element(unreachable).toHaveAttribute('aria-disabled', 'true');
 		await expect.element(unreachable).toHaveAttribute('aria-selected', 'false');
 
-		// つながらない機器を押しても、チェックは変えない。
+		// つながらないデバイスを押しても、チェックは変えない。
 		// aria-disabled の要素は locator.click が押せるようになるまで待ち続けるので、要素を直接押す
 		(unreachable.element() as HTMLElement).click();
 		await tick();
@@ -1292,7 +1292,7 @@ describe('見つけた同じアカウントの機器へ送る', () => {
 			.toHaveAttribute('aria-selected', 'true');
 	});
 
-	it('同じ機器を続けて切り替え、後の保存だけ失敗したら、前に保存できた状態に戻す', async () => {
+	it('同じデバイスを続けて切り替え、後の保存だけ失敗したら、前に保存できた状態に戻す', async () => {
 		let saveCount = 0;
 		// set_send_targets を呼んでも settings-changed は届かない（設定は古いまま）
 		invoked.mockImplementation((command) => {
@@ -1686,7 +1686,7 @@ describe('キー操作', () => {
 		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('commit', { text: 'git status' }));
 	});
 
-	it('機器が見つかっていなければ、送信先の一覧を開くキーでは何もしない', async () => {
+	it('デバイスが見つかっていなければ、送信先の一覧を開くキーでは何もしない', async () => {
 		const screen = await render(Page);
 		await screen.getByRole('textbox').click();
 

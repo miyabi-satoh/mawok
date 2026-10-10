@@ -229,7 +229,7 @@
 	"settings_ai_model_description": "Leave empty to use the default model.",
 	"settings_mawok_account": "Account",
 	"settings_mawok_sign_in": "Sign in",
-	"settings_mawok_signing_in": "Sign in on the page that opened in your browser, then click Link this PC.",
+	"settings_mawok_signing_in": "Sign in on the page that opened in your browser, then click Link this device.",
 	"settings_mawok_open_again": "Open the page again",
 	"settings_mawok_sign_in_cancel": "Cancel",
 	"settings_mawok_sign_in_expired": "Couldn't sign in. Please sign in again.",

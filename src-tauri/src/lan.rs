@@ -1,4 +1,4 @@
-//! 同じ LAN の同じアカウントの機器へ、下書きを送る（docs/lan.md「同じ LAN の自分の機器へ送る」）。
+//! 同じ LAN の同じアカウントのデバイスへ、下書きを送る（docs/lan.md「同じ LAN の自分のデバイスへ送る」）。
 //! 相手は UDP のブロードキャストの名乗りで見つける。mDNS は、無線の端末どうしのマルチキャストを中継しないアクセスポイントで届かないため使わない。
 //! ペアリングは、片方に出す 6 桁のコードから SPAKE2 で鍵を作り、それを事前共有鍵にした Noise の XXpsk2 でアカウントの鍵を渡す。
 //! コードをそのまま鍵にしないのは、やり取りを盗み見た相手に総当たりで当てられるため。
@@ -24,7 +24,7 @@ use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 use crate::{atomic_file, APP_NAME};
 
-/// この機器の鍵を置くファイルの名前（設定ファイルと同じフォルダー）。設定ファイルは人に見せることがあるので分ける
+/// このデバイスの鍵を置くファイルの名前（設定ファイルと同じフォルダー）。設定ファイルは人に見せることがあるので分ける
 pub const KEY_FILE_NAME: &str = "device-key";
 /// 下書きと組み合わせのやり取りを受ける TCP のポート。アドレスを手で入れる道を後で足すときに、ポートまで入れさせないよう固定する
 const TCP_PORT: u16 = 47626;
@@ -65,7 +65,7 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const PAIR_PATTERN: &str = "Noise_XXpsk2_25519_ChaChaPoly_BLAKE2s";
 // ADR: 事前共有鍵は1通目に混ぜる（psk1）。psk2 だと、受ける側は握手を終えても、相手が鍵を持つかを
-// 最初の本文を読むまで確かめられず、鍵を持たない相手を機器の一覧に足してしまう
+// 最初の本文を読むまで確かめられず、鍵を持たない相手をデバイスの一覧に足してしまう
 const SEND_PATTERN: &str = "Noise_IKpsk1_25519_ChaChaPoly_BLAKE2s";
 const SPAKE2_IDENTITY: &[u8] = b"mawok pairing v1";
 /// Noise の1通の上限と、暗号化で付く認証タグの長さ
@@ -90,20 +90,20 @@ type Result<T> = std::result::Result<T, String>;
 /// 組み合わせと送信の失敗の種類。画面は符号から、何をすればよいかの案内を出す（src/lib/lan-errors.ts）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Failure {
-    /// 同じアカウントで見つけた機器がない
+    /// 同じアカウントで見つけたデバイスがない
     NoDevice,
-    /// 見つけた機器はあるが、送信先に選んだ機器がない
+    /// 見つけたデバイスはあるが、送信先に選んだデバイスがない
     NoTarget,
     /// 相手とつながらない（場所が分からない、つなげない、コードを出している相手が見つからない）。
     /// 原因はネットワークや OS しだいで、どれでも確かめる所は同じなので分けない
     Unreachable,
     /// つながったが、相手が受け取らなかった
     Refused,
-    /// この機器で Pro を使えない
+    /// このデバイスで Pro を使えない
     ProRequired,
     /// Pro だが、まだアカウントの鍵を受け取っていない
     NeedsPairing,
-    /// 相手の機器で Pro を使えない
+    /// 相手のデバイスで Pro を使えない
     ReceiverProRequired,
     /// 相手が別の Mawok アカウントに結ばれている
     AccountMismatch,
@@ -166,7 +166,7 @@ impl<T> FailAs<T> for Result<T> {
     }
 }
 
-/// この機器の鍵。秘密鍵をログに出さないよう、Debug は付けない
+/// このデバイスの鍵。秘密鍵をログに出さないよう、Debug は付けない
 #[derive(Clone)]
 pub struct DeviceKey {
     private: Vec<u8>,
@@ -187,9 +187,9 @@ pub trait Host: Send + Sync + 'static {
     fn on_pairing_code_ended(&self);
     /// 自動でコードを出した。設定画面は、取り逃がしたときだけ pairing_offer を読み直す。
     fn on_pairing_code_offered(&self, code: String, remaining_seconds: u64, automatic: bool);
-    /// 同じアカウントの機器から下書きが届いた。受け入れたら true。
+    /// 同じアカウントのデバイスから下書きが届いた。受け入れたら true。
     fn on_received(&self, from: &[u8], text: String) -> bool;
-    /// この機器で使える Pro のアカウントの印。無ければ、相手の下書きは受け取らない。
+    /// このデバイスで使える Pro のアカウントの印。無ければ、相手の下書きは受け取らない。
     fn pro_account_tag(&self) -> Option<[u8; ACCOUNT_TAG_LEN]>;
     /// 資格情報管理にあるアカウントの鍵。Pro が失効していても、相手へ pro_required を返すために読む。
     fn account_key(&self) -> Option<[u8; 32]>;
@@ -197,9 +197,9 @@ pub trait Host: Send + Sync + 'static {
     fn account_key_id(&self) -> Option<String>;
     /// ペアリングで受け取った鍵を置く。置けたときだけ ACK を返す。
     fn receive_account_key(&self, key: [u8; 32]) -> bool;
-    /// 同じアカウントの機器を見つけた。
+    /// 同じアカウントのデバイスを見つけた。
     fn on_device_found(&self, peer: Peer, address: IpAddr) -> bool;
-    /// 握手が通った機器の場所。名前が分からない場合も、既存の一覧の場所は直せる。
+    /// 握手が通ったデバイスの場所。名前が分からない場合も、既存の一覧の場所は直せる。
     fn on_device_address_seen(&self, public_key: &[u8], address: IpAddr);
 }
 
@@ -217,8 +217,8 @@ pub fn from_hex(text: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// 組み合わせるときに相手へ名乗り、Mawok のアカウントと結ぶときに窓口へ送る、この機器の名前。コンピューター名を使い、取れなければ Mawok。
-/// macOS の `hostname` はローカルホスト名で、同じ名前の機器が LAN にいると見なされると macOS が番号を付け替える
+/// 組み合わせるときに相手へ名乗り、Mawok のアカウントと結ぶときに窓口へ送る、このデバイスの名前。コンピューター名を使い、取れなければ Mawok。
+/// macOS の `hostname` はローカルホスト名で、同じ名前のデバイスが LAN にいると見なされると macOS が番号を付け替える
 /// （`my-mac` が `my-mac-2` になる）ので使わず、利用者が付けたコンピューター名を読む
 pub fn device_name() -> String {
     #[cfg(target_os = "macos")]
@@ -246,7 +246,7 @@ fn generate_key() -> Result<DeviceKey> {
     })
 }
 
-/// この機器の鍵を読む。まだないか、中身が壊れていれば作って書き出す。作り直すと、次の名乗りでほかの機器から見つけ直される
+/// このデバイスの鍵を読む。まだないか、中身が壊れていれば作って書き出す。作り直すと、次の名乗りでほかのデバイスから見つけ直される
 fn load_or_create_key(path: &Path) -> Result<DeviceKey> {
     match fs::read_to_string(path) {
         Ok(text) => {
@@ -596,7 +596,7 @@ fn send_text(
     Ok(())
 }
 
-/// 下書きを受け取る。握手を通った同じアカウントの機器からだけ、中身を受け取る。
+/// 下書きを受け取る。握手を通った同じアカウントのデバイスからだけ、中身を受け取る。
 /// 受け取り終えたら `deliver` に渡し、受け入れられた（true）ときだけ相手に受け取れたと返す。送ってきた相手の公開鍵を返す
 fn receive_text(
     stream: &mut (impl Read + Write),
@@ -631,7 +631,7 @@ fn receive_text(
     Ok(remote)
 }
 
-/// 生存確認も送信と同じ Pro・アカウントの判定を通す。送信先の一覧が、実際に送れる機器だけを選べるようにする。
+/// 生存確認も送信と同じ Pro・アカウントの判定を通す。送信先の一覧が、実際に送れるデバイスだけを選べるようにする。
 fn probe_peer(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
@@ -733,7 +733,7 @@ enum DiscoverySource {
     Authenticated,
 }
 
-/// 見つけ済みの機器の場所だけを書き換える。まだ見つけていない機器は、生存確認が通ってから覚える
+/// 見つけ済みのデバイスの場所だけを書き換える。まだ見つけていないデバイスは、生存確認が通ってから覚える
 /// （先に覚えると、生存確認が失敗したときに見つけ済みの扱いになり、試し直さなくなる）
 fn remember_seen_address(
     seen: &mut HashMap<Vec<u8>, IpAddr>,
@@ -779,7 +779,7 @@ pub struct Lan {
     pairing: AtomicBool,
     devices_open: AtomicBool,
     wanted: Mutex<Option<Instant>>,
-    /// 同じアカウントの機器を、名乗りや受け取りで最後に見た場所（公開鍵ごと）
+    /// 同じアカウントのデバイスを、名乗りや受け取りで最後に見た場所（公開鍵ごと）
     seen: Mutex<HashMap<Vec<u8>, IpAddr>>,
     /// UDP の名乗りだけを根拠に失敗した相手へ、しばらく握手を試さない。
     rejected: Mutex<HashMap<Vec<u8>, Instant>>,
@@ -861,7 +861,7 @@ impl Lan {
             || (self.host.pro_account_tag().is_some() && self.host.account_key().is_some())
     }
 
-    /// 要るなら動かし、要らなくなったら止める。鍵や発見した機器が変わったら呼ぶ。動いているかを返す
+    /// 要るなら動かし、要らなくなったら止める。鍵や発見したデバイスが変わったら呼ぶ。動いているかを返す
     pub fn refresh(self: &Arc<Self>) -> bool {
         let mut running = self.running.lock().unwrap();
         match (self.needed(), running.as_ref()) {
@@ -948,7 +948,7 @@ impl Lan {
             .map_err(|error| format!("read: {error}"))?;
         match kind[0] {
             KIND_PAIR => {
-                // コードを取り出すと、まだ鍵を持つ機器がなければ一瞬待ち受けが要らなくなる。
+                // コードを取り出すと、まだ鍵を持つデバイスがなければ一瞬待ち受けが要らなくなる。
                 // やり取りの間に止めてしまわないよう、取り出す前に立てる
                 self.pairing.store(true, Ordering::Relaxed);
                 let result = self.accept_pairing(stream, ip, &key);
@@ -1294,7 +1294,7 @@ impl Lan {
         self.refresh();
     }
 
-    /// 一覧から忘れた機器は、次の名乗りで再び生存確認できるようにする。
+    /// 一覧から忘れたデバイスは、次の名乗りで再び生存確認できるようにする。
     pub fn forget_device(&self, public_key: &[u8]) {
         self.seen.lock().unwrap().remove(public_key);
         self.rejected.lock().unwrap().remove(public_key);
@@ -1361,7 +1361,7 @@ impl Lan {
             Ok((peer, ip)) => {
                 info!("lan: paired");
                 let remembered = self.host.on_device_found(peer, ip);
-                // 覚えた機器で待ち受けが要るようになってから下ろす。先に下ろすと、一瞬要らないとみなして止めてしまう
+                // 覚えたデバイスで待ち受けが要るようになってから下ろす。先に下ろすと、一瞬要らないとみなして止めてしまう
                 self.pairing.store(false, Ordering::Relaxed);
                 if remembered {
                     Ok(())
@@ -1395,7 +1395,7 @@ impl Lan {
         }
     }
 
-    /// 同じアカウントで見つけた機器へ下書きを送る。名乗りで見た場所がなければ、覚えていた場所へ送る。送れた場所を返す
+    /// 同じアカウントで見つけたデバイスへ下書きを送る。名乗りで見た場所がなければ、覚えていた場所へ送る。送れた場所を返す
     pub fn send(
         &self,
         remote_public: &[u8],
@@ -1427,7 +1427,7 @@ impl Lan {
         Ok(ip)
     }
 
-    /// 同じアカウントで見つけた機器が動いていて、つながるかを確かめる（握手まで）。つながった場所を返す。
+    /// 同じアカウントで見つけたデバイスが動いていて、つながるかを確かめる（握手まで）。つながった場所を返す。
     /// 握手が通らなかったときも、送れないので、つながらないとみなす
     pub fn probe(
         &self,
@@ -1455,7 +1455,7 @@ impl Lan {
         self.host.on_device_address_seen(remote_public, ip);
     }
 
-    /// 同じアカウントで見つけた機器の場所。名乗りで見た場所がなければ、覚えていた場所
+    /// 同じアカウントで見つけたデバイスの場所。名乗りで見た場所がなければ、覚えていた場所
     fn locate(
         &self,
         remote_public: &[u8],
@@ -1901,7 +1901,7 @@ mod tests {
         assert!(remember_seen_address(&mut seen, &public_key, authenticated));
         assert_eq!(seen[&public_key], authenticated);
 
-        // まだ見つけていない機器は、生存確認が通るまで覚えない
+        // まだ見つけていないデバイスは、生存確認が通るまで覚えない
         let unknown = vec![5; 32];
         assert!(!remember_seen_address(&mut seen, &unknown, authenticated));
         assert!(!seen.contains_key(&unknown));

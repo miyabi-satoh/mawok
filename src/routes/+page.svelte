@@ -78,7 +78,7 @@
 	// 入力欄の上下に操作のボタンを出すか
 	const showButtons = $derived(settings.current?.showTextWindowButtons ?? true);
 
-	// 同じアカウントの機器が見つかっているときだけ、送るキーとボタンを使える。
+	// 同じアカウントのデバイスが見つかっているときだけ、送るキーとボタンを使える。
 	const devices = $derived(settings.current?.devices ?? []);
 	const hasDevice = $derived(devices.length > 0);
 	const deviceNames = $derived(deviceLabels(devices));
@@ -197,7 +197,7 @@
 	let errorTitle = $state('');
 	// 残高が尽きたときだけ、料金ページを開く操作を帯に添える。帯の文から決めるので、ほかの失敗で文が変わればボタンも消える
 	const noCredit = $derived(error === m.action_error_no_credit());
-	// 同じアカウントの機器へ送っている最中か。つないで送り終えるまで数秒かかることがあり、その間は書き換えさせない
+	// 同じアカウントのデバイスへ送っている最中か。つないで送り終えるまで数秒かかることがあり、その間は書き換えさせない
 	let sending = $state(false);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	// 隠す操作（コピーする・しない）の完了待ち。重ねて受け付けると、Esc の直後の Cmd+Enter でコピーしてしまう
@@ -610,9 +610,9 @@
 		return hideWith('commit', m.copy_failed());
 	}
 
-	/** 同じアカウントの機器の下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
+	/** 同じアカウントのデバイスの下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
 	function send() {
-		// 送信先にチェックした機器がなければ、送らずに一覧を開いて選んでもらう
+		// 送信先にチェックしたデバイスがなければ、送らずに一覧を開いて選んでもらう
 		if (!devices.some((device) => device.sendTo)) {
 			targetsOpen = true;
 			return;
@@ -627,7 +627,7 @@
 		textarea?.focus();
 	}
 
-	/** 送信先の一覧から送る。チェックが入っていて、つながった機器だけに送る */
+	/** 送信先の一覧から送る。チェックが入っていて、つながったデバイスだけに送る */
 	async function sendToTargets(publicKeys: string[]) {
 		await closeTargets();
 		return hideWith('send_draft', m.send_failed(), publicKeys);
@@ -635,7 +635,7 @@
 
 	/**
 	 * コピーするか送るかして隠す。隠すのは Rust 側で、渡したら true、空で何もしなかったら false が返る。
-	 * 送るときは、targets（公開鍵）を渡せばその機器へ、渡さなければ送信先にチェックした機器へ送る
+	 * 送るときは、targets（公開鍵）を渡せばそのデバイスへ、渡さなければ送信先にチェックしたデバイスへ送る
 	 */
 	async function hideWith(
 		command: 'commit' | 'send_draft',
@@ -668,7 +668,7 @@
 		} catch (e) {
 			clearOnShow = false;
 			if (command === 'send_draft' && isPartialSend(e)) {
-				// 一部の機器にだけ届かなかった。原因は出さず、どの機器に届かなかったかだけを出す
+				// 一部のデバイスにだけ届かなかった。原因は出さず、どのデバイスに届かなかったかだけを出す
 				errorTitle = m.send_partial();
 				const names = e.devices.map((publicKey) =>
 					unbrokenAtHyphens(deviceNames.get(publicKey) ?? publicKey)
@@ -823,7 +823,7 @@
 	}
 
 	/**
-	 * キーに割り当てた操作を呼ぶ。今は使えない操作（機器が見つかっていないときの送る、
+	 * キーに割り当てた操作を呼ぶ。今は使えない操作（デバイスが見つかっていないときの送る、
 	 * 届いた下書きがないときの差し込むなど）なら何もせず false を返す
 	 */
 	function runAction(action: DraftAction): boolean {
@@ -1149,7 +1149,7 @@
 				/>
 			{/if}
 			{#if hasDevice}
-				<!-- 本体でチェックした機器へ送り、▼で送信先の一覧を開く -->
+				<!-- 本体でチェックしたデバイスへ送り、▼で送信先の一覧を開く -->
 				<div class="ml-auto flex">
 					<Button
 						tabindex={-1}

@@ -16,7 +16,7 @@ describe('deviceLabels', () => {
 		expect(labels.get('ef34gh')).toBe('Windows');
 	});
 
-	it('同じ名前の機器があれば、名前の後ろに公開鍵の先頭4文字を添える', () => {
+	it('同じ名前のデバイスがあれば、名前の後ろに公開鍵の先頭4文字を添える', () => {
 		const labels = deviceLabels([
 			device('MacBook Pro', '3f2a9b'),
 			device('MacBook Pro', '81c0de'),

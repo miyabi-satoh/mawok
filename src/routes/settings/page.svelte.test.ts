@@ -1381,7 +1381,7 @@ describe('設定画面のほかのアプリに移ったら下書きを隠す', (
 	});
 });
 
-describe('設定画面の機器', () => {
+describe('設定画面のデバイス', () => {
 	const devices = [
 		{ name: 'mac-mini', publicKey: 'de03ffff', address: '', sendTo: true },
 		{ name: 'mac-mini', publicKey: 'a1b2ffff', address: '', sendTo: true },
@@ -1398,7 +1398,7 @@ describe('設定画面の機器', () => {
 		};
 	});
 
-	it('同じ名前の機器は公開鍵の先頭4文字で見分け、一覧から消す操作はその機器に対して行う', async () => {
+	it('同じ名前のデバイスは公開鍵の先頭4文字で見分け、一覧から消す操作はそのデバイスに対して行う', async () => {
 		const screen = await renderAt(m.settings_category_devices);
 
 		await expect.element(screen.getByLabelText('mac-mini (a1b2)')).toBeChecked();
@@ -1412,7 +1412,7 @@ describe('設定画面の機器', () => {
 		expect(invoked).toHaveBeenCalledWith('forget_device', { publicKey: 'a1b2ffff' });
 	});
 
-	it('機器が見つかっていなければ、その理由を出す', async () => {
+	it('デバイスが見つかっていなければ、その理由を出す', async () => {
 		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'ready' };
 		const screen = await renderAt(m.settings_category_devices);
 
@@ -1436,7 +1436,7 @@ describe('設定画面の機器', () => {
 		await vi.waitFor(() => expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1));
 	});
 
-	it('鍵がない機器では、コードを入れて加えられる', async () => {
+	it('鍵がないデバイスでは、コードを入れて加えられる', async () => {
 		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
 		const screen = await renderAt(m.settings_category_devices);
 
@@ -1470,7 +1470,7 @@ describe('設定画面の機器', () => {
 		expect(invoked).toHaveBeenCalledWith('reset_account_key', undefined);
 	});
 
-	it('新しい機器を見つけて自動でコードを出したときは、その案内を出す', async () => {
+	it('新しいデバイスを見つけて自動でコードを出したときは、その案内を出す', async () => {
 		invoked.mockImplementation((command) =>
 			Promise.resolve(
 				command === 'pairing_offer'

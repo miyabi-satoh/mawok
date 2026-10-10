@@ -57,15 +57,15 @@ textHistorySize: number, trimTrailingWhitespace: boolean, replacements: Array<Re
  */
 snippets: Array<Snippet>, 
 /**
- * 同じアカウントで見つけた自分の機器。見つけた順
+ * 同じアカウントで見つけた自分のデバイス。見つけた順
  */
 devices: Array<Device>, 
 /**
- * ペアリングと生存確認で相手へ名乗る、この機器の名前
+ * ペアリングと生存確認で相手へ名乗る、このデバイスの名前
  */
 deviceName: string, 
 /**
- * 機器の間の送受信を使える Pro か
+ * デバイスの間の送受信を使える Pro か
  */
 proAvailable: boolean, accountKeyStatus: Status, 
 /**

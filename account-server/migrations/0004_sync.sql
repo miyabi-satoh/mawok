@@ -1,4 +1,4 @@
--- Pro の機器間同期。窓口は復号できない暗号文だけを置く。
+-- Pro のデバイス間同期。窓口は復号できない暗号文だけを置く。
 
 CREATE TABLE sync_accounts (
 	account_id TEXT PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,

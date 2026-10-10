@@ -14,5 +14,5 @@ CREATE TABLE link_codes (
 	created_at INTEGER NOT NULL
 );
 
--- 窓口の画面で、どの機器の Mawok かを見分けられるように。名前の無い行 (この版より前に結んだもの) は「Mawok」と出す。
+-- 窓口の画面で、どのデバイスの Mawok かを見分けられるように。名前の無い行 (この版より前に結んだもの) は「Mawok」と出す。
 ALTER TABLE app_tokens ADD COLUMN name TEXT;

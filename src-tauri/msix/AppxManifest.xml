@@ -48,8 +48,8 @@
   </Applications>
 
   <Extensions>
-    <!-- 機器の間の送受信の受け口 (TCP で下書きを受け、UDP で互いを見つける)。Windows 11 は新しいネットワークを既定でパブリックにするので、
-         パブリックも許可する (EXE 版で初回のダイアログの「許可」を押したときと同じ)。下書きは Noise の握手で組み合わせた機器に限り、組み合わせはコードを出している間だけ受け付ける。
+    <!-- デバイスの間の送受信の受け口 (TCP で下書きを受け、UDP で互いを見つける)。Windows 11 は新しいネットワークを既定でパブリックにするので、
+         パブリックも許可する (EXE 版で初回のダイアログの「許可」を押したときと同じ)。下書きは Noise の握手で組み合わせたデバイスに限り、組み合わせはコードを出している間だけ受け付ける。
          入れた場所は版ごとに変わるので、初めて待ち受けたときのダイアログで exe のパスに作る規則には頼らない。 -->
     <desktop2:Extension Category="windows.firewallRules">
       <desktop2:FirewallRules Executable="mawok.exe">
@@ -60,7 +60,7 @@
   </Extensions>
 
   <Capabilities>
-    <!-- 機器の間の送受信 (同じネットワークの中だけ)。受信の規則は上の windows.firewallRules で決めるので、
+    <!-- デバイスの間の送受信 (同じネットワークの中だけ)。受信の規則は上の windows.firewallRules で決めるので、
          internetClientServer は付けない (付けると、別に受信規則が足されるため)。 -->
     <Capability Name="privateNetworkClientServer" />
     <rescap:Capability Name="runFullTrust" />

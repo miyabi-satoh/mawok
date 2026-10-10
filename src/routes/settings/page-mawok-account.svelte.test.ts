@@ -253,7 +253,7 @@ describe('設定画面の Mawok のアカウント', () => {
 			.toBeVisible();
 	});
 
-	it('機器からアカウントを開ける', async () => {
+	it('デバイスからアカウントを開ける', async () => {
 		const screen = await render(Page);
 		await screen.getByRole('tab', { name: m.settings_category_devices() }).click();
 		await expect.element(screen.getByText(m.settings_devices_pro_sign_in())).toBeVisible();

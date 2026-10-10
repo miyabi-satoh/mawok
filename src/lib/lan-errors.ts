@@ -22,7 +22,7 @@ const MESSAGES: Record<string, () => string> = {
 	'lan.internal': m.lan_error_internal
 };
 
-/** 送信で、一部の機器にだけ届かなかったとき（Rust 側の SendFailure）。devices は届かなかった機器の公開鍵 */
+/** 送信で、一部のデバイスにだけ届かなかったとき（Rust 側の SendFailure）。devices は届かなかったデバイスの公開鍵 */
 export type PartialSend = SendFailure & { code: 'lan.partial' };
 
 export function isPartialSend(error: unknown): error is PartialSend {

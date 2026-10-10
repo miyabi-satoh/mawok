@@ -18,7 +18,7 @@
 技術の説明:
 
 - [アクションの実行](docs/actions.md)
-- [同じ LAN の自分の機器へ送る](docs/lan.md)
+- [同じ LAN の自分のデバイスへ送る](docs/lan.md)
 - [設定ファイル](docs/config.md)
 - [OS ごとの作り](docs/platform.md)
 - [第三者のソフトウェア](docs/third-party-licenses.md)

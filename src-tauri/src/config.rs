@@ -170,7 +170,7 @@ impl Default for Action {
     }
 }
 
-/// 同じアカウントで見つけた自分の機器（docs/lan.md「同じ LAN の自分の機器へ送る」）
+/// 同じアカウントで見つけた自分のデバイス（docs/lan.md「同じ LAN の自分のデバイスへ送る」）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -182,12 +182,12 @@ pub struct Device {
     pub public_key: String,
     /// 最後に相手へ送れた、または生存確認したときのアドレス。起動した直後で、相手の名乗りがまだ届いていないときに使う
     pub address: String,
-    /// 送信先にチェックを入れているか。送るキーとボタンは、チェックした機器へ送る
+    /// 送信先にチェックを入れているか。送るキーとボタンは、チェックしたデバイスへ送る
     pub send_to: bool,
 }
 
 /// 項目がない設定ファイル（送信先を選べるようになる前のもの）は、チェックを入れて読む。
-/// 新しく見つけた機器は送信先に加える
+/// 新しく見つけたデバイスは送信先に加える
 impl Default for Device {
     fn default() -> Self {
         Self {
@@ -239,7 +239,7 @@ pub struct Config {
     pub text_color_light: String,
     /// 下書きの入力欄の文字色（ダーク）。小文字の #rrggbb。空なら標準の文字色
     pub text_color_dark: String,
-    /// 同じアカウントで見つけた自分の機器
+    /// 同じアカウントで見つけた自分のデバイス
     pub devices: Vec<Device>,
     /// 下書きの入力欄に出す案内。None なら既定の案内（画面側で今の言語とホットキーから作る）、空文字なら出さない。
     /// 既定のままのときは、設定ファイルに書かない
@@ -488,7 +488,7 @@ fn rows(item: &Item) -> Option<Vec<Option<&dyn TableLike>>> {
     }
 }
 
-/// 並びの1行（置き換え辞書・定型文・アクション・見つけた機器）
+/// 並びの1行（置き換え辞書・定型文・アクション・見つけたデバイス）
 trait Row: Sized + PartialEq {
     /// 行を読む。省いた項目は既定値として読み、型の合わない項目があれば None
     fn read(table: &dyn TableLike) -> Option<Self>;
@@ -2680,7 +2680,7 @@ gemini = 3
 
     #[test]
     fn reads_devices_without_send_to_as_checked() {
-        // 送信先を選べるようになる前の設定ファイルには send_to がない。見つけた機器を送信先にする既定で読む
+        // 送信先を選べるようになる前の設定ファイルには send_to がない。見つけたデバイスを送信先にする既定で読む
         let path = temp_path("paired-devices");
         write(
             &path,

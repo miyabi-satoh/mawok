@@ -118,7 +118,7 @@ struct DraftState {
     blur: debounce::Debounce,
     /// 下書きを出してから、一度でもフォーカスが入ったか。入っていなければ、フォーカスが外れたとして隠さない
     focused_since_shown: AtomicBool,
-    /// 同じアカウントの機器から届き、画面がまだ受け取っていない下書き。画面の読み込み中に届いても失わないよう、起動中だけここに溜める
+    /// 同じアカウントのデバイスから届き、画面がまだ受け取っていない下書き。画面の読み込み中に届いても失わないよう、起動中だけここに溜める
     received: Mutex<Vec<ReceivedDraft>>,
     /// 下書きが隠れている間に届き、まだ下書きを出していないか。トレイのアイコンに点を付ける
     unseen_received: AtomicBool,
@@ -173,7 +173,7 @@ struct AppState {
     version: String,
     /// OS の言語設定から決めた言語。表示言語が「システム」のときに使う
     system_lang: Lang,
-    /// ペアリングと生存確認で相手へ名乗る、この機器の名前
+    /// ペアリングと生存確認で相手へ名乗る、このデバイスの名前
     device_name: String,
     config: Mutex<Config>,
     problems: Mutex<Problems>,
@@ -282,11 +282,11 @@ struct SettingsView {
     replacements: Vec<Replacement>,
     /// 定型文。登録した順
     snippets: Vec<Snippet>,
-    /// 同じアカウントで見つけた自分の機器。見つけた順
+    /// 同じアカウントで見つけた自分のデバイス。見つけた順
     devices: Vec<Device>,
-    /// ペアリングと生存確認で相手へ名乗る、この機器の名前
+    /// ペアリングと生存確認で相手へ名乗る、このデバイスの名前
     device_name: String,
-    /// 機器の間の送受信を使える Pro か
+    /// デバイスの間の送受信を使える Pro か
     pro_available: bool,
     account_key_status: account_key::Status,
     /// Mawok のアカウントトークンを資格情報管理から読めたか
@@ -1215,7 +1215,7 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     Ok(true)
 }
 
-/// 待つことのある処理（キーチェーン、相手の機器とのやり取り）を、メインスレッドを止めずに別のスレッドで走らせる。
+/// 待つことのある処理（キーチェーン、相手のデバイスとのやり取り）を、メインスレッドを止めずに別のスレッドで走らせる。
 /// 走らせたスレッドが落ちたら、その理由を返す
 async fn run_blocking<T: Send + 'static>(
     task: impl FnOnce() -> T + Send + 'static,
@@ -2057,7 +2057,7 @@ fn open_mawok_buy_page(app: AppHandle) -> Result<(), String> {
     open_page(&app, &account::buy_page_url(lang.code()))
 }
 
-/// Pro の料金ページをブラウザーで開く。機器の画面の案内にも使う。
+/// Pro の料金ページをブラウザーで開く。デバイスの画面の案内にも使う。
 #[tauri::command]
 fn open_mawok_pro_page(app: AppHandle) -> Result<(), String> {
     open_page(&app, &account::pro_page_url())
@@ -2589,17 +2589,17 @@ fn show_notification(app: &AppHandle, message: String) {
     }
 }
 
-/// 同じアカウントの機器から届いた下書き（画面側の draft-received）
+/// 同じアカウントのデバイスから届いた下書き（画面側の draft-received）
 #[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
 struct ReceivedDraft {
-    /// 送ってきた機器の名前
+    /// 送ってきたデバイスの名前
     from: String,
     text: String,
 }
 
-/// 見つけた機器を設定の順番と送信先の選択を保ったまま更新する。初めてなら末尾へ加える。
+/// 見つけたデバイスを設定の順番と送信先の選択を保ったまま更新する。初めてなら末尾へ加える。
 fn remember_found_device(devices: &mut Vec<Device>, peer: lan::Peer, address: IpAddr) -> bool {
     let public_key = lan::to_hex(&peer.public_key);
     let address = address.to_string();
@@ -2623,7 +2623,7 @@ fn remember_found_device(devices: &mut Vec<Device>, peer: lan::Peer, address: Ip
     true
 }
 
-/// 握手が通った機器の場所だけを更新する。UDP の名乗りだけでは設定を書き換えない。
+/// 握手が通ったデバイスの場所だけを更新する。UDP の名乗りだけでは設定を書き換えない。
 fn remember_device_address(devices: &mut [Device], public_key: &[u8], address: IpAddr) -> bool {
     let public_key = lan::to_hex(public_key);
     let address = address.to_string();
@@ -2877,7 +2877,7 @@ fn forget_device(
     Ok(())
 }
 
-/// 送れなかったときに画面へ渡すもの。一部の機器にだけ届かなかったら、符号は `lan.partial` で、届かなかった機器の公開鍵を添える
+/// 送れなかったときに画面へ渡すもの。一部のデバイスにだけ届かなかったら、符号は `lan.partial` で、届かなかったデバイスの公開鍵を添える
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -2896,11 +2896,11 @@ impl From<String> for SendFailure {
     }
 }
 
-/// 一部の機器にだけ届かなかったときの符号（src/lib/lan-errors.ts）
+/// 一部のデバイスにだけ届かなかったときの符号（src/lib/lan-errors.ts）
 const PARTIAL_SEND: &str = "lan.partial";
 
-/// 入力内容を同じアカウントで見つけた機器へ送り、直前のアプリへフォーカスを戻してウィンドウを隠す（コピーして隠すときと揃える）。
-/// 送信先は、`targets`（公開鍵）を渡せばその機器、渡さなければ送信先にチェックした機器。
+/// 入力内容を同じアカウントで見つけたデバイスへ送り、直前のアプリへフォーカスを戻してウィンドウを隠す（コピーして隠すときと揃える）。
+/// 送信先は、`targets`（公開鍵）を渡せばそのデバイス、渡さなければ送信先にチェックしたデバイス。
 /// 送ったら true、入力欄が空で何も送らなかったら false を返す。1台にでも届かなければ隠さない。
 /// 相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
 #[tauri::command]
@@ -2916,7 +2916,7 @@ async fn send_draft(
         .map_err(SendFailure::from)?
 }
 
-/// 同じアカウントで見つけた機器のうち `include` に当てはまるものと、その鍵。鍵が読めない機器は、ログに残して除く
+/// 同じアカウントで見つけたデバイスのうち `include` に当てはまるものと、その鍵。鍵が読めないデバイスは、ログに残して除く
 fn device_targets(app: &AppHandle, include: impl Fn(&Device) -> bool) -> Vec<(Device, Vec<u8>)> {
     let state = app.state::<AppState>();
     let config = state.config.lock().unwrap();
@@ -2961,8 +2961,8 @@ fn remember_addresses(app: &AppHandle, reached: &[(String, IpAddr)]) {
     }
 }
 
-/// 機器ごとに同時に `call` を呼び、機器と結果の組を `targets` の順に返す。動いていない機器を待つ時間が、台数分重ならないようにする。
-/// `call` には、機器の鍵と、覚えていた場所（読めなければ None）を渡す
+/// デバイスごとに同時に `call` を呼び、デバイスと結果の組を `targets` の順に返す。動いていないデバイスを待つ時間が、台数分重ならないようにする。
+/// `call` には、デバイスの鍵と、覚えていた場所（読めなければ None）を渡す
 fn on_each_device<'a, T: Send>(
     app: &AppHandle,
     targets: &'a [(Device, Vec<u8>)],
@@ -3054,12 +3054,12 @@ fn send_and_hide(
                 .iter()
                 .map(|(public_key, _)| public_key.clone())
                 .collect();
-            // lan_failure は原因をログに残すので、どの分岐でも全部の機器の分を先に評価する
+            // lan_failure は原因をログに残すので、どの分岐でも全部のデバイスの分を先に評価する
             let codes: Vec<String> = failures
                 .into_iter()
                 .map(|(_, error)| lan_failure("couldn't send", error))
                 .collect();
-            // 1台にも届かなければ、今までどおり失敗の種類で知らせる（台数が多ければ、最初の機器の種類）
+            // 1台にも届かなければ、今までどおり失敗の種類で知らせる（台数が多ければ、最初のデバイスの種類）
             if all_failed {
                 return Err(codes.into_iter().next().unwrap_or_default().into());
             }
@@ -3090,8 +3090,8 @@ fn send_and_hide(
     Ok(sent)
 }
 
-/// 同じアカウントで見つけた機器へつないで、動いているかを確かめる（送信先の一覧を開いたとき）。つながった機器の公開鍵を返す。
-/// 機器ごとに同時に確かめ、相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
+/// 同じアカウントで見つけたデバイスへつないで、動いているかを確かめる（送信先の一覧を開いたとき）。つながったデバイスの公開鍵を返す。
+/// デバイスごとに同時に確かめ、相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
 #[tauri::command]
 async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
     run_blocking(move || {
@@ -3116,7 +3116,7 @@ async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
     .await?
 }
 
-/// 送信先のチェックを覚える。渡した公開鍵の機器にチェックを入れ、ほかは外す
+/// 送信先のチェックを覚える。渡した公開鍵のデバイスにチェックを入れ、ほかは外す
 #[tauri::command]
 fn set_send_targets(app: AppHandle, public_keys: Vec<String>) -> Result<(), String> {
     update_config(&app, |config| {
