@@ -939,6 +939,7 @@ describe('buying credit', () => {
 			await request('/account/buy/done?next=%2Faccount%2F&pro=1', { cookie })
 		).text();
 		expect(pro).toContain('<h1>Mawok Pro</h1>');
+		expect(pro).toContain('<title>Mawok Pro - Mawok</title>');
 		expect(pro).toContain('申し込みを確かめています');
 		// Pro は試用で始まると支払いも領収のメールも無いので、クレジット向けの案内を出さない。
 		const gaveUp = await (
