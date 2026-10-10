@@ -973,9 +973,11 @@ accountApp.get('/buy', async (c) => {
 			return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proUnavailable), 404);
 		const pro = await proOf(c.env, account.id);
 		if (pro.active) return c.redirect(ACCOUNT_HOME, 303);
+		const trial = !(await hadSubscription(c.env, account.id));
 		return c.html(
 			proConfirmPage(lang, account.email, plan, saleRegion(c)!, {
-				trial: !(await hadSubscription(c.env, account.id))
+				trial,
+				now: now()
 			})
 		);
 	}

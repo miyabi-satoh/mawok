@@ -130,19 +130,55 @@ describe('buying credit', () => {
 		};
 	}
 
-	it('shows a Pro trial confirmation for a selected plan', async () => {
+	it('shows a Pro trial confirmation for a selected plan, and gives Checkout the same note with or without a trial', async () => {
 		const { cookie } = await signIn('pro-offer@example.com');
 		const confirmation = await (await request('/account/buy?plan=monthly', { cookie })).text();
-		expect(confirmation).toContain('Mawok Pro（月額）');
+		expect(confirmation).toContain(
+			'Mawok Pro（月額）。解約するまで、1 か月ごとに自動で更新します。'
+		);
 		expect(confirmation).toContain('480 円/月（税込み）');
-		expect(confirmation).toContain('14 日間は無料');
+		expect(confirmation).toContain('最初の 14 日間は無料です。');
+		expect(confirmation).toMatch(/\d{4}\/\d{1,2}\/\d{1,2} に最初の 480 円を支払い/);
+		expect(confirmation).toContain('無料の試用は、1つのアカウントにつき 1 回だけです。');
+		expect(confirmation).toContain('試用の間は付かず、最初の支払いの後から付きます。');
 		expect(confirmation).toContain('解約と返金');
-		expect(confirmation).toContain('アカウントのページからいつでもできます');
+		expect(confirmation).toContain('アカウントのページの「支払いを管理する」からいつでもできます');
+		expect(confirmation).toContain('次の更新日より前に解約すれば、次の期間の請求はありません');
 		expect(confirmation).toContain('支払い済みの期間の終わりまで Pro を使えます');
 		expect(confirmation.indexOf('解約と返金')).toBeLessThan(
 			confirmation.indexOf('申し込みを確定して支払いへ')
 		);
 		expect(confirmation).toMatch(/name="plan"\s+value="monthly"/);
+
+		const stripe = vi
+			.spyOn(globalThis, 'fetch')
+			.mockImplementation(async () =>
+				Response.json({ id: `cs_${crypto.randomUUID()}`, url: 'https://checkout.stripe.test/pro' })
+			);
+		expect(
+			(await postForm('/account/buy', { next: '/account/', plan: 'monthly' }, cookie)).status
+		).toBe(303);
+		const trialNote = new URLSearchParams(String(stripe.mock.calls[0][1]!.body)).get(
+			'custom_text[submit][message]'
+		);
+
+		const account = await accountId('pro-offer@example.com');
+		await env.DB.prepare(
+			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
+			 VALUES ('sub_pro_offer', ?, 'monthly', 0, 'canceled', 0)`
+		)
+			.bind(account)
+			.run();
+		await env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(account).run();
+		expect(
+			(await postForm('/account/buy', { next: '/account/', plan: 'monthly' }, cookie)).status
+		).toBe(303);
+		const noTrialNote = new URLSearchParams(String(stripe.mock.calls[1][1]!.body)).get(
+			'custom_text[submit][message]'
+		);
+		expect(noTrialNote).toBe(trialNote);
+		expect(noTrialNote).not.toContain('無料');
+		expect(noTrialNote).toContain('解約するまで自動で更新します。');
 	});
 
 	it('shows the trial charge date, then renewal or cancellation on the account page', async () => {

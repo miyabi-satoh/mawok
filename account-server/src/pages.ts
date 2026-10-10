@@ -2,6 +2,7 @@ import { html } from 'hono/html';
 import type { HtmlEscapedString } from 'hono/utils/html';
 import { messages, type Lang } from './i18n';
 import type { AccountPro, Balance } from './credits';
+import { PRO_TRIAL_DAYS } from './stripe';
 import { ACCOUNT, ACCOUNT_HOME, PRICING_PATH, PURCHASE_CONDITIONS } from './util';
 
 /** 規約類の置き場。利用規約とプライバシーポリシーは同じ Worker の静的アセットで出す (→ docs/account-server.md「作り」)。
@@ -13,6 +14,12 @@ export const LEGAL_PAGES = {
 } as const;
 
 type Body = HtmlEscapedString | Promise<HtmlEscapedString>;
+
+function date(lang: Lang, seconds: number) {
+	return new Date(seconds * 1000).toLocaleDateString(lang === 'ja' ? 'ja-JP' : 'en-US', {
+		timeZone: 'Asia/Tokyo'
+	});
+}
 
 // 差し色は amiiby.com の Mawok の色に合わせる。
 // 足もとの紹介と規約類は日本語だけなので、英語の画面からも同じ所へリンクする。
@@ -415,14 +422,15 @@ export function proConfirmPage(
 	email: string,
 	plan: 'monthly' | 'yearly',
 	region: SaleRegion,
-	{ trial }: { trial: boolean }
+	{ trial, now }: { trial: boolean; now: number }
 ) {
 	const t = messages[lang];
+	const firstPaymentDate = date(lang, now + PRO_TRIAL_DAYS * 24 * 60 * 60);
 	const rows: [string, string][] = [
 		[t.confirmItemLabel, t.proItem(plan)],
 		[t.confirmPriceLabel, t.proPrice(plan)],
-		[t.confirmPaymentLabel, t.proPayment[region]],
-		[t.confirmDeliveryLabel, t.proDelivery],
+		[t.confirmPaymentLabel, t.proPayment(plan, trial, region, firstPaymentDate, PRO_TRIAL_DAYS)],
+		[t.confirmDeliveryLabel, t.proDelivery(trial)],
 		[t.proCancelLabel, t.proCancel[region](LEGAL_PAGES.tokushoho)]
 	];
 	return page(
@@ -436,7 +444,6 @@ export function proConfirmPage(
 							<dd>${withLinks(value)}</dd>`
 				)}
 			</dl>
-			${trial ? html`<p>${t.proTrial}</p>` : ''}
 			<form method="post" action="${ACCOUNT}/buy">
 				<p class="muted">${withLegalLinks(lang, t.buyConsent)}</p>
 				<input type="hidden" name="next" value="${ACCOUNT_HOME}" /><input
@@ -470,10 +477,6 @@ export function homePage(
 	}: { bought?: boolean; pro?: AccountPro; billing?: boolean } = {}
 ) {
 	const t = messages[lang];
-	const date = (seconds: number) =>
-		new Date(seconds * 1000).toLocaleDateString(lang === 'ja' ? 'ja-JP' : 'en-US', {
-			timeZone: 'Asia/Tokyo'
-		});
 	return page(
 		lang,
 		t.accountTitle,
@@ -488,11 +491,11 @@ export function homePage(
 								${
 									!pro.renews
 										? pro.trial
-											? t.proTrialCanceledUntil(date(pro.displayUntil!))
-											: t.proCanceledUntil(pro.plan!, date(pro.displayUntil!))
+											? t.proTrialCanceledUntil(date(lang, pro.displayUntil!))
+											: t.proCanceledUntil(pro.plan!, date(lang, pro.displayUntil!))
 										: pro.trial
-											? t.proTrialUntil(date(pro.until!))
-											: t.proUntil(pro.plan!, date(pro.until!))
+											? t.proTrialUntil(date(lang, pro.until!))
+											: t.proUntil(pro.plan!, date(lang, pro.until!))
 								}
 							</p>
 							${billing ? html`<form method="post" action="${ACCOUNT}/billing"><button class="secondary">${t.manageBilling}</button></form>` : ''}`
@@ -509,7 +512,7 @@ export function homePage(
 								(app) =>
 									html`<li>
 										<form method="post" action="${ACCOUNT}/apps/unlink" class="inline">
-											${t.appLinkedAt(app.name, date(app.createdAt))}
+											${t.appLinkedAt(app.name, date(lang, app.createdAt))}
 											<input type="hidden" name="id" value="${app.id}" />
 											<button class="secondary">${t.unlink}</button>
 										</form>

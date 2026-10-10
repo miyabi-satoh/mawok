@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkingPurchasePage, homePage } from '../src/pages';
+import { checkingPurchasePage, homePage, proConfirmPage } from '../src/pages';
 
 describe('homePage', () => {
 	const home = async (remaining: number, percent: number) =>
@@ -58,5 +58,54 @@ describe('checkingPurchasePage', () => {
 		const pro = await checking(true, false);
 		expect(pro).toContain('申し込みをまだ確かめられていません');
 		expect(pro).not.toContain('領収のメール');
+	});
+});
+
+describe('proConfirmPage', () => {
+	const now = Date.UTC(2026, 0, 15) / 1000;
+
+	it('shows every plan, sale region and trial state before the confirmation button', async () => {
+		for (const plan of ['monthly', 'yearly'] as const) {
+			for (const region of ['domestic', 'overseas'] as const) {
+				for (const trial of [true, false]) {
+					const page = String(
+						await proConfirmPage('ja', 'a@example.com', plan, region, { trial, now })
+					);
+					const amount = plan === 'yearly' ? '4,800 円' : '480 円';
+					const interval = plan === 'yearly' ? '1 年' : '1 か月';
+
+					expect(page).toContain(`Mawok Pro（${plan === 'yearly' ? '年額' : '月額'}）。`);
+					expect(page).toContain(`解約するまで、${interval}ごとに自動で更新します。`);
+					expect(page).toContain(amount);
+					expect(page).toContain(`その後は ${interval}ごとに同じ額を支払います。`);
+					expect(page).toContain(
+						'解約はアカウントのページの「支払いを管理する」からいつでもできます。'
+					);
+					expect(page).toContain('次の更新日より前に解約すれば、次の期間の請求はありません。');
+
+					if (trial) {
+						expect(page).toContain('最初の 14 日間は無料です。');
+						expect(page).toContain('2026/1/29 に最初の');
+						expect(page).toContain('2026/1/29 より前に解約すれば、支払いは生じません。');
+						expect(page).toContain('試用の間は付かず、最初の支払いの後から付きます。');
+					} else {
+						expect(page).toContain(`申し込みのときに最初の ${amount}を支払い、`);
+						expect(page).not.toContain('無料');
+						expect(page).toContain('支払いが済むとすぐ、このアカウントで Pro を使えます。');
+					}
+
+					if (region === 'domestic') {
+						expect(page).toContain(
+							trial
+								? '次の画面 (Stripe) でカードを登録します。'
+								: '次の画面 (Stripe) でカードで払います。'
+						);
+					} else {
+						expect(page).toContain('次の画面で払い方を選びます。');
+						expect(page).toContain('カードの明細には「LINK.COM*」と出ます。');
+					}
+				}
+			}
+		}
 	});
 });

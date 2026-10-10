@@ -128,26 +128,39 @@ const ja = {
 	proTitle: 'Mawok Pro',
 	proUnavailable: 'いまは Pro を申し込めません。',
 	proSubscribe: 'Pro の料金を見る',
-	proItem: (plan: 'monthly' | 'yearly') => `Mawok Pro（${plan === 'yearly' ? '年額' : '月額'}）`,
+	proItem: (plan: 'monthly' | 'yearly') =>
+		`Mawok Pro（${plan === 'yearly' ? '年額' : '月額'}）。解約するまで、${plan === 'yearly' ? '1 年' : '1 か月'}ごとに自動で更新します。`,
 	proPrice: (plan: 'monthly' | 'yearly'): string =>
 		plan === 'yearly' ? '4,800 円/年（税込み）' : '480 円/月（税込み）',
-	proPayment: {
-		domestic: '期間ごとに同じ額で自動更新します。次の画面 (Stripe) でカードを登録します。',
-		overseas:
-			'期間ごとに同じ額で自動更新します。販売と決済は Link (Sold through Link, LLC) が代わりに行います。'
-	} as Record<SaleRegion, string>,
-	proDelivery: '申し込みが済むとすぐ、このアカウントで Pro を使えます。',
+	proPayment: (
+		plan: 'monthly' | 'yearly',
+		trial: boolean,
+		region: SaleRegion,
+		firstPaymentDate: string,
+		trialDays: number
+	) => {
+		const amount = plan === 'yearly' ? '4,800 円' : '480 円';
+		const interval = plan === 'yearly' ? '1 年' : '1 か月';
+		const payment = trial
+			? `最初の ${trialDays} 日間は無料です。${firstPaymentDate} に最初の ${amount}を支払い、その後は ${interval}ごとに同じ額を支払います。${firstPaymentDate} より前に解約すれば、支払いは生じません。無料の試用は、1つのアカウントにつき 1 回だけです。`
+			: `申し込みのときに最初の ${amount}を支払い、その後は ${interval}ごとに同じ額を支払います。`;
+		return region === 'domestic'
+			? `${payment}次の画面 (Stripe) で${trial ? 'カードを登録します。' : 'カードで払います。'}`
+			: `${payment}次の画面で払い方を選びます。販売と決済は Link (Sold through Link, LLC) が代わりに行い、カードの明細には「LINK.COM*」と出ます。お住まいの国の通貨に換えた額で表示されることがあります。`;
+	},
+	proDelivery: (trial: boolean): string =>
+		trial
+			? '申し込みが済むとすぐ、このアカウントで Pro を使えます。毎月の AI アクションのクレジットは、試用の間は付かず、最初の支払いの後から付きます。'
+			: '支払いが済むとすぐ、このアカウントで Pro を使えます。',
 	proCancelLabel: '解約と返金',
 	proCancel: {
 		domestic: (tokushoho: string) =>
-			`解約はアカウントのページからいつでもできます。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。`,
+			`解約はアカウントのページの「支払いを管理する」からいつでもできます。次の更新日より前に解約すれば、次の期間の請求はありません。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。`,
 		overseas: (tokushoho: string) =>
-			`解約はアカウントのページからいつでもできます。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。購入から 60 日以内は、[Link の返金ポリシー](${LINK_REFUND_POLICY})で返金されることがあります。`
+			`解約はアカウントのページの「支払いを管理する」からいつでもできます。次の更新日より前に解約すれば、次の期間の請求はありません。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。購入から 60 日以内は、[Link の返金ポリシー](${LINK_REFUND_POLICY})で返金されることがあります。`
 	} as Record<SaleRegion, (tokushoho: string) => string>,
-	proTrial:
-		'最初の 14 日間は無料です。試用の終わる前に解約しなければ、次の期間から課金が始まります。無料の試用は、1つのアカウントにつき 1 回だけです。',
 	proCheckoutNote:
-		'最初の 14 日間は無料です。試用の終わる前に解約しなければ、期間ごとに同じ額で自動更新します。',
+		'解約するまで自動で更新します。解約は Mawok のアカウントのページからでき、支払い済みの期間の終わりまで使えます。支払い済みの期間は返金できません。',
 	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
 		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} に自動で更新されます。`,
 	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
@@ -261,27 +274,39 @@ const en: typeof ja = {
 	proTitle: 'Mawok Pro',
 	proUnavailable: 'Pro is not available right now.',
 	proSubscribe: 'See Pro pricing',
-	proItem: (plan: 'monthly' | 'yearly') => `Mawok Pro (${plan})`,
+	proItem: (plan: 'monthly' | 'yearly') =>
+		`Mawok Pro (${plan}). It renews automatically every ${plan === 'yearly' ? 'year' : 'month'} until you cancel.`,
 	proPrice: (plan: 'monthly' | 'yearly') =>
 		plan === 'yearly' ? '4,800 yen/year (tax included)' : '480 yen/month (tax included)',
-	proPayment: {
-		domestic:
-			'It renews automatically at the same price each period. Register a card on the next page (Stripe).',
-		overseas:
-			'It renews automatically at the same price each period. The sale and payment are handled on our behalf by Link (Sold through Link, LLC).'
+	proPayment: (
+		plan: 'monthly' | 'yearly',
+		trial: boolean,
+		region: SaleRegion,
+		firstPaymentDate: string,
+		trialDays: number
+	) => {
+		const amount = plan === 'yearly' ? '4,800 yen' : '480 yen';
+		const interval = plan === 'yearly' ? 'year' : 'month';
+		const payment = trial
+			? `The first ${trialDays} days are free. Your first payment of ${amount} is due on ${firstPaymentDate}, followed by payments of the same amount every ${interval}. Cancel before ${firstPaymentDate} and you will not be charged. Each account is eligible for one free trial. `
+			: `You pay the first ${amount} when you subscribe, then the same amount every ${interval}. `;
+		return region === 'domestic'
+			? `${payment}${trial ? 'Register your card' : 'Pay by card'} on the next page (Stripe).`
+			: `${payment}Choose how to pay on the next page. The sale and payment are handled on our behalf by Link (Sold through Link, LLC), and your card statement shows "LINK.COM*". The amount may be shown in your local currency.`;
 	},
-	proDelivery: 'Pro is available on this account as soon as you subscribe.',
+	proDelivery: (trial: boolean) =>
+		trial
+			? 'Pro is available on this account as soon as you subscribe. Monthly AI action credit is not added during the trial; it begins after your first payment.'
+			: 'Pro is available on this account as soon as payment is complete.',
 	proCancelLabel: 'Cancellation and refunds',
 	proCancel: {
 		domestic: (tokushoho: string) =>
-			`You can cancel at any time on your account page. After canceling, you keep Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})).`,
+			`You can cancel at any time from Manage billing on your account page. Cancel before the next renewal date and you will not be charged for the next period. After cancellation, you can keep using Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})).`,
 		overseas: (tokushoho: string) =>
-			`You can cancel at any time on your account page. After canceling, you keep Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})). Within 60 days of purchase, you may get a refund under [Link's refund policy](${LINK_REFUND_POLICY}).`
+			`You can cancel at any time from Manage billing on your account page. Cancel before the next renewal date and you will not be charged for the next period. After cancellation, you can keep using Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})). Within 60 days of purchase, you may get a refund under [Link's refund policy](${LINK_REFUND_POLICY}).`
 	},
-	proTrial:
-		'Your first 14 days are free. Unless you cancel before the trial ends, billing starts for the next period. Each account can use the free trial once.',
 	proCheckoutNote:
-		'Your first 14 days are free. Unless you cancel before the trial ends, it renews automatically at the same price each period.',
+		'It renews automatically until you cancel. You can cancel from your Mawok account page and continue using it until the end of the paid period. Paid periods are non-refundable.',
 	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
 		`Pro (${plan}): renews automatically on ${date}.`,
 	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>

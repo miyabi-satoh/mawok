@@ -6,6 +6,7 @@ import {
 	createProCheckoutSession,
 	createCheckoutSession,
 	expireCheckoutSession,
+	PRO_TRIAL_DAYS,
 	ProInvoiceError,
 	StripeError,
 	stripeConfig,
@@ -137,7 +138,7 @@ describe('createProCheckoutSession', () => {
 		const sent = new URLSearchParams(String(stripe.mock.calls[0][1]!.body));
 		expect(sent.get('mode')).toBe('subscription');
 		expect(sent.get('line_items[0][price]')).toBe('price_pro_monthly');
-		expect(sent.get('subscription_data[trial_period_days]')).toBe('14');
+		expect(sent.get('subscription_data[trial_period_days]')).toBe(String(PRO_TRIAL_DAYS));
 		expect(sent.get('subscription_data[metadata][product]')).toBe('mawok-pro');
 		expect(sent.get('subscription_data[metadata][account_id]')).toBe('acc');
 		expect(sent.get('subscription_data[metadata][buyer_country]')).toBe('JP');
