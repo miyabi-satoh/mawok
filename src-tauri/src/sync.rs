@@ -898,13 +898,21 @@ fn detached(config: &Config, item: &ItemKey) -> bool {
     }
 }
 
-/// 届いた値を手元に入れたときに、記録に置く値。並びは、手元で同期しない行の id を除く。
-/// その id は手元の並び（`config_items`）に現れないので、残すと手元を変えたように見え、除いた並びを書き戻し続ける。
+fn synced_ids<T: SyncRow>(rows: &[T]) -> BTreeSet<&str> {
+    rows.iter()
+        .filter(|row| row.sync())
+        .map(|row| row.id())
+        .collect()
+}
+
+/// 届いた値を手元に入れたときに、記録に置く値。並びは、手元で同期する行として持っている id だけを残す
+/// （docs/sync.md「同期する単位」）。ほかの id（同期しない行・手元に無い行）は手元の並び（`config_items`）に
+/// 現れないので、残すと手元を変えたように見え、除いた並びを書き戻し続ける。
 fn settled_value(config: &Config, key: &ItemKey, value: &Value) -> Value {
-    let prefix = match kind(key) {
-        Some(Kind::Order("replacements")) => 'r',
-        Some(Kind::Order("snippets")) => 'n',
-        Some(Kind::Order("actions")) => 'a',
+    let synced = match kind(key) {
+        Some(Kind::Order("replacements")) => synced_ids(&config.replacements),
+        Some(Kind::Order("snippets")) => synced_ids(&config.snippets),
+        Some(Kind::Order("actions")) => synced_ids(config.actions.as_deref().unwrap_or_default()),
         _ => return value.clone(),
     };
     let Some(ids) = order_ids(value) else {
@@ -912,7 +920,7 @@ fn settled_value(config: &Config, key: &ItemKey, value: &Value) -> Value {
     };
     json(
         ids.into_iter()
-            .filter(|id| !detached(config, &ItemKey::new(SETTINGS, row_id(prefix, id))))
+            .filter(|id| synced.contains(id.as_str()))
             .collect::<Vec<_>>(),
     )
 }
@@ -1252,6 +1260,27 @@ fn reconcile_as(
         state.conflicts.contains(name) || state.ignored.contains_key(name)
     };
     let mut writes = Vec::new();
+    // 既定で同期する既定のアクションを、一度も書かないまま同期から外した。窓口に項目が無いと、ほかのデバイスには
+    // 並びから消えたことしか伝わらず、消した行と見分けられないので、外した印を書く。
+    // 何回かに分けて書くときに、その行を抜いた並びだけが先に届かないよう、ほかの項目より前に積む
+    for default in actions::default_actions(crate::i18n::Lang::En) {
+        let key = ItemKey::new(SETTINGS, row_id('a', &default.id));
+        let name = key.name();
+        if default.sync
+            && detached(&config, &key)
+            && !state.items.contains_key(&name)
+            && !state.retired.contains_key(&name)
+            && !held(&state, &name)
+        {
+            writes.push(Write {
+                key,
+                base_seq: None,
+                deleted: false,
+                plain: None,
+                detached: true,
+            });
+        }
+    }
     for (key, value) in &now {
         let name = key.name();
         if held(&state, &name) || state.too_large.contains_key(&name) {
@@ -1286,30 +1315,6 @@ fn reconcile_as(
             plain: None,
             detached,
         });
-    }
-    // 既定で同期する既定のアクションを、一度も書かないまま同期から外した。窓口に項目が無いと、ほかのデバイスには
-    // 並びから消えたことしか伝わらず、消した行と見分けられないので、外した印を書く
-    for default in actions::default_actions(crate::i18n::Lang::En) {
-        let key = ItemKey::new(SETTINGS, row_id('a', &default.id));
-        let name = key.name();
-        let unsynced = config
-            .actions
-            .as_ref()
-            .is_some_and(|rows| rows.iter().any(|row| row.id == default.id && !row.sync));
-        if default.sync
-            && unsynced
-            && !state.items.contains_key(&name)
-            && !state.retired.contains_key(&name)
-            && !held(&state, &name)
-        {
-            writes.push(Write {
-                key,
-                base_seq: None,
-                deleted: false,
-                plain: None,
-                detached: true,
-            });
-        }
     }
     Reconcile {
         config,
@@ -2849,13 +2854,7 @@ mod tests {
                     "{lang:?}"
                 );
                 // 並べ替えは手元で同期しない行。その id を抜いた並びを書き戻さない
-                assert!(
-                    !result
-                        .writes
-                        .iter()
-                        .any(|write| write.key.id.starts_with("a_") || write.key.id == "o_actions"),
-                    "{lang:?}"
-                );
+                assert!(action_writes(&result).is_empty(), "{lang:?}");
             }
         }
     }
@@ -2898,6 +2897,114 @@ mod tests {
             assert!(second.writes.is_empty(), "first sync: {first_sync}");
             assert_eq!(next.config, local, "first sync: {first_sync}");
         }
+    }
+
+    /// 英訳（既定で同期する既定のアクション）を、同期しない行として持つデバイス
+    fn translate_unsynced() -> (Config, ItemKey) {
+        let translate = Action {
+            sync: false,
+            ..default_action(0, crate::i18n::Lang::system())
+        };
+        let key = ItemKey::new(SETTINGS, row_id('a', &translate.id));
+        let local = Config {
+            actions: Some(vec![
+                translate,
+                default_action(1, crate::i18n::Lang::system()),
+            ]),
+            ..Config::default()
+        };
+        (local, key)
+    }
+
+    #[test]
+    fn an_unsynced_default_action_already_on_the_server_gets_no_mark() {
+        let (local, key) = translate_unsynced();
+        let arrivals = [
+            (
+                "value",
+                remote(
+                    SETTINGS,
+                    &key.id,
+                    6,
+                    row_value(&default_action(0, crate::i18n::Lang::En)),
+                ),
+            ),
+            ("deleted", deleted(&key, 6)),
+            ("mark", detached_mark(&key, 6)),
+        ];
+        for (first_sync, state) in [(false, Some(recorded(&local))), (true, None)] {
+            for (arrival, item) in &arrivals {
+                let case = format!("first sync: {first_sync}, {arrival}");
+                let result = reconcile(&local, state.clone(), std::slice::from_ref(item), "key", 6);
+                assert!(
+                    !result.writes.iter().any(|write| write.key == key),
+                    "{case}"
+                );
+                assert_eq!(result.config, local, "{case}");
+                assert!(!result.changed, "{case}");
+
+                let next = reconcile(&local, Some(result.state), &[], "key", 6);
+                assert!(!next.writes.iter().any(|write| write.key == key), "{case}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_mark_refused_because_the_item_exists_is_not_written_again() {
+        let (local, key) = translate_unsynced();
+        // 読んだ後に、ほかのデバイスが英訳を書いた
+        let theirs = ConflictItem {
+            key: key.clone(),
+            seq: Some(5),
+            deleted: false,
+            plain: Some(Plain::value(row_value(&default_action(
+                0,
+                crate::i18n::Lang::En,
+            )))),
+        };
+        let mut first = FakeTransport::reading([read(1, [])])
+            .failing([Error::Conflict(vec![theirs])])
+            .after_seq(5);
+        let result = run(&mut first, &local, Some(recorded(&Config::default()))).unwrap();
+        let [refused] = &first.written(&key.id)[..] else {
+            panic!("the mark is tried once");
+        };
+        assert!(refused.detached);
+        assert!(!first.stored.iter().any(|item| item.key == key));
+        assert_eq!(result.config, local);
+        assert!(!result.changed);
+
+        let mut second =
+            FakeTransport::reading([read(first.seq, first.stored.clone())]).after_seq(first.seq);
+        let next = run(&mut second, &local, Some(result.state)).unwrap();
+        assert!(second.writes.is_empty());
+        assert_eq!(next.config, local);
+    }
+
+    #[test]
+    fn a_mark_is_written_no_later_than_the_order_without_its_row() {
+        let (mut local, key) = translate_unsynced();
+        // 並びより後に積まれる行で、1回の書き込みの上限を超える
+        for index in 0..WRITE_BATCH_SIZE {
+            local.replacements.push(Replacement {
+                id: format!("{index:032x}"),
+                from: index.to_string(),
+                to: "to".into(),
+                enabled: true,
+                sync: true,
+            });
+        }
+        let mut transport = FakeTransport::reading([read(1, [])]).after_seq(1);
+        run(&mut transport, &local, Some(recorded(&Config::default()))).unwrap();
+        assert!(transport.writes.len() > 1);
+        let batch_of = |id: &str| {
+            transport
+                .writes
+                .iter()
+                .position(|batch| batch.iter().any(|write| write.key.id == id))
+                .unwrap_or_else(|| panic!("{id} is written"))
+        };
+        assert!(batch_of(&key.id) <= batch_of("o_actions"));
     }
 
     #[test]
@@ -3972,6 +4079,34 @@ mod tests {
                 .map(|row| &row.id[..1])
                 .collect();
             assert_eq!(ids, ["c", "a", "b"], "first sync: {first_sync}");
+            assert!(
+                !result
+                    .writes
+                    .iter()
+                    .any(|write| write.key.id == "o_snippets"),
+                "first sync: {first_sync}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_order_naming_a_row_not_held_locally_is_not_written_back() {
+        let local = Config {
+            snippets: vec![snippet('a', "a".into()), snippet('c', "c".into())],
+            ..Config::default()
+        };
+        // 相手の並びにある b は、手元では消したか、読み捨てた行
+        let order = json!(["c".repeat(32), "b".repeat(32), "a".repeat(32)]);
+        let arrival = remote(SETTINGS, "o_snippets", 5, order);
+        for (first_sync, state) in [(false, Some(recorded(&local))), (true, None)] {
+            let result = reconcile(&local, state, std::slice::from_ref(&arrival), "key", 5);
+            let ids: Vec<_> = result
+                .config
+                .snippets
+                .iter()
+                .map(|row| &row.id[..1])
+                .collect();
+            assert_eq!(ids, ["c", "a"], "first sync: {first_sync}");
             assert!(
                 !result
                     .writes
