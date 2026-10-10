@@ -7,11 +7,30 @@ import { TOKUSHOHO_URL } from '../lib/links';
 const { data } = (await getEntry('product', 'index'))!;
 ---
 
-<Base title="料金 | Mawok" description="Mawok の AI アクションは、キーが無くてもアカウントのクレジットで使えます。クレジットは 300 円（税込み）で買い足せます。">
+<Base title="料金 | Mawok" description="Mawok は無料で使えます。Pro（月額 480 円・年額 4,800 円、税込み）で、機器の間の送受信と同期が使え、AI アクションのクレジットが毎月付きます。クレジットだけを 300 円（税込み）で買い足すこともできます。">
   <Breadcrumb items={[{ label: 'Mawok', href: '/' }, { label: '料金' }]} />
   <div class="pricing" style={`--c: ${data.color}`}>
     <h1>料金</h1>
-    <p class="lead">Mawok は無料で使えます。AI アクションをキーなしで使うときは、アカウントのクレジットを買い足します。</p>
+    <p class="lead">Mawok は無料で使えます。Pro では、自分の機器の間でテキストを送り、設定と履歴を同期できます。AI アクションをキーなしで使うときは、アカウントのクレジットを使います。</p>
+
+    <section class="plan" aria-labelledby="pro-title">
+      <h2 id="pro-title">Mawok Pro</h2>
+      <p class="price">
+        <span class="amount">480&nbsp;円</span><span class="per">/月（税込み）</span>
+        <span class="or">または</span>
+        <span class="amount">4,800&nbsp;円</span><span class="per">/年（税込み）</span>
+      </p>
+      <ul class="features">
+        <li>同じネットワークにある自分の機器の間で、テキストを送る</li>
+        <li>設定と履歴を、機器の間で同期する（暗号化して預かり、運営者は中身を読めません）</li>
+        <li>AI アクションのクレジットが毎月付く</li>
+        <li>初めての申し込みは、最初の 14&nbsp;日間が無料</li>
+      </ul>
+      <div class="buys">
+        <a class="buy" href="/account/buy?plan=monthly&lang=ja">月額で申し込む</a>
+        <a class="buy" href="/account/buy?plan=yearly&lang=ja">年額で申し込む</a>
+      </div>
+    </section>
 
     <section class="plan" aria-labelledby="credit-title">
       <h2 id="credit-title">AI アクションのクレジット</h2>
@@ -26,22 +45,35 @@ const { data } = (await getEntry('product', 'index'))!;
 
     <h2 id="conditions">購入の条件</h2>
     <p>
-      支払方法・支払時期・引き渡し・返品の原則と、販売事業者・連絡先は、amiiby の<a href={TOKUSHOHO_URL}>特定商取引法に基づく表記</a>に載せています。ここには、価格・動作環境と、Mawok のクレジットに限った定めを書きます。
+      支払方法・支払時期・引き渡し・返品の原則と、販売事業者・連絡先は、amiiby の<a href={TOKUSHOHO_URL}>特定商取引法に基づく表記</a>に載せています。ここには、価格・動作環境と、Mawok の Pro とクレジットに限った定めを書きます。
     </p>
     <dl class="terms">
       <dt>販売価格</dt>
       <dd>
+        <p>Mawok Pro 月額 480&nbsp;円、または年額 4,800&nbsp;円（どちらも税込み）。</p>
         <p>AI アクションのクレジット 300&nbsp;円（税込み、1&nbsp;回払い）。自動の更新はありません。</p>
         <p>日本の外から購入するとき（接続元が日本と分からないときを含みます。以下同じ）は、決済ページで、お住まいの国の通貨に換えた額で表示されることがあります。その場合は、表示された額で決済されます。</p>
       </dd>
+      <dt>Pro の契約期間・更新・解約</dt>
+      <dd>
+        <p>月額は 1&nbsp;か月、年額は 1&nbsp;年ごとに、解約するまで自動で更新し、そのたびに同じ額をお支払いいただきます。</p>
+        <p>解約は、アカウントのページの「支払いを管理する」からいつでもできます。次の更新日より前に解約すれば、次の期間の請求はありません。解約後も、払い終えた期間の終わりまで Pro をお使いいただけます。</p>
+      </dd>
+      <dt>無料の試用</dt>
+      <dd>
+        初めて申し込むアカウントは、最初の 14&nbsp;日間を無料で使えます（1つのアカウントにつき 1&nbsp;回）。申し込みのときにカードを登録し、試用の終わる前に解約しなければ、試用の終わる日に最初の料金をお支払いいただきます。試用の間は、毎月のクレジットは付きません。
+      </dd>
       <dt>クレジット</dt>
       <dd>
-        クレジットを付けたアカウントで Mawok からサインインすると、AI アクションで使えます。クレジットは使った量に応じて減り、有効期限はありません。
+        <p>クレジットを付けたアカウントで Mawok からサインインすると、AI アクションで使えます。クレジットは使った量に応じて減ります。購入したクレジットに、有効期限はありません。</p>
+        <p>Pro で毎月付くクレジットは、その月の終わりに失効し、翌月に繰り越しません。Pro で付いた分から先に使います。</p>
       </dd>
       <dt>返品・キャンセル</dt>
       <dd>
-        <p>新しいアカウントに付く試せる分（月ごとの上限に達したときは、翌月以降に付きます）で動作を確かめてから、ご購入ください。アカウントのサービスを終えるときは 30&nbsp;日前にお知らせし、終えたあとに残っているクレジットは返金しません。</p>
-        <p>日本の外から購入したもの（Sold through Link, LLC（以下「Link」）が販売の代理として行ったもの）は、購入から 60&nbsp;日以内は、<a href="https://support.link.com/questions/requesting-a-refund-for-a-sold-through-link-payment">Link の返金ポリシー</a>が、特定商取引法に基づく表記にある返金の定めより優先し、Link が返金することがあります。Link が代わりに売った購入の条件は、Link の<a href="https://link.com/terms">利用規約</a>のうち「Link 経由の販売規約」によります。</p>
+        <p>Pro の払い終えた期間は、利用者の都合では返金できません。Pro が終わると、同期のために預かっている設定と履歴の写しは、90&nbsp;日後に消します（各機器の中の設定と履歴は残ります）。</p>
+        <p>クレジットは、新しいアカウントに付く試せる分（月ごとの上限に達したときは、翌月以降に付きます）で動作を確かめてから、ご購入ください。</p>
+        <p>アカウントのサービスを終えるときは 30&nbsp;日前にお知らせします。終えたあとに残っているクレジットは返金しません。Pro は、終える日より後の、払い終えた期間の分を返金します。</p>
+        <p>日本の外から購入したもの（Sold through Link, LLC（以下「Link」）が販売の代理として行ったもの。Pro の申し込みを含みます）は、購入から 60&nbsp;日以内は、<a href="https://support.link.com/questions/requesting-a-refund-for-a-sold-through-link-payment">Link の返金ポリシー</a>が、特定商取引法に基づく表記にある返金の定めより優先し、Link が返金することがあります。Link が代わりに売った購入の条件は、Link の<a href="https://link.com/terms">利用規約</a>のうち「Link 経由の販売規約」によります。</p>
       </dd>
       <dt>動作環境</dt>
       <dd>
@@ -49,7 +81,7 @@ const { data } = (await getEntry('product', 'index'))!;
           <li>Windows 10（64ビット）以上。</li>
           <li>macOS 13（Ventura）以上。Apple シリコンの Mac に限ります。</li>
         </ul>
-        <p>AI アクションを使うときに、インターネットへの接続が要ります。</p>
+        <p>AI アクションと同期を使うときに、インターネットへの接続が要ります。機器の間の送受信は、同じネットワークにある機器の間で使えます。</p>
       </dd>
     </dl>
   </div>
@@ -96,6 +128,23 @@ const { data } = (await getEntry('product', 'index'))!;
   .per {
     margin-left: 0.25rem;
     color: var(--muted);
+  }
+
+  .or {
+    margin: 0 0.5rem;
+    color: var(--muted);
+  }
+
+  .buys {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: auto;
+  }
+
+  @media (min-width: 30rem) {
+    .buys {
+      grid-template-columns: 1fr 1fr;
+    }
   }
 
   .features {
