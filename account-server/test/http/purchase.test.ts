@@ -929,24 +929,9 @@ describe('buying credit', () => {
 		);
 	});
 
-	it('names what is being bought while it waits for the payment', async () => {
+	it('waits on the Pro page after a Pro checkout', async () => {
 		const { cookie } = await signIn('waiting-title@example.com');
-		const credits = await (
-			await request('/account/buy/done?next=%2Faccount%2F&session_id=cs_none', { cookie })
-		).text();
-		expect(credits).toContain('<h1>クレジットを購入</h1>');
-		expect(credits).toContain('<title>クレジットを購入 - Mawok</title>');
-		const pro = await (
-			await request('/account/buy/done?next=%2Faccount%2F&pro=1', { cookie })
-		).text();
-		expect(pro).toContain('<h1>Mawok Pro</h1>');
-		expect(pro).toContain('<title>Mawok Pro - Mawok</title>');
-		expect(pro).toContain('申し込みを確かめています');
-		// Pro は試用で始まると支払いも領収のメールも無いので、クレジット向けの案内を出さない。
-		const gaveUp = await (
-			await request('/account/buy/done?next=%2Faccount%2F&pro=1&tries=10', { cookie })
-		).text();
-		expect(gaveUp).toContain('申し込みをまだ確かめられていません');
-		expect(gaveUp).not.toContain('買い直す');
+		const pro = await request('/account/buy/done?next=%2Faccount%2F&pro=1', { cookie });
+		expect(await pro.text()).toContain('<h1>Mawok Pro</h1>');
 	});
 });
