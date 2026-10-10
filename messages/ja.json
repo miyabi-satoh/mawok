@@ -158,7 +158,6 @@
 	"settings_devices_join_title": "コードを入力",
 	"settings_devices_reset_key_start": "解除",
 	"settings_devices_reset_key_description_needs_pairing": "コードを表示できるデバイスが手元に無いときに使います。解除すると、このデバイスから追加し直せます。",
-	"settings_devices_reset_key_description_ready": "追加済みのデバイスが、すべて送受信できなくなります。使い続けるには、追加し直します。",
 	"settings_devices_reset_key": "すべてのデバイスの接続を解除",
 	"settings_devices_reset_key_confirm_title": "すべてのデバイスの接続を解除しますか？",
 	"settings_devices_reset_key_confirm_description": "追加済みのデバイスが、すべて送受信できなくなります。使い続けるには、このデバイスでコードを表示して、追加し直します。",

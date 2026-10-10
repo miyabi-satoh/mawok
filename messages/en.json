@@ -158,7 +158,6 @@
 	"settings_devices_join_title": "Enter a code",
 	"settings_devices_reset_key_start": "Disconnect",
 	"settings_devices_reset_key_description_needs_pairing": "Use this when you don't have a device that can show a code. After disconnecting, you can add devices again from this one.",
-	"settings_devices_reset_key_description_ready": "All added devices stop sending and receiving. To keep using them, add them again.",
 	"settings_devices_reset_key": "Disconnect all devices",
 	"settings_devices_reset_key_confirm_title": "Disconnect all devices?",
 	"settings_devices_reset_key_confirm_description": "All added devices stop sending and receiving. To keep using them, show a code on this device and add them again.",

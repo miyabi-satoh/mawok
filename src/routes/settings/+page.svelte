@@ -549,7 +549,7 @@
 
 <!-- 記録中の表示。ホットキーと下書きの操作で同じ形にする -->
 <!-- 鍵を待つ状態と持つ状態で、同じ形の行をいちばん下に置く。ほかのデバイスを締め出す操作なので、押す前に何が起きるかを説明に書く -->
-{#snippet resetKeyRow(description: string)}
+{#snippet resetKeyRow(description?: string)}
 	<SettingsRow>
 		<Field.Field orientation="horizontal" class="min-h-8">
 			<Field.Title>{m.settings_devices_reset_key()}</Field.Title>
@@ -557,7 +557,9 @@
 				{m.settings_devices_reset_key_start()}
 			</Button>
 		</Field.Field>
-		<Field.Description class="leading-snug">{description}</Field.Description>
+		{#if description}
+			<Field.Description class="leading-snug">{description}</Field.Description>
+		{/if}
 	</SettingsRow>
 {/snippet}
 
@@ -1341,7 +1343,7 @@
 										: m.settings_devices_offer_description()}
 								</Field.Description>
 							</SettingsRow>
-							{@render resetKeyRow(m.settings_devices_reset_key_description_ready())}
+							{@render resetKeyRow()}
 						{/if}
 					</SettingsSection>
 				</Tabs.Content>
