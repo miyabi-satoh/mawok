@@ -1661,7 +1661,22 @@ async fn mawok_account_status(app: AppHandle) -> Result<Option<account::AccountS
 async fn refresh_mawok_account_status(
     app: &AppHandle,
 ) -> Result<Option<account::AccountStatus>, String> {
-    let token = match run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await? {
+    let generation = app
+        .state::<AppState>()
+        .pro_generation
+        .load(Ordering::SeqCst);
+    let stale = || {
+        app.state::<AppState>()
+            .pro_generation
+            .load(Ordering::SeqCst)
+            != generation
+    };
+    let read = run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await?;
+    if stale() {
+        // 読んでいる間にサインインかサインアウトがあった。前のトークンの結果では、今の状態に触らない。
+        return Ok(None);
+    }
+    let token = match read {
         Ok(token) => {
             let was_signed_in = app
                 .state::<AppState>()
@@ -1686,17 +1701,8 @@ async fn refresh_mawok_account_status(
         }
     };
     let client = http_client(app)?;
-    let generation = app
-        .state::<AppState>()
-        .pro_generation
-        .load(Ordering::SeqCst);
     let answer = account::status(&client, &token).await;
-    if app
-        .state::<AppState>()
-        .pro_generation
-        .load(Ordering::SeqCst)
-        != generation
-    {
+    if stale() {
         // 前のトークンへの答え。今のアカウントの状態にも、今のトークンにも触らない。
         return Ok(None);
     }
