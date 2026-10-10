@@ -169,7 +169,7 @@
 	"settings_devices_needs_pairing": "Open Devices in Settings on a device that already uses Mawok, then enter the code it shows.",
 	"settings_devices_not_ready": "Couldn't get ready to send between devices. Check your internet connection, then reopen Settings.",
 	"lan_error_key_mismatch": "The other device has an old key. Enter a code from another device that has the new key. If no device has it, reset the key.",
-	"lan_error_no_device": "No device signed in to the same account was found. Connect the other device to the same network.",
+	"lan_error_no_device": "No added device was found. Add another device under Devices in Settings, or connect an added device to the same network.",
 	"lan_error_no_target": "No destination is checked. Choose one with the ▼ next to Send.",
 	"lan_error_unreachable": "Couldn't connect to the other device. Check that Mawok is running on it, it's on the same network, and neither device's firewall or local network permission blocks it.",
 	"lan_error_refused": "The other device didn't accept the text. Check that Mawok is running on it.",
