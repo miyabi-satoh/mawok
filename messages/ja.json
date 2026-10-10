@@ -149,7 +149,7 @@
 	"settings_devices_offer_cancel": "キャンセル",
 	"settings_devices_offer_description": "表示したコードを、追加する側の設定の「デバイス」で入力します。",
 	"settings_devices_offer_automatic": "新しいデバイスが見つかりました。このコードを、そちらで入力してください。",
-	"settings_devices_offer_waiting": "追加する側で、このコードを入力してください。あと {seconds} 秒。",
+	"settings_devices_offer_waiting": "追加する側で、このコードを入力してください。あと {seconds} 秒。",
 	"settings_devices_join": "コード",
 	"settings_devices_join_submit": "追加",
 	"settings_devices_joining": "追加しています…",
