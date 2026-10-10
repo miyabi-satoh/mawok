@@ -164,7 +164,7 @@
 	"settings_devices_pro_description": "デバイスの間の送受信は Pro で利用できます。",
 	"settings_devices_pro_sign_in": "デバイスの間の送受信は Pro で利用できます。設定の「アカウント」でサインインしてください。",
 	"settings_devices_pro_buy": "Pro の料金を見る",
-	"settings_devices_needs_pairing": "すでに Mawok を使っているデバイスの設定で「コードを表示」を押し、表示されたコードを入力します。",
+	"settings_devices_needs_pairing": "ほかのデバイスの Mawok で設定を開いて「コードを表示」を押し、表示されたコードを入力します。",
 	"settings_devices_not_ready": "送受信の準備ができませんでした。インターネットにつながっているか確かめて、設定を開き直してください。",
 	"lan_error_key_mismatch": "コードを表示したデバイスは、接続が解除されています。ほかのデバイスでコードを表示してください。どこにも無いときは、「すべてのデバイスの接続を解除」を使ってください。",
 	"lan_error_no_device": "送信先がありません。設定の「デバイス」で追加するか、追加済みのデバイスを同じネットワークにつないでください。",

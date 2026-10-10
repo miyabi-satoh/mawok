@@ -164,7 +164,7 @@
 	"settings_devices_pro_description": "Send text between devices with Pro.",
 	"settings_devices_pro_sign_in": "Send text between devices with Pro. Sign in under Account in Settings first.",
 	"settings_devices_pro_buy": "View Pro pricing",
-	"settings_devices_needs_pairing": "On a device that already uses Mawok, select Show a code in Settings, then enter the code here.",
+	"settings_devices_needs_pairing": "In Mawok on another device, open Settings and select Show a code, then enter the code here.",
 	"settings_devices_not_ready": "Couldn't get ready to send between devices. Check your internet connection, then reopen Settings.",
 	"lan_error_key_mismatch": "The device that showed the code has been disconnected. Show a code on another device. If no device can, use Disconnect all devices.",
 	"lan_error_no_device": "No added device was found. Add another device under Devices in Settings, or connect an added device to the same network.",
