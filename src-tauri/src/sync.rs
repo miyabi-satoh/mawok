@@ -761,6 +761,7 @@ pub fn reconcile(
     state.since = since;
     let mut writes = Vec::new();
     let mut changed = false;
+    let local_items = config_items(local);
     let mut sorted = remote.to_vec();
     sorted.sort_by_key(|item| (matches!(kind(&item.key), Some(Kind::Order(_))), item.seq));
     for remote in &sorted {
@@ -771,7 +772,13 @@ pub fn reconcile(
         if state.conflicts.contains(&name) {
             continue;
         }
-        let current = config_items(&config).get(&remote.key).cloned();
+        // 並びは、同じ回に届いた行を入れる前の手元の並びで比べる。
+        // 入れた後で比べると、届いた行の分だけ並びが変わって見え、手元を変えていないのに食い違いになる
+        let current = if matches!(kind(&remote.key), Some(Kind::Order(_))) {
+            local_items.get(&remote.key).cloned()
+        } else {
+            config_items(&config).get(&remote.key).cloned()
+        };
         let previous = state.items.get(&name).cloned();
         if initial {
             match (&remote.plain, remote.deleted) {
@@ -1071,9 +1078,10 @@ pub async fn sync_once_with<T: SyncTransport>(
             continue;
         }
         return Ok(SyncResult {
+            // 同じ値を入れ直しただけなら、変わっていない。設定ファイルを書き直して次の同期を呼ばないため
+            changed: result.config != *config,
             config: result.config,
             state: result.state,
-            changed: result.changed,
             reset: reset_seen,
         });
     }
@@ -1208,13 +1216,8 @@ struct PutReply {
     items: Vec<PutItem>,
 }
 
-async fn put(
-    client: &reqwest::Client,
-    token: &str,
-    key: &[u8; 32],
-    key_id: &str,
-    writes: &[Write],
-) -> Result<Vec<PutItem>, Error> {
+/// 窓口へ書く項目の JSON。通信と分けて、要求の形を確かめられるようにする
+fn put_items(key: &[u8; 32], key_id: &str, writes: &[Write]) -> Result<Vec<Value>, Error> {
     let mut items = Vec::new();
     for write in writes {
         if kind(&write.key).is_none() {
@@ -1235,8 +1238,24 @@ async fn put(
                 .map_err(Error::Other)?,
             )
         };
-        items.push(json!({ "collection": write.key.collection, "id": write.key.id, "base_seq": write.base_seq, "deleted": write.deleted, "data": data }));
+        let mut item = json!({ "collection": write.key.collection, "id": write.key.id, "base_seq": write.base_seq, "deleted": write.deleted });
+        // 消す項目には data を付けない。窓口は data が文字列か、無いときだけ受け付ける
+        if let Some(data) = data {
+            item["data"] = Value::String(data);
+        }
+        items.push(item);
     }
+    Ok(items)
+}
+
+async fn put(
+    client: &reqwest::Client,
+    token: &str,
+    key: &[u8; 32],
+    key_id: &str,
+    writes: &[Write],
+) -> Result<Vec<PutItem>, Error> {
+    let items = put_items(key, key_id, writes)?;
     let response = client
         .put(format!("{}/v1/sync", account::ACCOUNT_URL))
         .header(reqwest::header::AUTHORIZATION, auth(token)?)
@@ -2304,6 +2323,106 @@ mod tests {
             next,
             items: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_deleted_write_carries_no_data_and_others_carry_ciphertext() {
+        let key = [7; 32];
+        let write = |deleted: bool| Write {
+            key: ItemKey::new("settings", "s_theme"),
+            base_seq: Some(3),
+            deleted,
+            plain: (!deleted).then(|| json!("dark")),
+            detached: false,
+            previous: None,
+        };
+        let items = put_items(&key, "key", &[write(true), write(false)]).unwrap();
+        // 窓口は、消す項目の data が null だと要求ごと断る
+        assert!(items[0].get("data").is_none(), "{}", items[0]);
+        assert_eq!(items[0]["deleted"], json!(true));
+        assert!(items[1]["data"].is_string(), "{}", items[1]);
+    }
+
+    #[test]
+    fn rows_and_their_order_arriving_together_are_not_a_conflict() {
+        let snippet = |id: char, name: &str| crate::config::Snippet {
+            id: id.to_string().repeat(32),
+            name: name.to_string(),
+            body: name.to_string(),
+            sync: true,
+        };
+        let local = Config {
+            snippets: vec![snippet('c', "手元")],
+            ..Config::default()
+        };
+        let theirs = Config {
+            snippets: vec![
+                snippet('e', "新2"),
+                snippet('d', "新1"),
+                snippet('c', "手元"),
+            ],
+            ..Config::default()
+        };
+        let their_items = config_items(&theirs);
+        let item = |id: String, seq| {
+            let key = ItemKey::new("settings", id);
+            remote("settings", &key.id, seq, their_items[&key].clone())
+        };
+        let result = reconcile(
+            &local,
+            Some(recorded(&local)),
+            &[
+                item("o_snippets".to_string(), 4),
+                item(format!("n_{}", "d".repeat(32)), 2),
+                item(format!("n_{}", "e".repeat(32)), 3),
+            ],
+            "key",
+            4,
+        );
+        assert!(
+            result.state.conflicts.is_empty(),
+            "{:?}",
+            result.state.conflicts
+        );
+        assert_eq!(
+            result
+                .config
+                .snippets
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["新2", "新1", "手元"]
+        );
+        assert!(result.writes.is_empty(), "{:?}", result.writes);
+    }
+
+    #[test]
+    fn receiving_the_value_already_held_is_not_a_change() {
+        let config = Config::default();
+        let key = ItemKey::new("settings", "s_theme");
+        let mut read = empty_read(false, 5);
+        read.items = vec![remote(
+            "settings",
+            "s_theme",
+            5,
+            config_items(&config)[&key].clone(),
+        )];
+        let mut transport = FakeTransport {
+            reads: vec![read],
+            write_errors: vec![],
+            read_since: Vec::new(),
+            writes: Vec::new(),
+        };
+        let result = tauri::async_runtime::block_on(sync_once_with(
+            &mut transport,
+            &config,
+            Some(recorded(&config)),
+            "key",
+        ))
+        .unwrap();
+        // 変わったと返すと、同じ中身の設定ファイルを書き直して、次の同期を呼んでしまう
+        assert!(!result.changed);
+        assert!(transport.writes.is_empty());
     }
 
     #[test]
