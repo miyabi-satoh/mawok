@@ -19,9 +19,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    account, account_key, atomic_file,
+    account, account_key, actions,
+    ai::AiService,
+    atomic_file,
     config::{self, Action, Config, Language, Snippet, Theme},
-    draft_keys::Platform,
+    draft_keys::{DraftAction, Platform},
     text::{CharWidths, PunctuationStyle, Replacement},
 };
 
@@ -29,6 +31,16 @@ pub const STATE_FILE_NAME: &str = "sync-state.json";
 const KEY_INFO: &[u8] = b"mawok sync v1";
 const VERSION: u64 = 1;
 const SETTINGS: &str = "settings";
+/// 窓口が1項目に受け付ける暗号文の上限（docs/account-server.md「同期」）。
+/// 超える項目を送ると、同じ要求のほかの項目まで断られるので、送る前に同じ値で測って外す。
+const MAX_ENCRYPTED_ITEM_BYTES: usize = 256 * 1024;
+/// 窓口が1回の書き込みに受け付ける項目数の上限（docs/account-server.md「同期」）。
+const WRITE_BATCH_SIZE: usize = 100;
+/// `conflict` を受けて書き直す回数の上限（docs/sync.md「1回の同期」）。
+/// ほかのデバイスと同じ項目を書き合い続けても、1回の同期を終わらせる。残りは次のきっかけで試す。
+const MAX_CONFLICT_RETRIES: usize = 3;
+/// 1ページに読む項目数。窓口が受け付ける上限（docs/account-server.md「同期」）にして、往復を減らす。
+const READ_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ItemKey {
@@ -52,10 +64,39 @@ impl ItemKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plain {
     v: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // 値が null の項目（既定の `input_guidance`）を、値が無いものと取り違えない
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_value"
+    )]
     value: Option<Value>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     detached: bool,
+}
+
+fn present_value<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
+}
+
+impl Plain {
+    fn value(value: Value) -> Self {
+        Self {
+            v: VERSION,
+            value: Some(value),
+            detached: false,
+        }
+    }
+
+    fn detached() -> Self {
+        Self {
+            v: VERSION,
+            value: None,
+            detached: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,12 +113,61 @@ pub struct State {
     pub items: BTreeMap<String, Seen>,
     #[serde(default)]
     pub conflicts: BTreeSet<String>,
-    /// 413 で拒まれた項目。値をログに出さず、次の変更まで再送しない。
+    /// 大きすぎて書けなかった項目と、そのときの平文の SHA-256。手元の値が変わるまで書かない。
     #[serde(default)]
-    pub too_large: BTreeSet<String>,
-    /// 復号できない・この版で読めない窓口の項目。古い版が書き戻さないよう、その版が変わるまで送らない。
+    pub too_large: BTreeMap<String, [u8; 32]>,
+    /// 窓口で消えた・同期から外れた項目の `seq`。同じ id をもう一度書くときの `base_seq` に使う。
+    #[serde(default)]
+    pub retired: BTreeMap<String, u64>,
+    /// 読み捨てた項目と、その `seq`。新しい版が書いた項目を壊さないよう、窓口の値が変わるまで書かない。
     #[serde(default)]
     pub ignored: BTreeMap<String, u64>,
+}
+
+impl State {
+    fn new(key_id: &str) -> Self {
+        Self {
+            key_id: key_id.to_string(),
+            ..Self::default()
+        }
+    }
+
+    /// この項目について、もう見た `seq`。これ以下の項目は、自分が書いた項目の読み戻しか、古い暗号文の出し直し。
+    fn seen_seq(&self, name: &str) -> Option<u64> {
+        [
+            self.items.get(name).map(|seen| seen.seq),
+            self.retired.get(name).copied(),
+            self.ignored.get(name).copied(),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+    }
+
+    /// 窓口と揃った。
+    fn settle(&mut self, name: String, seq: u64, value: &Value) {
+        self.retired.remove(&name);
+        self.ignored.remove(&name);
+        self.items.insert(
+            name,
+            Seen {
+                seq,
+                hash: hash_plain(value),
+            },
+        );
+    }
+
+    /// 窓口で消えた・同期から外れた。
+    fn retire(&mut self, name: String, seq: u64) {
+        self.items.remove(&name);
+        self.ignored.remove(&name);
+        self.retired.insert(name, seq);
+    }
+
+    /// まだ窓口の写しを読み終えたことが無い。記録が無いデバイスと同じく、初めての同期として合わせる。
+    fn awaits_first_read(&self) -> bool {
+        self.since == 0
+    }
 }
 
 pub fn load(path: &Path) -> Option<State> {
@@ -129,7 +219,7 @@ pub fn encrypt(
     key: &[u8; 32],
     key_id: &str,
     item: &ItemKey,
-    plain: &Value,
+    plain: &Plain,
 ) -> Result<String, String> {
     let mut nonce = [0u8; 24];
     getrandom::fill(&mut nonce).map_err(|error| error.to_string())?;
@@ -138,33 +228,7 @@ pub fn encrypt(
         .encrypt(
             XNonce::from_slice(&nonce),
             Payload {
-                msg: &encode_plain(&Plain {
-                    v: VERSION,
-                    value: Some(plain.clone()),
-                    detached: false,
-                })?,
-                aad: &associated_data(key_id, item),
-            },
-        )
-        .map_err(|_| "couldn't encrypt a sync item".to_string())?;
-    let mut data = nonce.to_vec();
-    data.extend(ciphertext);
-    Ok(STANDARD.encode(data))
-}
-
-fn encrypt_detached(key: &[u8; 32], key_id: &str, item: &ItemKey) -> Result<String, String> {
-    let mut nonce = [0u8; 24];
-    getrandom::fill(&mut nonce).map_err(|error| error.to_string())?;
-    let cipher = XChaCha20Poly1305::new((&derived_key(key)).into());
-    let ciphertext = cipher
-        .encrypt(
-            XNonce::from_slice(&nonce),
-            Payload {
-                msg: &encode_plain(&Plain {
-                    v: VERSION,
-                    value: None,
-                    detached: true,
-                })?,
+                msg: &encode_plain(plain)?,
                 aad: &associated_data(key_id, item),
             },
         )
@@ -191,15 +255,13 @@ pub fn decrypt(key: &[u8; 32], key_id: &str, item: &ItemKey, data: &str) -> Opti
 }
 
 fn hash_plain(value: &Value) -> [u8; 32] {
-    Sha256::digest(
-        encode_plain(&Plain {
-            v: VERSION,
-            value: Some(value.clone()),
-            detached: false,
-        })
-        .expect("sync values serialize"),
-    )
-    .into()
+    Sha256::digest(encode_plain(&Plain::value(value.clone())).expect("sync values serialize"))
+        .into()
+}
+
+/// 窓口が測るのと同じ、base64 にする前の暗号文の大きさ（nonce 24 バイト・平文・認証タグ 16 バイト）。
+fn encrypted_len(plain: &Plain) -> usize {
+    24 + 16 + encode_plain(plain).map_or(usize::MAX, |bytes| bytes.len())
 }
 
 fn platform_suffix() -> &'static str {
@@ -227,6 +289,37 @@ fn row_id(prefix: char, id: &str) -> String {
 
 fn order_id(name: &str) -> String {
     format!("o_{name}")
+}
+
+/// このデバイスの OS のホットキーの項目。
+pub fn hotkey_item() -> ItemKey {
+    setting_item(&format!("hotkey_{}", platform_suffix()))
+}
+
+/// このデバイスの OS の、テキストウィンドウのキーの項目。
+pub fn text_window_keys_item() -> ItemKey {
+    setting_item(&format!("text_window_keys_{}", platform_suffix()))
+}
+
+pub fn setting_item(name: &str) -> ItemKey {
+    ItemKey::new(SETTINGS, setting_id(name))
+}
+
+/// 設定ファイルと同じ項目名で書く。黙って外した操作は、設定ファイルと同じく書かない
+/// （書くと、ほかのデバイスで、重なりが解けても既定のキーに戻らなくなる）。
+fn draft_keys_value(config: &Config) -> Value {
+    Value::Object(
+        DraftAction::ALL
+            .into_iter()
+            .filter(|action| !config.yielded_draft_keys.contains(action))
+            .map(|action| {
+                (
+                    action.name().to_string(),
+                    Value::String(config.text_window_keys.get(action).to_string()),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn valid_wire_id(id: &str) -> bool {
@@ -341,7 +434,7 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
     set(
         &mut items,
         setting_id(&format!("text_window_keys_{suffix}")),
-        json(config.text_window_keys.clone()),
+        draft_keys_value(config),
     );
     set(
         &mut items,
@@ -384,21 +477,21 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
                 .map(|row| row.id.clone())
                 .collect::<Vec<_>>(),
         ),
-        (
-            "actions",
-            config
-                .actions
-                .as_ref()
-                .map(|rows| {
-                    rows.iter()
-                        .filter(|row| row.sync)
-                        .map(|row| row.id.clone())
-                        .collect()
-                })
-                .unwrap_or_default(),
-        ),
     ] {
         set(&mut items, order_id(name), json(order));
+    }
+    if let Some(actions) = &config.actions {
+        set(
+            &mut items,
+            order_id("actions"),
+            json(
+                actions
+                    .iter()
+                    .filter(|row| row.sync)
+                    .map(|row| row.id.clone())
+                    .collect::<Vec<_>>(),
+            ),
+        );
     }
     items
 }
@@ -435,17 +528,10 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
         Some(Kind::Setting("show_text_window_buttons")) => {
             set_if(&mut config.show_text_window_buttons, parse(value))
         }
-        Some(Kind::Setting("text_history_size")) => value
-            .as_f64()
-            .filter(|number| {
-                *number >= 0.0
-                    && *number <= config::MAX_DRAFT_HISTORY_SIZE as f64
-                    && number.is_finite()
-            })
-            .map(|number| {
-                config.text_history_size = number.round() as u16;
-            })
-            .is_some(),
+        Some(Kind::Setting("text_history_size")) => set_if(
+            &mut config.text_history_size,
+            parse::<u16>(value).filter(|size| *size <= config::MAX_DRAFT_HISTORY_SIZE),
+        ),
         Some(Kind::Setting("trim_trailing_whitespace")) => {
             set_if(&mut config.trim_trailing_whitespace, parse(value))
         }
@@ -459,17 +545,12 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
         Some(Kind::Setting("exclude_from_clipboard_history")) => {
             set_if(&mut config.exclude_from_clipboard_history, parse(value))
         }
-        Some(Kind::Setting("text_font_size")) => value
-            .as_f64()
-            .filter(|number| {
-                number.is_finite()
-                    && *number >= config::MIN_DRAFT_FONT_SIZE as f64
-                    && *number <= config::MAX_DRAFT_FONT_SIZE as f64
-            })
-            .map(|number| {
-                config.text_font_size = number.round() as u16;
-            })
-            .is_some(),
+        Some(Kind::Setting("text_font_size")) => set_if(
+            &mut config.text_font_size,
+            parse::<u16>(value).filter(|size| {
+                (config::MIN_DRAFT_FONT_SIZE..=config::MAX_DRAFT_FONT_SIZE).contains(size)
+            }),
+        ),
         Some(Kind::Setting("text_color_light")) => value
             .as_str()
             .and_then(config::normalize_text_color)
@@ -484,9 +565,30 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
             set_if(&mut config.input_guidance, parse::<Option<String>>(value))
         }
         Some(Kind::Setting("ai_service")) => set_if(&mut config.ai_service, parse(value)),
-        Some(Kind::Setting("ai_models")) => set_if(&mut config.ai_models, parse(value)),
+        Some(Kind::Setting("ai_models")) => set_if(
+            &mut config.ai_models,
+            // 空のモデルは、設定ファイルでも画面でも「既定のモデル」として項目ごと外す
+            parse::<BTreeMap<AiService, String>>(value).filter(|models| {
+                models
+                    .values()
+                    .all(|model| !model.is_empty() && model.trim() == model)
+            }),
+        ),
         Some(Kind::Setting(name)) if name == format!("hotkey_{}", platform_suffix()) => {
-            set_if(&mut config.hotkey, parse(value))
+            let Some(hotkey) = parse::<String>(value) else {
+                return false;
+            };
+            if crate::draft_keys::check_hotkey(
+                &config.text_window_keys,
+                &hotkey,
+                Platform::current(),
+            )
+            .is_err()
+            {
+                return false;
+            }
+            config.hotkey = hotkey;
+            true
         }
         Some(Kind::Setting(name)) if name == format!("text_window_keys_{}", platform_suffix()) => {
             apply_draft_keys(config, value)
@@ -497,17 +599,24 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
         Some(Kind::Replacement(id)) => apply_row(&mut config.replacements, id, value),
         Some(Kind::Snippet(id)) => apply_row(&mut config.snippets, id, value),
         Some(Kind::Action(id)) => {
-            let rows = config.actions.get_or_insert_default();
+            let rows = synced_actions(config);
             apply_row(rows, id, value)
         }
         Some(Kind::Order("replacements")) => apply_order(&mut config.replacements, value),
         Some(Kind::Order("snippets")) => apply_order(&mut config.snippets, value),
-        Some(Kind::Order("actions")) => config
-            .actions
-            .as_mut()
-            .is_some_and(|rows| apply_order(rows, value)),
+        Some(Kind::Order("actions")) => apply_order(synced_actions(config), value),
         _ => false,
     }
+}
+
+fn synced_actions(config: &mut Config) -> &mut Vec<Action> {
+    config.actions.get_or_insert_with(|| {
+        actions::default_actions(match config.language {
+            Language::Ja => crate::i18n::Lang::Ja,
+            Language::En => crate::i18n::Lang::En,
+            Language::System => crate::i18n::Lang::system(),
+        })
+    })
 }
 
 fn set_if<T>(target: &mut T, value: Option<T>) -> bool {
@@ -524,11 +633,15 @@ fn apply_draft_keys(config: &mut Config, value: &Value) -> bool {
         return false;
     };
     let mut table = toml_edit::InlineTable::new();
-    for action in crate::draft_keys::DraftAction::ALL {
-        let Some(key) = object.get(action.name()).and_then(Value::as_str) else {
-            continue;
-        };
-        table.insert(action.name(), toml_edit::Value::from(key));
+    for action in DraftAction::ALL {
+        match object.get(action.name()) {
+            // 無い操作は、設定ファイルに書いていないのと同じく既定のキーを使う
+            None => {}
+            Some(Value::String(key)) => {
+                table.insert(action.name(), toml_edit::Value::from(key.as_str()));
+            }
+            Some(_) => return false,
+        }
     }
     let item = toml_edit::Item::Value(toml_edit::Value::InlineTable(table));
     let parsed = crate::draft_keys::parse(Some(&item), Platform::current());
@@ -542,6 +655,11 @@ fn apply_draft_keys(config: &mut Config, value: &Value) -> bool {
         Platform::current(),
         &parsed.written,
     );
+    // 届いたキーを外して入れると、手元の値が届いた値と違うものになり、外した値を書き戻してしまう。
+    // 画面から割り当てるときと同じく、重なるキーは断る
+    if !resolved.removed.is_empty() {
+        return false;
+    }
     config.text_window_keys = keys;
     config.yielded_draft_keys = resolved.yielded;
     true
@@ -707,19 +825,21 @@ fn detached(config: &Config, item: &ItemKey) -> bool {
     }
 }
 
-fn dedupe_initial_rows<T: SyncRow>(rows: &mut Vec<T>, remote_ids: &BTreeSet<String>) {
-    let remote_values: BTreeSet<String> = rows
+/// 窓口に無い手元の行のうち、中身が窓口の行と同じものを落とす（残る窓口の行が、その `id` で手元の行になる）。
+/// 窓口の行どうしは、別々のデバイスが意図して置いた2行でありうるので、1つにしない。
+fn dedupe_initial_rows<T: SyncRow>(rows: &mut Vec<T>, on_server: &BTreeSet<String>) -> bool {
+    let server_values: BTreeSet<String> = rows
         .iter()
-        .filter(|row| remote_ids.contains(row.id()))
+        .filter(|row| on_server.contains(row.id()))
         .map(|row| row_value(row).to_string())
         .collect();
-    let mut kept_remote_values = BTreeSet::new();
+    let before = rows.len();
     rows.retain(|row| {
-        if !row.sync() || !remote_values.contains(&row_value(row).to_string()) {
-            return true;
-        }
-        remote_ids.contains(row.id()) && kept_remote_values.insert(row_value(row).to_string())
+        !row.sync()
+            || on_server.contains(row.id())
+            || !server_values.contains(&row_value(row).to_string())
     });
+    before != rows.len()
 }
 
 #[derive(Debug, Clone)]
@@ -729,6 +849,32 @@ pub struct RemoteItem {
     pub deleted: bool,
     pub plain: Option<Plain>,
 }
+
+/// 窓口の1項目が伝えていること。
+enum Incoming<'a> {
+    Deleted,
+    Detached,
+    Value(&'a Value),
+    /// 復号できない・知らない `v`。
+    Unreadable,
+}
+
+impl RemoteItem {
+    fn incoming(&self) -> Incoming<'_> {
+        if self.deleted {
+            return Incoming::Deleted;
+        }
+        match &self.plain {
+            Some(plain) if plain.v != VERSION => Incoming::Unreadable,
+            Some(plain) if plain.detached => Incoming::Detached,
+            Some(Plain {
+                value: Some(value), ..
+            }) => Incoming::Value(value),
+            _ => Incoming::Unreadable,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Write {
     pub key: ItemKey,
@@ -736,8 +882,21 @@ pub struct Write {
     pub deleted: bool,
     pub plain: Option<Value>,
     pub detached: bool,
-    previous: Option<Seen>,
 }
+
+impl Write {
+    /// 窓口に置く平文。消す項目には無い。
+    fn payload(&self) -> Option<Plain> {
+        if self.deleted {
+            None
+        } else if self.detached {
+            Some(Plain::detached())
+        } else {
+            self.plain.clone().map(Plain::value)
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Reconcile {
     pub config: Config,
@@ -747,6 +906,7 @@ pub struct Reconcile {
 }
 
 /// 通信を含まない同期の決まり。読む結果を検査済みの `RemoteItem` として渡し、次の設定・記録・書く項目を返す。
+/// 書く項目の記録は、窓口に書けてから `sync_once_with` が置く。
 pub fn reconcile(
     local: &Config,
     old: Option<State>,
@@ -754,217 +914,204 @@ pub fn reconcile(
     key_id: &str,
     since: u64,
 ) -> Reconcile {
-    let initial = old.is_none();
+    let initial = old.as_ref().is_none_or(State::awaits_first_read);
+    reconcile_as(
+        local,
+        old.unwrap_or_default(),
+        initial,
+        remote,
+        key_id,
+        since,
+    )
+}
+
+/// `initial` は、この同期が「初めての同期」か。`conflict` を受けて当て直す間も、同じ決まりで合わせる。
+fn reconcile_as(
+    local: &Config,
+    mut state: State,
+    initial: bool,
+    remote: &[RemoteItem],
+    key_id: &str,
+    since: u64,
+) -> Reconcile {
     let mut config = local.clone();
-    let mut state = old.unwrap_or_default();
     state.key_id = key_id.to_string();
     state.since = since;
-    let mut writes = Vec::new();
     let mut changed = false;
     let local_items = config_items(local);
     let mut sorted = remote.to_vec();
-    sorted.sort_by_key(|item| (matches!(kind(&item.key), Some(Kind::Order(_))), item.seq));
+    // 言語を先に入れてから、None のアクションを既定から実体化する。並びは最後にしないと同じ回の行を並べ替えられない。
+    sorted.sort_by_key(|item| {
+        (
+            match kind(&item.key) {
+                Some(Kind::Setting(_)) => 0,
+                Some(Kind::Order(_)) => 2,
+                _ => 1,
+            },
+            item.seq,
+        )
+    });
     for remote in &sorted {
-        if kind(&remote.key).is_none() {
+        let Some(item_kind) = kind(&remote.key) else {
             continue;
-        }
-        let name = remote.key.name();
-        if state.conflicts.contains(&name) {
-            continue;
-        }
-        // 並びは、同じ回に届いた行を入れる前の手元の並びで比べる。
-        // 入れた後で比べると、届いた行の分だけ並びが変わって見え、手元を変えていないのに食い違いになる
-        let current = if matches!(kind(&remote.key), Some(Kind::Order(_))) {
-            local_items.get(&remote.key).cloned()
-        } else {
-            config_items(&config).get(&remote.key).cloned()
         };
+        let name = remote.key.name();
+        if state.conflicts.contains(&name)
+            || state.seen_seq(&name).is_some_and(|seq| remote.seq <= seq)
+        {
+            continue;
+        }
+        // 同期から外した手元の行は、同じ id の項目が届いても、中身も `sync` も変えない（docs/sync.md「同期する単位」）。
+        if detached(&config, &remote.key) {
+            match state.items.get_mut(&name) {
+                // 外した印をまだ書いていない。ほかのデバイスの写しを切り離すため、届いた項目の上に印を書く
+                Some(seen) if !matches!(remote.incoming(), Incoming::Detached) => {
+                    seen.seq = remote.seq;
+                }
+                // 届いた `seq` は置いておき、印を付け直したときの `base_seq` にする
+                _ => state.retire(name, remote.seq),
+            }
+            continue;
+        }
         let previous = state.items.get(&name).cloned();
-        if initial {
-            match (&remote.plain, remote.deleted) {
-                (Some(plain), false) if plain.v == VERSION && !plain.detached => {
-                    if let Some(value) = &plain.value {
-                        if apply_value(&mut config, &remote.key, value) {
-                            changed = true;
-                            state.items.insert(
-                                name.clone(),
-                                Seen {
-                                    seq: remote.seq,
-                                    hash: hash_plain(value),
-                                },
-                            );
-                            state.ignored.remove(&name);
-                        } else {
-                            state.ignored.insert(name, remote.seq);
-                        }
+        // 記録がある項目（前の回に自分が書いた項目）は、初めての同期でも、いつもの決まりで比べる。
+        // 窓口の値を無条件に入れると、書いた後に手元で変えた値を巻き戻す
+        if initial && previous.is_none() {
+            match remote.incoming() {
+                Incoming::Value(value) => {
+                    if apply_value(&mut config, &remote.key, value) {
+                        changed = true;
+                        state.settle(name, remote.seq, value);
+                    } else {
+                        state.ignored.insert(name, remote.seq);
                     }
                 }
-                (Some(plain), false) if plain.v == VERSION && plain.detached => {
+                Incoming::Detached => {
                     changed |= detach_local(&mut config, &remote.key);
+                    state.retire(name, remote.seq);
                 }
-                (_, true) => {}
-                _ => {
+                Incoming::Deleted => {
+                    changed |= remove_local(&mut config, &remote.key);
+                    state.retire(name, remote.seq);
+                }
+                Incoming::Unreadable => {
                     state.ignored.insert(name, remote.seq);
                 }
             }
             continue;
         }
-        if remote.deleted {
-            match (previous, current) {
-                (Some(seen), Some(value)) if seen.hash == hash_plain(&value) => {
+        // 並びは、同じ回に届いた行を入れる前の手元の並びで比べる。
+        // 入れた後で比べると、届いた行の分だけ並びが変わって見え、手元を変えていないのに食い違いになる
+        let current = if matches!(item_kind, Kind::Order(_)) {
+            local_items.get(&remote.key).cloned()
+        } else {
+            config_items(&config).get(&remote.key).cloned()
+        };
+        let local_unchanged = match (&previous, &current) {
+            (Some(seen), Some(value)) => seen.hash == hash_plain(value),
+            (None, None) => true,
+            _ => false,
+        };
+        match remote.incoming() {
+            Incoming::Deleted => {
+                if current.is_none() {
+                    // 手元でも消したか、外している。記録が無ければ、もともと持っていない行
+                    if previous.is_some() {
+                        state.retire(name, remote.seq);
+                    }
+                } else if local_unchanged {
                     changed |= remove_local(&mut config, &remote.key);
-                    state.items.remove(&name);
-                }
-                (Some(_), None) => {
-                    state.items.remove(&name);
-                }
-                (Some(_), Some(_)) => {
+                    state.retire(name, remote.seq);
+                } else {
                     state.conflicts.insert(name);
                 }
-                _ => {}
             }
-            continue;
-        }
-        let Some(plain) = &remote.plain else {
-            state.ignored.insert(name, remote.seq);
-            continue;
-        };
-        if plain.v != VERSION {
-            state.ignored.insert(name, remote.seq);
-            continue;
-        }
-        if plain.detached {
-            changed |= detach_local(&mut config, &remote.key);
-            state.items.remove(&name);
-            continue;
-        }
-        let Some(value) = &plain.value else {
-            continue;
-        };
-        if !is_known_value(&config, &remote.key, value) {
-            state.ignored.insert(name, remote.seq);
-            continue;
-        }
-        state.ignored.remove(&name);
-        match (previous, current) {
-            (Some(seen), Some(local_value)) if seen.hash == hash_plain(&local_value) => {
-                changed |= apply_value(&mut config, &remote.key, value);
-                state.items.insert(
-                    name,
-                    Seen {
-                        seq: remote.seq,
-                        hash: hash_plain(value),
-                    },
-                );
+            Incoming::Detached => {
+                changed |= detach_local(&mut config, &remote.key);
+                state.retire(name, remote.seq);
             }
-            (Some(_), Some(local_value)) if local_value == *value => {
-                state.items.insert(
-                    name,
-                    Seen {
-                        seq: remote.seq,
-                        hash: hash_plain(value),
-                    },
-                );
+            Incoming::Unreadable => {
+                state.ignored.insert(name, remote.seq);
             }
-            (Some(_), Some(_)) => {
-                state.conflicts.insert(name);
-            }
-            (None, None) => {
-                changed |= apply_value(&mut config, &remote.key, value);
-                state.items.insert(
-                    name,
-                    Seen {
-                        seq: remote.seq,
-                        hash: hash_plain(value),
-                    },
-                );
-            }
-            (None, Some(local_value)) if local_value == *value => {
-                state.items.insert(
-                    name,
-                    Seen {
-                        seq: remote.seq,
-                        hash: hash_plain(value),
-                    },
-                );
-            }
-            (None, Some(_)) => {
-                state.conflicts.insert(name);
-            }
-            (Some(_), None) => {
-                state.conflicts.insert(name);
+            Incoming::Value(value) => {
+                if !is_known_value(&config, &remote.key, value) {
+                    state.ignored.insert(name, remote.seq);
+                } else if local_unchanged {
+                    changed |= apply_value(&mut config, &remote.key, value);
+                    state.settle(name, remote.seq, value);
+                } else if current.as_ref() == Some(value) {
+                    state.settle(name, remote.seq, value);
+                } else {
+                    state.ignored.remove(&name);
+                    state.conflicts.insert(name);
+                }
             }
         }
     }
     if initial {
-        let remote_ids = |row_kind: char| {
-            sorted
-                .iter()
-                .filter(|item| {
-                    matches!(
-                        (row_kind, kind(&item.key)),
-                        ('r', Some(Kind::Replacement(_)))
-                            | ('n', Some(Kind::Snippet(_)))
-                            | ('a', Some(Kind::Action(_)))
-                    ) && !item.deleted
-                        && item.plain.as_ref().is_some_and(|plain| !plain.detached)
-                })
-                .map(|item| item.key.id[2..].to_string())
+        // 記録にある行（この回に窓口から入れた行と、前の回に自分が書いた行）が、窓口にある行
+        let on_server = |prefix: &str| {
+            let prefix = ItemKey::new(SETTINGS, prefix).name();
+            state
+                .items
+                .keys()
+                .filter_map(|name| name.strip_prefix(&prefix))
+                .map(str::to_string)
                 .collect::<BTreeSet<_>>()
         };
-        dedupe_initial_rows(&mut config.replacements, &remote_ids('r'));
-        dedupe_initial_rows(&mut config.snippets, &remote_ids('n'));
+        changed |= dedupe_initial_rows(&mut config.replacements, &on_server("r_"));
+        changed |= dedupe_initial_rows(&mut config.snippets, &on_server("n_"));
         if let Some(actions) = &mut config.actions {
-            dedupe_initial_rows(actions, &remote_ids('a'));
+            changed |= dedupe_initial_rows(actions, &on_server("a_"));
         }
     }
     let now = config_items(&config);
+    let hashes: BTreeMap<String, [u8; 32]> = now
+        .iter()
+        .map(|(key, value)| (key.name(), hash_plain(value)))
+        .collect();
+    // 手元の値が変わった（か、無くなった）項目は、もう一度書いてみる
+    state
+        .too_large
+        .retain(|name, hash| hashes.get(name) == Some(hash));
+    let held = |state: &State, name: &str| {
+        state.conflicts.contains(name) || state.ignored.contains_key(name)
+    };
+    let mut writes = Vec::new();
     for (key, value) in &now {
         let name = key.name();
-        if state.conflicts.contains(&name)
-            || state.too_large.contains(&name)
-            || state.ignored.contains_key(&name)
-        {
+        if held(&state, &name) || state.too_large.contains_key(&name) {
             continue;
         }
-        if state
-            .items
-            .get(&name)
-            .is_none_or(|seen| seen.hash != hash_plain(value))
-        {
+        let seen = state.items.get(&name);
+        if seen.is_none_or(|seen| seen.hash != hashes[&name]) {
             writes.push(Write {
                 key: key.clone(),
-                base_seq: state.items.get(&name).map(|seen| seen.seq),
+                base_seq: seen
+                    .map(|seen| seen.seq)
+                    .or_else(|| state.retired.get(&name).copied()),
                 deleted: false,
                 plain: Some(value.clone()),
                 detached: false,
-                previous: None,
             });
         }
     }
-    for (name, seen) in state.items.clone() {
+    for (name, seen) in &state.items {
         let Some((collection, id)) = name.split_once('\0') else {
             continue;
         };
         let key = ItemKey::new(collection, id);
-        if kind(&key).is_none() {
+        if kind(&key).is_none() || now.contains_key(&key) || held(&state, name) {
             continue;
         }
-        if !now.contains_key(&key)
-            && !state.conflicts.contains(&name)
-            && !state.ignored.contains_key(&name)
-        {
-            let detached = detached(&config, &key);
-            writes.push(Write {
-                key,
-                base_seq: Some(seen.seq),
-                deleted: !detached,
-                plain: None,
-                detached,
-                previous: Some(seen),
-            });
-            state.items.remove(&name);
-        }
+        let detached = detached(&config, &key);
+        writes.push(Write {
+            key,
+            base_seq: Some(seen.seq),
+            deleted: !detached,
+            plain: None,
+            detached,
+        });
     }
     Reconcile {
         config,
@@ -983,6 +1130,7 @@ fn is_known_value(config: &Config, key: &ItemKey, value: &Value) -> bool {
 pub enum Error {
     SignedOut,
     KeyMismatch,
+    Conflict(Vec<ConflictItem>),
     Limit(&'static str),
     Other(String),
 }
@@ -998,6 +1146,15 @@ pub struct ReadResult {
 pub struct WrittenItem {
     pub key: ItemKey,
     pub seq: u64,
+}
+
+/// 409 に含まれる今の項目。`seq: None` は、窓口にその項目が無いことを表す。
+#[derive(Debug, Clone)]
+pub struct ConflictItem {
+    pub key: ItemKey,
+    pub seq: Option<u64>,
+    pub deleted: bool,
+    pub plain: Option<Plain>,
 }
 
 /// 通信だけを差し替えられる境目。同期の決まりの試験は窓口や暗号に依らない。
@@ -1018,74 +1175,150 @@ pub struct SyncResult {
     pub state: State,
     pub changed: bool,
     pub reset: bool,
+    /// この回に窓口へ書けた項目だけの記録。`config` を手元に入れずに捨てるときも、`merge_written` で残す。
+    pub written: State,
 }
 
-/// 1回の同期の外側。読み書きは `SyncTransport` に閉じ、競合時だけ最大3回読み直す。
+/// 失敗した同期。途中まで窓口へ書けていれば、その項目の記録を `merge_written` で残す。
+#[derive(Debug)]
+pub struct Failure {
+    pub error: Error,
+    pub written: State,
+    pub reset: bool,
+}
+
+/// 1回の同期の外側。読み書きは `SyncTransport` に閉じる。
 pub async fn sync_once_with<T: SyncTransport>(
     transport: &mut T,
     config: &Config,
-    mut state: Option<State>,
+    state: Option<State>,
     key_id: &str,
-) -> Result<SyncResult, Error> {
-    let mut reset_seen = false;
-    for _ in 0..3 {
-        let read = transport
-            .read(state.as_ref().map_or(0, |state| state.since))
-            .await?;
-        if read.reset {
-            state = None;
-            reset_seen = true;
+) -> Result<SyncResult, Box<Failure>> {
+    let read = match transport
+        .read(state.as_ref().map_or(0, |state| state.since))
+        .await
+    {
+        Ok(read) => read,
+        Err(error) => {
+            return Err(Box::new(Failure {
+                error,
+                written: State::new(key_id),
+                reset: false,
+            }))
         }
-        let mut result = reconcile(config, state.clone(), &read.items, key_id, read.next);
-        let mut conflict = false;
-        for batch in result.writes.chunks(100) {
-            match transport.write(batch).await {
-                Ok(written) => {
-                    for reply in written {
-                        let name = reply.key.name();
-                        if let Some(write) = batch.iter().find(|write| write.key == reply.key) {
-                            if let Some(value) = &write.plain {
-                                result.state.items.insert(
-                                    name,
-                                    Seen {
-                                        seq: reply.seq,
-                                        hash: hash_plain(value),
-                                    },
-                                );
-                            } else {
-                                result.state.items.remove(&name);
-                            }
-                        }
-                    }
+    };
+    // 窓口が写しで組み直すよう知らせたら、前の記録は使えない
+    let state = state.filter(|_| !read.reset);
+    let initial = state.as_ref().is_none_or(State::awaits_first_read);
+    let mut result = reconcile(config, state, &read.items, key_id, read.next);
+    let mut changed = result.changed;
+    let mut written = State::new(key_id);
+    let mut retries = 0;
+    loop {
+        let conflicts = match write_all(transport, &mut result, &mut written).await {
+            Ok(None) => break,
+            Ok(Some(_)) if retries == MAX_CONFLICT_RETRIES => {
+                Err(Error::Other("sync conflicts did not settle".to_string()))
+            }
+            Ok(Some(conflicts)) => Ok(conflicts),
+            Err(error) => Err(error),
+        };
+        let conflicts = match conflicts {
+            Ok(conflicts) => conflicts,
+            Err(error) => {
+                return Err(Box::new(Failure {
+                    error,
+                    written,
+                    reset: read.reset,
+                }))
+            }
+        };
+        retries += 1;
+        let mut current = Vec::new();
+        for conflict in conflicts {
+            match conflict.seq {
+                Some(seq) => current.push(RemoteItem {
+                    key: conflict.key,
+                    seq,
+                    deleted: conflict.deleted,
+                    plain: conflict.plain,
+                }),
+                // 窓口に無い。記録を外して、初めての項目として書き直す
+                None => {
+                    let name = conflict.key.name();
+                    result.state.items.remove(&name);
+                    result.state.retired.remove(&name);
                 }
-                Err(Error::Other(detail)) if detail == "conflict" => {
-                    conflict = true;
-                    break;
-                }
-                Err(Error::Limit(limit)) => {
-                    for write in batch {
-                        result.state.too_large.insert(write.key.name());
-                        if let Some(seen) = &write.previous {
-                            result.state.items.insert(write.key.name(), seen.clone());
-                        }
-                    }
-                    log::warn!("sync write was too large: {limit}");
-                }
-                Err(error) => return Err(error),
             }
         }
-        if conflict {
-            continue;
-        }
-        return Ok(SyncResult {
-            // 同じ値を入れ直しただけなら、変わっていない。設定ファイルを書き直して次の同期を呼ばないため
-            changed: result.changed && result.config != *config,
-            config: result.config,
-            state: result.state,
-            reset: reset_seen,
-        });
+        result = reconcile_as(
+            &result.config,
+            result.state,
+            initial,
+            &current,
+            key_id,
+            read.next,
+        );
+        changed |= result.changed;
     }
-    Err(Error::Other("sync conflicts did not settle".to_string()))
+    Ok(SyncResult {
+        // 同じ値を入れ直しただけなら、変わっていない。設定ファイルを書き直して次の同期を呼ばないため
+        changed: changed && result.config != *config,
+        config: result.config,
+        state: result.state,
+        reset: read.reset,
+        written,
+    })
+}
+
+/// 書く項目を窓口へ送り、書けた分を記録に置く。`conflict` が返ったら、そこで止めて今の項目を返す。
+async fn write_all<T: SyncTransport>(
+    transport: &mut T,
+    result: &mut Reconcile,
+    written: &mut State,
+) -> Result<Option<Vec<ConflictItem>>, Error> {
+    let mut writes = Vec::new();
+    for write in std::mem::take(&mut result.writes) {
+        match (write.payload(), &write.plain) {
+            (Some(plain), Some(value)) if encrypted_len(&plain) > MAX_ENCRYPTED_ITEM_BYTES => {
+                log::warn!("a sync item is too large to write");
+                result
+                    .state
+                    .too_large
+                    .insert(write.key.name(), hash_plain(value));
+            }
+            _ => writes.push(write),
+        }
+    }
+    for batch in writes.chunks(WRITE_BATCH_SIZE) {
+        let replies = match transport.write(batch).await {
+            Ok(replies) => replies,
+            Err(Error::Conflict(conflicts)) => return Ok(Some(conflicts)),
+            Err(Error::Limit(limit)) => {
+                // 1項目の上限は送る前に除いている。全体・要求の上限は、ほかの項目が減れば通るので、記録に置かず次のきっかけで試す
+                log::warn!("sync write was too large: {limit}");
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        for reply in replies {
+            let Some(write) = batch.iter().find(|write| write.key == reply.key) else {
+                continue;
+            };
+            let name = reply.key.name();
+            match &write.plain {
+                Some(value) => {
+                    result.state.settle(name.clone(), reply.seq, value);
+                    written.settle(name, reply.seq, value);
+                }
+                None => {
+                    result.state.retire(name.clone(), reply.seq);
+                    written.retire(name, reply.seq);
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 impl std::fmt::Display for Error {
@@ -1093,10 +1326,44 @@ impl std::fmt::Display for Error {
         match self {
             Self::SignedOut => write!(f, "signed out"),
             Self::KeyMismatch => write!(f, "key mismatch"),
+            Self::Conflict(_) => write!(f, "sync conflict"),
             Self::Limit(limit) => write!(f, "sync limit: {limit}"),
             Self::Other(detail) => f.write_str(detail),
         }
     }
+}
+
+/// 同期の結果を手元に入れずに捨てるとき・同期が途中で失敗したときの記録。前の記録に、窓口へ書けた項目
+/// （`written`）の `seq` と SHA-256 だけを足す（docs/sync.md「1回の同期」）。読んだだけの項目と `since` は
+/// 足さないので、次の回にもう一度読む。`reset` を受けた回と前の記録が無いときは、`since` が 0 の記録になり、
+/// 次の回も初めての同期として合わせる。
+pub fn merge_written(previous: Option<State>, written: &State, reset: bool, key_id: &str) -> State {
+    let mut state = previous
+        .filter(|state| !reset && state.key_id == key_id)
+        .unwrap_or_else(|| State::new(key_id));
+    for (name, seen) in &written.items {
+        state.retired.remove(name);
+        state.ignored.remove(name);
+        state.items.insert(name.clone(), seen.clone());
+    }
+    for (name, seq) in &written.retired {
+        state.retire(name.clone(), *seq);
+    }
+    state
+}
+
+/// 同期が手元に入れた項目を、このデバイスでは反映できなかった（OS がホットキーを登録できない など）ときに、
+/// 読み捨てた項目として置き直す。記録は同期の前に戻すので、窓口の値が変わったら、もう一度入れてみる。
+pub fn ignore_applied(state: &mut State, before: Option<&State>, key: &ItemKey) {
+    let name = key.name();
+    let Some(seq) = state.items.get(&name).map(|seen| seen.seq) else {
+        return;
+    };
+    match before.and_then(|before| before.items.get(&name)) {
+        Some(seen) => state.items.insert(name.clone(), seen.clone()),
+        None => state.items.remove(&name),
+    };
+    state.ignored.insert(name, seq);
 }
 
 fn auth(token: &str) -> Result<reqwest::header::HeaderValue, Error> {
@@ -1123,67 +1390,45 @@ struct GetReply {
     next: u64,
 }
 
-async fn read_all(
-    client: &reqwest::Client,
-    token: &str,
+/// `since` からの項目を、`more` が false になるまで読む。1ページを取る所（`fetch`。引数は `since` と、
+/// `rebuild=1` を付けるか）を差し替えられるようにして、ページ送りを通信なしで確かめる。
+async fn read_pages<F, R>(
+    mut fetch: F,
     key: &[u8; 32],
-    expected_key_id: &str,
+    key_id: &str,
     mut since: u64,
-) -> Result<(String, bool, u64, Vec<RemoteItem>), Error> {
+) -> Result<ReadResult, Error>
+where
+    F: FnMut(u64, bool) -> R,
+    R: Future<Output = Result<GetReply, Error>>,
+{
+    // `since=0` から始めたときと `reset: true` を受けたときは、組み直しの途中（docs/account-server.md「同期」）
     let mut rebuilding = since == 0;
     let mut reset = false;
-    let mut all = Vec::new();
+    let mut items = Vec::new();
     loop {
-        let mut url = reqwest::Url::parse(&format!("{}/v1/sync", account::ACCOUNT_URL))
-            .map_err(|error| Error::Other(error.to_string()))?;
-        {
-            let mut query = url.query_pairs_mut();
-            query.append_pair("since", &since.to_string());
-            query.append_pair("limit", "500");
-            if rebuilding {
-                query.append_pair("rebuild", "1");
-            }
-        }
-        let request = client
-            .get(url)
-            .header(reqwest::header::AUTHORIZATION, auth(token)?);
-        let response = request
-            .send()
-            .await
-            .map_err(|error| Error::Other(error.to_string()))?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(Error::SignedOut);
-        }
-        if !response.status().is_success() {
-            return Err(Error::Other(format!(
-                "GET /v1/sync: HTTP {}",
-                response.status()
-            )));
-        }
-        let reply: GetReply = response
-            .json()
-            .await
-            .map_err(|error| Error::Other(error.to_string()))?;
-        let key_id = reply.key_id.unwrap_or_default();
-        if !key_id.is_empty() && key_id != expected_key_id {
+        let reply = fetch(since, rebuilding).await?;
+        if reply.key_id.as_deref().is_some_and(|id| id != key_id) {
             return Err(Error::KeyMismatch);
         }
-        reset |= reply.reset;
-        rebuilding |= reply.reset;
+        if reply.reset {
+            // ここからは窓口の写しの先頭から届く。それまでに読んだ分は重なるので捨てる
+            items.clear();
+            reset = true;
+            rebuilding = true;
+        }
         for item in reply.items {
-            let key_item = ItemKey::new(&item.collection, item.id);
-            if kind(&key_item).is_none() {
+            let item_key = ItemKey::new(&item.collection, item.id);
+            if kind(&item_key).is_none() {
                 continue;
             }
-            let plain = if item.deleted {
-                None
-            } else {
-                item.data
-                    .as_deref()
-                    .and_then(|data| decrypt(key, expected_key_id, &key_item, data))
-            };
-            all.push(RemoteItem {
-                key: key_item,
+            let plain = item
+                .data
+                .as_deref()
+                .filter(|_| !item.deleted)
+                .and_then(|data| decrypt(key, key_id, &item_key, data));
+            items.push(RemoteItem {
+                key: item_key,
                 seq: item.seq,
                 deleted: item.deleted,
                 plain,
@@ -1191,18 +1436,50 @@ async fn read_all(
         }
         since = reply.next;
         if !reply.more {
-            return Ok((
-                if key_id.is_empty() {
-                    expected_key_id.to_string()
-                } else {
-                    key_id
-                },
+            return Ok(ReadResult {
                 reset,
-                since,
-                all,
-            ));
+                next: since,
+                items,
+            });
         }
     }
+}
+
+async fn get_page(
+    client: &reqwest::Client,
+    token: &str,
+    since: u64,
+    rebuild: bool,
+) -> Result<GetReply, Error> {
+    let mut url = reqwest::Url::parse(&format!("{}/v1/sync", account::ACCOUNT_URL))
+        .map_err(|error| Error::Other(error.to_string()))?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("since", &since.to_string());
+        query.append_pair("limit", &READ_LIMIT.to_string());
+        if rebuild {
+            query.append_pair("rebuild", "1");
+        }
+    }
+    let response = client
+        .get(url)
+        .header(reqwest::header::AUTHORIZATION, auth(token)?)
+        .send()
+        .await
+        .map_err(|error| Error::Other(error.to_string()))?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(Error::SignedOut);
+    }
+    if !response.status().is_success() {
+        return Err(Error::Other(format!(
+            "GET /v1/sync: HTTP {}",
+            response.status()
+        )));
+    }
+    response
+        .json()
+        .await
+        .map_err(|error| Error::Other(error.to_string()))
 }
 
 #[derive(Deserialize)]
@@ -1215,6 +1492,18 @@ struct PutItem {
 struct PutReply {
     items: Vec<PutItem>,
 }
+#[derive(Deserialize)]
+struct ConflictReply {
+    conflicts: Vec<ConflictReplyItem>,
+}
+#[derive(Deserialize)]
+struct ConflictReplyItem {
+    collection: String,
+    id: String,
+    seq: Option<u64>,
+    deleted: bool,
+    data: Option<String>,
+}
 
 /// 窓口へ書く項目の JSON。通信と分けて、要求の形を確かめられるようにする
 fn put_items(key: &[u8; 32], key_id: &str, writes: &[Write]) -> Result<Vec<Value>, Error> {
@@ -1223,29 +1512,43 @@ fn put_items(key: &[u8; 32], key_id: &str, writes: &[Write]) -> Result<Vec<Value
         if kind(&write.key).is_none() {
             return Err(Error::Other("invalid local sync item".to_string()));
         }
-        let data = if write.deleted {
-            None
-        } else if write.detached {
-            Some(encrypt_detached(key, key_id, &write.key).map_err(Error::Other)?)
-        } else {
-            Some(
-                encrypt(
-                    key,
-                    key_id,
-                    &write.key,
-                    write.plain.as_ref().expect("non-deleted write has a value"),
-                )
-                .map_err(Error::Other)?,
-            )
-        };
         let mut item = json!({ "collection": write.key.collection, "id": write.key.id, "base_seq": write.base_seq, "deleted": write.deleted });
         // 消す項目には data を付けない。窓口は data が文字列か、無いときだけ受け付ける
-        if let Some(data) = data {
-            item["data"] = Value::String(data);
+        if !write.deleted {
+            let plain = write
+                .payload()
+                .ok_or_else(|| Error::Other("a sync write has no value".to_string()))?;
+            item["data"] =
+                Value::String(encrypt(key, key_id, &write.key, &plain).map_err(Error::Other)?);
         }
         items.push(item);
     }
     Ok(items)
+}
+
+/// 409 の `conflicts` を、読んだ項目と同じ検査（知らない項目を除く・復号）に通す。
+fn conflict_items(key: &[u8; 32], key_id: &str, body: Value) -> Result<Vec<ConflictItem>, Error> {
+    let reply: ConflictReply =
+        serde_json::from_value(body).map_err(|error| Error::Other(error.to_string()))?;
+    Ok(reply
+        .conflicts
+        .into_iter()
+        .filter_map(|item| {
+            let item_key = ItemKey::new(&item.collection, item.id);
+            kind(&item_key)?;
+            let plain = item
+                .data
+                .as_deref()
+                .filter(|_| !item.deleted)
+                .and_then(|data| decrypt(key, key_id, &item_key, data));
+            Some(ConflictItem {
+                key: item_key,
+                seq: item.seq,
+                deleted: item.deleted,
+                plain,
+            })
+        })
+        .collect())
 }
 
 async fn put(
@@ -1264,6 +1567,9 @@ async fn put(
         .await
         .map_err(|error| Error::Other(error.to_string()))?;
     let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(Error::SignedOut);
+    }
     let body: Value = response
         .json()
         .await
@@ -1275,7 +1581,7 @@ async fn put(
     }
     match body.get("error").and_then(Value::as_str) {
         Some("key_mismatch") => Err(Error::KeyMismatch),
-        Some("conflict") => Err(Error::Other("conflict".to_string())),
+        Some("conflict") => Err(Error::Conflict(conflict_items(key, key_id, body)?)),
         Some("too_large") => Err(Error::Limit(
             match body.get("limit").and_then(Value::as_str) {
                 Some("item") => "item",
@@ -1300,11 +1606,13 @@ impl SyncTransport for HttpTransport<'_> {
         &'a mut self,
         since: u64,
     ) -> Pin<Box<dyn Future<Output = Result<ReadResult, Error>> + Send + 'a>> {
-        Box::pin(async move {
-            let (_, reset, next, items) =
-                read_all(self.client, self.token, self.key, self.key_id, since).await?;
-            Ok(ReadResult { reset, next, items })
-        })
+        let (client, token) = (self.client, self.token);
+        Box::pin(read_pages(
+            move |since, rebuild| get_page(client, token, since, rebuild),
+            self.key,
+            self.key_id,
+            since,
+        ))
     }
 
     fn write<'a>(
@@ -1335,7 +1643,7 @@ pub async fn sync_once(
     key_id: &str,
     config: &Config,
     state: Option<State>,
-) -> Result<SyncResult, Error> {
+) -> Result<SyncResult, Box<Failure>> {
     let mut transport = HttpTransport {
         client,
         token,
@@ -1354,40 +1662,11 @@ pub async fn sync_once(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn encrypts_with_a_fresh_nonce_and_binds_the_item() {
-        let key = [7; 32];
-        let item = ItemKey::new("settings", "s_theme");
-        let value = json!("dark");
-        let first = encrypt(&key, "key", &item, &value).unwrap();
-        let second = encrypt(&key, "key", &item, &value).unwrap();
-        assert_ne!(first, second);
-        assert_eq!(
-            decrypt(&key, "key", &item, &first).unwrap().value,
-            Some(value)
-        );
-        assert!(decrypt(&key, "other", &item, &first).is_none());
-        assert!(decrypt(&key, "key", &ItemKey::new("settings", "s_language"), &first).is_none());
-        assert!(decrypt(&key, "key", &ItemKey::new("history", "s_theme"), &first).is_none());
-    }
-
-    #[test]
-    fn only_syncs_the_specified_values() {
-        let config = Config::default();
-        let items = config_items(&config);
-        assert!(items.contains_key(&ItemKey::new("settings", "s_theme")));
-        assert!(!items.contains_key(&ItemKey::new("settings", "s_sync_enabled")));
-        assert!(!items.keys().any(|key| key.id.starts_with("a_")));
-        assert!(items.contains_key(&ItemKey::new(
-            "settings",
-            format!("s_hotkey_{}", platform_suffix())
-        )));
-    }
+    use crate::draft_keys::DraftKeys;
 
     #[test]
     fn corrupt_state_is_treated_as_missing() {
-        let path = std::env::temp_dir().join(format!("mawok-sync-state-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("mawok-sync-corrupt-{}", std::process::id()));
         fs::write(&path, b"not json").unwrap();
         assert!(load(&path).is_none());
         let _ = fs::remove_file(path);
@@ -1398,11 +1677,7 @@ mod tests {
             key: ItemKey::new(collection, id),
             seq,
             deleted: false,
-            plain: Some(Plain {
-                v: VERSION,
-                value: Some(value),
-                detached: false,
-            }),
+            plain: Some(Plain::value(value)),
         }
     }
 
@@ -1427,45 +1702,6 @@ mod tests {
     }
 
     #[test]
-    fn applies_a_remote_change_when_local_value_is_unchanged() {
-        let local = Config::default();
-        let result = reconcile(
-            &local,
-            Some(recorded(&local)),
-            &[remote("settings", "s_theme", 2, json!("dark"))],
-            "key",
-            2,
-        );
-        assert_eq!(result.config.theme, Theme::Dark);
-        assert!(result.writes.is_empty());
-    }
-
-    #[test]
-    fn writes_a_local_change_and_stops_on_a_conflict() {
-        let base = Config::default();
-        let mut local = base.clone();
-        local.theme = Theme::Dark;
-        let local_only = reconcile(&local, Some(recorded(&base)), &[], "key", 1);
-        assert!(local_only
-            .writes
-            .iter()
-            .any(|write| write.key == ItemKey::new("settings", "s_theme")));
-        let conflict = reconcile(
-            &local,
-            Some(recorded(&base)),
-            &[remote("settings", "s_theme", 2, json!("light"))],
-            "key",
-            2,
-        );
-        assert_eq!(conflict.config.theme, Theme::Dark);
-        assert!(conflict.state.conflicts.contains("settings\0s_theme"));
-        assert!(!conflict
-            .writes
-            .iter()
-            .any(|write| write.key == ItemKey::new("settings", "s_theme")));
-    }
-
-    #[test]
     fn initial_sync_prefers_remote_settings() {
         let local = Config {
             theme: Theme::Dark,
@@ -1486,71 +1722,10 @@ mod tests {
     }
 
     #[test]
-    fn initial_sync_writes_settings_missing_from_the_server() {
-        let result = reconcile(&Config::default(), None, &[], "key", 0);
-        assert!(result
-            .writes
-            .iter()
-            .any(|write| write.key == ItemKey::new(SETTINGS, "s_language")));
-    }
-
-    #[test]
-    fn removes_and_detaches_rows_without_overwriting_them() {
-        let mut local = Config::default();
-        let id = "a".repeat(32);
-        local.replacements.push(Replacement {
-            id: id.clone(),
-            from: "a".into(),
-            to: "b".into(),
-            enabled: true,
-            sync: true,
-        });
-        let mut deleted = RemoteItem {
-            key: ItemKey::new("settings", row_id('r', &id)),
-            seq: 2,
-            deleted: true,
-            plain: None,
-        };
-        let result = reconcile(&local, Some(recorded(&local)), &[deleted.clone()], "key", 2);
-        assert!(result.config.replacements.is_empty());
-        deleted.deleted = false;
-        deleted.plain = Some(Plain {
-            v: VERSION,
-            value: None,
-            detached: true,
-        });
-        let detached = reconcile(&local, Some(recorded(&local)), &[deleted], "key", 2);
-        assert!(!detached.config.replacements[0].sync);
-        let local_detached = detached.config.clone();
-        let write = reconcile(&local_detached, Some(recorded(&local)), &[], "key", 1);
-        assert!(
-            write
-                .writes
-                .iter()
-                .any(|write| write.detached
-                    && write.key == ItemKey::new("settings", row_id('r', &id)))
-        );
-    }
-
-    #[test]
-    fn ignores_bad_or_unknown_remote_values_without_writing_them_back() {
-        let local = Config::default();
-        let bad = remote("settings", "s_theme", 2, json!("future-theme"));
-        let unknown = remote("future", "value", 3, json!(true));
-        let result = reconcile(&local, Some(recorded(&local)), &[bad, unknown], "key", 3);
-        assert!(result.state.ignored.contains_key("settings\0s_theme"));
-        assert!(!result.state.ignored.contains_key("future\0value"));
-        assert!(!result
-            .writes
-            .iter()
-            .any(|write| write.key == ItemKey::new("settings", "s_theme")));
-    }
-
-    #[test]
     fn encryption_rejects_a_changed_key_id() {
         let key = [1; 32];
         let item = ItemKey::new(SETTINGS, "s_theme");
-        let data = encrypt(&key, "first", &item, &json!("dark")).unwrap();
+        let data = encrypt(&key, "first", &item, &Plain::value(json!("dark"))).unwrap();
         assert!(decrypt(&key, "second", &item, &data).is_none());
     }
 
@@ -1558,7 +1733,7 @@ mod tests {
     fn encryption_rejects_a_changed_collection() {
         let key = [1; 32];
         let item = ItemKey::new(SETTINGS, "s_theme");
-        let data = encrypt(&key, "key", &item, &json!("dark")).unwrap();
+        let data = encrypt(&key, "key", &item, &Plain::value(json!("dark"))).unwrap();
         assert!(decrypt(&key, "key", &ItemKey::new("history", "s_theme"), &data).is_none());
     }
 
@@ -1566,7 +1741,7 @@ mod tests {
     fn encryption_rejects_a_changed_id() {
         let key = [1; 32];
         let item = ItemKey::new(SETTINGS, "s_theme");
-        let data = encrypt(&key, "key", &item, &json!("dark")).unwrap();
+        let data = encrypt(&key, "key", &item, &Plain::value(json!("dark"))).unwrap();
         assert!(decrypt(&key, "key", &ItemKey::new(SETTINGS, "s_language"), &data).is_none());
     }
 
@@ -1575,7 +1750,7 @@ mod tests {
         let key = [1; 32];
         let item = ItemKey::new(SETTINGS, "s_theme");
         let mut data = STANDARD
-            .decode(encrypt(&key, "key", &item, &json!("dark")).unwrap())
+            .decode(encrypt(&key, "key", &item, &Plain::value(json!("dark"))).unwrap())
             .unwrap();
         *data.last_mut().unwrap() ^= 1;
         assert!(decrypt(&key, "key", &item, &STANDARD.encode(data)).is_none());
@@ -1586,7 +1761,7 @@ mod tests {
         let key = [3; 32];
         let item = ItemKey::new(SETTINGS, "s_theme");
         let value = json!("dark");
-        let data = encrypt(&key, "key", &item, &value).unwrap();
+        let data = encrypt(&key, "key", &item, &Plain::value(value.clone())).unwrap();
         assert_eq!(
             decrypt(&key, "key", &item, &data).unwrap().value,
             Some(value)
@@ -1598,8 +1773,8 @@ mod tests {
         let key = [3; 32];
         let item = ItemKey::new(SETTINGS, "s_theme");
         assert_ne!(
-            encrypt(&key, "key", &item, &json!("dark")).unwrap(),
-            encrypt(&key, "key", &item, &json!("dark")).unwrap()
+            encrypt(&key, "key", &item, &Plain::value(json!("dark"))).unwrap(),
+            encrypt(&key, "key", &item, &Plain::value(json!("dark"))).unwrap()
         );
     }
 
@@ -1607,7 +1782,7 @@ mod tests {
     fn detached_plaintext_round_trips() {
         let key = [1; 32];
         let item = ItemKey::new(SETTINGS, format!("r_{}", "a".repeat(32)));
-        let data = encrypt_detached(&key, "key", &item).unwrap();
+        let data = encrypt(&key, "key", &item, &Plain::detached()).unwrap();
         assert!(decrypt(&key, "key", &item, &data).unwrap().detached);
     }
 
@@ -1628,12 +1803,14 @@ mod tests {
             body: "body".into(),
             sync: true,
         });
-        config.actions = Some(vec![Action {
+        let mut actions = actions::default_actions(crate::i18n::Lang::En);
+        actions.push(Action {
             id,
             name: "name".into(),
             command: "command".into(),
             ..Action::default()
-        }]);
+        });
+        config.actions = Some(actions);
         for key in config_items(&config).into_keys() {
             assert_eq!(key.collection, SETTINGS, "{}", key.id);
             assert!(valid_wire_id(&key.id), "{}", key.id);
@@ -1692,7 +1869,7 @@ mod tests {
     fn conversion_omits_default_actions_not_written_to_config() {
         assert!(!config_items(&Config::default())
             .keys()
-            .any(|key| key.id.starts_with("a_")));
+            .any(|key| key.id.starts_with("a_") || key.id == "o_actions"));
     }
 
     #[test]
@@ -1770,29 +1947,6 @@ mod tests {
     }
 
     #[test]
-    fn conflict_stays_stopped_on_the_next_sync() {
-        let base = Config::default();
-        let mut local = base.clone();
-        local.theme = Theme::Dark;
-        let first = reconcile(
-            &local,
-            Some(recorded(&base)),
-            &[remote(SETTINGS, "s_theme", 2, json!("light"))],
-            "key",
-            2,
-        );
-        let next = reconcile(
-            &first.config,
-            Some(first.state),
-            &[remote(SETTINGS, "s_theme", 3, json!("system"))],
-            "key",
-            3,
-        );
-        assert_eq!(next.config.theme, Theme::Dark);
-        assert!(!next.writes.iter().any(|write| write.key.id == "s_theme"));
-    }
-
-    #[test]
     fn a_remote_deletion_removes_an_unchanged_row() {
         let mut config = Config::default();
         let id = "b".repeat(32);
@@ -1834,31 +1988,6 @@ mod tests {
     }
 
     #[test]
-    fn local_sync_false_writes_detached_and_removes_the_record() {
-        let id = "d".repeat(32);
-        let mut base = Config::default();
-        base.replacements.push(Replacement {
-            id: id.clone(),
-            from: "a".into(),
-            to: "b".into(),
-            enabled: true,
-            sync: true,
-        });
-        let mut local = base.clone();
-        local.replacements[0].sync = false;
-        let result = reconcile(&local, Some(recorded(&base)), &[], "key", 1);
-        assert!(result
-            .writes
-            .iter()
-            .any(|write| write.detached && write.key.id == row_id('r', &id)));
-        assert!(!result
-            .state
-            .items
-            .contains_key(&ItemKey::new(SETTINGS, row_id('r', &id)).name()));
-        assert!(!result.config.replacements.is_empty());
-    }
-
-    #[test]
     fn remote_detached_marks_the_local_row_unsynced() {
         let id = "e".repeat(32);
         let mut local = Config::default();
@@ -1876,11 +2005,7 @@ mod tests {
                 key: ItemKey::new(SETTINGS, row_id('r', &id)),
                 seq: 2,
                 deleted: false,
-                plain: Some(Plain {
-                    v: VERSION,
-                    value: None,
-                    detached: true,
-                }),
+                plain: Some(Plain::detached()),
             }],
             "key",
             2,
@@ -1988,18 +2113,18 @@ mod tests {
                 katakana: crate::text::KatakanaWidth::Full,
             },
             exclude_from_clipboard_history: false,
-            hotkey: "Alt+X".into(),
+            hotkey: "Alt+KeyX".into(),
             text_font_family: "Test Sans".into(),
             text_font_size: 20,
             text_color_light: "#112233".into(),
             text_color_dark: "#aabbcc".into(),
             input_guidance: Some("guide".into()),
-            ai_service: crate::ai::AiService::Gemini,
+            ai_service: AiService::Gemini,
             ..Config::default()
         };
-        config
-            .ai_models
-            .insert(crate::ai::AiService::Gemini, "model".into());
+        config.ai_models.insert(AiService::Gemini, "model".into());
+        *config.text_window_keys.get_mut(DraftAction::HistoryOlder) = "Alt+KeyP".into();
+        config.text_window_keys.get_mut(DraftAction::Copy).clear();
         config.replacements.push(Replacement {
             id: id.clone(),
             from: "from".into(),
@@ -2013,7 +2138,8 @@ mod tests {
             body: "body".into(),
             sync: true,
         });
-        config.actions = Some(vec![Action {
+        let mut actions = actions::default_actions(crate::i18n::Lang::En);
+        actions.push(Action {
             id: id.clone(),
             name: "action".into(),
             command: "command".into(),
@@ -2021,7 +2147,8 @@ mod tests {
             encoding: crate::config::ActionEncoding::ShiftJis,
             enabled: false,
             sync: true,
-        }]);
+        });
+        config.actions = Some(actions);
         let items = config_items(&config);
         let mut restored = Config::default();
         for (key, value) in items
@@ -2037,6 +2164,8 @@ mod tests {
             assert!(apply_value(&mut restored, key, value), "{}", key.id);
         }
         assert_eq!(config_items(&restored), items);
+        assert_eq!(restored.text_window_keys, config.text_window_keys);
+        assert_eq!(restored.input_guidance, config.input_guidance);
     }
 
     #[test]
@@ -2107,6 +2236,26 @@ mod tests {
         );
         assert_eq!(result.config.replacements.len(), 1);
         assert_eq!(result.config.replacements[0].id, remote_id);
+    }
+
+    #[test]
+    fn initial_sync_keeps_equal_rows_that_are_both_already_on_the_server() {
+        let first = "a".repeat(32);
+        let second = "b".repeat(32);
+        let local = Config::default();
+        let row = json!({ "from": "a", "to": "b", "enabled": true });
+        let result = reconcile(
+            &local,
+            None,
+            &[
+                remote(SETTINGS, &row_id('r', &first), 1, row.clone()),
+                remote(SETTINGS, &row_id('r', &second), 2, row),
+            ],
+            "key",
+            2,
+        );
+        assert_eq!(result.config.replacements.len(), 2);
+        assert!(!result.writes.iter().any(|write| write.deleted));
     }
 
     #[test]
@@ -2282,11 +2431,314 @@ mod tests {
         assert!(load(&path).is_none());
     }
 
+    #[test]
+    fn a_null_value_survives_the_plaintext() {
+        // 既定の input_guidance は null。値が無い平文として読み捨てると、既定に戻したことが伝わらない
+        let key = [3; 32];
+        let item = setting_item("input_guidance");
+        let data = encrypt(&key, "key", &item, &Plain::value(Value::Null)).unwrap();
+        assert_eq!(
+            decrypt(&key, "key", &item, &data).unwrap().value,
+            Some(Value::Null)
+        );
+    }
+
+    #[test]
+    fn text_window_keys_use_the_config_file_names_and_omit_yielded_keys() {
+        let mut config = Config::default();
+        *config.text_window_keys.get_mut(DraftAction::HistoryOlder) = "Alt+KeyP".into();
+        config
+            .text_window_keys
+            .get_mut(DraftAction::SendTargets)
+            .clear();
+        config.yielded_draft_keys = vec![DraftAction::SendTargets];
+        let value = config_items(&config)[&text_window_keys_item()].clone();
+        assert_eq!(value["history_older"], json!("Alt+KeyP"));
+        assert!(value.get("send_targets").is_none(), "{value}");
+
+        let mut received = Config::default();
+        assert!(apply_value(&mut received, &text_window_keys_item(), &value));
+        assert_eq!(
+            received.text_window_keys.get(DraftAction::HistoryOlder),
+            "Alt+KeyP"
+        );
+        // 書いていない操作は、重なりが無ければ既定のキーを使う
+        assert_eq!(
+            received.text_window_keys.get(DraftAction::SendTargets),
+            DraftKeys::default().get(DraftAction::SendTargets)
+        );
+    }
+
+    #[test]
+    fn keys_that_fail_the_screen_checks_are_ignored_without_a_write() {
+        let local = Config::default();
+        let copy = local.text_window_keys.get(DraftAction::Copy).to_string();
+        let cases = [
+            // ホットキーが、テキストウィンドウのキーと重なる
+            (hotkey_item(), json!(copy)),
+            // 2つの操作に同じキー
+            (
+                text_window_keys_item(),
+                json!({ "snippets": "Alt+KeyP", "actions": "Alt+KeyP" }),
+            ),
+            // ホットキーと同じキー
+            (text_window_keys_item(), json!({ "copy": local.hotkey })),
+            (text_window_keys_item(), json!({ "copy": 1 })),
+        ];
+        for (key, value) in cases {
+            let result = reconcile(
+                &local,
+                Some(recorded(&local)),
+                &[remote(SETTINGS, &key.id, 2, value.clone())],
+                "key",
+                2,
+            );
+            assert_eq!(result.config, local, "{value}");
+            assert_eq!(result.state.ignored.get(&key.name()), Some(&2), "{value}");
+            assert!(result.writes.is_empty(), "{value}");
+        }
+    }
+
+    #[test]
+    fn conflict_stops_the_item_until_it_is_resolved() {
+        let base = Config::default();
+        let mut local = base.clone();
+        local.theme = Theme::Dark;
+        let first = reconcile(
+            &local,
+            Some(recorded(&base)),
+            &[remote(SETTINGS, "s_theme", 2, json!("light"))],
+            "key",
+            2,
+        );
+        assert_eq!(first.config.theme, Theme::Dark);
+        assert!(first.state.conflicts.contains("settings\0s_theme"));
+        assert!(first.writes.is_empty());
+        let next = reconcile(
+            &first.config,
+            Some(first.state),
+            &[remote(SETTINGS, "s_theme", 3, json!("system"))],
+            "key",
+            3,
+        );
+        assert_eq!(next.config.theme, Theme::Dark);
+        assert!(next.writes.is_empty());
+    }
+
+    #[test]
+    fn an_item_at_or_below_the_recorded_seq_is_not_a_new_change() {
+        // 古い暗号文の出し直し。手元を変えていなくても入れない
+        let local = Config::default();
+        let mut state = recorded(&local);
+        state.items.get_mut("settings\0s_theme").unwrap().seq = 5;
+        for seq in [4, 5] {
+            let result = reconcile(
+                &local,
+                Some(state.clone()),
+                &[remote(SETTINGS, "s_theme", seq, json!("dark"))],
+                "key",
+                5,
+            );
+            assert_eq!(result.config.theme, local.theme, "seq {seq}");
+            assert!(result.state.conflicts.is_empty(), "seq {seq}");
+        }
+    }
+
+    fn replacement(id: char, from: &str) -> Replacement {
+        Replacement {
+            id: id.to_string().repeat(32),
+            from: from.into(),
+            to: "to".into(),
+            enabled: true,
+            sync: true,
+        }
+    }
+
+    fn row_key(prefix: char, id: char) -> ItemKey {
+        ItemKey::new(SETTINGS, row_id(prefix, &id.to_string().repeat(32)))
+    }
+
+    fn deleted(key: &ItemKey, seq: u64) -> RemoteItem {
+        RemoteItem {
+            key: key.clone(),
+            seq,
+            deleted: true,
+            plain: None,
+        }
+    }
+
+    fn detached_mark(key: &ItemKey, seq: u64) -> RemoteItem {
+        RemoteItem {
+            key: key.clone(),
+            seq,
+            deleted: false,
+            plain: Some(Plain::detached()),
+        }
+    }
+
+    #[test]
+    fn initial_sync_removes_a_local_row_the_server_recorded_as_deleted() {
+        let local = Config {
+            replacements: vec![replacement('a', "gone"), replacement('b', "kept")],
+            ..Config::default()
+        };
+        let key = row_key('r', 'a');
+        let result = reconcile(&local, None, &[deleted(&key, 4)], "key", 4);
+        assert_eq!(result.config.replacements, [replacement('b', "kept")]);
+        assert_eq!(result.state.retired.get(&key.name()), Some(&4));
+        assert!(!result.writes.iter().any(|write| write.key == key));
+    }
+
+    #[test]
+    fn initial_sync_unsyncs_a_local_row_the_server_marked_as_detached() {
+        let local = Config {
+            replacements: vec![replacement('a', "local only")],
+            ..Config::default()
+        };
+        let key = row_key('r', 'a');
+        let result = reconcile(&local, None, &[detached_mark(&key, 4)], "key", 4);
+        assert_eq!(result.config.replacements.len(), 1);
+        assert!(!result.config.replacements[0].sync);
+        assert!(!result.writes.iter().any(|write| write.key == key));
+    }
+
+    #[test]
+    fn default_actions_gain_a_received_row() {
+        let local = Config::default();
+        let key = row_key('a', 'a');
+        let row = json!({
+            "name": "同期したアクション",
+            "command": "echo synced",
+            "output": "insert",
+            "encoding": "utf-8",
+            "enabled": true,
+        });
+        let result = reconcile(
+            &local,
+            Some(recorded(&local)),
+            &[remote(SETTINGS, &key.id, 2, row)],
+            "key",
+            2,
+        );
+        let defaults = actions::default_actions(crate::i18n::Lang::system());
+        let ids: Vec<_> = result
+            .config
+            .actions
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|action| action.id.clone())
+            .collect();
+        let mut expected: Vec<_> = defaults.iter().map(|action| action.id.clone()).collect();
+        expected.push("a".repeat(32));
+        assert_eq!(ids, expected);
+        // 設定に書き出した既定のアクションは、ここから同期する
+        assert!(result
+            .writes
+            .iter()
+            .any(|write| write.key.id == "o_actions"));
+    }
+
+    #[test]
+    fn default_actions_follow_a_received_order() {
+        let local = Config::default();
+        let mut ids: Vec<_> = actions::default_actions(crate::i18n::Lang::En)
+            .into_iter()
+            .map(|action| action.id)
+            .collect();
+        ids.reverse();
+        let result = reconcile(
+            &local,
+            Some(recorded(&local)),
+            &[remote(SETTINGS, "o_actions", 2, json!(ids))],
+            "key",
+            2,
+        );
+        assert_eq!(
+            result
+                .config
+                .actions
+                .unwrap()
+                .into_iter()
+                .map(|action| action.id)
+                .collect::<Vec<_>>(),
+            ids
+        );
+        assert!(result.state.conflicts.is_empty());
+    }
+
+    #[test]
+    fn ignore_applied_restores_the_record_and_holds_the_item() {
+        let local = Config::default();
+        let before = recorded(&local);
+        let mut result = reconcile(
+            &local,
+            Some(before.clone()),
+            &[remote(SETTINGS, &hotkey_item().id, 6, json!("Alt+KeyP"))],
+            "key",
+            6,
+        );
+        assert_eq!(result.config.hotkey, "Alt+KeyP");
+        // OS が登録できなかったので、手元は元のホットキーのまま
+        ignore_applied(&mut result.state, Some(&before), &hotkey_item());
+        let name = hotkey_item().name();
+        assert_eq!(result.state.items[&name], before.items[&name]);
+        let next = reconcile(&local, Some(result.state.clone()), &[], "key", 6);
+        assert!(
+            next.writes.is_empty(),
+            "the local hotkey is not written back"
+        );
+        // 窓口の値が変わったら、もう一度入れてみる
+        let later = reconcile(
+            &local,
+            Some(result.state),
+            &[remote(SETTINGS, &hotkey_item().id, 7, json!("Alt+KeyO"))],
+            "key",
+            7,
+        );
+        assert_eq!(later.config.hotkey, "Alt+KeyO");
+        assert!(later.state.ignored.is_empty());
+    }
+
+    /// 窓口の代わり。書けた項目には `seq` を順に振り、読み戻せるよう `stored` に置く
+    #[derive(Default)]
     struct FakeTransport {
-        reads: Vec<ReadResult>,
-        write_errors: Vec<Option<Error>>,
+        reads: std::collections::VecDeque<ReadResult>,
+        /// 書く要求ごとに、先頭から1つずつ返す失敗。尽きたら書ける
+        write_errors: std::collections::VecDeque<Error>,
+        /// 何回目（0 から）の書く要求から、通信の失敗にするか
+        fail_from_write: Option<usize>,
+        seq: u64,
         read_since: Vec<u64>,
         writes: Vec<Vec<Write>>,
+        stored: Vec<RemoteItem>,
+    }
+
+    impl FakeTransport {
+        fn reading(reads: impl IntoIterator<Item = ReadResult>) -> Self {
+            Self {
+                reads: reads.into_iter().collect(),
+                ..Self::default()
+            }
+        }
+
+        fn failing(mut self, errors: impl IntoIterator<Item = Error>) -> Self {
+            self.write_errors = errors.into_iter().collect();
+            self
+        }
+
+        fn after_seq(mut self, seq: u64) -> Self {
+            self.seq = seq;
+            self
+        }
+
+        fn written(&self, id: &str) -> Vec<&Write> {
+            self.writes
+                .iter()
+                .flatten()
+                .filter(|write| write.key.id == id)
+                .collect()
+        }
     }
 
     impl SyncTransport for FakeTransport {
@@ -2295,7 +2747,8 @@ mod tests {
             since: u64,
         ) -> Pin<Box<dyn Future<Output = Result<ReadResult, Error>> + Send + 'a>> {
             self.read_since.push(since);
-            Box::pin(std::future::ready(Ok(self.reads.remove(0))))
+            let read = self.reads.pop_front().expect("an unexpected read");
+            Box::pin(std::future::ready(Ok(read)))
         }
 
         fn write<'a>(
@@ -2303,13 +2756,29 @@ mod tests {
             writes: &'a [Write],
         ) -> Pin<Box<dyn Future<Output = Result<Vec<WrittenItem>, Error>> + Send + 'a>> {
             self.writes.push(writes.to_vec());
-            let result = match self.write_errors.remove(0) {
+            let failing = self
+                .fail_from_write
+                .is_some_and(|from| self.writes.len() > from);
+            let error = self
+                .write_errors
+                .pop_front()
+                .or_else(|| failing.then(|| Error::Other("offline".into())));
+            let result = match error {
                 Some(error) => Err(error),
                 None => Ok(writes
                     .iter()
-                    .map(|write| WrittenItem {
-                        key: write.key.clone(),
-                        seq: 2,
+                    .map(|write| {
+                        self.seq += 1;
+                        self.stored.push(RemoteItem {
+                            key: write.key.clone(),
+                            seq: self.seq,
+                            deleted: write.deleted,
+                            plain: write.payload(),
+                        });
+                        WrittenItem {
+                            key: write.key.clone(),
+                            seq: self.seq,
+                        }
                     })
                     .collect()),
             };
@@ -2317,12 +2786,20 @@ mod tests {
         }
     }
 
-    fn empty_read(reset: bool, next: u64) -> ReadResult {
+    fn read(next: u64, items: impl IntoIterator<Item = RemoteItem>) -> ReadResult {
         ReadResult {
-            reset,
+            reset: false,
             next,
-            items: Vec::new(),
+            items: items.into_iter().collect(),
         }
+    }
+
+    fn run(
+        transport: &mut FakeTransport,
+        config: &Config,
+        state: Option<State>,
+    ) -> Result<SyncResult, Box<Failure>> {
+        tauri::async_runtime::block_on(sync_once_with(transport, config, state, "key"))
     }
 
     #[test]
@@ -2334,7 +2811,6 @@ mod tests {
             deleted,
             plain: (!deleted).then(|| json!("dark")),
             detached: false,
-            previous: None,
         };
         let items = put_items(&key, "key", &[write(true), write(false)]).unwrap();
         // 窓口は、消す項目の data が null だと要求ごと断る
@@ -2400,98 +2876,641 @@ mod tests {
     fn receiving_the_value_already_held_is_not_a_change() {
         let config = Config::default();
         let key = ItemKey::new("settings", "s_theme");
-        let mut read = empty_read(false, 5);
-        read.items = vec![remote(
-            "settings",
-            "s_theme",
-            5,
-            config_items(&config)[&key].clone(),
-        )];
-        let mut transport = FakeTransport {
-            reads: vec![read],
-            write_errors: vec![],
-            read_since: Vec::new(),
-            writes: Vec::new(),
-        };
-        let result = tauri::async_runtime::block_on(sync_once_with(
-            &mut transport,
-            &config,
-            Some(recorded(&config)),
-            "key",
-        ))
-        .unwrap();
+        let held = config_items(&config)[&key].clone();
+        let mut transport =
+            FakeTransport::reading([read(5, [remote("settings", "s_theme", 5, held)])]);
+        let result = run(&mut transport, &config, Some(recorded(&config))).unwrap();
         // 変わったと返すと、同じ中身の設定ファイルを書き直して、次の同期を呼んでしまう
         assert!(!result.changed);
         assert!(transport.writes.is_empty());
     }
 
     #[test]
-    fn sync_once_retries_conflicts_at_most_three_times() {
-        let mut transport = FakeTransport {
-            reads: vec![
-                empty_read(false, 1),
-                empty_read(false, 2),
-                empty_read(false, 3),
-            ],
-            write_errors: vec![
-                Some(Error::Other("conflict".to_string())),
-                Some(Error::Other("conflict".to_string())),
-                Some(Error::Other("conflict".to_string())),
-            ],
-            read_since: Vec::new(),
-            writes: Vec::new(),
+    fn rereading_our_own_write_is_not_a_conflict_with_a_newer_local_change() {
+        let dark = Config {
+            theme: Theme::Dark,
+            ..Config::default()
         };
-        let error = tauri::async_runtime::block_on(sync_once_with(
-            &mut transport,
-            &Config::default(),
-            None,
-            "key",
-        ))
-        .unwrap_err();
+        let mut first = FakeTransport::reading([read(0, [])]);
+        let synced = run(&mut first, &dark, None).unwrap();
+        let ours = first
+            .stored
+            .iter()
+            .find(|item| item.key.id == "s_theme")
+            .unwrap()
+            .clone();
+
+        // 書いた直後に手元を変える。次の回は、記録の since から自分の書き込みを読み戻す
+        let light = Config {
+            theme: Theme::Light,
+            ..dark
+        };
+        let mut second =
+            FakeTransport::reading([read(first.seq, [ours.clone()])]).after_seq(first.seq);
+        let result = run(&mut second, &light, Some(synced.state)).unwrap();
+        assert!(result.state.conflicts.is_empty());
+        assert_eq!(result.config.theme, Theme::Light);
+        let writes = second.written("s_theme");
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].base_seq, Some(ours.seq));
+        assert_eq!(writes[0].plain, Some(json!("light")));
+    }
+
+    #[test]
+    fn discarding_a_result_keeps_our_writes_and_reads_the_rest_again() {
+        let base = Config::default();
+        let dark = Config {
+            theme: Theme::Dark,
+            ..base.clone()
+        };
+        let theirs = remote(SETTINGS, "s_language", 5, json!("en"));
+        let mut first = FakeTransport::reading([read(5, [theirs.clone()])]).after_seq(5);
+        let before = recorded(&base);
+        let discarded = run(&mut first, &dark, Some(before.clone())).unwrap();
+        assert_eq!(discarded.config.language, Language::En);
+        let [ours] = &first.stored[..] else {
+            panic!("only the local change is written: {:?}", first.stored);
+        };
+        let ours = ours.clone();
+        assert_eq!(ours.key.id, "s_theme");
+
+        // 通信の間に手元を変えたので、読んだ値は入れていない
+        let record = merge_written(Some(before.clone()), &discarded.written, false, "key");
+        assert_eq!(record.since, before.since);
+        let light = Config {
+            theme: Theme::Light,
+            ..base
+        };
+        let mut second = FakeTransport::reading([read(6, [theirs, ours.clone()])]).after_seq(6);
+        let result = run(&mut second, &light, Some(record)).unwrap();
+        assert_eq!(second.read_since, [before.since]);
+        assert!(result.state.conflicts.is_empty());
+        assert_eq!(
+            result.config.language,
+            Language::En,
+            "their change arrives again"
+        );
+        assert_eq!(result.config.theme, Theme::Light);
+        assert_eq!(second.written("s_theme")[0].base_seq, Some(ours.seq));
+        assert!(second.written("s_language").is_empty());
+    }
+
+    #[test]
+    fn discarding_the_first_sync_does_not_roll_back_a_newer_local_value() {
+        let dark = Config {
+            theme: Theme::Dark,
+            ..Config::default()
+        };
+        let mut first = FakeTransport::reading([read(0, [])]);
+        let discarded = run(&mut first, &dark, None).unwrap();
+        let record = merge_written(None, &discarded.written, false, "key");
+
+        // 次の回も初めての同期。窓口の写しには、自分が書いた古い値と、ほかのデバイスの値がある
+        let light = Config {
+            theme: Theme::Light,
+            ..dark
+        };
+        let mut copy = first.stored.clone();
+        copy.retain(|item| item.key.id != "s_language");
+        copy.push(remote(SETTINGS, "s_language", first.seq + 1, json!("en")));
+        let mut second =
+            FakeTransport::reading([read(first.seq + 1, copy)]).after_seq(first.seq + 1);
+        let result = run(&mut second, &light, Some(record)).unwrap();
+        assert_eq!(second.read_since, [0]);
+        assert_eq!(result.config.theme, Theme::Light);
+        assert_eq!(second.written("s_theme")[0].plain, Some(json!("light")));
+        assert_eq!(result.config.language, Language::En, "the server wins");
+        assert!(result.state.conflicts.is_empty());
+    }
+
+    #[test]
+    fn a_reset_or_another_key_discards_the_previous_record_when_merging() {
+        let config = Config::default();
+        let before = recorded(&config);
+        let mut transport = FakeTransport::reading([ReadResult {
+            reset: true,
+            ..read(9, [])
+        }])
+        .after_seq(9);
+        let result = run(&mut transport, &config, Some(before.clone())).unwrap();
+        let merged = merge_written(Some(before.clone()), &result.written, true, "key");
+        assert_eq!(merged.since, 0);
+        assert!(merged.items.values().all(|seen| seen.seq > 9));
+
+        let other = merge_written(Some(before), &result.written, false, "other");
+        assert_eq!(other.key_id, "other");
+        assert_eq!(other.since, 0);
+    }
+
+    #[test]
+    fn unsyncing_a_row_writes_the_mark_and_syncing_it_again_builds_on_the_mark() {
+        let base = Config {
+            replacements: vec![replacement('d', "row")],
+            ..Config::default()
+        };
+        let key = row_key('r', 'd');
+        let mut unsynced = base.clone();
+        unsynced.replacements[0].sync = false;
+        let mut first = FakeTransport::reading([read(1, [])]).after_seq(1);
+        let result = run(&mut first, &unsynced, Some(recorded(&base))).unwrap();
+        let mark = first.written(&key.id)[0].clone();
+        assert!(mark.detached && !mark.deleted);
+        assert_eq!(mark.base_seq, Some(1));
+        assert!(!result.state.items.contains_key(&key.name()));
+        assert_eq!(result.config.replacements, unsynced.replacements);
+        let mark_seq = first
+            .stored
+            .iter()
+            .find(|item| item.key == key)
+            .unwrap()
+            .seq;
+
+        let mut second = FakeTransport::reading([read(mark_seq, [])]).after_seq(mark_seq);
+        run(&mut second, &base, Some(result.state)).unwrap();
+        let write = second.written(&key.id)[0];
+        assert_eq!(write.base_seq, Some(mark_seq));
+        assert_eq!(write.plain, Some(row_value(&base.replacements[0])));
+    }
+
+    #[test]
+    fn a_conflict_reply_aligns_the_record_before_writing_again() {
+        let base = Config::default();
+        let local = Config {
+            theme: Theme::Dark,
+            trim_trailing_whitespace: !base.trim_trailing_whitespace,
+            text_history_size: 7,
+            ..base.clone()
+        };
+        let conflicts = vec![
+            // 窓口には、同じ値がもう入っている
+            ConflictItem {
+                key: setting_item("theme"),
+                seq: Some(4),
+                deleted: false,
+                plain: Some(Plain::value(json!("dark"))),
+            },
+            // 窓口に項目が無い
+            ConflictItem {
+                key: setting_item("text_history_size"),
+                seq: None,
+                deleted: true,
+                plain: None,
+            },
+        ];
+        let mut transport = FakeTransport::reading([read(1, [])])
+            .failing([Error::Conflict(conflicts)])
+            .after_seq(4);
+        let result = run(&mut transport, &local, Some(recorded(&base))).unwrap();
+        assert_eq!(
+            transport.read_since.len(),
+            1,
+            "the conflicts stand in for a read"
+        );
+        let second = &transport.writes[1];
+        assert!(!second.iter().any(|write| write.key.id == "s_theme"));
+        let base_seq = |id: &str| {
+            second
+                .iter()
+                .find(|write| write.key.id == id)
+                .unwrap_or_else(|| panic!("{id} is written again"))
+                .base_seq
+        };
+        assert_eq!(base_seq("s_text_history_size"), None);
+        assert_eq!(base_seq("s_trim_trailing_whitespace"), Some(1));
+        assert_eq!(result.state.items["settings\0s_theme"].seq, 4);
+        assert!(result.state.conflicts.is_empty());
+        assert!(!result.changed);
+    }
+
+    #[test]
+    fn a_conflict_during_the_first_sync_takes_the_server_value() {
+        let local = Config {
+            theme: Theme::Dark,
+            ..Config::default()
+        };
+        let conflict = ConflictItem {
+            key: setting_item("theme"),
+            seq: Some(3),
+            deleted: false,
+            plain: Some(Plain::value(json!("light"))),
+        };
+        let mut transport = FakeTransport::reading([read(0, [])])
+            .failing([Error::Conflict(vec![conflict])])
+            .after_seq(3);
+        let result = run(&mut transport, &local, None).unwrap();
+        assert_eq!(result.config.theme, Theme::Light);
+        assert!(result.changed);
+        assert!(result.state.conflicts.is_empty());
+        assert!(!transport.writes[1]
+            .iter()
+            .any(|write| write.key.id == "s_theme"));
+    }
+
+    #[test]
+    fn conflicts_are_retried_three_times_and_then_left_for_the_next_sync() {
+        let conflict = || Error::Conflict(Vec::new());
+        let mut transport = FakeTransport::reading([read(0, [])]).failing([
+            conflict(),
+            conflict(),
+            conflict(),
+            conflict(),
+        ]);
+        let error = run(&mut transport, &Config::default(), None)
+            .unwrap_err()
+            .error;
         assert!(
             matches!(error, Error::Other(message) if message == "sync conflicts did not settle")
         );
-        assert_eq!(transport.read_since, vec![0, 0, 0]);
+        assert_eq!(transport.writes.len(), 1 + MAX_CONFLICT_RETRIES);
+
+        // 空の conflicts は、同じ要求の送り直し
+        let mut transport =
+            FakeTransport::reading([read(0, [])]).failing([conflict(), conflict(), conflict()]);
+        run(&mut transport, &Config::default(), None).unwrap();
+        assert_eq!(transport.writes[3].len(), transport.writes[0].len());
     }
 
     #[test]
-    fn sync_once_reset_discards_the_old_record_and_rebuilds() {
-        let state = recorded(&Config::default());
-        let mut transport = FakeTransport {
-            reads: vec![empty_read(true, 9)],
-            write_errors: vec![None],
-            read_since: Vec::new(),
-            writes: Vec::new(),
+    fn a_reset_discards_the_old_record_and_rebuilds_from_the_copy() {
+        let config = Config {
+            replacements: vec![replacement('a', "row")],
+            ..Config::default()
         };
-        let result = tauri::async_runtime::block_on(sync_once_with(
-            &mut transport,
-            &Config::default(),
-            Some(state),
-            "key",
-        ))
-        .unwrap();
+        let mut old = recorded(&config);
+        old.conflicts.insert("settings\0s_theme".into());
+        old.ignored.insert("settings\0s_language".into(), 1);
+        old.retired.insert(row_key('r', 'b').name(), 1);
+        let copy = remote(SETTINGS, "s_theme", 8, json!("dark"));
+        let mut transport = FakeTransport::reading([ReadResult {
+            reset: true,
+            ..read(9, [copy])
+        }])
+        .after_seq(9);
+        let result = run(&mut transport, &config, Some(old)).unwrap();
         assert!(result.reset);
-        assert_eq!(transport.read_since, vec![1]);
-        assert!(transport.writes[0]
-            .iter()
-            .any(|write| write.base_seq.is_none()));
+        assert_eq!(transport.read_since, [1]);
+        assert_eq!(
+            result.config.theme,
+            Theme::Dark,
+            "the copy wins as in a first sync"
+        );
+        assert_eq!(result.state.since, 9);
+        assert!(result.state.conflicts.is_empty());
+        assert!(result.state.ignored.is_empty());
+        assert!(result.state.retired.is_empty());
+        assert_eq!(result.state.items["settings\0s_theme"].seq, 8);
+        // 写しに無い手元の項目は、初めての項目として書く
+        let row = transport.written(&row_key('r', 'a').id)[0];
+        assert_eq!(row.base_seq, None);
+        assert!(result.state.items[&row_key('r', 'a').name()].seq > 9);
     }
 
     #[test]
-    fn sync_once_returns_key_mismatch() {
-        let mut transport = FakeTransport {
-            reads: vec![empty_read(false, 1)],
-            write_errors: vec![Some(Error::KeyMismatch)],
-            read_since: Vec::new(),
-            writes: Vec::new(),
-        };
-        let error = tauri::async_runtime::block_on(sync_once_with(
-            &mut transport,
-            &Config::default(),
-            None,
-            "key",
-        ))
-        .unwrap_err();
+    fn key_mismatch_is_returned_to_the_caller() {
+        let mut transport = FakeTransport::reading([read(1, [])]).failing([Error::KeyMismatch]);
+        let error = run(&mut transport, &Config::default(), None)
+            .unwrap_err()
+            .error;
         assert!(matches!(error, Error::KeyMismatch));
+    }
+
+    fn snippet(id: char, body: String) -> Snippet {
+        Snippet {
+            id: id.to_string().repeat(32),
+            name: "name".into(),
+            body,
+            sync: true,
+        }
+    }
+
+    #[test]
+    fn only_the_item_over_the_size_limit_is_left_unwritten() {
+        let config = Config {
+            snippets: vec![
+                snippet('a', "x".repeat(MAX_ENCRYPTED_ITEM_BYTES)),
+                snippet('b', "small".into()),
+            ],
+            ..Config::default()
+        };
+        let large = row_key('n', 'a');
+        let mut first = FakeTransport::reading([read(1, [])]).after_seq(1);
+        let result = run(&mut first, &config, Some(recorded(&Config::default()))).unwrap();
+        assert!(first.written(&large.id).is_empty());
+        assert_eq!(first.written(&row_key('n', 'b').id).len(), 1);
+        assert_eq!(first.written("o_snippets").len(), 1);
+        assert!(result.state.too_large.contains_key(&large.name()));
+
+        // 値が同じ間は試さない
+        let mut again = FakeTransport::reading([read(first.seq, [])]).after_seq(first.seq);
+        let unchanged = run(&mut again, &config, Some(result.state)).unwrap();
+        assert!(again.writes.is_empty());
+
+        let mut shortened = config.clone();
+        shortened.snippets[0].body = "short".into();
+        let mut third = FakeTransport::reading([read(first.seq, [])]).after_seq(first.seq);
+        let result = run(&mut third, &shortened, Some(unchanged.state)).unwrap();
+        assert_eq!(third.written(&large.id)[0].base_seq, None);
+        assert!(result.state.too_large.is_empty());
+    }
+
+    #[test]
+    fn an_item_just_under_the_size_limit_is_written() {
+        let fits = |body_len: usize| {
+            let row = snippet('a', "x".repeat(body_len));
+            encrypted_len(&Plain::value(row_value(&row))) <= MAX_ENCRYPTED_ITEM_BYTES
+        };
+        let overhead = encrypted_len(&Plain::value(row_value(&snippet('a', String::new()))));
+        assert!(fits(MAX_ENCRYPTED_ITEM_BYTES - overhead));
+        assert!(!fits(MAX_ENCRYPTED_ITEM_BYTES - overhead + 1));
+        // 測った大きさは、窓口が測る base64 を解いた暗号文の大きさと同じ
+        let key = row_key('n', 'a');
+        let plain = Plain::value(json!("x"));
+        let data = encrypt(&[1; 32], "key", &key, &plain).unwrap();
+        assert_eq!(STANDARD.decode(data).unwrap().len(), encrypted_len(&plain));
+    }
+
+    #[test]
+    fn a_write_refused_for_the_total_size_is_tried_again_next_time() {
+        let base = Config {
+            replacements: vec![replacement('a', "row")],
+            ..Config::default()
+        };
+        let local = Config {
+            theme: Theme::Dark,
+            ..Config::default()
+        };
+        let mut first = FakeTransport::reading([read(1, [])]).failing([Error::Limit("total")]);
+        let result = run(&mut first, &local, Some(recorded(&base))).unwrap();
+        assert!(result.state.too_large.is_empty());
+        let mut second = FakeTransport::reading([read(1, [])]).after_seq(1);
+        run(&mut second, &local, Some(result.state)).unwrap();
+        assert_eq!(second.written("s_theme").len(), 1);
+        // 書けなかった「消す」も、消えたことにせずにもう一度書く
+        assert!(second.written(&row_key('r', 'a').id)[0].deleted);
+    }
+
+    fn page(reset: bool, more: bool, next: u64, items: &[(&ItemKey, u64)]) -> GetReply {
+        GetReply {
+            key_id: Some("key".into()),
+            reset,
+            more,
+            next,
+            items: items
+                .iter()
+                .map(|(key, seq)| GetItem {
+                    collection: key.collection.clone(),
+                    id: key.id.clone(),
+                    seq: *seq,
+                    deleted: false,
+                    data: Some(encrypt(&[5; 32], "key", key, &Plain::value(json!(seq))).unwrap()),
+                })
+                .collect(),
+        }
+    }
+
+    fn read_fake_pages(
+        since: u64,
+        pages: Vec<GetReply>,
+    ) -> (Result<ReadResult, Error>, Vec<(u64, bool)>) {
+        let mut pages = std::collections::VecDeque::from(pages);
+        let mut calls = Vec::new();
+        let result = tauri::async_runtime::block_on(read_pages(
+            |since, rebuild| {
+                calls.push((since, rebuild));
+                std::future::ready(Ok(pages.pop_front().expect("an unexpected page")))
+            },
+            &[5; 32],
+            "key",
+            since,
+        ));
+        (result, calls)
+    }
+
+    #[test]
+    fn every_page_reaches_the_rules_and_the_last_next_is_the_new_since() {
+        let (theme, language) = (setting_item("theme"), setting_item("language"));
+        let (result, calls) = read_fake_pages(
+            3,
+            vec![
+                page(false, true, 4, &[(&theme, 4)]),
+                page(false, false, 9, &[(&language, 6)]),
+            ],
+        );
+        let result = result.unwrap();
+        assert_eq!(calls, [(3, false), (4, false)]);
+        assert!(!result.reset);
+        assert_eq!(result.next, 9);
+        let read: Vec<_> = result
+            .items
+            .iter()
+            .map(|item| (item.key.id.as_str(), item.seq, item.plain.is_some()))
+            .collect();
+        assert_eq!(read, [("s_theme", 4, true), ("s_language", 6, true)]);
+    }
+
+    #[test]
+    fn a_rebuild_keeps_asking_for_the_copy_on_later_pages() {
+        let theme = setting_item("theme");
+        // since=0 から始めたとき
+        let (_, calls) = read_fake_pages(
+            0,
+            vec![
+                page(false, true, 2, &[(&theme, 2)]),
+                page(false, false, 5, &[]),
+            ],
+        );
+        assert_eq!(calls, [(0, true), (2, true)]);
+        // reset: true を受けたとき
+        let (result, calls) = read_fake_pages(
+            7,
+            vec![
+                page(true, true, 2, &[(&theme, 2)]),
+                page(false, false, 5, &[]),
+            ],
+        );
+        assert_eq!(calls, [(7, false), (2, true)]);
+        let result = result.unwrap();
+        assert!(result.reset);
+        assert_eq!(result.items.len(), 1);
+    }
+
+    #[test]
+    fn a_page_for_another_key_stops_the_read() {
+        let mut other = page(false, false, 1, &[]);
+        other.key_id = Some("other".into());
+        let (result, _) = read_fake_pages(1, vec![other]);
+        assert!(matches!(result, Err(Error::KeyMismatch)));
+    }
+
+    #[test]
+    fn a_conflict_reply_is_read_like_fetched_items() {
+        let key = [5; 32];
+        let theme = setting_item("theme");
+        let body = json!({
+            "error": "conflict",
+            "conflicts": [
+                { "collection": "settings", "id": "s_theme", "seq": 4, "deleted": false,
+                  "data": encrypt(&key, "key", &theme, &Plain::value(json!("dark"))).unwrap() },
+                { "collection": "settings", "id": "s_language", "seq": null, "deleted": true, "data": null },
+                { "collection": "history", "id": "h1", "seq": 2, "deleted": false, "data": "AAAA" },
+            ],
+        });
+        let items = conflict_items(&key, "key", body).unwrap();
+        assert_eq!(items.len(), 2, "items this app does not know are dropped");
+        assert_eq!(items[0].seq, Some(4));
+        assert_eq!(items[0].plain.as_ref().unwrap().value, Some(json!("dark")));
+        assert_eq!(items[1].seq, None);
+    }
+
+    #[test]
+    fn an_unsynced_local_row_is_left_alone_when_its_item_arrives() {
+        let mut mine = replacement('a', "mine");
+        mine.sync = false;
+        let local = Config {
+            replacements: vec![replacement('b', "first"), mine.clone()],
+            ..Config::default()
+        };
+        let key = row_key('r', 'a');
+        let theirs = row_value(&replacement('a', "theirs"));
+        let arrivals = [
+            remote(SETTINGS, &key.id, 6, theirs),
+            deleted(&key, 6),
+            detached_mark(&key, 6),
+        ];
+        let mut synced_only = local.clone();
+        synced_only.replacements.pop();
+        for (first_sync, state) in [(false, Some(recorded(&synced_only))), (true, None)] {
+            for arrival in &arrivals {
+                let result = reconcile(
+                    &local,
+                    state.clone(),
+                    std::slice::from_ref(arrival),
+                    "key",
+                    6,
+                );
+                let case = format!("first sync: {first_sync}, deleted: {}", arrival.deleted);
+                assert_eq!(result.config.replacements[1], mine, "{case}");
+                assert!(result.state.conflicts.is_empty(), "{case}");
+                assert!(
+                    !result.writes.iter().any(|write| write.key == key),
+                    "{case}"
+                );
+
+                // 印を付け直したら、届いた項目の seq の上に手元の値を書く
+                let mut again = result.config.clone();
+                again.replacements[1].sync = true;
+                let next = reconcile(&again, Some(result.state), &[], "key", 6);
+                let write = next.writes.iter().find(|write| write.key == key).unwrap();
+                assert_eq!(write.base_seq, Some(6), "{case}");
+                assert_eq!(write.plain, Some(row_value(&mine)), "{case}");
+                assert!(next.state.conflicts.is_empty(), "{case}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_row_unsynced_before_its_mark_is_written_still_tells_the_other_devices() {
+        let base = Config {
+            replacements: vec![replacement('a', "mine")],
+            ..Config::default()
+        };
+        let mut local = base.clone();
+        local.replacements[0].sync = false;
+        let key = row_key('r', 'a');
+        let theirs = remote(SETTINGS, &key.id, 6, row_value(&replacement('a', "theirs")));
+        for arrival in [theirs.clone(), deleted(&key, 6)] {
+            let case = format!("deleted: {}", arrival.deleted);
+            let result = reconcile(&local, Some(recorded(&base)), &[arrival], "key", 6);
+            assert_eq!(result.config.replacements, local.replacements, "{case}");
+            assert!(result.state.conflicts.is_empty(), "{case}");
+            let write = result.writes.iter().find(|write| write.key == key).unwrap();
+            assert!(write.detached && !write.deleted, "{case}");
+            assert_eq!(write.base_seq, Some(6), "{case}");
+        }
+        // 相手も外していたら、書かずに既読にする
+        let result = reconcile(
+            &local,
+            Some(recorded(&base)),
+            &[detached_mark(&key, 6)],
+            "key",
+            6,
+        );
+        assert!(!result.writes.iter().any(|write| write.key == key));
+
+        // 印を書き終えた後に届いた値には、書かない
+        let mut first = FakeTransport::reading([read(1, [])]).after_seq(1);
+        let marked = run(&mut first, &local, Some(recorded(&base))).unwrap();
+        assert!(first.written(&key.id)[0].detached);
+        let later = RemoteItem {
+            seq: first.seq + 1,
+            ..theirs
+        };
+        let mut second =
+            FakeTransport::reading([read(first.seq + 1, [later])]).after_seq(first.seq + 1);
+        let result = run(&mut second, &local, Some(marked.state)).unwrap();
+        assert!(second.written(&key.id).is_empty());
+        assert_eq!(result.config.replacements, local.replacements);
+    }
+
+    #[test]
+    fn an_order_naming_an_unsynced_row_keeps_it_after_its_predecessor() {
+        let mut mine = replacement('b', "mine");
+        mine.sync = false;
+        let local = Config {
+            replacements: vec![replacement('a', "a"), mine, replacement('c', "c")],
+            ..Config::default()
+        };
+        let order = json!(["b".repeat(32), "c".repeat(32), "a".repeat(32)]);
+        let result = reconcile(
+            &local,
+            Some(recorded(&local)),
+            &[remote(SETTINGS, "o_replacements", 5, order)],
+            "key",
+            5,
+        );
+        let rows: Vec<_> = result
+            .config
+            .replacements
+            .iter()
+            .map(|row| (row.from.as_str(), row.sync))
+            .collect();
+        assert_eq!(rows, [("c", true), ("a", true), ("mine", false)]);
+    }
+
+    #[test]
+    fn a_batch_written_before_a_failure_stays_in_the_record() {
+        let base = Config::default();
+        let mut local = base.clone();
+        for index in 0..WRITE_BATCH_SIZE {
+            local.snippets.push(Snippet {
+                id: format!("{index:032x}"),
+                name: "name".into(),
+                body: "body".into(),
+                sync: true,
+            });
+        }
+        let before = recorded(&base);
+        let mut first = FakeTransport::reading([read(1, [])]).after_seq(1);
+        // 1回目のまとまりは書け、2回目のまとまりが落ちる
+        first.fail_from_write = Some(1);
+        let failure = run(&mut first, &local, Some(before.clone())).unwrap_err();
+        assert_eq!(first.writes.len(), 2);
+        assert_eq!(failure.written.items.len(), WRITE_BATCH_SIZE);
+
+        let record = merge_written(Some(before), &failure.written, failure.reset, "key");
+        let ours = first.stored[0].clone();
+        let Some(Kind::Snippet(id)) = kind(&ours.key) else {
+            panic!("the first batch holds snippets: {}", ours.key.id);
+        };
+        // 書けた行を、次の回までに手元で直す。自分の書き込みを読み戻しても、食い違いにならない
+        let mut edited = local.clone();
+        let row = edited.snippets.iter_mut().find(|row| row.id == id).unwrap();
+        row.body = "edited".into();
+        let mut second =
+            FakeTransport::reading([read(first.seq, first.stored.clone())]).after_seq(first.seq);
+        let result = run(&mut second, &edited, Some(record)).unwrap();
+        assert!(result.state.conflicts.is_empty());
+        assert_eq!(second.written(&ours.key.id)[0].base_seq, Some(ours.seq));
+        assert_eq!(result.config, edited);
     }
 }

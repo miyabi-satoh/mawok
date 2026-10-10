@@ -62,7 +62,13 @@
 		type DraftAction
 	} from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
-	import { settings, type CharWidths, type Replacement, type Snippet } from '$lib/settings.svelte';
+	import {
+		settings,
+		type CharWidths,
+		type Replacement,
+		type SettingsView,
+		type Snippet
+	} from '$lib/settings.svelte';
 
 	/** サイドバーの分類。選んだ分類は覚えず、開くたびに先頭の「一般」から始める */
 	const categories = settingsCategories();
@@ -434,6 +440,31 @@
 	function showDefaultTextColor(theme: TextColorTheme) {
 		if (textColorInputs[theme].trim() === '') textColorInputs[theme] = DEFAULT_TEXT_COLORS[theme];
 	}
+
+	// 同期が設定を変えたら、画面側で持っている一覧と欄を、届いた設定から写し直す。
+	// 写し直さないと、次に画面で直したときに、届く前の並びや値で保存して、届いた分を消してしまう。
+	// Rust 側は、通信の間に画面からの保存が無かったときだけ知らせるので、打った内容は届いた設定に入っている
+	$effect(() => {
+		const unlisten = listen<SettingsView>(EVENTS.SYNC_APPLIED, ({ payload: view }) => {
+			replacements.recopy(view.replacements, true);
+			snippets.recopy(view.snippets, true);
+			actionsEditor.recopy(view);
+			fontFamily = view.textFontFamily;
+			fontSize = view.textFontSize;
+			// 保存の前の、打っている途中の値（離れるまで保存しない件数、読めない色）は消さない
+			if (historySizeInput === historySize) historySizeInput = view.textHistorySize;
+			historySize = view.textHistorySize;
+			guidance = view.inputGuidance;
+			for (const theme of ['light', 'dark'] as const) {
+				const color = theme === 'light' ? view.textColorLight : view.textColorDark;
+				textColors[theme] = color;
+				if (!textColorErrors[theme]) textColorInputs[theme] = color || DEFAULT_TEXT_COLORS[theme];
+			}
+		});
+		return () => {
+			unlisten.then((fn) => fn());
+		};
+	});
 
 	function addReplacement() {
 		// 置き換える前の文字列が空の行は何もしないので、書きかけのまま保存してよい

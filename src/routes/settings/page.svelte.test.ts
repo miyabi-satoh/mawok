@@ -436,6 +436,26 @@ describe('設定画面の定型文', () => {
 		expect(lastSavedSnippets()).toEqual([confirm, added]);
 	});
 
+	it('同期の知らせで届いた定型文が一覧に出て、その後の編集の保存に含まれる', async () => {
+		settings.current = { ...view(), snippets: snippetRows([confirm]) };
+		// 前のテストで描いた画面の受け口を呼ばないよう、この画面の分だけにする
+		vi.mocked(listen).mockClear();
+		const screen = await renderAt(m.settings_category_snippets);
+
+		const received = { name: '同期した行', body: '同期した本文' };
+		const synced = { ...view(), snippets: snippetRows([received, confirm]) };
+		for (const [name, handler] of vi.mocked(listen).mock.calls) {
+			if (name === EVENTS.SYNC_APPLIED) handler({ event: name, id: 0, payload: synced });
+		}
+		await openRows(screen);
+		await expect
+			.element(screen.getByLabelText(m.settings_snippets_name()).nth(0))
+			.toHaveValue(received.name);
+
+		await screen.getByLabelText(m.settings_snippets_body()).nth(1).fill('直した本文');
+		expect(lastSavedSnippets()).toEqual([received, { ...confirm, body: '直した本文' }]);
+	});
+
 	it('削除すると、その1件を除いて保存する', async () => {
 		settings.current = {
 			...view(),
@@ -661,6 +681,23 @@ describe('設定画面の下書きのフォント', () => {
 
 		await vi.waitFor(() =>
 			expect(invoked).toHaveBeenCalledWith('set_draft_font', { family: 'Menlo', size: 22 })
+		);
+	});
+
+	it('同期の知らせで届いたフォント名を、その後の大きさの保存に使う', async () => {
+		settings.current = view([], 'keep', { family: 'Menlo', size: 16 });
+		vi.mocked(listen).mockClear();
+		const screen = await renderAt(m.settings_category_draft);
+
+		const synced = view([], 'keep', { family: 'HackGen', size: 16 });
+		for (const [name, handler] of vi.mocked(listen).mock.calls) {
+			if (name === EVENTS.SYNC_APPLIED) handler({ event: name, id: 0, payload: synced });
+		}
+		await expect.element(screen.getByLabelText(m.settings_draft_font())).toHaveValue('HackGen');
+		await screen.getByLabelText(m.settings_draft_font_size()).fill('22');
+
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('set_draft_font', { family: 'HackGen', size: 22 })
 		);
 	});
 
