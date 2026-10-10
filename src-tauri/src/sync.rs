@@ -616,16 +616,34 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
 /// アクションの行。既定のアクションのままのデバイスでは、同期しない既定のアクションだけを設定に書き出す
 /// （docs/sync.md「同期する単位」）。同期する行は、届いたものだけにする。
 fn synced_actions(config: &mut Config) -> &mut Vec<Action> {
-    config.actions.get_or_insert_with(|| {
-        let lang = match config.language {
-            Language::Ja => crate::i18n::Lang::Ja,
-            Language::En => crate::i18n::Lang::En,
-            Language::System => crate::i18n::Lang::system(),
-        };
-        let mut defaults = actions::default_actions(lang);
-        defaults.retain(|action| !action.sync);
-        defaults
-    })
+    let language = config.language;
+    config
+        .actions
+        .get_or_insert_with(|| unsynced_defaults(language, None))
+}
+
+/// 設定に書き出す既定のアクション。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
+fn unsynced_defaults(language: Language, detached: Option<&str>) -> Vec<Action> {
+    let lang = match language {
+        Language::Ja => crate::i18n::Lang::Ja,
+        Language::En => crate::i18n::Lang::En,
+        Language::System => crate::i18n::Lang::system(),
+    };
+    let mut defaults = actions::default_actions(lang);
+    for action in &mut defaults {
+        if detached == Some(action.id.as_str()) {
+            action.sync = false;
+        }
+    }
+    defaults.retain(|action| !action.sync);
+    defaults
+}
+
+/// 既定で同期する既定のアクションか。
+fn synced_default_action(id: &str) -> bool {
+    actions::default_actions(crate::i18n::Lang::En)
+        .iter()
+        .any(|action| action.id == id && action.sync)
 }
 
 fn apply_action_row(config: &mut Config, id: &str, value: &Value) -> bool {
@@ -835,10 +853,16 @@ fn detach_local(config: &mut Config, item: &ItemKey) -> bool {
     match kind(item) {
         Some(Kind::Replacement(id)) => detach_row(&mut config.replacements, id),
         Some(Kind::Snippet(id)) => detach_row(&mut config.snippets, id),
-        Some(Kind::Action(id)) => config
-            .actions
-            .as_mut()
-            .is_some_and(|rows| detach_row(rows, id)),
+        Some(Kind::Action(id)) => match &mut config.actions {
+            Some(rows) => detach_row(rows, id),
+            // 既定のアクションのままのデバイスでは、外された既定のアクションを同期しない行として書き出す。
+            // 書き出さないと、並びが届いたときに、誰も消していないのに手元から消える
+            None if synced_default_action(id) => {
+                config.actions = Some(unsynced_defaults(config.language, Some(id)));
+                true
+            }
+            None => false,
+        },
         _ => false,
     }
 }
@@ -872,6 +896,25 @@ fn detached(config: &Config, item: &ItemKey) -> bool {
         },
         _ => false,
     }
+}
+
+/// 届いた値を手元に入れたときに、記録に置く値。並びは、手元で同期しない行の id を除く。
+/// その id は手元の並び（`config_items`）に現れないので、残すと手元を変えたように見え、除いた並びを書き戻し続ける。
+fn settled_value(config: &Config, key: &ItemKey, value: &Value) -> Value {
+    let prefix = match kind(key) {
+        Some(Kind::Order("replacements")) => 'r',
+        Some(Kind::Order("snippets")) => 'n',
+        Some(Kind::Order("actions")) => 'a',
+        _ => return value.clone(),
+    };
+    let Some(ids) = order_ids(value) else {
+        return value.clone();
+    };
+    json(
+        ids.into_iter()
+            .filter(|id| !detached(config, &ItemKey::new(SETTINGS, row_id(prefix, id))))
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// 窓口に無い手元の行のうち、中身が窓口の行と同じものを落とす（残る窓口の行が、その `id` で手元の行になる）。
@@ -1014,7 +1057,8 @@ fn receive(
             Incoming::Value(value) => {
                 if apply_value(config, &remote.key, value) {
                     changed = true;
-                    state.settle(name, remote.seq, value);
+                    let settled = settled_value(config, &remote.key, value);
+                    state.settle(name, remote.seq, &settled);
                 } else {
                     state.ignored.insert(name, remote.seq);
                 }
@@ -1071,7 +1115,8 @@ fn receive(
                 state.ignored.insert(name, remote.seq);
             } else if local_unchanged {
                 changed |= apply_value(config, &remote.key, value);
-                state.settle(name, remote.seq, value);
+                let settled = settled_value(config, &remote.key, value);
+                state.settle(name, remote.seq, &settled);
             } else if current.as_ref() == Some(value) {
                 state.settle(name, remote.seq, value);
             } else {
@@ -1142,12 +1187,14 @@ fn reconcile_as(
     let local_items = config_items(local);
     let mut sorted = remote.to_vec();
     // 言語を先に入れてから、None のアクションを既定から実体化する。並びは最後にしないと同じ回の行を並べ替えられない。
+    // 外した印は行より先に入れる。行が先に既定のアクションを実体化すると、外された既定のアクションを残せない。
     sorted.sort_by_key(|item| {
         (
             match kind(&item.key) {
                 Some(Kind::Setting(_)) => 0,
-                Some(Kind::Order(_)) => 2,
-                _ => 1,
+                Some(Kind::Order(_)) => 3,
+                _ if matches!(item.incoming(), Incoming::Detached) => 1,
+                _ => 2,
             },
             item.seq,
         )
@@ -1240,6 +1287,30 @@ fn reconcile_as(
             detached,
         });
     }
+    // 既定で同期する既定のアクションを、一度も書かないまま同期から外した。窓口に項目が無いと、ほかのデバイスには
+    // 並びから消えたことしか伝わらず、消した行と見分けられないので、外した印を書く
+    for default in actions::default_actions(crate::i18n::Lang::En) {
+        let key = ItemKey::new(SETTINGS, row_id('a', &default.id));
+        let name = key.name();
+        let unsynced = config
+            .actions
+            .as_ref()
+            .is_some_and(|rows| rows.iter().any(|row| row.id == default.id && !row.sync));
+        if default.sync
+            && unsynced
+            && !state.items.contains_key(&name)
+            && !state.retired.contains_key(&name)
+            && !held(&state, &name)
+        {
+            writes.push(Write {
+                key,
+                base_seq: None,
+                deleted: false,
+                plain: None,
+                detached: true,
+            });
+        }
+    }
     Reconcile {
         config,
         state,
@@ -1303,6 +1374,7 @@ pub struct SyncResult {
     pub changed: bool,
     pub reset: bool,
     /// この回に窓口へ書けた項目だけの記録。`config` を手元に入れずに捨てるときも、`merge_written` で残す。
+    /// 並びは、同期を始めたときの手元の並びを書いたときだけ入る。
     pub written: State,
 }
 
@@ -1340,9 +1412,10 @@ pub async fn sync_once_with<T: SyncTransport>(
     let mut result = reconcile(config, state, &read.items, key_id, read.next);
     let mut changed = result.changed;
     let mut written = State::new(key_id);
+    let local_items = config_items(config);
     let mut retries = 0;
     loop {
-        let conflicts = match write_all(transport, &mut result, &mut written).await {
+        let conflicts = match write_all(transport, &mut result, &mut written, &local_items).await {
             Ok(None) => break,
             Ok(Some(_)) if retries == MAX_CONFLICT_RETRIES => {
                 Err(Error::Other("sync conflicts did not settle".to_string()))
@@ -1399,10 +1472,12 @@ pub async fn sync_once_with<T: SyncTransport>(
 }
 
 /// 書く項目を窓口へ送り、書けた分を記録に置く。`conflict` が返ったら、そこで止めて今の項目を返す。
+/// `local_items` は、同期を始めたときの手元の値。
 async fn write_all<T: SyncTransport>(
     transport: &mut T,
     result: &mut Reconcile,
     written: &mut State,
+    local_items: &BTreeMap<ItemKey, Value>,
 ) -> Result<Option<Vec<ConflictItem>>, Error> {
     let mut writes = Vec::new();
     for write in std::mem::take(&mut result.writes) {
@@ -1436,7 +1511,14 @@ async fn write_all<T: SyncTransport>(
             match &write.plain {
                 Some(value) => {
                     result.state.settle(name.clone(), reply.seq, value);
-                    written.settle(name, reply.seq, value);
+                    // 届いた並びに手元の行を足した並びは、結果を捨てると手元に入らないので置かず、次の回に読み直して
+                    // 合わせる。手元の並びをそのまま書いたものは置く。忘れると、次の回に自分の書き込みを
+                    // 他人の変更と取り違える
+                    let unapplied_order = matches!(kind(&write.key), Some(Kind::Order(_)))
+                        && local_items.get(&write.key) != Some(value);
+                    if !unapplied_order {
+                        written.settle(name, reply.seq, value);
+                    }
                 }
                 None => {
                     result.state.retire(name.clone(), reply.seq);
@@ -1468,12 +1550,8 @@ pub fn merge_written(previous: Option<State>, written: &State, reset: bool, key_
     let mut state = previous
         .filter(|state| !reset && state.key_id == key_id)
         .unwrap_or_else(|| State::new(key_id));
-    let order = ItemKey::new(SETTINGS, "o_").name();
     for (name, seen) in &written.items {
-        // 書いた並びは、届いた並びに手元の行を足したもの。手元には入っていないので、次の回に読み直して合わせる
-        if !name.starts_with(&order) {
-            state.settle_seen(name.clone(), seen.clone());
-        }
+        state.settle_seen(name.clone(), seen.clone());
     }
     for (name, seq) in &written.retired {
         state.retire(name.clone(), *seq);
@@ -2770,14 +2848,113 @@ mod tests {
                     Some(vec![translate.clone(), sort.clone()]),
                     "{lang:?}"
                 );
+                // 並べ替えは手元で同期しない行。その id を抜いた並びを書き戻さない
                 assert!(
                     !result
                         .writes
                         .iter()
-                        .any(|write| write.key.id.starts_with("a_")),
+                        .any(|write| write.key.id.starts_with("a_") || write.key.id == "o_actions"),
                     "{lang:?}"
                 );
             }
+        }
+    }
+
+    fn action_writes(result: &Reconcile) -> Vec<&Write> {
+        result
+            .writes
+            .iter()
+            .filter(|write| write.key.id.starts_with("a_") || write.key.id == "o_actions")
+            .collect()
+    }
+
+    #[test]
+    fn unsyncing_a_default_action_never_written_writes_the_mark_once() {
+        let mut translate = default_action(0, crate::i18n::Lang::system());
+        translate.sync = false;
+        let key = ItemKey::new(SETTINGS, row_id('a', &translate.id));
+        // 既定のアクションのままのデバイスで、最初の操作として英訳を同期から外した
+        let local = Config {
+            actions: Some(vec![
+                translate,
+                default_action(1, crate::i18n::Lang::system()),
+            ]),
+            ..Config::default()
+        };
+        for (first_sync, state) in [(false, Some(recorded(&Config::default()))), (true, None)] {
+            let since = state.as_ref().map_or(0, |state| state.since);
+            let mut first = FakeTransport::reading([read(since, [])]).after_seq(since);
+            let result = run(&mut first, &local, state).unwrap();
+            let [mark] = &first.written(&key.id)[..] else {
+                panic!("first sync: {first_sync}, the mark is written once");
+            };
+            assert!(mark.detached && !mark.deleted, "first sync: {first_sync}");
+            assert_eq!(mark.base_seq, None, "first sync: {first_sync}");
+            assert_eq!(result.config, local, "first sync: {first_sync}");
+
+            let mut second = FakeTransport::reading([read(first.seq, first.stored.clone())])
+                .after_seq(first.seq);
+            let next = run(&mut second, &local, Some(result.state)).unwrap();
+            assert!(second.writes.is_empty(), "first sync: {first_sync}");
+            assert_eq!(next.config, local, "first sync: {first_sync}");
+        }
+    }
+
+    #[test]
+    fn a_default_action_unsynced_on_another_device_stays_as_an_unsynced_row() {
+        let sort = default_action(1, crate::i18n::Lang::system());
+        let translate = Action {
+            sync: false,
+            ..default_action(0, crate::i18n::Lang::system())
+        };
+        let custom = Action {
+            id: "a".repeat(32),
+            name: "自作".into(),
+            command: "echo".into(),
+            ..Action::default()
+        };
+        let mark_key = ItemKey::new(SETTINGS, row_id('a', &translate.id));
+        // どれが先に届いても同じ
+        for (mark_seq, other_seq) in [(2, 3), (3, 2)] {
+            let items = [
+                detached_mark(&mark_key, mark_seq),
+                remote(SETTINGS, "o_actions", other_seq, json!([])),
+            ];
+            for result in receive_actions(&items) {
+                assert_eq!(
+                    result.config.actions,
+                    Some(vec![translate.clone(), sort.clone()]),
+                    "mark at {mark_seq}"
+                );
+                assert!(action_writes(&result).is_empty(), "mark at {mark_seq}");
+            }
+            let items = [
+                detached_mark(&mark_key, mark_seq),
+                remote(
+                    SETTINGS,
+                    &row_id('a', &custom.id),
+                    other_seq,
+                    row_value(&custom),
+                ),
+                remote(SETTINGS, "o_actions", 4, json!([custom.id])),
+            ];
+            for result in receive_actions(&items) {
+                assert_eq!(
+                    result.config.actions,
+                    Some(vec![translate.clone(), sort.clone(), custom.clone()]),
+                    "mark at {mark_seq}"
+                );
+                assert!(action_writes(&result).is_empty(), "mark at {mark_seq}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_order_without_a_mark_does_not_write_out_the_synced_default() {
+        let sort = default_action(1, crate::i18n::Lang::system());
+        for result in receive_actions(&[remote(SETTINGS, "o_actions", 2, json!([]))]) {
+            assert_eq!(result.config.actions, Some(vec![sort.clone()]));
+            assert!(action_writes(&result).is_empty());
         }
     }
 
@@ -3245,6 +3422,40 @@ mod tests {
         assert_eq!(names, ["相手2", "相手1", "手元"]);
         assert!(second.written("o_snippets").is_empty());
         assert!(result.state.conflicts.is_empty());
+    }
+
+    #[test]
+    fn discarding_a_result_keeps_a_written_order_that_was_the_local_order() {
+        let rows = |ids: [char; 3]| Config {
+            snippets: ids
+                .into_iter()
+                .map(|id| snippet(id, id.to_string()))
+                .collect(),
+            ..Config::default()
+        };
+        let before = recorded(&rows(['d', 'e', 'f']));
+        // 手元の並びだけを変えて書き、通信の間に設定が変わったので結果を捨てる
+        let mut first = FakeTransport::reading([read(1, [])]).after_seq(1);
+        let discarded = run(&mut first, &rows(['e', 'd', 'f']), Some(before.clone())).unwrap();
+        let [ours] = &first.stored[..] else {
+            panic!("only the order is written: {:?}", first.stored);
+        };
+        let ours = ours.clone();
+        assert_eq!(ours.key.id, "o_snippets");
+        let record = merge_written(Some(before), &discarded.written, false, "key");
+
+        // 並びをもう一度変える。自分が書いた並びを読み戻しても、食い違いにならない
+        let again = rows(['f', 'e', 'd']);
+        let mut second =
+            FakeTransport::reading([read(first.seq, [ours.clone()])]).after_seq(first.seq);
+        let result = run(&mut second, &again, Some(record)).unwrap();
+        assert!(result.state.conflicts.is_empty());
+        assert_eq!(result.config, again);
+        let [write] = &second.written("o_snippets")[..] else {
+            panic!("the new order is written once");
+        };
+        assert_eq!(write.base_seq, Some(ours.seq));
+        assert_eq!(write.plain, Some(config_items(&again)[&ours.key].clone()));
     }
 
     #[test]
@@ -3739,6 +3950,36 @@ mod tests {
             .map(|row| (row.from.as_str(), row.sync))
             .collect();
         assert_eq!(rows, [("c", true), ("a", true), ("mine", false)]);
+    }
+
+    #[test]
+    fn an_order_naming_an_unsynced_row_is_not_written_back() {
+        let mut mine = snippet('b', "mine".into());
+        mine.sync = false;
+        let local = Config {
+            snippets: vec![snippet('a', "a".into()), mine, snippet('c', "c".into())],
+            ..Config::default()
+        };
+        // 相手は、手元で同期から外している行を同期している
+        let order = json!(["c".repeat(32), "b".repeat(32), "a".repeat(32)]);
+        let arrival = remote(SETTINGS, "o_snippets", 5, order);
+        for (first_sync, state) in [(false, Some(recorded(&local))), (true, None)] {
+            let result = reconcile(&local, state, std::slice::from_ref(&arrival), "key", 5);
+            let ids: Vec<_> = result
+                .config
+                .snippets
+                .iter()
+                .map(|row| &row.id[..1])
+                .collect();
+            assert_eq!(ids, ["c", "a", "b"], "first sync: {first_sync}");
+            assert!(
+                !result
+                    .writes
+                    .iter()
+                    .any(|write| write.key.id == "o_snippets"),
+                "first sync: {first_sync}"
+            );
+        }
     }
 
     #[test]
