@@ -1,11 +1,13 @@
 import { ENCODINGS, OUTPUTS } from '$lib/action-options';
 import { aiServiceInfo } from '$lib/ai-services';
 import type { SyncConflict } from '$lib/bindings/SyncConflict';
+import type { SyncBackupDifference } from '$lib/bindings/SyncBackupDifference';
 import type { SyncValue } from '$lib/bindings/SyncValue';
 import { CONSTANTS } from '$lib/bindings/constants';
 import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { DRAFT_ACTIONS_IN_SETTINGS, draftActionLabel, formatKeys, type Platform } from '$lib/keys';
 import { m } from '$lib/paraglide/messages';
+import type { Locale } from '$lib/paraglide/runtime';
 import type { CharWidths } from '$lib/settings.svelte';
 import { snippetLabel } from '$lib/snippets';
 
@@ -110,9 +112,78 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 			return m.sync_choice_row_snippet({ name: rowName(value) });
 		case 'action':
 			return m.sync_choice_row_action({ name: rowName(value) });
+		case 'order':
+			return m.sync_restore_order({
+				name:
+					{
+						replacements: m.settings_replacements(),
+						snippets: m.settings_category_snippets(),
+						actions: m.settings_category_actions()
+					}[value.value] ?? value.value
+			});
 		default:
 			return undefined;
 	}
+}
+
+/** 同期前の控えへ戻すと、変わる・消える・戻る項目。 */
+export function restoreChangeText(changes: SyncBackupDifference[], locale: Locale) {
+	const summarize = (
+		items: SyncBackupDifference[],
+		value: (change: SyncBackupDifference) => SyncValue,
+		message: (args: { names: string }) => string
+	) => {
+		const names = items
+			.map((change) => {
+				const named = value(change);
+				return named.type === 'deleted' ? undefined : label(named);
+			})
+			.filter((name): name is string => Boolean(name));
+		if (names.length === 0) return undefined;
+		const shown = names.slice(0, 3);
+		if (names.length > shown.length)
+			shown.push(m.sync_restore_more({ count: names.length - shown.length }));
+		return message({ names: shown.join(locale === 'ja' ? '、' : ', ') });
+	};
+	// 行が消える・戻るなら並びも必ず変わる。その一覧の並びまで挙げると、同じことを2回言うことになる
+	const ROW_OF_ORDER: Record<string, SyncValue['type']> = {
+		replacements: 'replacement',
+		snippets: 'snippet',
+		actions: 'action'
+	};
+	const rowsMoved = new Set(
+		changes
+			.filter(({ current, restored }) => current.type === 'deleted' || restored.type === 'deleted')
+			.map(({ current, restored }) => (current.type === 'deleted' ? restored.type : current.type))
+	);
+	const impliedOrder = ({ restored }: SyncBackupDifference) =>
+		restored.type === 'order' && rowsMoved.has(ROW_OF_ORDER[restored.value]);
+	return {
+		changes: summarize(
+			changes.filter(
+				(change) =>
+					change.current.type !== 'deleted' &&
+					change.restored.type !== 'deleted' &&
+					!impliedOrder(change)
+			),
+			({ restored }) => restored,
+			m.sync_restore_changes
+		),
+		removes: summarize(
+			changes.filter(
+				({ current, restored }) => current.type !== 'deleted' && restored.type === 'deleted'
+			),
+			({ current }) => current,
+			m.sync_restore_removes
+		),
+		bringsBack: summarize(
+			changes.filter(
+				({ current, restored }) => current.type === 'deleted' && restored.type !== 'deleted'
+			),
+			({ restored }) => restored,
+			m.sync_restore_brings_back
+		)
+	};
 }
 
 /** `other` と同じ種類の値なら、その値。行は、片方が「削除」のことがある */
@@ -183,6 +254,8 @@ function valueText(value: SyncValue, other: SyncValue, platform: Platform): stri
 		}
 		case 'text_font_family':
 			return orDefault(value.value);
+		case 'order':
+			return '';
 		case 'replacement': {
 			const row = value.value;
 			const theirs = sameType(value, other)?.value;

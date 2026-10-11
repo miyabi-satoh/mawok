@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { SyncBackupDifference } from '$lib/bindings/SyncBackupDifference';
 import type { SyncConflict } from '$lib/bindings/SyncConflict';
 import type { SyncValue } from '$lib/bindings/SyncValue';
 import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { m } from '$lib/paraglide/messages';
 import type { Action, Replacement, Snippet } from '$lib/settings.svelte';
 import { DEFAULT_DRAFT_KEYS } from '$lib/test-support/settings-view';
-import { choiceText, fromDifference, sideName } from './sync-choices';
+import { choiceText, fromDifference, restoreChangeText, sideName } from './sync-choices';
 
 function conflict(thisDevice: SyncValue, otherDevice: SyncValue): SyncConflict {
 	return { id: 's_item', seq: 2, thisDevice, otherDevice };
@@ -191,7 +192,7 @@ describe('choiceText', () => {
 	it('同期する設定の項目を、どれも見ている', () => {
 		// SyncValue の種類のうち、行と「削除」を除いたもの。足したら、上の表にも足す
 		const types: Record<
-			Exclude<SyncValue['type'], 'replacement' | 'snippet' | 'action' | 'deleted'>,
+			Exclude<SyncValue['type'], 'replacement' | 'snippet' | 'action' | 'deleted' | 'order'>,
 			true
 		> = {
 			language: true,
@@ -283,6 +284,118 @@ describe('choiceText', () => {
 				pair(m.settings_actions_encoding(), 'Shift_JIS'),
 				pair(m.settings_actions_enabled_unnamed(), m.sync_choice_off())
 			].join('\n')
+		});
+	});
+});
+
+describe('restoreChangeText', () => {
+	it('変わるものは先頭3件と残りを日本語の区切りで出す', () => {
+		const changes: SyncBackupDifference[] = [
+			{
+				id: 's_theme',
+				current: { type: 'theme', value: 'dark' },
+				restored: { type: 'theme', value: 'light' }
+			},
+			{
+				id: 'r_a',
+				current: { type: 'replacement', value: replacement },
+				restored: { type: 'replacement', value: { ...replacement, to: '戻した値' } }
+			},
+			{
+				id: 'o_replacements',
+				current: { type: 'order', value: 'replacements' },
+				restored: { type: 'order', value: 'replacements' }
+			},
+			{
+				id: 'n_b',
+				current: { type: 'snippet', value: snippet },
+				restored: { type: 'snippet', value: { ...snippet, body: '戻した本文' } }
+			}
+		];
+		expect(restoreChangeText(changes, 'ja')).toEqual({
+			changes: m.sync_restore_changes({
+				names: [
+					m.settings_theme(),
+					m.sync_choice_row_replacement({ name: '濃度' }),
+					m.sync_restore_order({ name: m.settings_replacements() }),
+					m.sync_restore_more({ count: 1 })
+				].join('、')
+			}),
+			removes: undefined,
+			bringsBack: undefined
+		});
+	});
+
+	it('行が消える・戻る一覧の並びは、変わるものに挙げない', () => {
+		const changes: SyncBackupDifference[] = [
+			{
+				id: 'n_b',
+				current: { type: 'snippet', value: snippet },
+				restored: { type: 'deleted' }
+			},
+			{
+				id: 'o_snippets',
+				current: { type: 'order', value: 'snippets' },
+				restored: { type: 'order', value: 'snippets' }
+			},
+			{
+				id: 'o_replacements',
+				current: { type: 'order', value: 'replacements' },
+				restored: { type: 'order', value: 'replacements' }
+			}
+		];
+		expect(restoreChangeText(changes, 'ja').changes).toBe(
+			m.sync_restore_changes({ names: m.sync_restore_order({ name: m.settings_replacements() }) })
+		);
+	});
+
+	it('消えるものは今の行の名前で示す', () => {
+		const changes: SyncBackupDifference[] = [
+			{
+				id: 'r_a',
+				current: { type: 'replacement', value: replacement },
+				restored: { type: 'deleted' }
+			},
+			{
+				id: 'n_b',
+				current: { type: 'snippet', value: snippet },
+				restored: { type: 'deleted' }
+			}
+		];
+		expect(restoreChangeText(changes, 'en')).toEqual({
+			changes: undefined,
+			removes: m.sync_restore_removes({
+				names: [
+					m.sync_choice_row_replacement({ name: '濃度' }),
+					m.sync_choice_row_snippet({ name: '挨拶' })
+				].join(', ')
+			}),
+			bringsBack: undefined
+		});
+	});
+
+	it('戻るものは戻した行の名前で示す', () => {
+		const changes: SyncBackupDifference[] = [
+			{
+				id: 'r_a',
+				current: { type: 'deleted' },
+				restored: { type: 'replacement', value: replacement }
+			},
+			{
+				id: 'n_b',
+				current: { type: 'deleted' },
+				restored: { type: 'snippet', value: snippet }
+			}
+		];
+		expect(restoreChangeText(changes, 'en')).toEqual({
+			changes: undefined,
+			removes: undefined,
+			bringsBack: m.sync_restore_brings_back({
+				names: [
+					m.sync_choice_row_replacement({ name: '濃度' }),
+					m.sync_choice_row_snippet({ name: '挨拶' })
+				].join(', ')
+			})
 		});
 	});
 });

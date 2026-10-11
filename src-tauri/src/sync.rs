@@ -870,14 +870,18 @@ fn synced_actions(config: &mut Config) -> &mut Vec<Action> {
         .get_or_insert_with(|| unsynced_defaults(language, None))
 }
 
-/// 設定に書き出す既定のアクション。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
-fn unsynced_defaults(language: Language, detached: Option<&str>) -> Vec<Action> {
+fn default_actions_for(language: Language) -> Vec<Action> {
     let lang = match language {
         Language::Ja => crate::i18n::Lang::Ja,
         Language::En => crate::i18n::Lang::En,
         Language::System => crate::i18n::Lang::system(),
     };
-    let mut defaults = actions::default_actions(lang);
+    actions::default_actions(lang)
+}
+
+/// 設定に書き出す既定のアクション。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
+fn unsynced_defaults(language: Language, detached: Option<&str>) -> Vec<Action> {
+    let mut defaults = default_actions_for(language);
     for action in &mut defaults {
         if detached == Some(action.id.as_str()) {
             action.sync = false;
@@ -1670,8 +1674,147 @@ pub enum SyncValue {
     Replacement(Replacement),
     Snippet(Snippet),
     Action(Action),
+    /// 同期する行の並び。食い違いでは自動で合わせるが、控えへ戻すときは利用者に知らせる。
+    Order(String),
     /// 行を消した。
     Deleted,
+}
+
+/// 控えへ戻すと変わる、同期の1項目。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBackupDifference {
+    pub id: String,
+    pub current: SyncValue,
+    pub restored: SyncValue,
+}
+
+/// 手元の同期前の控え。名前は UTC の作成日時で、画面は差分を選ぶ手がかりとして出す。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBackup {
+    pub name: String,
+    pub changes: Vec<SyncBackupDifference>,
+}
+
+pub struct RestoreConfig {
+    pub config: Config,
+    pub rejected: Vec<ItemKey>,
+}
+
+/// 控えの値を、同期する設定だけへ入れる。デバイス固有の項目と、設定ファイルの知らない項目は呼び出し元が持つ現在値のままになる。
+pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
+    let mut restored = current.clone();
+    let current_items = config_items(current);
+    let mut rejected = Vec::new();
+    let initial_backup_items = config_items(backup);
+    let (hotkey, keys) = (hotkey_item(), text_window_keys_item());
+    // 設定（言語）を先に入れる。控えが既定のアクションのままなら、この後の表示言語で実体化するため。
+    for (key, value) in initial_backup_items.iter().filter(|(key, _)| {
+        matches!(kind(key), Some(Kind::Setting(_))) && **key != hotkey && **key != keys
+    }) {
+        if sync_enabled(current, key) && !apply_value(&mut restored, key, value) {
+            rejected.push(key.clone());
+        }
+    }
+    let mut effective_backup = backup.clone();
+    if effective_backup.actions.is_none() {
+        effective_backup.actions = Some(default_actions_for(restored.language));
+    }
+    let backup_items = config_items(&effective_backup);
+    // ホットキーとキー操作は互いに重なりを見るので、同期と同じく組にして入れる
+    if let (Some(hotkey_value), Some(keys_value)) =
+        (backup_items.get(&hotkey), backup_items.get(&keys))
+    {
+        if sync_enabled(current, &hotkey) && sync_enabled(current, &keys) {
+            let before = restored.clone();
+            // キー操作は、これから替わるホットキーとは照らさずに入れ、ホットキーを入れた後で照らし直す
+            let local_hotkey = std::mem::take(&mut restored.hotkey);
+            let keys_applied = apply_value(&mut restored, &keys, keys_value);
+            restored.hotkey = local_hotkey;
+            if !(keys_applied
+                && apply_value(&mut restored, &hotkey, hotkey_value)
+                && apply_value(&mut restored, &keys, keys_value))
+            {
+                restored = before;
+                rejected.extend([hotkey.clone(), keys.clone()]);
+            }
+        }
+    }
+    // 行を入れてから並びを入れる。同期しない行は、そのデバイスの今の値と場所を残す。
+    let rows: Vec<(&ItemKey, &Value)> = backup_items
+        .iter()
+        .filter(|(key, _)| {
+            !matches!(kind(key), Some(Kind::Setting(_)) | Some(Kind::Order(_)))
+                && sync_enabled(current, key)
+                && !detached(current, key)
+        })
+        .collect();
+    for (key, value) in rows {
+        if !apply_value(&mut restored, key, value) {
+            rejected.push(key.clone());
+        }
+    }
+    for (key, value) in backup_items
+        .iter()
+        .filter(|(key, _)| is_order(key) && sync_enabled(current, key))
+    {
+        if !apply_value(&mut restored, key, value) {
+            rejected.push(key.clone());
+        }
+    }
+    for key in current_items.keys().filter(|key| {
+        sync_enabled(current, key)
+            && !backup_items.contains_key(*key)
+            && !detached(&effective_backup, key)
+    }) {
+        let _ = remove_local(&mut restored, key);
+    }
+    // 今も控えも既定のアクションのままなら、比べるために実体化した行を、既定のままという表現へ戻す。
+    // 今が行を持っているときは戻さない。None にすると行の項目が無くなり、次の同期が、記録にある行を
+    // 消したものとして窓口へ書いて、ほかのデバイスの行まで消す
+    if backup.actions.is_none() && current.actions.is_none() && current.sync_actions {
+        restored.actions = None;
+    }
+    RestoreConfig {
+        config: restored,
+        rejected,
+    }
+}
+
+/// 現在の設定と控えへ戻した後の設定を、同期の項目と同じ粒度で比べる。
+pub fn backup_differences(current: &Config, restored: &Config) -> Vec<SyncBackupDifference> {
+    let current_items = config_items(current);
+    let restored_items = config_items(restored);
+    current_items
+        .keys()
+        .chain(restored_items.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|key| {
+            let before = current_items.get(key);
+            let after = restored_items.get(key);
+            if before == after {
+                return None;
+            }
+            Some(SyncBackupDifference {
+                id: key.id.clone(),
+                current: backup_value(current, key)?,
+                restored: backup_value(restored, key)?,
+            })
+        })
+        .collect()
+}
+
+fn backup_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
+    match kind(key)? {
+        Kind::Order(name) => Some(SyncValue::Order(name.to_string())),
+        _ => sync_value(config, key),
+    }
 }
 
 /// 食い違っている1項目。
@@ -6728,5 +6871,216 @@ mod tests {
         assert_eq!(on.history, Some(history(&[("a", 10), ("b", 200)], 0)));
         assert_eq!(transport.written(HISTORY_ID).len(), 1);
         assert_eq!(on.state.paused.get("history"), None);
+    }
+
+    #[test]
+    fn restoring_a_backup_keeps_disabled_and_excluded_settings() {
+        let current = Config {
+            theme: Theme::Dark,
+            autostart: false,
+            language: Language::En,
+            sync_excluded_settings: vec!["theme".to_string()],
+            ..Config::default()
+        };
+        let backup = Config {
+            theme: Theme::Light,
+            autostart: true,
+            language: Language::Ja,
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(restored.config.theme, Theme::Dark);
+        assert_eq!(restored.config.language, Language::Ja);
+        assert!(!restored.config.autostart);
+        assert!(restored.rejected.is_empty());
+        assert_eq!(
+            backup_differences(&current, &restored.config)
+                .iter()
+                .map(|change| change.id.as_str())
+                .collect::<Vec<_>>(),
+            ["s_language"]
+        );
+    }
+
+    #[test]
+    fn restoring_a_backup_keeps_rows_when_their_kind_is_disabled() {
+        let current = Config {
+            sync_replacements: false,
+            replacements: vec![replacement('a', "current")],
+            ..Config::default()
+        };
+        let backup = Config {
+            replacements: vec![replacement('b', "backup")],
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(restored.config.replacements, current.replacements);
+        assert!(restored.rejected.is_empty());
+        assert!(backup_differences(&current, &restored.config).is_empty());
+    }
+
+    #[test]
+    fn restoring_a_backup_keeps_a_row_that_was_unsynced_in_the_backup() {
+        let current = Config {
+            replacements: vec![replacement('a', "current")],
+            ..Config::default()
+        };
+        let mut local_in_backup = replacement('a', "previous local value");
+        local_in_backup.sync = false;
+        let backup = Config {
+            replacements: vec![local_in_backup],
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(restored.config.replacements, current.replacements);
+        assert!(restored.rejected.is_empty());
+        assert!(backup_differences(&current, &restored.config).is_empty());
+    }
+
+    #[test]
+    fn restoring_a_backup_merges_synced_rows_and_their_order() {
+        let mut local_only = replacement('b', "local only");
+        local_only.sync = false;
+        let current = Config {
+            replacements: vec![local_only.clone(), replacement('a', "current")],
+            ..Config::default()
+        };
+        let mut backup_only = replacement('d', "backup only");
+        backup_only.sync = false;
+        let backup = Config {
+            replacements: vec![replacement('c', "backup"), backup_only],
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(
+            restored.config.replacements,
+            [local_only, replacement('c', "backup")]
+        );
+        assert!(restored.rejected.is_empty());
+        let changes = backup_differences(&current, &restored.config);
+        assert!(changes
+            .iter()
+            .any(|change| change.id == row_key('r', 'a').id));
+        assert!(changes
+            .iter()
+            .any(|change| change.id == row_key('r', 'c').id));
+        assert!(changes.iter().any(|change| change.id == "o_replacements"));
+        assert!(!changes
+            .iter()
+            .any(|change| change.id == row_key('r', 'b').id));
+        assert!(!changes
+            .iter()
+            .any(|change| change.id == row_key('r', 'd').id));
+    }
+
+    #[test]
+    fn restoring_a_backup_reports_values_that_cannot_be_applied() {
+        let current = Config::default();
+        let backup = Config {
+            text_font_size: config::MAX_DRAFT_FONT_SIZE + 1,
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(restored.config.text_font_size, current.text_font_size);
+        assert_eq!(restored.rejected, [setting_item("text_font_size")]);
+    }
+
+    #[test]
+    fn restoring_a_swapped_hotkey_and_key_takes_both() {
+        let backup = Config::default();
+        let mut current = Config::default();
+        let copy = backup.text_window_keys.get(DraftAction::Copy).to_string();
+        *current.text_window_keys.get_mut(DraftAction::Copy) = backup.hotkey.clone();
+        current.hotkey = copy;
+        let restored = restore_config(&current, &backup);
+        assert!(restored.rejected.is_empty());
+        assert_eq!(restored.config.hotkey, backup.hotkey);
+        assert_eq!(restored.config.text_window_keys, backup.text_window_keys);
+    }
+
+    #[test]
+    fn restoring_implicit_default_actions_uses_the_restored_language() {
+        let current = Config {
+            language: Language::En,
+            actions: Some(vec![
+                Action {
+                    id: "e".repeat(32),
+                    name: "received action".into(),
+                    command: "received".into(),
+                    ..Action::default()
+                },
+                default_action(1, crate::i18n::Lang::En),
+            ]),
+            ..Config::default()
+        };
+        // `actions` が無い控えでも、設定を先に戻した後の表示言語の既定のアクションを入れる。
+        let backup = Config {
+            language: Language::Ja,
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert!(restored.rejected.is_empty());
+        assert_eq!(restored.config.language, Language::Ja);
+        assert_eq!(
+            restored.config.actions,
+            Some(vec![
+                default_action(0, crate::i18n::Lang::Ja),
+                default_action(1, crate::i18n::Lang::En),
+            ])
+        );
+    }
+
+    #[test]
+    fn restoring_implicit_default_actions_keeps_the_rows_when_the_device_has_rows() {
+        let received = Action {
+            id: "e".repeat(32),
+            name: "received action".into(),
+            command: "received".into(),
+            ..Action::default()
+        };
+        let current = Config {
+            actions: Some(vec![
+                received.clone(),
+                default_action(1, crate::i18n::Lang::system()),
+            ]),
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &Config::default());
+        assert!(restored.rejected.is_empty());
+        // None にはしない。行の項目が無くなると、次の同期が既定の行まで消した記録として書く
+        assert_eq!(
+            restored.config.actions,
+            Some(default_actions_for(restored.config.language))
+        );
+        let removed: Vec<String> = backup_differences(&current, &restored.config)
+            .into_iter()
+            .filter(|change| change.restored == SyncValue::Deleted)
+            .map(|change| change.id)
+            .collect();
+        assert_eq!(removed, [row_id('a', &received.id)]);
+    }
+
+    #[test]
+    fn restoring_an_implicit_default_backup_from_defaults_changes_nothing() {
+        let current = Config::default();
+        let restored = restore_config(&current, &Config::default());
+        assert_eq!(restored.config.actions, None);
+        assert!(restored.rejected.is_empty());
+        assert!(backup_differences(&current, &restored.config).is_empty());
+    }
+
+    #[test]
+    fn restoring_a_deleted_row_writes_it_again_with_the_retired_sequence() {
+        let mut state = recorded(&Config::default());
+        let row = row_key('r', 'a');
+        state.retired.insert(row.name(), 7);
+        let restored = Config {
+            replacements: vec![replacement('a', "again")],
+            ..Config::default()
+        };
+        let result = reconcile(&restored, Some(state), &[], "key", 7);
+        let write = result.writes.iter().find(|write| write.key == row).unwrap();
+        assert_eq!(write.base_seq, Some(7));
+        assert!(!write.deleted);
     }
 }

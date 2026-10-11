@@ -350,6 +350,7 @@
 	"settings_sync_actions_off": "アクションの同期はオフです。設定の「アカウント」でオンにできます。",
 	"settings_sync_choice_notice": "このデバイスとほかのデバイスで、同じ設定を別々に変更しました。選ぶまで、その設定は同期されません。",
 	"settings_sync_choice_open": "どちらを使うか選ぶ...",
+	"settings_sync_restore_open": "同期の前の設定に戻す...",
 	"sync_choice_title": "どちらの設定を使いますか？",
 	"sync_choice_this_device": "このデバイス",
 	"sync_choice_other_device": "ほかのデバイス",
@@ -371,5 +372,16 @@
 	"sync_choice_row_snippet": "定型文「{name}」",
 	"sync_choice_row_action": "アクション「{name}」",
 	"sync_choice_later": "あとで選ぶ",
-	"sync_choice_unreadable": "ほかのデバイスの設定を、このバージョンの Mawok では読み込めません。Mawok を最新のバージョンに更新してから、やり直してください。"
+	"sync_choice_unreadable": "ほかのデバイスの設定を、このバージョンの Mawok では読み込めません。Mawok を最新のバージョンに更新してから、やり直してください。",
+	"sync_restore_title": "同期の前の設定に戻す",
+	"sync_restore_description": "同期がこのデバイスの設定を書き換える前の状態に戻します。戻した設定は、ほかのデバイスにも同期されます。消えるものは、ほかのデバイスからも消えます。",
+	"sync_restore_empty": "戻せる設定はまだありません。同期がこのデバイスの設定を書き換えると、その前の状態がここに並びます。",
+	"sync_restore_loading": "読み込んでいます…",
+	"sync_restore_changes": "変わるもの: {names}",
+	"sync_restore_removes": "消えるもの: {names}",
+	"sync_restore_brings_back": "戻るもの: {names}",
+	"sync_restore_more": "ほか {count} 件",
+	"sync_restore_confirm": "この設定に戻す",
+	"sync_restore_order": "{name}の並び",
+	"sync_restore_partial": "一部の設定を戻せませんでした。"
 }
