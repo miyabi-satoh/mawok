@@ -315,8 +315,6 @@ struct SettingsView {
     sync_kinds: sync::Kinds,
     /// 種類「設定」から外した設定ファイルの項目名
     sync_excluded_settings: Vec<String>,
-    /// 種類「設定」から外せる設定ファイルの項目名
-    syncable_settings: Vec<String>,
     /// ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
     sync_conflicts: u32,
     punctuation_style: PunctuationStyle,
@@ -370,10 +368,6 @@ fn settings_view(state: &AppState) -> SettingsView {
         revision,
         sync_kinds: sync::kinds(&config),
         sync_excluded_settings: config.sync_excluded_settings.clone(),
-        syncable_settings: sync::SYNCABLE_SETTING_NAMES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect(),
         sync_conflicts: shown_sync_conflicts(state, pro_available),
         locale: lang.code(),
         ai_service: config.ai_service,
@@ -1919,7 +1913,7 @@ async fn change_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> 
     Ok(())
 }
 
-/// オフにした種類を、同期の記録に残す。オフにした後の同期の回に任せると、両方オフの間（通信しない）と
+/// オフにした種類を、同期の記録に残す。オフにした後の同期の回に任せると、全部オフの間（通信しない）と
 /// つながらない間は残らず、オンに戻した回が、オフにしていたことを知らない（docs/sync.md 冒頭）。
 /// 一度も同期していなければ、記録が無いので何もしない。オンに戻した回は、初めての同期になる
 async fn mark_paused_sync_kinds(app: &AppHandle) {

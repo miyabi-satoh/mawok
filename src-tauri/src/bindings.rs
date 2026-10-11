@@ -2,7 +2,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use crate::{actions, ai, config, draft_keys, events};
+use crate::{actions, ai, config, draft_keys, events, sync};
 
 #[test]
 fn writes_constants() {
@@ -31,7 +31,8 @@ export const CONSTANTS = {{\n\
 \tSUPPORTED_CODES: {:?},\n\
 \tAI_PREFIX: {:?},\n\
 \tTEXT_MARK: {:?},\n\
-\tNEW_ACTION: {}\n\
+\tNEW_ACTION: {},\n\
+\tSYNCABLE_SETTINGS: {:?}\n\
 }} as const;\n\n\
 export const EVENTS = {{\n\
 \tSETTINGS_CHANGED: {:?},\n\
@@ -60,6 +61,7 @@ export const EVENTS = {{\n\
         actions::AI_PREFIX,
         actions::TEXT_MARK,
         new_action,
+        sync::SYNCABLE_SETTING_NAMES,
         events::SETTINGS_CHANGED,
         events::DRAFT_HISTORY_CLEARED,
         events::DRAFT_HISTORY_SYNCED,

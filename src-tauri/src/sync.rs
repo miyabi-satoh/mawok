@@ -125,7 +125,7 @@ pub struct State {
     /// 読み捨てた項目と、その `seq`。新しい版が書いた項目を壊さないよう、窓口の値が変わるまで書かない。
     #[serde(default)]
     pub ignored: BTreeMap<String, u64>,
-    /// 読まずに置いてある種類・設定項目ごとの位置（docs/sync.md「同期する種類」）。
+    /// 読まずに置いてある種類・設定項目ごとの位置（docs/sync.md 冒頭）。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub paused: BTreeMap<String, u64>,
 }
@@ -194,7 +194,12 @@ impl State {
         let mut changed = false;
         for group in paused_groups(config) {
             if !self.paused.contains_key(&group) {
-                self.paused.insert(group, self.since);
+                // 種類「設定」を止めている間に外した項目は、種類を止めたときから読んでいない
+                let since = self
+                    .paused
+                    .get(SyncKind::Settings.group())
+                    .map_or(self.since, |settings| self.since.min(*settings));
+                self.paused.insert(group, since);
                 changed = true;
             }
         }
@@ -268,6 +273,11 @@ impl Kinds {
             || self.snippets
             || self.actions
             || self.history
+    }
+
+    /// 履歴のほかの（collection `settings` に置く）種類のどれかを同期するか。
+    fn any_settings(self) -> bool {
+        self.settings || self.keys || self.replacements || self.snippets || self.actions
     }
 
     pub fn enabled(self, kind: SyncKind) -> bool {
@@ -555,9 +565,13 @@ fn is_key_setting(name: &str) -> bool {
         .any(|setting| name == format!("{setting}_{}", platform_suffix()))
 }
 
+/// 窓口の項目名に対応する設定ファイルの項目名（`syncable_setting_item` の逆）。
 fn setting_config_name(name: &str) -> &str {
-    let suffix = format!("_{}", platform_suffix());
-    name.strip_suffix(&suffix).unwrap_or(name)
+    if name == format!("text_font_family_{}", platform_suffix()) {
+        "text_font_family"
+    } else {
+        name
+    }
 }
 
 fn sync_enabled(config: &Config, key: &ItemKey) -> bool {
@@ -2077,12 +2091,7 @@ pub async fn sync_once_with<T: SyncTransport>(
     let mut recorded = state.unwrap_or_default();
     recorded.pause(config);
     let initial = Initial::new(no_record, &recorded);
-    let mut result = if kinds(config).settings
-        || kinds(config).keys
-        || kinds(config).replacements
-        || kinds(config).snippets
-        || kinds(config).actions
-    {
+    let mut result = if kinds(config).any_settings() {
         reconcile_as(config, recorded, &initial, &read.items, key_id, read.next)
     } else {
         recorded.key_id = key_id.to_string();
@@ -2170,15 +2179,7 @@ pub async fn sync_once_with<T: SyncTransport>(
             .get(&history_item().name())
             .is_some_and(|seen| seen.hash == history_hash(local, size))
     });
-    if !settled {
-        if let Some(since) = history_resumed_from {
-            result
-                .state
-                .paused
-                .entry(SyncKind::History.group().to_string())
-                .or_insert(since);
-        }
-    } else if kinds(config).history {
+    if settled && kinds(config).history {
         result.state.paused.remove(SyncKind::History.group());
     }
     // 成功した回だけ、再び読んだ設定の種類と個別項目の位置を外す。履歴は揃った回だけ上で外す。
@@ -6283,6 +6284,24 @@ mod tests {
         assert_eq!(transport.read_since, [1]);
         assert_eq!(resumed.config.theme, Theme::Dark);
         assert_eq!(resumed.state.paused.get(&theme), None);
+    }
+
+    #[test]
+    fn a_setting_excluded_while_settings_are_off_is_read_from_where_settings_stopped() {
+        let base = Config::default();
+        let mut settings_off = base.clone();
+        settings_off.sync_settings = false;
+        let mut transport = FakeTransport::reading([read(8, [])]).after_seq(8);
+        let off = run_sync(&mut transport, &settings_off, Some(recorded(&base)), None);
+        assert_eq!(off.state.paused.get("settings"), Some(&1));
+
+        // 設定を止めた後、`since` が進んでから項目を外す。項目も、設定を止めたときから読んでいない
+        let mut excluded = settings_off.clone();
+        excluded.sync_excluded_settings = vec!["theme".to_string()];
+        let mut state = off.state;
+        assert!(state.pause(&excluded));
+        let theme = syncable_setting_item("theme").name();
+        assert_eq!(state.paused.get(&theme), Some(&1));
     }
 
     #[test]

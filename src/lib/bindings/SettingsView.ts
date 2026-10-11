@@ -82,10 +82,6 @@ syncKinds: Kinds,
  */
 syncExcludedSettings: Array<string>, 
 /**
- * 種類「設定」から外せる設定ファイルの項目名
- */
-syncableSettings: Array<string>, 
-/**
  * ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
  */
 syncConflicts: number, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 

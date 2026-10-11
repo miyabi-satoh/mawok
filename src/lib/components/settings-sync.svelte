@@ -6,6 +6,7 @@
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import * as Field from '$lib/components/ui/field';
 	import { Switch } from '$lib/components/ui/switch';
+	import { CONSTANTS } from '$lib/bindings/constants';
 	import type { Call } from '$lib/call';
 	import { m } from '$lib/paraglide/messages';
 	import type { SettingsView } from '$lib/settings.svelte';
@@ -66,7 +67,7 @@
 			<AlertDialog.Title>{m.settings_sync_select_settings_title()}</AlertDialog.Title>
 		</AlertDialog.Header>
 		<div class="flex flex-col gap-3">
-			{#each view.syncableSettings as name (name)}
+			{#each CONSTANTS.SYNCABLE_SETTINGS as name (name)}
 				<label class="flex items-center gap-2 text-sm">
 					<input
 						type="checkbox"
