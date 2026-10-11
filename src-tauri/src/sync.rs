@@ -1563,6 +1563,11 @@ impl RemoteHistory {
                 detached: false,
                 ..
             }) => parse::<History>(value)
+                // 今の形で書けない値は、新しい版が書いたものとして読み捨てる。混ぜて書き戻すと、その版の履歴を削る
+                .filter(|history| {
+                    history.entries.len() <= history_store::MAX_SYNCED_ENTRIES
+                        && history.entries.iter().all(|entry| entry.at > 0)
+                })
                 .map_or(Self::Unreadable(seq), |history| Self::Value(seq, history)),
             _ => Self::Unreadable(seq),
         }
@@ -4917,6 +4922,12 @@ mod tests {
         let local = history(&[("a", 10)], 0);
         let unreadable = [
             remote(HISTORY, HISTORY_ID, 4, json!({ "entries": "future" })),
+            // 今の版が書かない値: 時刻の無い履歴と、上限を超える件数
+            remote_history(4, &history(&[("z", 0)], 0)),
+            remote_history(
+                4,
+                &numbered(1..history_store::MAX_SYNCED_ENTRIES as u64 + 2),
+            ),
             RemoteItem {
                 key: history_item(),
                 seq: 4,

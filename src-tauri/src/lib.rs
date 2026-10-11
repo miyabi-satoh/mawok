@@ -1145,16 +1145,19 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
-    screen.caught_up();
     match history_store::load(&path) {
         Ok(history) => {
+            screen.caught_up();
             let entries = history.truncated(size).texts();
             info!("loaded draft history: {} entries", entries.len());
             Ok(entries)
         }
         Err(error) => {
             warn!("couldn't read draft history: {error}");
+            // 読めなかっただけなら、画面は同期で届いた履歴をまだ持っていない。持ったことにすると、次の保存が
+            // 届いた履歴を画面の古い一覧で上書きする
             if let history_store::LoadError::Invalid(_) = error {
+                screen.caught_up();
                 match history_store::set_aside(&path, SystemTime::now()) {
                     Ok(Some(backup)) => {
                         info!(
