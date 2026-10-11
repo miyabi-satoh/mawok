@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { APP_IDENTIFIER, APP_VERSION } from './app-conf.mjs';
 import { APP_DATA_DIRS } from './config.mjs';
 import { readBackupRecordSync, recordPath, writeJsonAtomicSync } from './files.mjs';
-import { isMawokRunning, runPowerShell } from './os.mjs';
+import { describeForegroundWindow, isMawokRunning, runPowerShell } from './os.mjs';
 import { waitFor } from './wait.mjs';
 import { readTaskbarButtons, WINDOW_TYPE } from './window.mjs';
 
@@ -245,9 +245,24 @@ Set-ItemProperty -LiteralPath $args[0] -Name State -Value ([int]$args[1]) -Type 
 	);
 }
 
-/** Windows の設定を閉じる */
+/**
+ * Windows の設定を閉じ、その窓が前面から消えるまで待つ。
+ * 止めた後も窓 (ApplicationFrameHost) はしばらく残り、消えるときに前面が替わる。待たずにトレイのメニューを出すと、
+ * 出たばかりのメニューがその前面の入れ替わりで閉じ、項目を読めない
+ */
 export async function closeSystemSettings() {
-	await runPowerShell('Stop-Process -Name SystemSettings -Force -ErrorAction SilentlyContinue');
+	await runPowerShell(`
+$settings = @(Get-Process -Name SystemSettings -ErrorAction SilentlyContinue)
+if ($settings.Count -gt 0) {
+    $settings | Stop-Process -Force -ErrorAction SilentlyContinue
+    $settings | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+}
+`);
+	await waitFor(
+		describeForegroundWindow,
+		(text) => !/title=(設定|Settings) process=ApplicationFrameHost/.test(text),
+		{ label: 'Windows の設定が前面から消える' }
+	);
 }
 
 // 通知の履歴は、差出人の AUMID ごとに OS が持っている。パッケージの外からも AUMID を渡せば読めるので、
