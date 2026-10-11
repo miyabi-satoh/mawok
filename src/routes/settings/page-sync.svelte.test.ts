@@ -124,7 +124,7 @@ describe('設定画面の同期', () => {
 			second: '2-digit'
 		}).format(new Date(Date.UTC(2026, 9, 11, 12, 34, 56)));
 		const backup = dialog.getByRole('radio', {
-			name: new RegExp(`${backupDate}.*${m.settings_theme()}`)
+			name: new RegExp(`${backupDate}.*${m.sync_restore_changes({ names: m.settings_theme() })}`)
 		});
 		await expect.element(backup).toBeVisible();
 		const confirm = dialog.getByRole('button', { name: m.sync_restore_confirm() });

@@ -870,14 +870,18 @@ fn synced_actions(config: &mut Config) -> &mut Vec<Action> {
         .get_or_insert_with(|| unsynced_defaults(language, None))
 }
 
-/// 設定に書き出す既定のアクション。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
-fn unsynced_defaults(language: Language, detached: Option<&str>) -> Vec<Action> {
+fn default_actions_for(language: Language) -> Vec<Action> {
     let lang = match language {
         Language::Ja => crate::i18n::Lang::Ja,
         Language::En => crate::i18n::Lang::En,
         Language::System => crate::i18n::Lang::system(),
     };
-    let mut defaults = actions::default_actions(lang);
+    actions::default_actions(lang)
+}
+
+/// 設定に書き出す既定のアクション。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
+fn unsynced_defaults(language: Language, detached: Option<&str>) -> Vec<Action> {
+    let mut defaults = default_actions_for(language);
     for action in &mut defaults {
         if detached == Some(action.id.as_str()) {
             action.sync = false;
@@ -1706,56 +1710,80 @@ pub struct RestoreConfig {
 pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
     let mut restored = current.clone();
     let current_items = config_items(current);
-    let backup_items = config_items(backup);
     let mut rejected = Vec::new();
-    // 届いた同期の項目を手元へ入れるのと同じ順にする。設定（言語）を先に入れてから、None のアクションを
-    // 既定から実体化する。並びは最後にしないと、同じ回の行を並べ替えられない
-    let mut sorted: Vec<(&ItemKey, &Value)> = backup_items
-        .iter()
-        // 現在同期していない行は、以前の同期前の値で上書きしない。今は無い行は、控えで同期していたものだけを戻せる。
-        .filter(|(key, _)| sync_enabled(current, key) && !detached(current, key))
-        .collect();
-    sorted.sort_by_key(|(key, _)| match kind(key) {
-        Some(Kind::Setting(_)) => 0,
-        Some(Kind::Order(_)) => 2,
-        _ => 1,
-    });
-    // ホットキーとキー操作は互いに重なりを見るので、同期と同じく組にして入れる
+    let initial_backup_items = config_items(backup);
     let (hotkey, keys) = (hotkey_item(), text_window_keys_item());
-    if let (Some(hotkey_value), Some(keys_value)) = (
-        sorted
-            .iter()
-            .find(|(key, _)| **key == hotkey)
-            .map(|(_, v)| *v),
-        sorted
-            .iter()
-            .find(|(key, _)| **key == keys)
-            .map(|(_, v)| *v),
-    ) {
-        let before = restored.clone();
-        // キー操作は、これから替わるホットキーとは照らさずに入れ、ホットキーを入れた後で照らし直す
-        let local_hotkey = std::mem::take(&mut restored.hotkey);
-        let keys_applied = apply_value(&mut restored, &keys, keys_value);
-        restored.hotkey = local_hotkey;
-        if !(keys_applied
-            && apply_value(&mut restored, &hotkey, hotkey_value)
-            && apply_value(&mut restored, &keys, keys_value))
-        {
-            restored = before;
-            rejected.extend([hotkey.clone(), keys.clone()]);
+    // 設定（言語）を先に入れる。控えが既定のアクションのままなら、この後の表示言語で実体化するため。
+    for (key, value) in initial_backup_items.iter().filter(|(key, _)| {
+        matches!(kind(key), Some(Kind::Setting(_))) && **key != hotkey && **key != keys
+    }) {
+        if sync_enabled(current, key) && !apply_value(&mut restored, key, value) {
+            rejected.push(key.clone());
         }
-        sorted.retain(|(key, _)| **key != hotkey && **key != keys);
     }
-    for (key, value) in sorted {
+    let mut effective_backup = backup.clone();
+    if effective_backup.actions.is_none() {
+        effective_backup.actions = Some(default_actions_for(restored.language));
+    }
+    let backup_items = config_items(&effective_backup);
+    // ホットキーとキー操作は互いに重なりを見るので、同期と同じく組にして入れる
+    if let (Some(hotkey_value), Some(keys_value)) =
+        (backup_items.get(&hotkey), backup_items.get(&keys))
+    {
+        if sync_enabled(current, &hotkey) && sync_enabled(current, &keys) {
+            let before = restored.clone();
+            // キー操作は、これから替わるホットキーとは照らさずに入れ、ホットキーを入れた後で照らし直す
+            let local_hotkey = std::mem::take(&mut restored.hotkey);
+            let keys_applied = apply_value(&mut restored, &keys, keys_value);
+            restored.hotkey = local_hotkey;
+            if !(keys_applied
+                && apply_value(&mut restored, &hotkey, hotkey_value)
+                && apply_value(&mut restored, &keys, keys_value))
+            {
+                restored = before;
+                rejected.extend([hotkey.clone(), keys.clone()]);
+            }
+        }
+    }
+    // 行を入れてから並びを入れる。同期しない行は、そのデバイスの今の値と場所を残す。
+    let rows: Vec<(&ItemKey, &Value)> = backup_items
+        .iter()
+        .filter(|(key, _)| {
+            !matches!(kind(key), Some(Kind::Setting(_)) | Some(Kind::Order(_)))
+                && sync_enabled(current, key)
+                && !detached(current, key)
+        })
+        .collect();
+    for (key, value) in rows {
         if !apply_value(&mut restored, key, value) {
             rejected.push(key.clone());
         }
     }
-    for key in current_items
-        .keys()
-        .filter(|key| sync_enabled(current, key) && !backup_items.contains_key(*key))
+    for (key, value) in backup_items
+        .iter()
+        .filter(|(key, _)| is_order(key) && sync_enabled(current, key))
     {
+        if !apply_value(&mut restored, key, value) {
+            rejected.push(key.clone());
+        }
+    }
+    for key in current_items.keys().filter(|key| {
+        sync_enabled(current, key)
+            && !backup_items.contains_key(*key)
+            && !detached(&effective_backup, key)
+    }) {
         let _ = remove_local(&mut restored, key);
+    }
+    // 控えがアクションの項目を持たないなら、既定のままという設定ファイルの表現へ戻す。
+    if backup.actions.is_none()
+        && current.sync_actions
+        && (current.actions.is_none()
+            || restored
+                .actions
+                .as_ref()
+                .is_some_and(|actions| actions == &default_actions_for(restored.language)))
+    {
+        restored.actions = None;
     }
     RestoreConfig {
         config: restored,
@@ -6897,6 +6925,24 @@ mod tests {
     }
 
     #[test]
+    fn restoring_a_backup_keeps_a_row_that_was_unsynced_in_the_backup() {
+        let current = Config {
+            replacements: vec![replacement('a', "current")],
+            ..Config::default()
+        };
+        let mut local_in_backup = replacement('a', "previous local value");
+        local_in_backup.sync = false;
+        let backup = Config {
+            replacements: vec![local_in_backup],
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(restored.config.replacements, current.replacements);
+        assert!(restored.rejected.is_empty());
+        assert!(backup_differences(&current, &restored.config).is_empty());
+    }
+
+    #[test]
     fn restoring_a_backup_merges_synced_rows_and_their_order() {
         let mut local_only = replacement('b', "local only");
         local_only.sync = false;
@@ -6958,24 +7004,70 @@ mod tests {
     }
 
     #[test]
-    fn restoring_the_language_comes_before_the_default_actions() {
+    fn restoring_implicit_default_actions_uses_the_restored_language() {
         let current = Config {
             language: Language::En,
+            actions: Some(vec![
+                Action {
+                    id: "e".repeat(32),
+                    name: "received action".into(),
+                    command: "received".into(),
+                    ..Action::default()
+                },
+                default_action(1, crate::i18n::Lang::En),
+            ]),
             ..Config::default()
         };
-        // 控えは日本語で、既定のアクションの1つを同期する行として持つ
-        let mut backup = Config {
+        // `actions` が無い控えでも、設定を先に戻した後の表示言語の既定のアクションを入れる。
+        let backup = Config {
             language: Language::Ja,
             ..Config::default()
         };
-        backup.actions = Some(actions::default_actions(crate::i18n::Lang::Ja));
         let restored = restore_config(&current, &backup);
         assert!(restored.rejected.is_empty());
         assert_eq!(restored.config.language, Language::Ja);
         assert_eq!(
             restored.config.actions,
-            Some(actions::default_actions(crate::i18n::Lang::Ja))
+            Some(vec![
+                default_action(0, crate::i18n::Lang::Ja),
+                default_action(1, crate::i18n::Lang::En),
+            ])
         );
+    }
+
+    #[test]
+    fn restoring_implicit_default_actions_keeps_the_compact_config_representation() {
+        let received = Action {
+            id: "e".repeat(32),
+            name: "received action".into(),
+            command: "received".into(),
+            ..Action::default()
+        };
+        let current = Config {
+            actions: Some(vec![
+                received.clone(),
+                default_action(1, crate::i18n::Lang::system()),
+            ]),
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &Config::default());
+        assert!(restored.rejected.is_empty());
+        assert_eq!(restored.config.actions, None);
+        let shown = restored
+            .config
+            .actions
+            .unwrap_or_else(|| default_actions_for(restored.config.language));
+        assert_eq!(shown, default_actions_for(restored.config.language));
+        assert!(!shown.iter().any(|action| action.id == received.id));
+    }
+
+    #[test]
+    fn restoring_an_implicit_default_backup_from_defaults_changes_nothing() {
+        let current = Config::default();
+        let restored = restore_config(&current, &Config::default());
+        assert_eq!(restored.config.actions, None);
+        assert!(restored.rejected.is_empty());
+        assert!(backup_differences(&current, &restored.config).is_empty());
     }
 
     #[test]

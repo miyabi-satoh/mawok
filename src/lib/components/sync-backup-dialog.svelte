@@ -34,11 +34,11 @@
 			? m.sync_restore_partial()
 			: m.settings_failed({ error: errorCode(error) });
 
-	async function load() {
+	async function load(message = '') {
 		const load = ++loads;
 		backups = null;
 		selected = null;
-		notice = '';
+		notice = message;
 		try {
 			const result = await invoke<SyncBackup[]>('sync_backups');
 			if (load === loads) backups = result;
@@ -63,7 +63,9 @@
 			await invoke('restore_sync_backup', { name: selected });
 			open = false;
 		} catch (error) {
-			notice = failure(error);
+			const message = failure(error);
+			if (errorCode(error) === 'sync.restore_partial') await load(message);
+			else notice = message;
 		} finally {
 			restoring = false;
 		}
@@ -86,6 +88,7 @@
 				<p class="text-sm text-muted-foreground">{m.sync_restore_empty()}</p>
 			{:else}
 				{#each backups as backup (backup.name)}
+					{@const changes = restoreChangeText(backup.changes, locale)}
 					<label
 						class="flex cursor-pointer gap-3 rounded-lg border p-3 text-sm has-checked:border-primary has-focus-visible:ring-3 has-focus-visible:ring-ring/50"
 					>
@@ -96,11 +99,13 @@
 							disabled={restoring}
 							bind:group={selected}
 						/>
-						<span class="flex min-w-0 flex-col gap-1"
-							><span>{date(backup.name)}</span><span class="text-muted-foreground"
-								>{restoreChangeText(backup.changes, locale)}</span
-							></span
-						>
+						<span class="flex min-w-0 flex-col gap-1">
+							<span>{date(backup.name)}</span>
+							{#if changes.changes}<span class="text-muted-foreground">{changes.changes}</span>{/if}
+							{#if changes.removes}<span class="text-muted-foreground">{changes.removes}</span>{/if}
+							{#if changes.bringsBack}<span class="text-muted-foreground">{changes.bringsBack}</span
+								>{/if}
+						</span>
 					</label>
 				{/each}
 			{/if}

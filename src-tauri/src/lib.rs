@@ -2250,8 +2250,6 @@ async fn restore_sync_backup(app: AppHandle, name: String) -> Result<(), String>
     }
     .await;
     release_sync(&app);
-    // 戻した値は手元を変えたのと同じなので、設定を変えたときと同じく、ほかのデバイスへ送る
-    schedule_sync_after_change(&app);
     result
 }
 

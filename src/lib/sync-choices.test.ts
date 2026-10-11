@@ -289,7 +289,7 @@ describe('choiceText', () => {
 });
 
 describe('restoreChangeText', () => {
-	it('消した行は今の名前で示し、先頭3件と残りを日本語の区切りで出す', () => {
+	it('変わるものは先頭3件と残りを日本語の区切りで出す', () => {
 		const changes: SyncBackupDifference[] = [
 			{
 				id: 's_theme',
@@ -299,7 +299,7 @@ describe('restoreChangeText', () => {
 			{
 				id: 'r_a',
 				current: { type: 'replacement', value: replacement },
-				restored: { type: 'deleted' }
+				restored: { type: 'replacement', value: { ...replacement, to: '戻した値' } }
 			},
 			{
 				id: 'o_replacements',
@@ -309,39 +309,94 @@ describe('restoreChangeText', () => {
 			{
 				id: 'n_b',
 				current: { type: 'snippet', value: snippet },
-				restored: { type: 'deleted' }
+				restored: { type: 'snippet', value: { ...snippet, body: '戻した本文' } }
 			}
 		];
-		expect(restoreChangeText(changes, 'ja')).toBe(
-			m.sync_restore_changes({
+		expect(restoreChangeText(changes, 'ja')).toEqual({
+			changes: m.sync_restore_changes({
 				names: [
 					m.settings_theme(),
 					m.sync_choice_row_replacement({ name: '濃度' }),
-					m.sync_restore_order({ name: m.settings_sync_replacements() }),
+					m.sync_restore_order({ name: m.settings_replacements() }),
 					m.sync_restore_more({ count: 1 })
 				].join('、')
-			})
+			}),
+			removes: undefined,
+			bringsBack: undefined
+		});
+	});
+
+	it('行が消える・戻る一覧の並びは、変わるものに挙げない', () => {
+		const changes: SyncBackupDifference[] = [
+			{
+				id: 'n_b',
+				current: { type: 'snippet', value: snippet },
+				restored: { type: 'deleted' }
+			},
+			{
+				id: 'o_snippets',
+				current: { type: 'order', value: 'snippets' },
+				restored: { type: 'order', value: 'snippets' }
+			},
+			{
+				id: 'o_replacements',
+				current: { type: 'order', value: 'replacements' },
+				restored: { type: 'order', value: 'replacements' }
+			}
+		];
+		expect(restoreChangeText(changes, 'ja').changes).toBe(
+			m.sync_restore_changes({ names: m.sync_restore_order({ name: m.settings_replacements() }) })
 		);
 	});
 
-	it('英語では項目名をコンマで区切る', () => {
+	it('消えるものは今の行の名前で示す', () => {
 		const changes: SyncBackupDifference[] = [
-			{
-				id: 's_theme',
-				current: { type: 'theme', value: 'dark' },
-				restored: { type: 'theme', value: 'light' }
-			},
 			{
 				id: 'r_a',
 				current: { type: 'replacement', value: replacement },
 				restored: { type: 'deleted' }
+			},
+			{
+				id: 'n_b',
+				current: { type: 'snippet', value: snippet },
+				restored: { type: 'deleted' }
 			}
 		];
-		expect(restoreChangeText(changes, 'en')).toBe(
-			m.sync_restore_changes({
-				names: [m.settings_theme(), m.sync_choice_row_replacement({ name: '濃度' })].join(', ')
+		expect(restoreChangeText(changes, 'en')).toEqual({
+			changes: undefined,
+			removes: m.sync_restore_removes({
+				names: [
+					m.sync_choice_row_replacement({ name: '濃度' }),
+					m.sync_choice_row_snippet({ name: '挨拶' })
+				].join(', ')
+			}),
+			bringsBack: undefined
+		});
+	});
+
+	it('戻るものは戻した行の名前で示す', () => {
+		const changes: SyncBackupDifference[] = [
+			{
+				id: 'r_a',
+				current: { type: 'deleted' },
+				restored: { type: 'replacement', value: replacement }
+			},
+			{
+				id: 'n_b',
+				current: { type: 'deleted' },
+				restored: { type: 'snippet', value: snippet }
+			}
+		];
+		expect(restoreChangeText(changes, 'en')).toEqual({
+			changes: undefined,
+			removes: undefined,
+			bringsBack: m.sync_restore_brings_back({
+				names: [
+					m.sync_choice_row_replacement({ name: '濃度' }),
+					m.sync_choice_row_snippet({ name: '挨拶' })
+				].join(', ')
 			})
-		);
+		});
 	});
 });
 

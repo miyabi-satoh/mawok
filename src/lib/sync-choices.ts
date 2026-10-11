@@ -57,7 +57,7 @@ function rowName(row: Row): string {
 }
 
 /** 項目の名前。設定の画面でのその項目のラベルと同じ言い方にし、行は種類と行の名前にする */
-export function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefined {
+function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefined {
 	switch (value.type) {
 		case 'language':
 			return m.settings_language();
@@ -116,9 +116,9 @@ export function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | 
 			return m.sync_restore_order({
 				name:
 					{
-						replacements: m.settings_sync_replacements(),
-						snippets: m.settings_sync_snippets(),
-						actions: m.settings_sync_actions()
+						replacements: m.settings_replacements(),
+						snippets: m.settings_category_snippets(),
+						actions: m.settings_category_actions()
 					}[value.value] ?? value.value
 			});
 		default:
@@ -126,18 +126,64 @@ export function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | 
 	}
 }
 
-/** 同期前の控えへ戻すと変わる項目。消した行は、今ある側の名前で示す。 */
-export function restoreChangeText(changes: SyncBackupDifference[], locale: Locale): string {
-	const names = changes
-		.map(({ current, restored }) => {
-			const value = restored.type === 'deleted' ? current : restored;
-			return value.type === 'deleted' ? undefined : label(value);
-		})
-		.filter((name): name is string => Boolean(name));
-	const shown = names.slice(0, 3);
-	if (names.length > shown.length)
-		shown.push(m.sync_restore_more({ count: names.length - shown.length }));
-	return m.sync_restore_changes({ names: shown.join(locale === 'ja' ? '、' : ', ') });
+/** 同期前の控えへ戻すと、変わる・消える・戻る項目。 */
+export function restoreChangeText(changes: SyncBackupDifference[], locale: Locale) {
+	const summarize = (
+		items: SyncBackupDifference[],
+		value: (change: SyncBackupDifference) => SyncValue,
+		message: (args: { names: string }) => string
+	) => {
+		const names = items
+			.map((change) => {
+				const named = value(change);
+				return named.type === 'deleted' ? undefined : label(named);
+			})
+			.filter((name): name is string => Boolean(name));
+		if (names.length === 0) return undefined;
+		const shown = names.slice(0, 3);
+		if (names.length > shown.length)
+			shown.push(m.sync_restore_more({ count: names.length - shown.length }));
+		return message({ names: shown.join(locale === 'ja' ? '、' : ', ') });
+	};
+	// 行が消える・戻るなら並びも必ず変わる。その一覧の並びまで挙げると、同じことを2回言うことになる
+	const ROW_OF_ORDER: Record<string, SyncValue['type']> = {
+		replacements: 'replacement',
+		snippets: 'snippet',
+		actions: 'action'
+	};
+	const rowsMoved = new Set(
+		changes
+			.filter(({ current, restored }) => current.type === 'deleted' || restored.type === 'deleted')
+			.map(({ current, restored }) => (current.type === 'deleted' ? restored.type : current.type))
+	);
+	const impliedOrder = ({ restored }: SyncBackupDifference) =>
+		restored.type === 'order' && rowsMoved.has(ROW_OF_ORDER[restored.value]);
+	return {
+		changes: summarize(
+			changes.filter(
+				(change) =>
+					change.current.type !== 'deleted' &&
+					change.restored.type !== 'deleted' &&
+					!impliedOrder(change)
+			),
+			({ restored }) => restored,
+			m.sync_restore_changes
+		),
+		removes: summarize(
+			changes.filter(
+				({ current, restored }) => current.type !== 'deleted' && restored.type === 'deleted'
+			),
+			({ current }) => current,
+			m.sync_restore_removes
+		),
+		bringsBack: summarize(
+			changes.filter(
+				({ current, restored }) => current.type === 'deleted' && restored.type !== 'deleted'
+			),
+			({ restored }) => restored,
+			m.sync_restore_brings_back
+		)
+	};
 }
 
 /** `other` と同じ種類の値なら、その値。行は、片方が「削除」のことがある */
