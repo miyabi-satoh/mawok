@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CONSTANTS } from '$lib/bindings/constants';
 import type { SyncConflict } from '$lib/bindings/SyncConflict';
 import { m } from '$lib/paraglide/messages';
 import { settings } from '$lib/settings.svelte';
@@ -67,7 +68,7 @@ describe('設定画面の同期', () => {
 			.not.toBeInTheDocument();
 	});
 
-	it('Pro なら同期する種類を切り替えられ、設定ごとの同期も選べる', async () => {
+	it('Pro なら同期する種類を切り替えられる', async () => {
 		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
 		const screen = await openAccount();
 		await screen.getByRole('switch', { name: m.settings_sync_settings() }).click();
@@ -88,18 +89,77 @@ describe('設定画面の同期', () => {
 				['set_sync_kind', { kind: 'history', enabled: false }]
 			])
 		);
-		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
-		await screen.getByRole('button', { name: m.settings_sync_select_settings() }).click();
-		await expect
-			.element(screen.getByRole('alertdialog', { name: m.settings_sync_select_settings_title() }))
-			.toBeVisible();
-		await screen.getByRole('checkbox', { name: m.settings_theme() }).click();
-		expect(callsOf(invoked, 'set_sync_excluded_setting')).toEqual([
-			['set_sync_excluded_setting', { name: 'theme', sync: false }]
-		]);
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_sync_choice_open() }))
 			.not.toBeInTheDocument();
+	});
+
+	it('Pro で設定の同期がオンなら、設定の雲の印でその項目を外せる', async () => {
+		settings.current = settingsView({ proAvailable: true, aiService: 'openai' });
+		const screen = await render(Page);
+		const toggle = screen.getByRole('button', {
+			name: m.settings_sync_item({ name: m.settings_theme() })
+		});
+		await expect.element(toggle).toHaveAttribute('aria-pressed', 'true');
+		await toggle.click();
+		expect(callsOf(invoked, 'set_sync_excluded_setting')).toEqual([
+			['set_sync_excluded_setting', { name: 'theme', sync: false }]
+		]);
+	});
+
+	it('同期から外した設定は、オフの雲の印で出す', async () => {
+		settings.current = settingsView({ proAvailable: true, syncExcludedSettings: ['theme'] });
+		const screen = await render(Page);
+		await expect
+			.element(
+				screen.getByRole('button', { name: m.settings_sync_item({ name: m.settings_theme() }) })
+			)
+			.toHaveAttribute('aria-pressed', 'false');
+	});
+
+	it('設定の同期がオフ、または Pro でなければ、設定の雲の印を出さない', async () => {
+		settings.current = settingsView({
+			proAvailable: true,
+			syncKinds: {
+				settings: false,
+				keys: true,
+				replacements: true,
+				snippets: true,
+				actions: true,
+				history: true
+			}
+		});
+		let screen = await render(Page);
+		expect(screen.container.querySelector('[data-sync-setting="theme"]')).toBeNull();
+
+		settings.current = settingsView();
+		screen = await render(Page);
+		expect(screen.container.querySelector('[data-sync-setting="theme"]')).toBeNull();
+	});
+
+	it('同期から外せる設定はすべて、その場所に雲の印を出す', async () => {
+		settings.current = settingsView({ proAvailable: true, aiService: 'openai' });
+		const screen = await render(Page);
+		const found = new Set<string>();
+		const collect = () => {
+			for (const toggle of screen.container.querySelectorAll<HTMLElement>('[data-sync-setting]')) {
+				const name = toggle.dataset.syncSetting;
+				if (name) found.add(name);
+			}
+		};
+
+		collect();
+		for (const label of [
+			m.settings_category_draft(),
+			m.settings_category_copy(),
+			m.settings_category_actions()
+		]) {
+			await screen.getByRole('tab', { name: label }).click();
+			collect();
+		}
+
+		expect(found.size).toBe(CONSTANTS.SYNCABLE_SETTINGS.length);
+		expect([...found].sort()).toEqual([...CONSTANTS.SYNCABLE_SETTINGS].sort());
 	});
 
 	it('定型文の同期がオフなら、雲の印の代わりにオフの説明を出す', async () => {

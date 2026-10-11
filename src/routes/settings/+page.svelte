@@ -679,6 +679,17 @@
 
 {#if settings.current}
 	{@const view = settings.current}
+	{#snippet syncSetting(name: string, label: string)}
+		{#if view.proAvailable && view.syncKinds.settings}
+			<SyncToggle
+				compact
+				settingName={name}
+				pressed={!view.syncExcludedSettings.includes(name)}
+				name={label}
+				onchange={(sync) => void run('set_sync_excluded_setting', { name, sync })}
+			/>
+		{/if}
+	{/snippet}
 	<main class="settings-page flex h-dvh" {@attach showWindow}>
 		<Tabs.Root
 			orientation="vertical"
@@ -756,6 +767,11 @@
 				{/if}
 				<Tabs.Content value="general">
 					<div class="flex flex-col gap-5">
+						{#if view.proAvailable && view.syncKinds.settings}
+							<p class="text-xs leading-snug text-muted-foreground">
+								{m.settings_sync_description()}
+							</p>
+						{/if}
 						<SettingsSection title={m.settings_section_startup()}>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
@@ -775,6 +791,10 @@
 									<Field.Label for="draft-always-on-top"
 										>{m.settings_draft_always_on_top()}</Field.Label
 									>
+									{@render syncSetting(
+										'text_window_always_on_top',
+										m.settings_draft_always_on_top()
+									)}
 									<Switch
 										id="draft-always-on-top"
 										bind:checked={
@@ -789,6 +809,7 @@
 									<Field.Label for="hide-draft-on-blur"
 										>{m.settings_hide_draft_on_blur()}</Field.Label
 									>
+									{@render syncSetting('hide_text_window_on_blur', m.settings_hide_draft_on_blur())}
 									<Switch
 										id="hide-draft-on-blur"
 										bind:checked={
@@ -804,6 +825,7 @@
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<Field.Label for="show-draft-buttons">{m.settings_draft_buttons()}</Field.Label>
+									{@render syncSetting('show_text_window_buttons', m.settings_draft_buttons())}
 									<Switch
 										id="show-draft-buttons"
 										bind:checked={
@@ -818,6 +840,7 @@
 									<Field.Label for="draft-history-size"
 										>{m.settings_draft_history_size()}</Field.Label
 									>
+									{@render syncSetting('text_history_size', m.settings_draft_history_size())}
 									<Input
 										id="draft-history-size"
 										type="number"
@@ -837,6 +860,7 @@
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<Field.Title id="language">{m.settings_language()}</Field.Title>
+									{@render syncSetting('language', m.settings_language())}
 									<!-- 選択中の項目を押すと空になるので、空は無視して今の設定のまま表示する -->
 									<ToggleGroup.Root
 										type="single"
@@ -860,6 +884,7 @@
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<Field.Title id="theme">{m.settings_theme()}</Field.Title>
+									{@render syncSetting('theme', m.settings_theme())}
 									<ToggleGroup.Root
 										type="single"
 										variant="outline"
@@ -987,9 +1012,17 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="draft">
+					{#if view.proAvailable && view.syncKinds.settings}
+						<p class="text-xs leading-snug text-muted-foreground">
+							{m.settings_sync_description()}
+						</p>
+					{/if}
 					<SettingsSection>
 						<SettingsRow>
-							<Field.Label for="draft-font-family">{m.settings_draft_font()}</Field.Label>
+							<div class="flex items-center gap-1">
+								<Field.Label for="draft-font-family">{m.settings_draft_font()}</Field.Label>
+								{@render syncSetting('text_font_family', m.settings_draft_font())}
+							</div>
 							<!-- 入力欄の文字の大きさは class で決め打ちする。部品の既定はウィンドウの幅 768px で切り替わり、広げる途中で小さくなるため（辞書の欄も同じ） -->
 							<div class="flex gap-2">
 								<Input
@@ -1003,25 +1036,38 @@
 										}
 									}
 								/>
-								<Input
-									type="number"
-									class="w-20 text-sm"
-									aria-label={m.settings_draft_font_size()}
-									min={MIN_DRAFT_FONT_SIZE}
-									max={MAX_DRAFT_FONT_SIZE}
-									bind:value={
-										() => fontSize,
-										(value) => {
-											// 空にした途中の状態では保存しない
-											const size = Number(value);
-											if (!Number.isFinite(size) || size <= 0) return;
-											// 画面側でも範囲に収める。Rust 側も収めるが、そちらだけだと画面の表示と実際の値がずれたまま残る。
-											// 整数でない値や u16 に収まらない値は、そもそも invoke が受け取れずに保存が落ちる
-											fontSize = clamp(Math.round(size), MIN_DRAFT_FONT_SIZE, MAX_DRAFT_FONT_SIZE);
-											saveFont();
+								<div class="flex items-center gap-1">
+									<span
+										id="draft-font-size-label"
+										class="text-xs whitespace-nowrap text-muted-foreground"
+										>{m.settings_draft_font_size()}</span
+									>
+									{@render syncSetting('text_font_size', m.settings_draft_font_size())}
+									<Input
+										id="draft-font-size"
+										type="number"
+										class="w-20 text-sm"
+										aria-labelledby="draft-font-size-label"
+										min={MIN_DRAFT_FONT_SIZE}
+										max={MAX_DRAFT_FONT_SIZE}
+										bind:value={
+											() => fontSize,
+											(value) => {
+												// 空にした途中の状態では保存しない
+												const size = Number(value);
+												if (!Number.isFinite(size) || size <= 0) return;
+												// 画面側でも範囲に収める。Rust 側も収めるが、そちらだけだと画面の表示と実際の値がずれたまま残る。
+												// 整数でない値や u16 に収まらない値は、そもそも invoke が受け取れずに保存が落ちる
+												fontSize = clamp(
+													Math.round(size),
+													MIN_DRAFT_FONT_SIZE,
+													MAX_DRAFT_FONT_SIZE
+												);
+												saveFont();
+											}
 										}
-									}
-								/>
+									/>
+								</div>
 							</div>
 							<Field.Description class="leading-snug">
 								{m.settings_draft_font_description()}
@@ -1040,6 +1086,7 @@
 											>
 												{row.label()}
 											</Field.Label>
+											{@render syncSetting(`text_color_${row.theme}`, row.label())}
 											<!-- 色見本は #rrggbb しか扱えないので、既定のときは標準の色を見せる -->
 											<input
 												type="color"
@@ -1073,6 +1120,7 @@
 							<!-- ほかの行のボタンと同じ高さにして、説明文までの間隔を揃える -->
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<Field.Label for="draft-guidance">{m.settings_draft_guidance()}</Field.Label>
+								{@render syncSetting('input_guidance', m.settings_draft_guidance())}
 								<!-- 既定のままなら戻すものがないので押せなくする -->
 								<Button variant="outline" disabled={guidance === null} onclick={resetGuidance}>
 									{m.settings_draft_guidance_reset()}
@@ -1094,10 +1142,16 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="copy">
+					{#if view.proAvailable && view.syncKinds.settings}
+						<p class="text-xs leading-snug text-muted-foreground">
+							{m.settings_sync_description()}
+						</p>
+					{/if}
 					<SettingsSection>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<Field.Label for="trim-trailing">{m.settings_trim_trailing()}</Field.Label>
+								{@render syncSetting('trim_trailing_whitespace', m.settings_trim_trailing())}
 								<Switch
 									id="trim-trailing"
 									bind:checked={
@@ -1113,6 +1167,10 @@
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<Field.Label for="exclude-history">{m.settings_exclude_history()}</Field.Label>
+								{@render syncSetting(
+									'exclude_from_clipboard_history',
+									m.settings_exclude_history()
+								)}
 								<Switch
 									id="exclude-history"
 									bind:checked={
@@ -1126,15 +1184,21 @@
 							</Field.Description>
 						</SettingsRow>
 						<SettingsRow>
-							<Field.Title>{m.settings_char_width()}</Field.Title>
+							<div class="flex items-center gap-1">
+								<Field.Title>{m.settings_char_width()}</Field.Title>
+								{@render syncSetting('char_widths', m.settings_char_width())}
+							</div>
 							<Field.Description class="leading-snug">
 								{m.settings_char_width_description()}
 							</Field.Description>
 							<!-- 句読点は幅でなく形を選ぶ。「、。」と「，．」はどちらも全角で、「、。」にはふつうに使う半角が無いため -->
 							<Field.Field orientation="horizontal" class="flex-wrap justify-between">
-								<span id="char-width-punctuation" class="text-sm"
-									>{m.settings_char_width_punctuation()}</span
-								>
+								<div class="flex items-center gap-1">
+									<span id="char-width-punctuation" class="text-sm"
+										>{m.settings_char_width_punctuation()}</span
+									>
+									{@render syncSetting('punctuation_style', m.settings_char_width_punctuation())}
+								</div>
 								<ToggleGroup.Root
 									type="single"
 									variant="outline"

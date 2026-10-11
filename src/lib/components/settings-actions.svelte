@@ -50,6 +50,11 @@
 	let keyState = $state<{ service: AiService; hasKey: boolean | null } | null>(null);
 	/** 今の AI サービスのキーがあるか。まだ確かめていなければ undefined、確かめられなかったときは null */
 	const hasKey = $derived(keyState?.service === view.aiService ? keyState.hasKey : undefined);
+	const syncSettingsAvailable = $derived(view.proAvailable && view.syncKinds.settings);
+
+	function setSyncSetting(name: string, sync: boolean) {
+		void editor.call('set_sync_excluded_setting', { name, sync });
+	}
 	/**
 	 * キーを確かめるたびに振る番号。後から確かめ始めていれば、先の確かめの返事は古いので捨てる
 	 * （遅れて返った前のサービスの確かめが、替えた後の表示を上書きしないため）
@@ -311,10 +316,22 @@
 			</SettingsRow>
 		</SettingsSection>
 	</div>
+	{#if syncSettingsAvailable}
+		<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
+	{/if}
 	<SettingsSection>
 		<SettingsRow>
 			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 				<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
+				{#if syncSettingsAvailable}
+					<SyncToggle
+						compact
+						settingName="ai_service"
+						pressed={!view.syncExcludedSettings.includes('ai_service')}
+						name={m.settings_ai_service()}
+						onchange={(sync) => setSyncSetting('ai_service', sync)}
+					/>
+				{/if}
 				<!-- 5つ並べると最小の幅に収まらないので、ボタンの並びではなく一覧から選ぶ -->
 				<NativeSelect.Root
 					aria-labelledby="ai-service"
@@ -413,6 +430,15 @@
 							class="min-h-8 *:data-[slot=field-label]:flex-none!"
 						>
 							<Field.Label for="ai-model">{m.settings_ai_model()}</Field.Label>
+							{#if syncSettingsAvailable}
+								<SyncToggle
+									compact
+									settingName="ai_models"
+									pressed={!view.syncExcludedSettings.includes('ai_models')}
+									name={m.settings_ai_model()}
+									onchange={(sync) => setSyncSetting('ai_models', sync)}
+								/>
+							{/if}
 							<Input
 								id="ai-model"
 								class="w-56 min-w-0 font-mono text-sm"

@@ -3,23 +3,19 @@
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SyncChoiceDialog from '$lib/components/sync-choice-dialog.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import * as Field from '$lib/components/ui/field';
 	import { Switch } from '$lib/components/ui/switch';
-	import { CONSTANTS } from '$lib/bindings/constants';
 	import type { Call } from '$lib/call';
 	import { m } from '$lib/paraglide/messages';
 	import type { SettingsView } from '$lib/settings.svelte';
-	import { syncSettingLabel } from '$lib/sync-choices';
 
-	/** アカウントの同期。種類ごとの切り替えと、設定を1つずつ外す選択画面を置く。 */
+	/** アカウントの同期。種類ごとの切り替えと、食い違いを選ぶ画面を置く。 */
 	let {
 		view,
 		call,
 		choiceOpen = $bindable(false)
 	}: { view: SettingsView; call: Call; choiceOpen: boolean } = $props();
 
-	let settingsOpen = $state(false);
 	const kinds = [
 		{ kind: 'settings', label: m.settings_sync_settings },
 		{ kind: 'keys', label: m.settings_sync_keys },
@@ -42,11 +38,6 @@
 					}
 				/>
 			</Field.Field>
-			{#if kind === 'settings' && view.syncKinds.settings}
-				<Button variant="outline" size="sm" class="w-fit" onclick={() => (settingsOpen = true)}>
-					{m.settings_sync_select_settings()}
-				</Button>
-			{/if}
 		</SettingsRow>
 	{/each}
 	{#if view.syncConflicts > 0}
@@ -59,31 +50,4 @@
 	{/if}
 </SettingsSection>
 
-<AlertDialog.Root bind:open={settingsOpen}>
-	<AlertDialog.Content class="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto]">
-		<AlertDialog.Header>
-			<AlertDialog.Title>{m.settings_sync_select_settings_title()}</AlertDialog.Title>
-		</AlertDialog.Header>
-		<div class="-mx-4 flex flex-col gap-3 overflow-y-auto px-4">
-			{#each CONSTANTS.SYNCABLE_SETTINGS as name (name)}
-				<label class="flex items-center gap-2 text-sm">
-					<input
-						type="checkbox"
-						class="size-4 accent-primary"
-						checked={!view.syncExcludedSettings.includes(name)}
-						onchange={(event) =>
-							void call('set_sync_excluded_setting', {
-								name,
-								sync: event.currentTarget.checked
-							})}
-					/>
-					{syncSettingLabel(name)}
-				</label>
-			{/each}
-		</div>
-		<AlertDialog.Footer>
-			<AlertDialog.Cancel>{m.settings_sync_select_settings_close()}</AlertDialog.Cancel>
-		</AlertDialog.Footer>
-	</AlertDialog.Content>
-</AlertDialog.Root>
 <SyncChoiceDialog bind:open={choiceOpen} platform={view.platform} />

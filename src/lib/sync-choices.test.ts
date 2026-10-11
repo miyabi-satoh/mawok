@@ -5,7 +5,7 @@ import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { m } from '$lib/paraglide/messages';
 import type { Action, Replacement, Snippet } from '$lib/settings.svelte';
 import { DEFAULT_DRAFT_KEYS } from '$lib/test-support/settings-view';
-import { choiceText, fromDifference, sideName, syncSettingLabel } from './sync-choices';
+import { choiceText, fromDifference, sideName } from './sync-choices';
 
 function conflict(thisDevice: SyncValue, otherDevice: SyncValue): SyncConflict {
 	return { id: 's_item', seq: 2, thisDevice, otherDevice };
@@ -46,14 +46,6 @@ const action: Action = {
 	enabled: true,
 	sync: true
 };
-
-describe('syncSettingLabel', () => {
-	it('食い違いを選ぶ画面と同じ設定名を使い、知らない名前はそのまま出す', () => {
-		expect(syncSettingLabel('theme')).toBe(m.settings_theme());
-		expect(syncSettingLabel('text_font_family')).toBe(m.settings_draft_font());
-		expect(syncSettingLabel('unknown_setting')).toBe('unknown_setting');
-	});
-});
 
 /**
  * 同期する設定の項目（docs/sync.md「同期する単位」）ごとの、名前と値の言い方。

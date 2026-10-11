@@ -115,11 +115,6 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 	}
 }
 
-/** 種類「設定」から外す項目の名前。食い違いを選ぶ画面と同じラベルを使う。 */
-export function syncSettingLabel(name: string): string {
-	return label({ type: name } as Exclude<SyncValue, { type: 'deleted' }>) ?? name;
-}
-
 /** `other` と同じ種類の値なら、その値。行は、片方が「削除」のことがある */
 function sameType<T extends SyncValue>(value: T, other: SyncValue): T | null {
 	return other.type === value.type ? (other as T) : null;
