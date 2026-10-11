@@ -350,6 +350,7 @@
 	"settings_sync_actions_off": "Action sync is off. Turn it on in Account settings.",
 	"settings_sync_choice_notice": "The same setting was changed separately on this device and on another device. It won't sync until you choose.",
 	"settings_sync_choice_open": "Choose Which to Use...",
+	"settings_sync_restore_open": "Restore settings from before a sync...",
 	"sync_choice_title": "Which settings do you want to use?",
 	"sync_choice_this_device": "This device",
 	"sync_choice_other_device": "Other device",
@@ -371,5 +372,13 @@
 	"sync_choice_row_snippet": "Snippet “{name}”",
 	"sync_choice_row_action": "Action “{name}”",
 	"sync_choice_later": "Choose later",
-	"sync_choice_unreadable": "This version of Mawok can't load the settings from your other devices. Update Mawok to the latest version and try again."
+	"sync_choice_unreadable": "This version of Mawok can't load the settings from your other devices. Update Mawok to the latest version and try again.",
+	"sync_restore_title": "Restore settings from before a sync",
+	"sync_restore_description": "Restores the settings from before sync changed them on this device. The restored settings will sync to your other devices.",
+	"sync_restore_empty": "There are no settings to restore yet. When sync changes the settings on this device, their previous state will appear here.",
+	"sync_restore_loading": "Loading…",
+	"sync_restore_changes": "Changes when restored: {names}",
+	"sync_restore_more": "{count} more",
+	"sync_restore_confirm": "Restore these settings",
+	"sync_restore_order": "Order of {name}"
 }

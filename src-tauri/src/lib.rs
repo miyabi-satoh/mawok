@@ -863,13 +863,14 @@ fn get_settings(state: tauri::State<'_, AppState>) -> SettingsView {
 /// 起動時に設定ファイルをそのまま読めなかった場合と、起動した後に壊されていた場合は、上書きする前に元のファイルを写す。
 /// トレイに出す設定ファイルの問題が、この保存で変わったかどうかを返す
 fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<bool, String> {
-    Ok(save_config_if_current(app, None, change)?.expect("unconditional save"))
+    Ok(save_config_if_current(app, None, false, change)?.expect("unconditional save"))
 }
 
 /// `expected_generation` を指定した同期だけ、利用者の保存と競合していない設定を保存する。
 fn save_config_if_current(
     app: &AppHandle,
     expected_generation: Option<usize>,
+    sync_backup: bool,
     change: impl FnOnce(&mut Config),
 ) -> Result<Option<bool>, String> {
     let state = app.state::<AppState>();
@@ -900,6 +901,13 @@ fn save_config_if_current(
             repaired: &[],
         },
     };
+    if sync_backup && next != *config {
+        match config::save_sync_backup(&state.config_path, SystemTime::now()) {
+            Ok(Some(path)) => info!("saved settings before sync to {}", path.display()),
+            Ok(None) => {}
+            Err(error) => warn!("couldn't save settings before sync: {error}"),
+        }
+    }
     let backed_up = config::save_with_backup(&state.config_path, &next, loaded, SystemTime::now())
         .map_err(|error| error.to_string())?;
     if let Some(path) = &backed_up {
@@ -986,7 +994,8 @@ fn save_synced_config(
             }
         }
     }
-    let saved = save_config_if_current(app, Some(generation), |config| *config = next.clone());
+    let saved =
+        save_config_if_current(app, Some(generation), true, |config| *config = next.clone());
     if !matches!(saved, Ok(Some(_))) {
         // 保存しなかったので、先に当てたものを設定に残る値へ戻す
         if next.hotkey != current.hotkey {
@@ -2151,6 +2160,90 @@ async fn resolve_sync_conflicts_held(
         }
         None => stale(),
     })
+}
+
+/// 同期が手元を書き換える前の控え。今と同じ内容の控えは、選ぶ手がかりにならないので出さない。
+#[tauri::command]
+async fn sync_backups(app: AppHandle) -> Result<Vec<sync::SyncBackup>, String> {
+    let state = app.state::<AppState>();
+    let (current, _) = config_with_generation(&state);
+    let path = state.config_path.clone();
+    run_blocking(move || {
+        let mut backups = Vec::new();
+        for backup in config::sync_backup_paths(&path)? {
+            if backups.len() == config::SYNC_BACKUP_LIST_LIMIT {
+                break;
+            }
+            let Some(name) = backup.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let backup_config = match config::load_sync_backup(&path, name) {
+                Ok(backup) => backup,
+                Err(error) => {
+                    warn!("couldn't read sync backup {name}: {error}");
+                    continue;
+                }
+            };
+            let restored = sync::restore_config(&current, &backup_config);
+            let changes = sync::backup_differences(&current, &restored);
+            if !changes.is_empty() {
+                backups.push(sync::SyncBackup {
+                    name: name.to_string(),
+                    changes,
+                });
+            }
+        }
+        Ok::<_, std::io::Error>(backups)
+    })
+    .await?
+    .map_err(|error| error.to_string())
+}
+
+/// 選んだ控えの同期する設定を手元へ入れる。保存と反映は同期で届いた設定と同じ経路を通す。
+#[tauri::command]
+async fn restore_sync_backup(app: AppHandle, name: String) -> Result<(), String> {
+    if !config::valid_sync_backup_name(&name) {
+        return Err("invalid sync backup name".to_string());
+    }
+    info!("restore sync backup {name}");
+    hold_sync(&app).await;
+    let result = async {
+        let state = app.state::<AppState>();
+        let (current, generation) = config_with_generation(&state);
+        let path = state.config_path.clone();
+        let backup = run_blocking(move || config::load_sync_backup(&path, &name))
+            .await?
+            .map_err(|error| error.to_string())?;
+        let next = sync::restore_config(&current, &backup);
+        if next == current {
+            return Ok(());
+        }
+        let action_state = app.state::<ActionState>();
+        let _settings = if next.ai_service != current.ai_service {
+            Some(action_state.settings.lock().await)
+        } else {
+            None
+        };
+        let _commit = state.sync_commit.lock().await;
+        match save_synced_config(&app, generation, next)? {
+            Some(rejected) => {
+                // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
+                apply_config(&app);
+                let _ = app.emit(events::SYNC_APPLIED, settings_view(&state));
+                if rejected.is_empty() {
+                    Ok(())
+                } else {
+                    Err("some restored settings couldn't be applied".to_string())
+                }
+            }
+            None => Err("settings changed while restoring the backup".to_string()),
+        }
+    }
+    .await;
+    release_sync(&app);
+    // 戻した値は手元を変えたのと同じなので、設定を変えたときと同じく、ほかのデバイスへ送る
+    schedule_sync_after_change(&app);
+    result
 }
 
 /// 同期の外で設定と記録を変えるときの、変える前に読んだもの。
@@ -4850,6 +4943,8 @@ pub fn run() {
             get_settings,
             set_sync_kind,
             set_sync_excluded_setting,
+            sync_backups,
+            restore_sync_backup,
             sync_conflicts,
             resolve_sync_conflicts,
             take_sync_choice_request,
@@ -5047,6 +5142,9 @@ pub fn run() {
             // 読むとファイルができるので、その前に見る
             let config_missing = config::is_missing(&config_path);
             let (mut config, config_problem) = config::load_or_create(&config_path);
+            if let Err(error) = config::clean_sync_backups(&config_path, SystemTime::now()) {
+                warn!("couldn't clean old sync backups: {error}");
+            }
             // つながらないまま起動しても、今このデバイスで同期する食い違いだけを知らせる
             let sync_conflicts = sync::load(&sync_state_path)
                 .map_or(0, |record| record.active_conflict_count(&config));

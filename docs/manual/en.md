@@ -99,6 +99,8 @@ The device you added receives the same settings and history.
 
 If you change the same setting on different devices, "Choose Which to Use..." appears under "Account" in Settings. Select it, choose "This device" or "Other device" for each item, then select "Apply Selected Settings". You can also open it from "Choose Which Settings to Use…" in the {macos:menu bar}{windows:system tray} menu.
 
+To go back to settings from before sync changed them, select "Restore settings from before a sync..." under "Account" in Settings. Choose the date you want, then select "Restore these settings".
+
 ## Keyboard shortcuts
 
 | Action | Key |

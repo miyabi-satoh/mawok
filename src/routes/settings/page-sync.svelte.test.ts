@@ -3,6 +3,7 @@ import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CONSTANTS } from '$lib/bindings/constants';
 import type { SyncConflict } from '$lib/bindings/SyncConflict';
+import type { SyncBackup } from '$lib/bindings/SyncBackup';
 import { m } from '$lib/paraglide/messages';
 import { settings } from '$lib/settings.svelte';
 import { sideName } from '$lib/sync-choices';
@@ -30,6 +31,19 @@ const conflicts: SyncConflict[] = [
 	}
 ];
 
+const backups: SyncBackup[] = [
+	{
+		name: '20261011T123456Z.toml',
+		changes: [
+			{
+				id: 's_theme',
+				current: { type: 'theme', value: 'dark' },
+				restored: { type: 'theme', value: 'light' }
+			}
+		]
+	}
+];
+
 /** トレイから、選ぶ画面を頼まれているか */
 let requested: boolean;
 
@@ -49,6 +63,8 @@ describe('設定画面の同期', () => {
 					return Promise.resolve(requested);
 				case 'sync_conflicts':
 					return Promise.resolve({ items: conflicts, unreadable: false });
+				case 'sync_backups':
+					return Promise.resolve(backups);
 				case 'resolve_sync_conflicts':
 					return Promise.resolve({ stale: false, rejected: [] });
 				default:
@@ -92,6 +108,34 @@ describe('設定画面の同期', () => {
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_sync_choice_open() }))
 			.not.toBeInTheDocument();
+	});
+
+	it('Pro なら同期前の設定を選んで戻せる', async () => {
+		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
+		const screen = await openAccount();
+		await screen.getByRole('button', { name: m.settings_sync_restore_open() }).click();
+		const dialog = screen.getByRole('alertdialog', { name: m.sync_restore_title() });
+		await expect.element(dialog.getByText(m.settings_theme(), { exact: false })).toBeVisible();
+		const confirm = dialog.getByRole('button', { name: m.sync_restore_confirm() });
+		await expect.element(confirm).toBeDisabled();
+		await dialog.getByRole('radio').click();
+		await expect.element(confirm).toBeEnabled();
+		await confirm.click();
+		expect(callsOf(invoked, 'restore_sync_backup')).toEqual([
+			['restore_sync_backup', { name: '20261011T123456Z.toml' }]
+		]);
+	});
+
+	it('戻せる同期前の設定が無ければ、その理由を出す', async () => {
+		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
+		invoked.mockImplementation((command) =>
+			Promise.resolve(
+				command === 'sync_backups' ? [] : command === 'take_sync_choice_request' ? false : undefined
+			)
+		);
+		const screen = await openAccount();
+		await screen.getByRole('button', { name: m.settings_sync_restore_open() }).click();
+		await expect.element(screen.getByText(m.sync_restore_empty())).toBeVisible();
 	});
 
 	it('Pro で設定の同期がオンなら、設定の雲の印でその項目を外せる', async () => {

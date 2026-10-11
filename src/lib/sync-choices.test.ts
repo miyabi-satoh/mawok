@@ -191,7 +191,7 @@ describe('choiceText', () => {
 	it('同期する設定の項目を、どれも見ている', () => {
 		// SyncValue の種類のうち、行と「削除」を除いたもの。足したら、上の表にも足す
 		const types: Record<
-			Exclude<SyncValue['type'], 'replacement' | 'snippet' | 'action' | 'deleted'>,
+			Exclude<SyncValue['type'], 'replacement' | 'snippet' | 'action' | 'deleted' | 'order'>,
 			true
 		> = {
 			language: true,

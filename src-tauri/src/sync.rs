@@ -1670,8 +1670,83 @@ pub enum SyncValue {
     Replacement(Replacement),
     Snippet(Snippet),
     Action(Action),
+    /// 同期する行の並び。食い違いでは自動で合わせるが、控えへ戻すときは利用者に知らせる。
+    Order(String),
     /// 行を消した。
     Deleted,
+}
+
+/// 控えへ戻すと変わる、同期の1項目。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBackupDifference {
+    pub id: String,
+    pub current: SyncValue,
+    pub restored: SyncValue,
+}
+
+/// 手元の同期前の控え。名前は UTC の作成日時で、画面は差分を選ぶ手がかりとして出す。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBackup {
+    pub name: String,
+    pub changes: Vec<SyncBackupDifference>,
+}
+
+/// 控えの値を、同期する設定だけへ入れる。デバイス固有の項目と、設定ファイルの知らない項目は呼び出し元が持つ現在値のままになる。
+pub fn restore_config(current: &Config, backup: &Config) -> Config {
+    let mut restored = current.clone();
+    let current_items = config_items(current);
+    let backup_items = config_items(backup);
+    for (key, value) in &backup_items {
+        let _ = apply_value(&mut restored, key, value);
+    }
+    for key in current_items
+        .keys()
+        .filter(|key| !backup_items.contains_key(*key))
+    {
+        let _ = remove_local(&mut restored, key);
+    }
+    // 行の `id` と `sync` も控えの状態へ戻す。同期を止めていた行も、控えを作った時点の状態へ戻せる。
+    restored.replacements = backup.replacements.clone();
+    restored.snippets = backup.snippets.clone();
+    restored.actions.clone_from(&backup.actions);
+    restored
+}
+
+/// 現在の設定と控えへ戻した後の設定を、同期の項目と同じ粒度で比べる。
+pub fn backup_differences(current: &Config, restored: &Config) -> Vec<SyncBackupDifference> {
+    let current_items = config_items(current);
+    let restored_items = config_items(restored);
+    current_items
+        .keys()
+        .chain(restored_items.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|key| {
+            let before = current_items.get(key);
+            let after = restored_items.get(key);
+            if before == after {
+                return None;
+            }
+            Some(SyncBackupDifference {
+                id: key.id.clone(),
+                current: backup_value(current, key)?,
+                restored: backup_value(restored, key)?,
+            })
+        })
+        .collect()
+}
+
+fn backup_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
+    match kind(key)? {
+        Kind::Order(name) => Some(SyncValue::Order(name.to_string())),
+        _ => sync_value(config, key),
+    }
 }
 
 /// 食い違っている1項目。
@@ -6728,5 +6803,46 @@ mod tests {
         assert_eq!(on.history, Some(history(&[("a", 10), ("b", 200)], 0)));
         assert_eq!(transport.written(HISTORY_ID).len(), 1);
         assert_eq!(on.state.paused.get("history"), None);
+    }
+
+    #[test]
+    fn restoring_a_backup_keeps_device_settings_and_reports_synced_changes() {
+        let current = Config {
+            theme: Theme::Dark,
+            autostart: false,
+            sync_settings: false,
+            replacements: vec![replacement('a', "current")],
+            ..Config::default()
+        };
+        let backup = Config {
+            theme: Theme::Light,
+            autostart: true,
+            sync_settings: true,
+            replacements: vec![replacement('b', "backup")],
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(restored.theme, Theme::Light);
+        assert!(!restored.autostart);
+        assert!(!restored.sync_settings);
+        assert_eq!(restored.replacements, backup.replacements);
+        let changes = backup_differences(&current, &restored);
+        assert!(changes.iter().any(|change| change.id == "s_theme"));
+        assert!(changes.iter().any(|change| change.id == "o_replacements"));
+    }
+
+    #[test]
+    fn restoring_a_deleted_row_writes_it_again_with_the_retired_sequence() {
+        let mut state = recorded(&Config::default());
+        let row = row_key('r', 'a');
+        state.retired.insert(row.name(), 7);
+        let restored = Config {
+            replacements: vec![replacement('a', "again")],
+            ..Config::default()
+        };
+        let result = reconcile(&restored, Some(state), &[], "key", 7);
+        let write = result.writes.iter().find(|write| write.key == row).unwrap();
+        assert_eq!(write.base_seq, Some(7));
+        assert!(!write.deleted);
     }
 }

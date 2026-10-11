@@ -24,6 +24,11 @@ use crate::{
 };
 
 pub const FILE_NAME: &str = "config.toml";
+pub const SYNC_BACKUPS_DIR: &str = "sync-backups";
+/// VS Code の設定同期と同じく、30 日より古い控えは消す。ただし最近の 10 件は、同期を繰り返した直後でも戻れるよう残す。
+pub const SYNC_BACKUP_RETENTION_DAYS: u64 = 30;
+pub const SYNC_BACKUP_MIN_COUNT: usize = 10;
+pub const SYNC_BACKUP_LIST_LIMIT: usize = 20;
 pub const DEFAULT_HOTKEY: &str = "CommandOrControl+Shift+Space";
 
 /// 表示言語。System は OS の言語に従う
@@ -1678,6 +1683,114 @@ pub fn is_missing(path: &Path) -> bool {
     matches!(fs::metadata(path), Err(error) if error.kind() == io::ErrorKind::NotFound)
 }
 
+/// 同期が設定を書き換える直前の、設定ファイル全体の控え。
+///
+/// 読めない・書けないときでも同期自体は止めないよう、呼ぶ側でエラーをログに残して続ける。
+pub fn save_sync_backup(path: &Path, now: SystemTime) -> io::Result<Option<PathBuf>> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let directory = path
+        .parent()
+        .expect("the settings file has a parent")
+        .join(SYNC_BACKUPS_DIR);
+    fs::create_dir_all(&directory)?;
+    let name = sync_backup_name(now);
+    let target = directory.join(&name);
+    let duplicate = sync_backup_paths(path)?
+        .first()
+        .is_some_and(|previous| fs::read_to_string(previous).ok().as_ref() == Some(&contents));
+    if duplicate {
+        clean_sync_backups(path, now)?;
+        return Ok(None);
+    }
+    atomic_file::write(&target, contents.as_bytes())?;
+    clean_sync_backups(path, now)?;
+    Ok(Some(target))
+}
+
+/// 形が正しい控えの名前だけを受ける。パスの区切りを通さない。
+pub fn valid_sync_backup_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() == 21
+        && bytes[8] == b'T'
+        && bytes[15] == b'Z'
+        && &bytes[16..] == b".toml"
+        && bytes[..8]
+            .iter()
+            .chain(bytes[9..15].iter())
+            .all(u8::is_ascii_digit)
+}
+
+pub fn sync_backup_paths(path: &Path) -> io::Result<Vec<PathBuf>> {
+    let directory = path
+        .parent()
+        .expect("the settings file has a parent")
+        .join(SYNC_BACKUPS_DIR);
+    let mut paths = match fs::read_dir(directory) {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_file()
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(valid_sync_backup_name)
+            })
+            .collect(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(error),
+    };
+    paths.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    Ok(paths)
+}
+
+pub fn load_sync_backup(path: &Path, name: &str) -> io::Result<Config> {
+    if !valid_sync_backup_name(name) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid sync backup name",
+        ));
+    }
+    let target = path
+        .parent()
+        .expect("the settings file has a parent")
+        .join(SYNC_BACKUPS_DIR)
+        .join(name);
+    let text = fs::read_to_string(target)?;
+    parse(&text)
+        .map(|(config, _, _)| config)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+pub fn clean_sync_backups(path: &Path, now: SystemTime) -> io::Result<()> {
+    let cutoff = sync_backup_name(
+        now.checked_sub(std::time::Duration::from_secs(
+            SYNC_BACKUP_RETENTION_DAYS * 86_400,
+        ))
+        .unwrap_or(UNIX_EPOCH),
+    );
+    for (index, backup) in sync_backup_paths(path)?.into_iter().enumerate() {
+        let name = backup
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if index >= SYNC_BACKUP_MIN_COUNT && name < cutoff.as_str() {
+            fs::remove_file(backup)?;
+        }
+    }
+    Ok(())
+}
+
+fn sync_backup_name(time: SystemTime) -> String {
+    let stamp = utc_stamp(time);
+    let (date, time) = stamp.split_at(8);
+    format!("{date}T{}Z.toml", &time[1..])
+}
+
 /// そのまま読めなかったファイルを、上書きする前に同じフォルダーの `<名前>.broken-YYYYMMDD-HHMMSS.<拡張子>` へ写す
 /// （設定ファイルなら `config.broken-….toml`、下書きの履歴なら `history.broken-….json`）。
 /// 写した先を返す。写す元がなければ何もせず None
@@ -1903,6 +2016,34 @@ mod tests {
         Some(LoadProblem::Repaired(
             keys.iter().map(|key| key.to_string()).collect(),
         ))
+    }
+
+    #[test]
+    fn keeps_distinct_sync_backups_and_cleans_old_ones_after_the_newest_ten() {
+        let path = temp_path("sync-backups");
+        write(&path, "theme = \"dark\"\n");
+        let now = UNIX_EPOCH + Duration::from_secs(1_789_281_005);
+        let saved = save_sync_backup(&path, now).unwrap().unwrap();
+        assert_eq!(saved.file_name().unwrap(), "20260913T063005Z.toml");
+        assert!(save_sync_backup(&path, now + Duration::from_secs(1))
+            .unwrap()
+            .is_none());
+        assert!(valid_sync_backup_name("20260913T063005Z.toml"));
+        assert!(!valid_sync_backup_name("../config.toml"));
+
+        let directory = path.parent().unwrap().join(SYNC_BACKUPS_DIR);
+        for day in 1..=11 {
+            fs::write(
+                directory.join(sync_backup_name(
+                    UNIX_EPOCH + Duration::from_secs(day * 86_400),
+                )),
+                format!("theme = \"{day}\"\n"),
+            )
+            .unwrap();
+        }
+        clean_sync_backups(&path, UNIX_EPOCH + Duration::from_secs(32 * 86_400)).unwrap();
+        let names = sync_backup_paths(&path).unwrap();
+        assert_eq!(names.len(), 11);
     }
 
     const NOW: SystemTime = UNIX_EPOCH;

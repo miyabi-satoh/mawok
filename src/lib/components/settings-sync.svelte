@@ -2,6 +2,7 @@
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SyncChoiceDialog from '$lib/components/sync-choice-dialog.svelte';
+	import SyncBackupDialog from '$lib/components/sync-backup-dialog.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
 	import { Switch } from '$lib/components/ui/switch';
@@ -15,6 +16,7 @@
 		call,
 		choiceOpen = $bindable(false)
 	}: { view: SettingsView; call: Call; choiceOpen: boolean } = $props();
+	let backupOpen = $state(false);
 
 	const kinds = [
 		{ kind: 'settings', label: m.settings_sync_settings },
@@ -42,6 +44,11 @@
 			</Field.Field>
 		</SettingsRow>
 	{/each}
+	<SettingsRow>
+		<Button variant="outline" size="sm" class="w-fit" onclick={() => (backupOpen = true)}>
+			{m.settings_sync_restore_open()}
+		</Button>
+	</SettingsRow>
 	{#if view.syncConflicts > 0}
 		<SettingsRow>
 			<p class="text-sm">{m.settings_sync_choice_notice()}</p>
@@ -53,3 +60,4 @@
 </SettingsSection>
 
 <SyncChoiceDialog bind:open={choiceOpen} platform={view.platform} />
+<SyncBackupDialog bind:open={backupOpen} locale={view.locale} />

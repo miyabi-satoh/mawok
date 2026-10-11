@@ -55,7 +55,7 @@ function rowName(row: Row): string {
 }
 
 /** 項目の名前。設定の画面でのその項目のラベルと同じ言い方にし、行は種類と行の名前にする */
-function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefined {
+export function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefined {
 	switch (value.type) {
 		case 'language':
 			return m.settings_language();
@@ -110,6 +110,15 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 			return m.sync_choice_row_snippet({ name: rowName(value) });
 		case 'action':
 			return m.sync_choice_row_action({ name: rowName(value) });
+		case 'order':
+			return m.sync_restore_order({
+				name:
+					{
+						replacements: m.settings_sync_replacements(),
+						snippets: m.settings_sync_snippets(),
+						actions: m.settings_sync_actions()
+					}[value.value] ?? value.value
+			});
 		default:
 			return undefined;
 	}
@@ -183,6 +192,8 @@ function valueText(value: SyncValue, other: SyncValue, platform: Platform): stri
 		}
 		case 'text_font_family':
 			return orDefault(value.value);
+		case 'order':
+			return '';
 		case 'replacement': {
 			const row = value.value;
 			const theirs = sameType(value, other)?.value;
