@@ -265,19 +265,19 @@ describe('choiceText', () => {
 		});
 	});
 
-	it('アクションは、名前とコマンドに、違っている項目だけを添え、違いの1行前から出す', () => {
+	it('アクションは、名前とコマンドに、違っている項目だけを添える', () => {
 		const theirs: Action = { ...action, output: 'insert', encoding: 'shift_jis', enabled: false };
 		expect(text({ type: 'action', value: action }, { type: 'action', value: theirs })).toEqual({
 			label: m.sync_choice_row_action({ name: '英訳' }),
 			thisDevice: [
-				'…',
+				'英訳',
 				'@ai 英語に訳す',
 				pair(m.settings_actions_output(), m.settings_actions_output_replace()),
 				pair(m.settings_actions_encoding(), 'UTF-8'),
 				pair(m.settings_actions_enabled_unnamed(), m.sync_choice_on())
 			].join('\n'),
 			otherDevice: [
-				'…',
+				'英訳',
 				'@ai 英語に訳す',
 				pair(m.settings_actions_output(), m.settings_actions_output_insert()),
 				pair(m.settings_actions_encoding(), 'Shift_JIS'),
@@ -325,6 +325,10 @@ describe('fromDifference', () => {
 
 	it('2行目が違うときも、1行前が先頭なので略さない', () => {
 		expect(fromDifference('a\nb', 'a\nx')).toEqual(['a\nb', 'a\nx']);
+	});
+
+	it('略して減るのが1行だけなら、略さない', () => {
+		expect(fromDifference('a\nb\nc', 'a\nb\nx')).toEqual(['a\nb\nc', 'a\nb\nx']);
 	});
 
 	it('末尾が違えば、その1行前から出し、略した印を先頭に置く', () => {

@@ -103,6 +103,9 @@ describe('設定画面の同期', () => {
 		const side = (name: Parameters<typeof sideName>[1]) =>
 			screen.getByRole('radio', { name: sideName(m.settings_theme(), name) });
 		await expect.element(side('later')).toBeChecked();
+		await expect
+			.element(side('other_device'))
+			.toHaveAccessibleDescription(m.settings_theme_light());
 		// 選んだ項目を「あとで選ぶ」に戻すと、適用するものが無くなる
 		await side('this_device').click();
 		await expect.element(apply).toBeEnabled();

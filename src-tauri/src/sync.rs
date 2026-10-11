@@ -202,6 +202,21 @@ impl State {
         .unwrap_or(self.since)
     }
 
+    /// 今オフにしている種類に、読まずに置いてある位置を置く（docs/sync.md 冒頭）。もう置いてあれば変えない。
+    /// スイッチを切り替えたときと、記録を保存する前に通す。変えたかを返す
+    pub fn pause(&mut self, kinds: Kinds) -> bool {
+        let mut changed = false;
+        if !kinds.settings && self.settings_paused_at.is_none() {
+            self.settings_paused_at = Some(self.since);
+            changed = true;
+        }
+        if !kinds.history && self.history_paused_at.is_none() {
+            self.history_paused_at = Some(self.since);
+            changed = true;
+        }
+        changed
+    }
+
     /// 利用者が選ぶのを待っている食い違いの数。
     pub fn conflict_count(&self) -> usize {
         self.conflicts
@@ -1881,10 +1896,11 @@ pub async fn sync_once_with<T: SyncTransport>(
     let history_paused_at = (!kinds.history)
         .then(|| paused(state.as_ref().and_then(|state| state.history_paused_at)))
         .flatten();
-    let history_resumed = kinds.history
-        && state
-            .as_ref()
-            .is_some_and(|state| state.history_paused_at.is_some());
+    // 履歴の同期をオンに戻した回なら、オフの間に置いてあった位置
+    let history_resumed_from = state
+        .as_ref()
+        .and_then(|state| state.history_paused_at)
+        .filter(|_| kinds.history);
     let mut result = if kinds.settings {
         reconcile(config, state, &read.items, key_id, read.next)
     } else {
@@ -1952,7 +1968,7 @@ pub async fn sync_once_with<T: SyncTransport>(
         changed |= result.changed;
     }
     // 同じ回に履歴の件数が届いたら、届いた後の件数で合わせる
-    let history = if kinds.history {
+    let synced_history = if kinds.history {
         sync_history(
             transport,
             &mut result.state,
@@ -1960,12 +1976,26 @@ pub async fn sync_once_with<T: SyncTransport>(
             &read.items,
             history,
             result.config.text_history_size as usize,
-            history_resumed,
+            history_resumed_from.is_some(),
         )
         .await
     } else {
         None
     };
+    // オンに戻した回に履歴を揃えられなかったら、戻した印を残して、次の回も同じ扱いにする。
+    // 外すと、次の回が、オフの間に置いた手元の消した時刻で混ぜる（docs/sync.md「混ぜ方」）
+    let size = result.config.text_history_size as usize;
+    let settled = synced_history.as_ref().or(history).is_some_and(|local| {
+        result
+            .state
+            .items
+            .get(&history_item().name())
+            .is_some_and(|seen| seen.hash == history_hash(local, size))
+    });
+    if !settled {
+        result.state.history_paused_at = result.state.history_paused_at.or(history_resumed_from);
+    }
+    let history = synced_history;
     Ok(SyncResult {
         // 同じ値を入れ直しただけなら、変わっていない。設定ファイルを書き直して次の同期を呼ばないため
         changed: changed && result.config != *config,
@@ -6138,6 +6168,100 @@ mod tests {
         );
         assert!(transport.written(HISTORY_ID).is_empty());
         assert_eq!(on.history, Some(shared));
+        assert_eq!(on.state.history_paused_at, None);
+    }
+
+    /// 履歴を1回同期した記録と、そのとき窓口に置いた項目。
+    fn history_synced_once(shared: &History) -> (State, Vec<RemoteItem>) {
+        let config = Config::default();
+        let mut transport = FakeTransport::reading([read(1, [])]).after_seq(1);
+        let synced = run_kinds(
+            &mut transport,
+            &config,
+            Some(recorded(&config)),
+            Some(shared),
+            ALL_KINDS,
+        );
+        (synced.state, transport.stored)
+    }
+
+    fn resume_history(
+        state: State,
+        on_server: &[RemoteItem],
+        local: &History,
+    ) -> (SyncResult, FakeTransport) {
+        let mut transport = FakeTransport::reading([read(2, [])]).after_seq(2);
+        transport.stored = on_server.to_vec();
+        let result = run_kinds(
+            &mut transport,
+            &Config::default(),
+            Some(state),
+            Some(local),
+            ALL_KINDS,
+        );
+        (result, transport)
+    }
+
+    #[test]
+    fn a_history_cleared_while_both_kinds_were_off_does_not_clear_the_other_devices() {
+        let shared = history(&[("a", 10)], 0);
+        let (mut state, on_server) = history_synced_once(&shared);
+        // 両方オフの間は通信しないので、印はスイッチを切り替えたときに置く
+        let both_off = Kinds {
+            settings: false,
+            history: false,
+        };
+        assert!(state.pause(both_off));
+        assert!(!state.pause(both_off));
+        let (on, transport) = resume_history(state, &on_server, &history(&[], 100));
+        assert!(transport.written(HISTORY_ID).is_empty());
+        assert_eq!(on.history, Some(shared));
+        assert_eq!(on.state.history_paused_at, None);
+    }
+
+    #[test]
+    fn a_history_cleared_after_turning_it_off_offline_does_not_clear_the_other_devices() {
+        let shared = history(&[("a", 10)], 0);
+        let (mut state, on_server) = history_synced_once(&shared);
+        state.pause(Kinds {
+            settings: true,
+            history: false,
+        });
+        // オフにした回は窓口につながらず、途中まで書けた分だけを記録に足す
+        let state = merge_written(Some(state), &State::new("key"), false, "key");
+        assert!(state.history_paused_at.is_some());
+        let (on, transport) = resume_history(state, &on_server, &history(&[], 100));
+        assert!(transport.written(HISTORY_ID).is_empty());
+        assert_eq!(on.history, Some(shared));
+    }
+
+    #[test]
+    fn a_history_that_could_not_be_mixed_when_turned_back_on_is_resumed_again_next_time() {
+        let shared = history(&[("a", 10)], 0);
+        let (mut state, on_server) = history_synced_once(&shared);
+        state.pause(Kinds {
+            settings: true,
+            history: false,
+        });
+        let paused_at = state.history_paused_at;
+        // オフの間に消してから、1件覚えた
+        let local = history(&[("b", 200)], 100);
+        let mut transport =
+            FakeTransport::reading([read(2, [])]).failing([Error::Other("offline".into())]);
+        transport.stored = on_server.clone();
+        let failed = run_kinds(
+            &mut transport,
+            &Config::default(),
+            Some(state),
+            Some(&local),
+            ALL_KINDS,
+        );
+        assert_eq!(failed.history, None);
+        assert_eq!(failed.state.history_paused_at, paused_at);
+
+        let (on, transport) = resume_history(failed.state, &on_server, &local);
+        assert_eq!(on.history, Some(history(&[("a", 10), ("b", 200)], 0)));
+        assert_eq!(transport.written(HISTORY_ID).len(), 1);
         assert_eq!(on.state.history_paused_at, None);
     }
 }

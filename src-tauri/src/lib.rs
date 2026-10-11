@@ -1791,7 +1791,6 @@ async fn run_settings_sync(app: &AppHandle) {
         .flatten(),
         _ => None,
     };
-    let path = app.state::<AppState>().sync_state_path.clone();
     let before = load_sync_record(app, &key_id).await;
     let synced = sync::sync_once(
         sync::HttpTransport {
@@ -1862,7 +1861,7 @@ async fn run_settings_sync(app: &AppHandle) {
                 result.state
             };
             let conflicts = record.conflict_count();
-            if let Err(error) = run_blocking(move || sync::save(&path, &record)).await {
+            if let Err(error) = save_sync_record(app, record).await {
                 warn!("couldn't save sync state: {error}");
             }
             remember_sync_conflicts(app, conflicts);
@@ -1878,7 +1877,7 @@ async fn run_settings_sync(app: &AppHandle) {
                 if app_state.sync_record_generation.load(Ordering::SeqCst) == record_generation {
                     let record =
                         sync::merge_written(before, &failure.written, failure.reset, &key_id);
-                    if let Err(error) = run_blocking(move || sync::save(&path, &record)).await {
+                    if let Err(error) = save_sync_record(app, record).await {
                         warn!("couldn't save sync state: {error}");
                     }
                 }
@@ -1902,23 +1901,66 @@ async fn run_settings_sync(app: &AppHandle) {
 
 /// 同期する種類を変える（docs/sync.md 冒頭）。オンにした種類は、すぐに同期する。
 /// オフにした種類の記録は消さないので、オンに戻すと続きから合わせる
-fn set_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
+async fn set_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
     let _ = save_config(app, change)?;
     apply_config(app);
+    mark_paused_sync_kinds(app).await;
     request_sync(app);
     Ok(())
 }
 
-#[tauri::command]
-fn set_sync_settings(app: AppHandle, enabled: bool) -> Result<(), String> {
-    info!("set sync settings: {enabled}");
-    set_sync_kind(&app, |config| config.sync_settings = enabled)
+/// 今の設定で同期する種類。
+fn sync_kinds(app: &AppHandle) -> sync::Kinds {
+    let state = app.state::<AppState>();
+    let config = state.config.lock().unwrap();
+    sync::Kinds {
+        settings: config.sync_settings,
+        history: config.sync_history,
+    }
+}
+
+/// オフにした種類を、同期の記録に残す。オフにした後の同期の回に任せると、両方オフの間（通信しない）と
+/// つながらない間は残らず、オンに戻した回が、オフにしていたことを知らない（docs/sync.md 冒頭）。
+/// 一度も同期していなければ、記録が無いので何もしない。オンに戻した回は、初めての同期になる
+async fn mark_paused_sync_kinds(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let _commit = state.sync_commit.lock().await;
+    let kinds = sync_kinds(app);
+    let path = state.sync_state_path.clone();
+    let saved = run_blocking(move || {
+        let Some(mut record) = sync::load(&path) else {
+            return Ok(());
+        };
+        if record.pause(kinds) {
+            sync::save(&path, &record)
+        } else {
+            Ok(())
+        }
+    })
+    .await;
+    if let Ok(Err(error)) | Err(error) = saved {
+        warn!("couldn't save sync state: {error}");
+    }
+}
+
+/// 同期の記録を保存する。通信の間にスイッチがオフになった種類は、前の記録から作った結果で
+/// オフの印を上書きしないよう、保存する前に置き直す。`sync_commit` の中で呼ぶ
+async fn save_sync_record(app: &AppHandle, mut record: sync::State) -> Result<(), String> {
+    record.pause(sync_kinds(app));
+    let path = app.state::<AppState>().sync_state_path.clone();
+    run_blocking(move || sync::save(&path, &record)).await?
 }
 
 #[tauri::command]
-fn set_sync_history(app: AppHandle, enabled: bool) -> Result<(), String> {
+async fn set_sync_settings(app: AppHandle, enabled: bool) -> Result<(), String> {
+    info!("set sync settings: {enabled}");
+    set_sync_kind(&app, |config| config.sync_settings = enabled).await
+}
+
+#[tauri::command]
+async fn set_sync_history(app: AppHandle, enabled: bool) -> Result<(), String> {
     info!("set sync history: {enabled}");
-    set_sync_kind(&app, |config| config.sync_history = enabled)
+    set_sync_kind(&app, |config| config.sync_history = enabled).await
 }
 
 /// 食い違いを選ぶ画面で、窓口と話せなかった。
@@ -2134,13 +2176,10 @@ async fn commit_sync_change(
         }
     }
     let conflicts = record.conflict_count();
-    let path = app_state.sync_state_path.clone();
-    run_blocking(move || sync::save(&path, &record))
-        .await?
-        .map_err(|error| {
-            warn!("couldn't save sync state: {error}");
-            error
-        })?;
+    save_sync_record(app, record).await.map_err(|error| {
+        warn!("couldn't save sync state: {error}");
+        error
+    })?;
     remember_sync_conflicts(app, conflicts);
     Ok(Some(rejected))
 }

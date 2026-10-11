@@ -225,7 +225,8 @@ export function fromDifference(mine: string, theirs: string): [string, string] {
 	let first = 0;
 	while (first < shorter && a[first] === b[first]) first++;
 	const start = first - 1;
-	if (start <= 0 || mine === theirs) return [mine, theirs];
+	// 略して減るのが1行だけなら、印に替わるだけで短くならず、1行が見えなくなる
+	if (start <= 1 || mine === theirs) return [mine, theirs];
 	const cut = (lines: string[]) => [OMITTED, ...lines.slice(start)].join('\n');
 	return [cut(a), cut(b)];
 }

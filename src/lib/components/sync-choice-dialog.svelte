@@ -27,6 +27,21 @@
 	/** 読み込みの通し番号。閉じた後や読み直した後に届いた前の答えを捨てる */
 	let loads = 0;
 
+	/**
+	 * 中身があふれている欄だけ、フォーカスを置けるようにする（キーボードで送れるように）。
+	 * あふれていない欄にも置くと、Tab が、送るものの無い値に項目ごとに2回止まる
+	 */
+	function focusableWhenScrollable(element: HTMLElement) {
+		const update = () => {
+			if (element.scrollHeight > element.clientHeight) element.tabIndex = 0;
+			else element.removeAttribute('tabindex');
+		};
+		const observer = new ResizeObserver(update);
+		observer.observe(element);
+		update();
+		return () => observer.disconnect();
+	}
+
 	const items = $derived(
 		(conflicts ?? []).map((conflict) => ({ conflict, text: choiceText(conflict, platform) }))
 	);
@@ -123,16 +138,19 @@
 										name="sync-choice-{conflict.id}"
 										value={side}
 										aria-label={sideName(text.label, side)}
+										aria-describedby={side === 'later'
+											? undefined
+											: `sync-choice-${conflict.id}-${side}`}
 										disabled={applying}
 										bind:group={chosen[conflict.id]}
 									/>
 									{name()}
 								</span>
 								{#if side !== 'later'}
-									<!-- 長い値は切らずに、欄の中で送って読めるようにする。キーボードでも送れるよう、フォーカスを置ける -->
-									<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+									<!-- 長い値は切らずに、欄の中で送って読めるようにする -->
 									<span
-										tabindex="0"
+										id="sync-choice-{conflict.id}-{side}"
+										{@attach focusableWhenScrollable}
 										class="max-h-24 overflow-y-auto rounded-sm text-xs leading-snug wrap-anywhere whitespace-pre-wrap text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 									>
 										{side === 'this_device' ? text.thisDevice : text.otherDevice}
