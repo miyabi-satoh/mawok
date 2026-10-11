@@ -1028,7 +1028,7 @@
 				</Tabs.Content>
 				<Tabs.Content value="draft">
 					{#if view.proAvailable && view.syncKinds.settings}
-						<p class="text-xs leading-snug text-muted-foreground">
+						<p class="mb-3 text-xs leading-snug text-muted-foreground">
 							{m.settings_sync_description()}
 						</p>
 					{/if}
@@ -1162,7 +1162,7 @@
 				</Tabs.Content>
 				<Tabs.Content value="copy">
 					{#if view.proAvailable && (view.syncKinds.settings || view.syncKinds.replacements)}
-						<p class="text-xs leading-snug text-muted-foreground">
+						<p class="mb-3 text-xs leading-snug text-muted-foreground">
 							{m.settings_sync_description()}
 						</p>
 					{/if}
