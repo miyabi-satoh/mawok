@@ -15,6 +15,7 @@
 	import type { PairingOffer } from '$lib/bindings/PairingOffer';
 	import { deviceLabels } from '$lib/devices';
 	import { devicesPanel } from '$lib/devices-panel';
+	import { pairingOfferDescription, pairingOfferRemainingSeconds } from '$lib/pairing-offer';
 	import { errorCode } from '$lib/errors';
 	import SyncToggle from '$lib/components/sync-toggle.svelte';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
@@ -504,6 +505,11 @@
 	let pairingCode = $state('');
 	/** `want` を受けて自動で出したコードか。相手のデバイスに出す案内だけを替える。 */
 	let pairingAutomatic = $state(false);
+	/** 違う確認コードを試した後に出したコードか。次のコードに替わるまで案内する。 */
+	let pairingPreviousCodeWasWrong = $state(false);
+	let pairingDescription = $derived(
+		pairingOfferDescription(pairingAutomatic, pairingPreviousCodeWasWrong)
+	);
 	/** 相手に出ているコードを入れる欄 */
 	let joinCode = $state('');
 	/** コードを入れて、相手を探している最中か */
@@ -516,15 +522,7 @@
 	$effect(() => {
 		if (!pairingCode) return;
 		const timer = setInterval(() => {
-			const left = Math.ceil((pairingDeadline - performance.now()) / 1000);
-			if (left <= 0) {
-				// Rust 側は期限切れを知らせないので、画面でコードごと消す
-				pairingCode = '';
-				pairingAutomatic = false;
-				pairingRemainingSeconds = 0;
-				return;
-			}
-			pairingRemainingSeconds = left;
+			pairingRemainingSeconds = pairingOfferRemainingSeconds(pairingDeadline, performance.now());
 		}, 250);
 		return () => clearInterval(timer);
 	});
@@ -533,6 +531,7 @@
 		const unlistenEnded = listen(EVENTS.PAIRING_CODE_ENDED, () => {
 			pairingCode = '';
 			pairingAutomatic = false;
+			pairingPreviousCodeWasWrong = false;
 		});
 		const unlistenOffered = listen<PairingOffer>(EVENTS.PAIRING_CODE_OFFERED, ({ payload }) => {
 			showPairingOffer(payload);
@@ -554,11 +553,13 @@
 		pairingDeadline = performance.now() + offer.remainingSeconds * 1000;
 		pairingCode = offer.code;
 		pairingAutomatic = offer.automatic;
+		pairingPreviousCodeWasWrong = offer.previousCodeWasWrong;
 	}
 
 	function cancelPairing() {
 		pairingCode = '';
 		pairingAutomatic = false;
+		pairingPreviousCodeWasWrong = false;
 		pairingRemainingSeconds = 0;
 		run('cancel_pairing');
 	}
@@ -1557,13 +1558,15 @@
 								</Field.Field>
 								<Field.Description
 									class="leading-snug"
-									role={pairingCode && !pairingAutomatic ? 'timer' : undefined}
+									role={pairingCode ? 'timer' : undefined}
 									aria-live="off"
 								>
 									{pairingCode
-										? pairingAutomatic
-											? m.settings_devices_offer_automatic()
-											: m.settings_devices_offer_waiting({ seconds: pairingRemainingSeconds })
+										? pairingDescription === 'wrongCode'
+											? m.settings_devices_offer_wrong_code({ seconds: pairingRemainingSeconds })
+											: pairingDescription === 'automatic'
+												? m.settings_devices_offer_automatic({ seconds: pairingRemainingSeconds })
+												: m.settings_devices_offer_waiting({ seconds: pairingRemainingSeconds })
 										: m.settings_devices_offer_description()}
 								</Field.Description>
 							</SettingsRow>

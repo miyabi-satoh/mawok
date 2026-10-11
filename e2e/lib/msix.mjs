@@ -464,8 +464,9 @@ public static class MawokE2eCredential {
     static extern bool CredWrite(ref CREDENTIAL credential, int flags);
     public static void Write(string target, string user, string value) {
         byte[] blob = System.Text.Encoding.Unicode.GetBytes(value);
-        // Type 1 は CRED_TYPE_GENERIC、Persist 2 は CRED_PERSIST_LOCAL_MACHINE (cmdkey の /generic と同じ)
-        CREDENTIAL credential = new CREDENTIAL { Type = 1, TargetName = target, UserName = user, Persist = 2, CredentialBlobSize = blob.Length };
+        // Type 1 は CRED_TYPE_GENERIC、Persist 3 は CRED_PERSIST_ENTERPRISE (Mawok が書くときと同じ)。
+        // CRED_PERSIST_LOCAL_MACHINE で置いた項目を Mawok が書き換えると、消した数分後に、置いたときの項目がまた現れる
+        CREDENTIAL credential = new CREDENTIAL { Type = 1, TargetName = target, UserName = user, Persist = 3, CredentialBlobSize = blob.Length };
         credential.CredentialBlob = Marshal.AllocHGlobal(blob.Length);
         try {
             Marshal.Copy(blob, 0, credential.CredentialBlob, blob.Length);

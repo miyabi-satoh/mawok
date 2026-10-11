@@ -1688,14 +1688,22 @@ describe('設定画面のデバイス', () => {
 		invoked.mockImplementation((command) =>
 			Promise.resolve(
 				command === 'pairing_offer'
-					? { code: '123456', remainingSeconds: 120, automatic: true }
+					? {
+							code: '123456',
+							remainingSeconds: 120,
+							automatic: true,
+							previousCodeWasWrong: false
+						}
 					: undefined
 			)
 		);
 		const screen = await renderAt(m.settings_category_devices);
 
 		await expect.element(screen.getByText('123456')).toBeVisible();
-		await expect.element(screen.getByText(m.settings_devices_offer_automatic())).toBeVisible();
+		await expect
+			.element(screen.getByText(m.settings_devices_offer_automatic({ seconds: 120 })))
+			.toBeVisible();
+		await expect.element(screen.getByRole('timer')).toBeVisible();
 		expect(
 			screen.getByRole('button', { name: m.settings_devices_offer_cancel() }).query()
 		).toBeNull();
@@ -1711,7 +1719,14 @@ describe('設定画面のデバイス', () => {
 		});
 		const screen = await renderAt(m.settings_category_devices);
 
-		offered?.({ payload: { code: '654321', remainingSeconds: 120, automatic: true } });
+		offered?.({
+			payload: {
+				code: '654321',
+				remainingSeconds: 120,
+				automatic: true,
+				previousCodeWasWrong: false
+			}
+		});
 		await tick();
 
 		await expect.element(screen.getByText('654321')).toBeVisible();
@@ -1722,7 +1737,12 @@ describe('設定画面のデバイス', () => {
 		vi.useFakeTimers();
 		invoked.mockImplementation((command) =>
 			command === 'start_pairing'
-				? Promise.resolve({ code: '123456', remainingSeconds: 120, automatic: false })
+				? Promise.resolve({
+						code: '123456',
+						remainingSeconds: 120,
+						automatic: false,
+						previousCodeWasWrong: false
+					})
 				: Promise.resolve(undefined)
 		);
 		const screen = await renderAt(m.settings_category_devices);
@@ -1746,11 +1766,41 @@ describe('設定画面のデバイス', () => {
 		vi.useRealTimers();
 	});
 
-	it('残り秒が0になったら、コードごと消す', async () => {
+	it('違う確認コードの後に出したコードでは、その案内を出す', async () => {
+		let offered: ((event: { payload: PairingOffer }) => void) | undefined;
+		vi.mocked(listen).mockImplementation((event, handler) => {
+			if (event === EVENTS.PAIRING_CODE_OFFERED) {
+				offered = handler as unknown as (event: { payload: PairingOffer }) => void;
+			}
+			return Promise.resolve(() => {});
+		});
+		const screen = await renderAt(m.settings_category_devices);
+
+		offered?.({
+			payload: {
+				code: '654321',
+				remainingSeconds: 120,
+				automatic: false,
+				previousCodeWasWrong: true
+			}
+		});
+		await tick();
+
+		await expect
+			.element(screen.getByText(m.settings_devices_offer_wrong_code({ seconds: 120 })))
+			.toBeVisible();
+	});
+
+	it('残り秒が0になっても、新しいコードが届くまで表示を続ける', async () => {
 		vi.useFakeTimers();
 		invoked.mockImplementation((command) =>
 			command === 'start_pairing'
-				? Promise.resolve({ code: '123456', remainingSeconds: 3, automatic: false })
+				? Promise.resolve({
+						code: '123456',
+						remainingSeconds: 3,
+						automatic: false,
+						previousCodeWasWrong: false
+					})
 				: Promise.resolve(undefined)
 		);
 		const screen = await renderAt(m.settings_category_devices);
@@ -1762,9 +1812,13 @@ describe('設定画面のデバイス', () => {
 
 		vi.advanceTimersByTime(3_500);
 		await tick();
+		await expect.element(screen.getByText('123456')).toBeInTheDocument();
 		await expect
-			.element(screen.getByText(m.settings_devices_offer_description()))
+			.element(screen.getByText(m.settings_devices_offer_waiting({ seconds: 1 })))
 			.toBeInTheDocument();
+		expect(
+			screen.getByRole('button', { name: m.settings_devices_offer_start() }).query()
+		).toBeNull();
 		vi.useRealTimers();
 	});
 });
