@@ -42,15 +42,13 @@
 					}
 				/>
 			</Field.Field>
+			{#if kind === 'settings' && view.syncKinds.settings}
+				<Button variant="outline" size="sm" class="w-fit" onclick={() => (settingsOpen = true)}>
+					{m.settings_sync_select_settings()}
+				</Button>
+			{/if}
 		</SettingsRow>
 	{/each}
-	{#if view.syncKinds.settings}
-		<SettingsRow>
-			<Button variant="outline" size="sm" class="w-fit" onclick={() => (settingsOpen = true)}>
-				{m.settings_sync_select_settings()}
-			</Button>
-		</SettingsRow>
-	{/if}
 	{#if view.syncConflicts > 0}
 		<SettingsRow>
 			<p class="text-sm">{m.settings_sync_choice_notice()}</p>
@@ -62,11 +60,11 @@
 </SettingsSection>
 
 <AlertDialog.Root bind:open={settingsOpen}>
-	<AlertDialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+	<AlertDialog.Content class="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto]">
 		<AlertDialog.Header>
 			<AlertDialog.Title>{m.settings_sync_select_settings_title()}</AlertDialog.Title>
 		</AlertDialog.Header>
-		<div class="flex flex-col gap-3">
+		<div class="flex flex-col gap-3 overflow-y-auto">
 			{#each CONSTANTS.SYNCABLE_SETTINGS as name (name)}
 				<label class="flex items-center gap-2 text-sm">
 					<input

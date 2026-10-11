@@ -11,7 +11,7 @@ export const CONSTANTS = {
 	AI_PREFIX: "@ai",
 	TEXT_MARK: "{{t}}",
 	NEW_ACTION: {"id":"","name":"","command":"","output":"replace","encoding":"utf-8","enabled":true,"sync":true},
-	SYNCABLE_SETTINGS: ["language", "theme", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "trim_trailing_whitespace", "punctuation_style", "char_widths", "exclude_from_clipboard_history", "text_font_size", "text_color_light", "text_color_dark", "input_guidance", "ai_service", "ai_models", "text_font_family"]
+	SYNCABLE_SETTINGS: ["language", "theme", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "trim_trailing_whitespace", "punctuation_style", "char_widths", "exclude_from_clipboard_history", "text_font_family", "text_font_size", "text_color_light", "text_color_dark", "input_guidance", "ai_service", "ai_models"]
 } as const;
 
 export const EVENTS = {

@@ -554,13 +554,13 @@ pub const SYNCABLE_SETTING_NAMES: &[&str] = &[
     "punctuation_style",
     "char_widths",
     "exclude_from_clipboard_history",
+    "text_font_family",
     "text_font_size",
     "text_color_light",
     "text_color_dark",
     "input_guidance",
     "ai_service",
     "ai_models",
-    "text_font_family",
 ];
 
 pub fn known_syncable_setting(name: &str) -> bool {
