@@ -1154,18 +1154,18 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
         }
         Err(error) => {
             warn!("couldn't read draft history: {error}");
-            // 読めなかっただけなら、画面は同期で届いた履歴をまだ持っていない。持ったことにすると、次の保存が
-            // 届いた履歴を画面の古い一覧で上書きする
+            // 読めなかっただけ・除けられなかっただけなら、画面は同期で届いた履歴をまだ持っていない。
+            // 持ったことにすると、次の保存が届いた履歴を画面の古い一覧で上書きする
             if let history_store::LoadError::Invalid(_) = error {
-                screen.caught_up();
                 match history_store::set_aside(&path, SystemTime::now()) {
                     Ok(Some(backup)) => {
+                        screen.caught_up();
                         info!(
                             "set aside the unreadable draft history to {}",
                             backup.display()
                         );
                     }
-                    Ok(None) => {}
+                    Ok(None) => screen.caught_up(),
                     Err(error) => warn!("couldn't set aside the unreadable draft history: {error}"),
                 }
             }
