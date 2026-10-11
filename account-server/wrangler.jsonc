@@ -35,7 +35,7 @@
 		{ "name": "EMAIL_LIMITER", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
 		// 結ぶ: アカウントごと。1つのアカウントでコードを作りすぎないように。
 		{ "name": "CODE_LIMITER", "namespace_id": "2003", "simple": { "limit": 10, "period": 60 } },
-		// 設定と履歴の同期: アカウントごと。複数の機器からの連続した同期で D1 を使い切らないように。
+		// 設定と履歴の同期: アカウントごと。複数のデバイスからの連続した同期で D1 を使い切らないように。
 		{ "name": "SYNC_LIMITER", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } }
 	],
 	// 生成する型 (worker-configuration.d.ts) にも効く。手元の .dev.vars の中身で型が変わらないよう、ここで決める。

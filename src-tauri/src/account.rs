@@ -239,6 +239,60 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
     })
 }
 
+/// 同期の最初のページだけを読み、アカウントの鍵の見分けを得る。
+pub async fn sync_key_id(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<Option<String>, AccountError> {
+    let response = client
+        .get(format!("{ACCOUNT_URL}/v1/sync?since=0&limit=1"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            bearer(token).map_err(other)?,
+        )
+        .send()
+        .await
+        .map_err(other)?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(AccountError::SignedOut);
+    }
+    if !response.status().is_success() {
+        return Err(other(format!("HTTP {}", response.status().as_u16())));
+    }
+    let body: Value = response.json().await.map_err(other)?;
+    match body.get("key_id") {
+        Some(Value::Null) | None => Ok(None),
+        Some(Value::String(key_id)) if !key_id.is_empty() => Ok(Some(key_id.clone())),
+        _ => Err(other("the sync answer has an invalid key ID")),
+    }
+}
+
+/// 鍵を失くしたときの同期の作り直し。鍵の見分けだけを窓口へ渡す。
+pub async fn reset_sync(
+    client: &reqwest::Client,
+    token: &str,
+    key_id: &str,
+) -> Result<(), AccountError> {
+    let response = client
+        .post(format!("{ACCOUNT_URL}/v1/sync/reset"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            bearer(token).map_err(other)?,
+        )
+        .json(&json!({ "key_id": key_id }))
+        .send()
+        .await
+        .map_err(other)?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(AccountError::SignedOut);
+    }
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(other(format!("HTTP {}", response.status().as_u16())))
+    }
+}
+
 /// トークンを外す（Mawok でのサインアウト）。外せなくても、手元のトークンは消す（窓口の画面からも外せる）
 pub async fn sign_out(client: &reqwest::Client, token: &str) -> Result<(), AccountError> {
     let response = client

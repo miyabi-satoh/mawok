@@ -58,9 +58,10 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 			openai: 'gpt-5.4-nano'
 		},
 		actions: [],
-		pairedDevices: [],
+		devices: [],
 		deviceName: 'desk-pc',
 		proAvailable: false,
+		accountKeyStatus: 'none',
 		mawokAccountSignedIn: false,
 		version: '0.1.0',
 		locale: 'ja',

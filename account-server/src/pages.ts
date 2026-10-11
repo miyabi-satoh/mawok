@@ -321,7 +321,7 @@ export function signInPage(
 
 /**
  * メールを送ったところ。Mawok を結ぶ途中なら、リンクを同じパソコンで開くよう添える。
- * 結ぶとブラウザを 127.0.0.1 へ戻すので、ほかの機器で開くと Mawok へ戻れないため。
+ * 結ぶとブラウザを 127.0.0.1 へ戻すので、ほかのデバイスで開くと Mawok へ戻れないため。
  */
 export function mailSentPage(lang: Lang, email: string, minutes: number, linking: boolean) {
 	const t = messages[lang];

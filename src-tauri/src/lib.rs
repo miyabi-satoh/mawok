@@ -1,4 +1,5 @@
 mod account;
+mod account_key;
 mod actions;
 mod ai;
 mod atomic_file;
@@ -63,8 +64,7 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use crate::{
     ai::AiService,
     config::{
-        Action, ActionEncoding, ActionOutput, Config, Language, LoadProblem, PairedDevice, Snippet,
-        Theme,
+        Action, ActionEncoding, ActionOutput, Config, Device, Language, LoadProblem, Snippet, Theme,
     },
     draft_keys::{DraftAction, DraftKeys, Platform},
     hotkey::Registrar as _,
@@ -118,7 +118,7 @@ struct DraftState {
     blur: debounce::Debounce,
     /// 下書きを出してから、一度でもフォーカスが入ったか。入っていなければ、フォーカスが外れたとして隠さない
     focused_since_shown: AtomicBool,
-    /// 組み合わせた機器から届き、画面がまだ受け取っていない下書き。画面の読み込み中に届いても失わないよう、起動中だけここに溜める
+    /// 同じアカウントのデバイスから届き、画面がまだ受け取っていない下書き。画面の読み込み中に届いても失わないよう、起動中だけここに溜める
     received: Mutex<Vec<ReceivedDraft>>,
     /// 下書きが隠れている間に届き、まだ下書きを出していないか。トレイのアイコンに点を付ける
     unseen_received: AtomicBool,
@@ -173,7 +173,7 @@ struct AppState {
     version: String,
     /// OS の言語設定から決めた言語。表示言語が「システム」のときに使う
     system_lang: Lang,
-    /// 組み合わせるときに相手へ名乗る、この機器の名前
+    /// ペアリングと生存確認で相手へ名乗る、このデバイスの名前
     device_name: String,
     config: Mutex<Config>,
     problems: Mutex<Problems>,
@@ -187,6 +187,12 @@ struct AppState {
     mawok_account_signed_in: AtomicBool,
     /// Pro の状態を消すたびに進める。問い合わせている間にサインアウトやアカウントの替わりがあったら、その答えを捨てる。
     pro_generation: AtomicUsize,
+    /// 窓口と照らしたアカウントの鍵。設定ファイルには置かない。
+    account_key: Mutex<Option<[u8; 32]>>,
+    account_key_id: Mutex<Option<String>>,
+    account_key_status: Mutex<account_key::Status>,
+    /// 鍵の生成・窓口への登録・資格情報管理への保存を、同じ鍵について一続きにする。
+    account_key_refresh: tokio::sync::Mutex<()>,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -276,12 +282,13 @@ struct SettingsView {
     replacements: Vec<Replacement>,
     /// 定型文。登録した順
     snippets: Vec<Snippet>,
-    /// 組み合わせた自分の機器。組み合わせた順
-    paired_devices: Vec<PairedDevice>,
-    /// 組み合わせるときに相手へ名乗る、この機器の名前
+    /// 同じアカウントで見つけた自分のデバイス。見つけた順
+    devices: Vec<Device>,
+    /// ペアリングと生存確認で相手へ名乗る、このデバイスの名前
     device_name: String,
-    /// 機器の間の送受信を使える Pro か
+    /// デバイスの間の送受信を使える Pro か
     pro_available: bool,
+    account_key_status: account_key::Status,
     /// Mawok のアカウントトークンを資格情報管理から読めたか
     mawok_account_signed_in: bool,
     punctuation_style: PunctuationStyle,
@@ -360,9 +367,10 @@ fn settings_view(state: &AppState) -> SettingsView {
         trim_trailing_whitespace: config.trim_trailing_whitespace,
         replacements: config.replacements,
         snippets: config.snippets,
-        paired_devices: config.paired_devices,
+        devices: config.devices,
         device_name: state.device_name.clone(),
         pro_available,
+        account_key_status: *state.account_key_status.lock().unwrap(),
         mawok_account_signed_in: state.mawok_account_signed_in.load(Ordering::Relaxed),
         punctuation_style: config.punctuation_style,
         char_widths: config.char_widths,
@@ -1207,7 +1215,7 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     Ok(true)
 }
 
-/// 待つことのある処理（キーチェーン、相手の機器とのやり取り）を、メインスレッドを止めずに別のスレッドで走らせる。
+/// 待つことのある処理（キーチェーン、相手のデバイスとのやり取り）を、メインスレッドを止めずに別のスレッドで走らせる。
 /// 走らせたスレッドが落ちたら、その理由を返す
 async fn run_blocking<T: Send + 'static>(
     task: impl FnOnce() -> T + Send + 'static,
@@ -1726,7 +1734,25 @@ async fn refresh_mawok_account_status(
     }
     match answer {
         Ok(status) => {
+            let changed_account = app
+                .state::<AppState>()
+                .pro_state
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|old| old.account_id != status.account_id);
+            if changed_account {
+                clear_account_key(app).await;
+            }
             remember_pro_state(app, &status, generation).await;
+            if status.pro.active {
+                refresh_account_key(app, &client, &token, generation).await;
+            } else {
+                *app.state::<AppState>().account_key_status.lock().unwrap() =
+                    account_key::Status::None;
+                app.state::<Arc<lan::Lan>>().refresh();
+                apply_config(app);
+            }
             Ok(Some(status))
         }
         Err(account::AccountError::SignedOut) => {
@@ -1736,11 +1762,171 @@ async fn refresh_mawok_account_status(
         }
         Err(account::AccountError::Other(detail)) => {
             warn!("couldn't ask the Mawok account: {detail}");
-            // オフラインの猶予が過ぎていれば、開いている設定画面でもすぐペアリングを止める。
-            apply_config(app);
+            if pro_account_tag(app).is_some()
+                && app
+                    .state::<AppState>()
+                    .account_key
+                    .lock()
+                    .unwrap()
+                    .is_none()
+            {
+                restore_local_account_key(app).await;
+            } else {
+                apply_config(app);
+            }
             Err("account.unreachable".to_string())
         }
     }
+}
+
+/// 窓口へつながらない間は、最後に確かめた Pro の猶予と資格情報管理の鍵で LAN を続ける。
+async fn restore_local_account_key(app: &AppHandle) {
+    let local = match run_blocking(account_key::load).await {
+        Ok(Ok(key)) => key,
+        Ok(Err(error)) | Err(error) => {
+            warn!("couldn't read the account key: {error}");
+            return;
+        }
+    };
+    use_unverified_account_key(app, local);
+}
+
+fn use_unverified_account_key(app: &AppHandle, local: Option<[u8; 32]>) {
+    *app.state::<AppState>().account_key.lock().unwrap() = local;
+    *app.state::<AppState>().account_key_status.lock().unwrap() =
+        account_key::offline_status(local.as_ref());
+    app.state::<Arc<lan::Lan>>().refresh();
+    apply_config(app);
+}
+
+fn account_key_generation_is_current(app: &AppHandle, generation: usize) -> bool {
+    app.state::<AppState>()
+        .pro_generation
+        .load(Ordering::SeqCst)
+        == generation
+}
+
+fn should_store_account_key(local: Option<&[u8; 32]>) -> bool {
+    local.is_none()
+}
+
+/// Pro の確認の直後に、窓口の鍵の印と資格情報管理の鍵をそろえる。
+/// 鍵を初めて作る流れは、並行した確認どうしで別の鍵を登録しないよう直列にする。
+async fn refresh_account_key(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    token: &str,
+    generation: usize,
+) {
+    let state = app.state::<AppState>();
+    let _refresh = state.account_key_refresh.lock().await;
+    if !account_key_generation_is_current(app, generation) {
+        return;
+    }
+    let local = match run_blocking(account_key::load).await {
+        Ok(Ok(key)) => key,
+        Ok(Err(error)) | Err(error) => {
+            warn!("couldn't read the account key: {error}");
+            return;
+        }
+    };
+    let server = match account::sync_key_id(client, token).await {
+        Ok(key_id) => key_id,
+        Err(error) => {
+            warn!("couldn't check the account key: {error:?}");
+            if account_key_generation_is_current(app, generation) {
+                use_unverified_account_key(app, local);
+            }
+            return;
+        }
+    };
+    if !account_key_generation_is_current(app, generation) {
+        return;
+    }
+    *app.state::<AppState>().account_key_id.lock().unwrap() = server.clone();
+    if account_key::decide(server.as_deref(), local.as_ref()) == account_key::Status::NeedsPairing {
+        if local.is_some() {
+            if !account_key_generation_is_current(app, generation) {
+                return;
+            }
+            if let Err(error) = run_blocking(account_key::clear).await {
+                warn!("couldn't discard a mismatched account key: {error:?}");
+            }
+        }
+        if !account_key_generation_is_current(app, generation) {
+            return;
+        }
+        *app.state::<AppState>().account_key.lock().unwrap() = None;
+        *app.state::<AppState>().account_key_status.lock().unwrap() =
+            account_key::Status::NeedsPairing;
+        forget_devices(app);
+        app.state::<Arc<lan::Lan>>().refresh();
+        apply_config(app);
+        return;
+    }
+    let generated = should_store_account_key(local.as_ref());
+    let key = match local {
+        Some(key) => key,
+        None => match account_key::generate() {
+            Ok(key) => key,
+            Err(error) => {
+                warn!("couldn't generate an account key: {error}");
+                *app.state::<AppState>().account_key_status.lock().unwrap() =
+                    account_key::Status::None;
+                app.state::<Arc<lan::Lan>>().refresh();
+                apply_config(app);
+                return;
+            }
+        },
+    };
+    if server.is_none() {
+        let reset = account::reset_sync(client, token, &account_key::key_id(&key)).await;
+        if !account_key_generation_is_current(app, generation) {
+            return;
+        }
+        if let Err(error) = reset {
+            warn!("couldn't set the account key ID: {error:?}");
+            *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::None;
+            app.state::<Arc<lan::Lan>>().refresh();
+            apply_config(app);
+            return;
+        }
+    }
+    if !account_key_generation_is_current(app, generation) {
+        return;
+    }
+    if generated {
+        let key_to_store = key;
+        if let Err(error) = run_blocking(move || account_key::store(&key_to_store)).await {
+            warn!("couldn't store the account key: {error:?}");
+            return;
+        }
+        if !account_key_generation_is_current(app, generation) {
+            return;
+        }
+    }
+    *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
+    *app.state::<AppState>().account_key_id.lock().unwrap() =
+        Some(server.unwrap_or_else(|| account_key::key_id(&key)));
+    *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
+    app.state::<Arc<lan::Lan>>().refresh();
+    apply_config(app);
+}
+
+/// 鍵を置く処理（確かめ・作り直し・ペアリングでの受け取り）と同じ排他を取り、消すのを必ず後にする。
+/// 取らないと、サインアウトと重なった保存が、消した後に鍵を書き戻す
+async fn clear_account_key(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let _refresh = state.account_key_refresh.lock().await;
+    *app.state::<AppState>().account_key.lock().unwrap() = None;
+    *app.state::<AppState>().account_key_id.lock().unwrap() = None;
+    *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::None;
+    if let Err(error) = run_blocking(account_key::clear).await {
+        warn!("couldn't clear the account key: {error:?}");
+    }
+    forget_devices(app);
+    app.state::<Arc<lan::Lan>>().refresh();
+    apply_config(app);
 }
 
 const PRO_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -1792,6 +1978,7 @@ async fn clear_pro_state(app: &AppHandle) {
     app.state::<AppState>()
         .mawok_account_signed_in
         .store(false, Ordering::Relaxed);
+    clear_account_key(app).await;
     match run_blocking(move || pro::clear(&path)).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) | Err(error) => warn!("couldn't clear the Pro state: {error}"),
@@ -1827,6 +2014,45 @@ async fn sign_out_mawok(app: AppHandle) -> Result<(), String> {
     forget_mawok_token(&app).await
 }
 
+/// 新しい鍵を窓口へ反映できたときだけ、資格情報管理の鍵を置き換える。
+#[tauri::command]
+async fn reset_account_key(app: AppHandle) -> Result<(), String> {
+    let generation = app
+        .state::<AppState>()
+        .pro_generation
+        .load(Ordering::SeqCst);
+    let token = run_blocking(|| secrets::read(AiService::Mawok.credential_user()))
+        .await?
+        .map_err(|_| "account.sign_in_required".to_string())?;
+    let state = app.state::<AppState>();
+    let _refresh = state.account_key_refresh.lock().await;
+    if !account_key_generation_is_current(&app, generation) {
+        return Ok(());
+    }
+    if pro_account_tag(&app).is_none() {
+        return Err(lan::Failure::ProRequired.code().to_string());
+    }
+    let key = run_blocking(account_key::generate).await??;
+    let client = http_client(&app)?;
+    account::reset_sync(&client, &token, &account_key::key_id(&key))
+        .await
+        .map_err(|_| "account.unreachable".to_string())?;
+    if !account_key_generation_is_current(&app, generation) {
+        return Ok(());
+    }
+    run_blocking(move || account_key::store(&key)).await??;
+    if !account_key_generation_is_current(&app, generation) {
+        return Ok(());
+    }
+    *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
+    *app.state::<AppState>().account_key_id.lock().unwrap() = Some(account_key::key_id(&key));
+    *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
+    forget_devices(&app);
+    app.state::<Arc<lan::Lan>>().refresh();
+    apply_config(&app);
+    Ok(())
+}
+
 /// 残高を買い足す入口をブラウザで開く
 #[tauri::command]
 fn open_mawok_buy_page(app: AppHandle) -> Result<(), String> {
@@ -1834,7 +2060,7 @@ fn open_mawok_buy_page(app: AppHandle) -> Result<(), String> {
     open_page(&app, &account::buy_page_url(lang.code()))
 }
 
-/// Pro の料金ページをブラウザーで開く。機器の画面の案内にも使う。
+/// Pro の料金ページをブラウザーで開く。デバイスの画面の案内にも使う。
 #[tauri::command]
 fn open_mawok_pro_page(app: AppHandle) -> Result<(), String> {
     open_page(&app, &account::pro_page_url())
@@ -2366,46 +2592,80 @@ fn show_notification(app: &AppHandle, message: String) {
     }
 }
 
-/// 組み合わせた機器から届いた下書き（画面側の draft-received）
+/// 同じアカウントのデバイスから届いた下書き（画面側の draft-received）
 #[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
 struct ReceivedDraft {
-    /// 送ってきた機器の名前
+    /// 送ってきたデバイスの名前
     from: String,
     text: String,
 }
 
-impl lan::Host for AppHandle {
-    fn paired_keys(&self) -> Vec<Vec<u8>> {
-        self.state::<AppState>()
-            .config
-            .lock()
-            .unwrap()
-            .paired_devices
-            .iter()
-            .filter_map(|device| lan::from_hex(&device.public_key))
-            .collect()
+/// 見つけたデバイスを設定の順番と送信先の選択を保ったまま更新する。初めてなら末尾へ加える。
+fn remember_found_device(devices: &mut Vec<Device>, peer: lan::Peer, address: IpAddr) -> bool {
+    let public_key = lan::to_hex(&peer.public_key);
+    let address = address.to_string();
+    if let Some(device) = devices
+        .iter_mut()
+        .find(|device| device.public_key == public_key)
+    {
+        let changed = device.name != peer.name || device.address != address;
+        if changed {
+            device.name = peer.name;
+            device.address = address;
+        }
+        return changed;
     }
+    devices.push(Device {
+        name: peer.name,
+        public_key,
+        address,
+        send_to: true,
+    });
+    true
+}
 
-    fn on_paired(&self, peer: lan::Peer, address: IpAddr) -> bool {
-        let device = PairedDevice {
-            name: peer.name,
-            public_key: lan::to_hex(&peer.public_key),
-            address: address.to_string(),
-            send_to: true,
+/// 握手が通ったデバイスの場所だけを更新する。UDP の名乗りだけでは設定を書き換えない。
+fn remember_device_address(devices: &mut [Device], public_key: &[u8], address: IpAddr) -> bool {
+    let public_key = lan::to_hex(public_key);
+    let address = address.to_string();
+    let Some(device) = devices
+        .iter_mut()
+        .find(|device| device.public_key == public_key)
+    else {
+        return false;
+    };
+    if device.address == address {
+        return false;
+    }
+    device.address = address;
+    true
+}
+
+fn received_device_name(devices: &[Device], public_key: &str) -> String {
+    devices
+        .iter()
+        .find(|device| device.public_key == public_key)
+        .map(|device| device.name.clone())
+        .unwrap_or_else(|| public_key[..4].to_string())
+}
+
+impl lan::Host for AppHandle {
+    fn on_device_found(&self, peer: lan::Peer, address: IpAddr) -> bool {
+        let changed = {
+            let state = self.state::<AppState>();
+            let mut devices = state.config.lock().unwrap().devices.clone();
+            remember_found_device(&mut devices, peer.clone(), address)
         };
-        // 同じ機器と組み合わせ直したら置き換え、ほかの機器なら足す
-        let saved = update_config(self, |config| {
-            config
-                .paired_devices
-                .retain(|paired| paired.public_key != device.public_key);
-            config.paired_devices.push(device);
+        if !changed {
+            return true;
+        }
+        update_config(self, |config| {
+            remember_found_device(&mut config.devices, peer, address);
         })
-        .inspect_err(|error| error!("couldn't save the paired device: {error}"))
-        .is_ok();
-        self.state::<Arc<lan::Lan>>().cancel_pairing();
-        saved
+        .inspect_err(|error| error!("couldn't save a discovered device: {error}"))
+        .is_ok()
     }
 
     fn on_pairing_code_ended(&self) {
@@ -2413,27 +2673,43 @@ impl lan::Host for AppHandle {
         let _ = self.emit(events::PAIRING_CODE_ENDED, ());
     }
 
+    fn on_pairing_code_offered(&self, code: String, remaining_seconds: u64, automatic: bool) {
+        let _ = self.emit(
+            events::PAIRING_CODE_OFFERED,
+            PairingOffer {
+                code,
+                remaining_seconds,
+                automatic,
+            },
+        );
+    }
+
+    fn on_device_address_seen(&self, public_key: &[u8], address: IpAddr) {
+        let changed = {
+            let state = self.state::<AppState>();
+            let mut devices = state.config.lock().unwrap().devices.clone();
+            remember_device_address(&mut devices, public_key, address)
+        };
+        if changed {
+            if let Err(error) = update_config(self, |config| {
+                remember_device_address(&mut config.devices, public_key, address);
+            }) {
+                warn!("lan: couldn't remember a device's address: {error}");
+            }
+        }
+    }
+
     fn on_received(&self, from: &[u8], text: String) -> bool {
         let from = lan::to_hex(from);
         let state = self.state::<AppState>();
-        // 解除（設定の保存）と食い違わないよう、設定を押さえたまま、組み合わせたままかを確かめて溜める
         let config = state.config.lock().unwrap();
-        let Some(device) = config
-            .paired_devices
-            .iter()
-            .find(|device| device.public_key == from)
-        else {
-            return false;
-        };
+        let name = received_device_name(&config.devices, &from);
         // 前面には出さない。画面側で、入力欄が空ならそのまま入れ、書きかけがあれば帯で知らせる
         self.state::<DraftState>()
             .received
             .lock()
             .unwrap()
-            .push(ReceivedDraft {
-                from: device.name.clone(),
-                text,
-            });
+            .push(ReceivedDraft { from: name, text });
         drop(config);
         // 中身は載せずに知らせるだけ。画面は take_received_drafts で取りに来る（読み込み中で知らせを取り逃がしても、読み込み後に取りに来る）
         let _ = self.emit(events::DRAFT_RECEIVED, ());
@@ -2464,6 +2740,32 @@ impl lan::Host for AppHandle {
             .filter(|pro| pro.available_at(pro::now()))
             .map(pro::State::account_tag)
     }
+
+    fn account_key(&self) -> Option<[u8; 32]> {
+        *self.state::<AppState>().account_key.lock().unwrap()
+    }
+
+    fn account_key_id(&self) -> Option<String> {
+        self.state::<AppState>()
+            .account_key_id
+            .lock()
+            .unwrap()
+            .clone()
+    }
+
+    fn receive_account_key(&self, key: [u8; 32]) -> bool {
+        // LAN のスレッドから呼ばれる（非同期の文脈ではない）。握手の間にサインアウトしていたら置かない
+        let state = self.state::<AppState>();
+        let _refresh = state.account_key_refresh.blocking_lock();
+        if pro_account_tag(self).is_none() || account_key::store(&key).is_err() {
+            return false;
+        }
+        *self.state::<AppState>().account_key.lock().unwrap() = Some(key);
+        *self.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
+        self.state::<Arc<lan::Lan>>().refresh();
+        apply_config(self);
+        true
+    }
 }
 
 fn pro_account_tag(app: &AppHandle) -> Option<[u8; lan::ACCOUNT_TAG_LEN]> {
@@ -2483,13 +2785,14 @@ fn take_received_drafts(state: tauri::State<'_, DraftState>) -> Vec<ReceivedDraf
     std::mem::take(&mut *state.received.lock().unwrap())
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
 #[serde(rename_all = "camelCase")]
 struct PairingOffer {
     code: String,
     remaining_seconds: u64,
+    automatic: bool,
 }
 
 /// コードを出して、組み合わせる相手が入れるのを待つ。コードと画面表示用の残り秒を返す
@@ -2502,12 +2805,26 @@ fn start_pairing(
     if pro_account_tag(&app).is_none() {
         return Err(lan::Failure::ProRequired.code().to_string());
     }
-    let (code, remaining_seconds) = lan
-        .start_pairing()
+    if *app.state::<AppState>().account_key_status.lock().unwrap() != account_key::Status::Ready {
+        return Err(lan::Failure::NeedsPairing.code().to_string());
+    }
+    let offer = lan
+        .start_pairing(false)
         .map_err(|error| lan_failure("couldn't start pairing", error))?;
     Ok(PairingOffer {
-        code,
-        remaining_seconds,
+        code: offer.code,
+        remaining_seconds: offer.remaining_seconds,
+        automatic: offer.automatic,
+    })
+}
+
+/// 今表示しているコード。設定を開いた後、`want` を受けて自動で始めた組み合わせも画面に出す。
+#[tauri::command]
+fn pairing_offer(lan: tauri::State<'_, Arc<lan::Lan>>) -> Option<PairingOffer> {
+    lan.pairing_offer().map(|offer| PairingOffer {
+        code: offer.code,
+        remaining_seconds: offer.remaining_seconds,
+        automatic: offer.automatic,
     })
 }
 
@@ -2515,6 +2832,11 @@ fn start_pairing(
 fn cancel_pairing(lan: tauri::State<'_, Arc<lan::Lan>>) {
     info!("cancel pairing");
     lan.cancel_pairing();
+}
+
+#[tauri::command]
+fn set_devices_open(lan: tauri::State<'_, Arc<lan::Lan>>, open: bool) {
+    lan.set_devices_open(open);
 }
 
 /// 相手に出ているコードを入れて組み合わせる。相手を探すので数秒かかるため、メインスレッドを止めない
@@ -2528,25 +2850,36 @@ async fn join_pairing(
     if pro_account_tag(&app).is_none() {
         return Err(lan::Failure::ProRequired.code().to_string());
     }
+    if *app.state::<AppState>().account_key_status.lock().unwrap()
+        != account_key::Status::NeedsPairing
+    {
+        return Err(lan::Failure::Internal.code().to_string());
+    }
     let lan = Arc::clone(lan.inner());
     run_blocking(move || lan.join_pairing(&code))
         .await?
         .map_err(|error| lan_failure("couldn't pair", error))
 }
 
-#[tauri::command]
-fn unpair_device(app: AppHandle, public_key: String) -> Result<(), String> {
-    info!("unpair a device");
-    update_config(&app, |config| {
-        config
-            .paired_devices
-            .retain(|device| device.public_key != public_key)
-    })?;
-    app.state::<Arc<lan::Lan>>().refresh();
-    Ok(())
+/// アカウントの鍵が替わった・消えたときに、デバイスの一覧を空にする。一覧は「今の鍵で確かめた相手」なので、
+/// 前の鍵の相手を残すと、送れない送信先が並ぶ。新しい鍵を持つデバイスは、次の名乗りで一覧に戻る
+fn forget_devices(app: &AppHandle) {
+    let empty = app
+        .state::<AppState>()
+        .config
+        .lock()
+        .unwrap()
+        .devices
+        .is_empty();
+    if !empty {
+        if let Err(error) = update_config(app, |config| config.devices.clear()) {
+            warn!("couldn't clear the devices: {error}");
+        }
+    }
+    app.state::<Arc<lan::Lan>>().forget_devices();
 }
 
-/// 送れなかったときに画面へ渡すもの。一部の機器にだけ届かなかったら、符号は `lan.partial` で、届かなかった機器の公開鍵を添える
+/// 送れなかったときに画面へ渡すもの。一部のデバイスにだけ届かなかったら、符号は `lan.partial` で、届かなかったデバイスの公開鍵を添える
 #[derive(Debug, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -2565,11 +2898,11 @@ impl From<String> for SendFailure {
     }
 }
 
-/// 一部の機器にだけ届かなかったときの符号（src/lib/lan-errors.ts）
+/// 一部のデバイスにだけ届かなかったときの符号（src/lib/lan-errors.ts）
 const PARTIAL_SEND: &str = "lan.partial";
 
-/// 入力内容を組み合わせた機器の下書きへ送り、直前のアプリへフォーカスを戻してウィンドウを隠す（コピーして隠すときと揃える）。
-/// 送信先は、`targets`（公開鍵）を渡せばその機器、渡さなければ送信先にチェックした機器。
+/// 入力内容を同じアカウントで見つけたデバイスへ送り、直前のアプリへフォーカスを戻してウィンドウを隠す（コピーして隠すときと揃える）。
+/// 送信先は、`targets`（公開鍵）を渡せばそのデバイス、渡さなければ送信先にチェックしたデバイス。
 /// 送ったら true、入力欄が空で何も送らなかったら false を返す。1台にでも届かなければ隠さない。
 /// 相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
 #[tauri::command]
@@ -2585,21 +2918,18 @@ async fn send_draft(
         .map_err(SendFailure::from)?
 }
 
-/// 組み合わせた機器のうち `include` に当てはまるものと、その鍵。鍵が読めない機器は、ログに残して除く
-fn paired_targets(
-    app: &AppHandle,
-    include: impl Fn(&PairedDevice) -> bool,
-) -> Vec<(PairedDevice, Vec<u8>)> {
+/// 同じアカウントで見つけたデバイスのうち `include` に当てはまるものと、その鍵。鍵が読めないデバイスは、ログに残して除く
+fn device_targets(app: &AppHandle, include: impl Fn(&Device) -> bool) -> Vec<(Device, Vec<u8>)> {
     let state = app.state::<AppState>();
     let config = state.config.lock().unwrap();
     config
-        .paired_devices
+        .devices
         .iter()
         .filter(|device| include(device))
         .filter_map(|device| match lan::from_hex(&device.public_key) {
             Some(key) => Some((device.clone(), key)),
             None => {
-                warn!("lan: a paired device's key is unreadable");
+                warn!("lan: a device's key is unreadable");
                 None
             }
         })
@@ -2612,7 +2942,7 @@ fn remember_addresses(app: &AppHandle, reached: &[(String, IpAddr)]) {
         let state = app.state::<AppState>();
         let config = state.config.lock().unwrap();
         reached.iter().any(|(public_key, address)| {
-            config.paired_devices.iter().any(|paired| {
+            config.devices.iter().any(|paired| {
                 &paired.public_key == public_key && paired.address != address.to_string()
             })
         })
@@ -2621,7 +2951,7 @@ fn remember_addresses(app: &AppHandle, reached: &[(String, IpAddr)]) {
         // 起動時に読めなかった設定ファイルを、ここで初めて写すこともあるので、トレイと画面にも反映する
         if let Err(error) = update_config(app, |config| {
             for (public_key, address) in reached {
-                for paired in &mut config.paired_devices {
+                for paired in &mut config.devices {
                     if &paired.public_key == public_key {
                         paired.address = address.to_string();
                     }
@@ -2633,13 +2963,13 @@ fn remember_addresses(app: &AppHandle, reached: &[(String, IpAddr)]) {
     }
 }
 
-/// 機器ごとに同時に `call` を呼び、機器と結果の組を `targets` の順に返す。動いていない機器を待つ時間が、台数分重ならないようにする。
-/// `call` には、機器の鍵と、覚えていた場所（読めなければ None）を渡す
+/// デバイスごとに同時に `call` を呼び、デバイスと結果の組を `targets` の順に返す。動いていないデバイスを待つ時間が、台数分重ならないようにする。
+/// `call` には、デバイスの鍵と、覚えていた場所（読めなければ None）を渡す
 fn on_each_device<'a, T: Send>(
     app: &AppHandle,
-    targets: &'a [(PairedDevice, Vec<u8>)],
+    targets: &'a [(Device, Vec<u8>)],
     call: impl Fn(&lan::Lan, &[u8], Option<IpAddr>) -> T + Sync,
-) -> Vec<(&'a PairedDevice, T)> {
+) -> Vec<(&'a Device, T)> {
     let state = app.state::<Arc<lan::Lan>>();
     let (lan, call): (&lan::Lan, _) = (&state, &call);
     thread::scope(|scope| {
@@ -2656,6 +2986,31 @@ fn on_each_device<'a, T: Send>(
     })
 }
 
+fn account_key_failure_for_lan(
+    pro_available: bool,
+    status: account_key::Status,
+    has_account_key: bool,
+) -> Option<lan::Failure> {
+    if !pro_available {
+        Some(lan::Failure::ProRequired)
+    } else if status != account_key::Status::Ready || !has_account_key {
+        Some(lan::Failure::NeedsPairing)
+    } else {
+        None
+    }
+}
+
+fn ready_account_key_for_lan(app: &AppHandle) -> Result<[u8; 32], lan::Failure> {
+    let key = *app.state::<AppState>().account_key.lock().unwrap();
+    let status = *app.state::<AppState>().account_key_status.lock().unwrap();
+    if let Some(failure) =
+        account_key_failure_for_lan(pro_account_tag(app).is_some(), status, key.is_some())
+    {
+        return Err(failure);
+    }
+    Ok(key.expect("a Ready account key is present"))
+}
+
 fn send_and_hide(
     app: &AppHandle,
     text: &str,
@@ -2663,19 +3018,19 @@ fn send_and_hide(
 ) -> Result<bool, SendFailure> {
     let sent = !text.is_empty();
     if sent {
-        let account_tag = pro_account_tag(app)
-            .ok_or_else(|| SendFailure::from(lan::Failure::ProRequired.code().to_string()))?;
+        let account_key = ready_account_key_for_lan(app)
+            .map_err(|failure| SendFailure::from(failure.code().to_string()))?;
         if app
             .state::<AppState>()
             .config
             .lock()
             .unwrap()
-            .paired_devices
+            .devices
             .is_empty()
         {
             return Err(lan::Failure::NoDevice.code().to_string().into());
         }
-        let targets = paired_targets(app, |device| match targets {
+        let targets = device_targets(app, |device| match targets {
             Some(keys) => keys.contains(&device.public_key),
             None => device.send_to,
         });
@@ -2684,7 +3039,7 @@ fn send_and_hide(
         }
         // 送るのは整える前の入力欄の中身。整えるのは、受け取った側がコピーするとき
         let results = on_each_device(app, &targets, |lan, key, saved| {
-            lan.send(key, saved, Some(account_tag), text)
+            lan.send(key, saved, Some(account_key), text)
         });
         let mut reached = Vec::new();
         let mut failures = Vec::new();
@@ -2701,12 +3056,12 @@ fn send_and_hide(
                 .iter()
                 .map(|(public_key, _)| public_key.clone())
                 .collect();
-            // lan_failure は原因をログに残すので、どの分岐でも全部の機器の分を先に評価する
+            // lan_failure は原因をログに残すので、どの分岐でも全部のデバイスの分を先に評価する
             let codes: Vec<String> = failures
                 .into_iter()
                 .map(|(_, error)| lan_failure("couldn't send", error))
                 .collect();
-            // 1台にも届かなければ、今までどおり失敗の種類で知らせる（台数が多ければ、最初の機器の種類）
+            // 1台にも届かなければ、今までどおり失敗の種類で知らせる（台数が多ければ、最初のデバイスの種類）
             if all_failed {
                 return Err(codes.into_iter().next().unwrap_or_default().into());
             }
@@ -2737,16 +3092,16 @@ fn send_and_hide(
     Ok(sent)
 }
 
-/// 組み合わせた機器へつないで、動いているかを確かめる（送信先の一覧を開いたとき）。つながった機器の公開鍵を返す。
-/// 機器ごとに同時に確かめ、相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
+/// 同じアカウントで見つけたデバイスへつないで、動いているかを確かめる（送信先の一覧を開いたとき）。つながったデバイスの公開鍵を返す。
+/// デバイスごとに同時に確かめ、相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
 #[tauri::command]
 async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
     run_blocking(move || {
-        let account_tag =
-            pro_account_tag(&app).ok_or_else(|| lan::Failure::ProRequired.code().to_string())?;
-        let targets = paired_targets(&app, |_| true);
+        let account_key =
+            ready_account_key_for_lan(&app).map_err(|failure| failure.code().to_string())?;
+        let targets = device_targets(&app, |_| true);
         let reached: Vec<(String, IpAddr)> = on_each_device(&app, &targets, |lan, key, saved| {
-            lan.probe(key, saved, Some(account_tag))
+            lan.probe(key, saved, Some(account_key))
                 // つながらないのはよくあること（電源が入っていないなど）なので、細かい中身だけログに残す
                 .inspect_err(|error| info!("probe: {}", error.detail))
                 .ok()
@@ -2763,11 +3118,11 @@ async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
     .await?
 }
 
-/// 送信先のチェックを覚える。渡した公開鍵の機器にチェックを入れ、ほかは外す
+/// 送信先のチェックを覚える。渡した公開鍵のデバイスにチェックを入れ、ほかは外す
 #[tauri::command]
 fn set_send_targets(app: AppHandle, public_keys: Vec<String>) -> Result<(), String> {
     update_config(&app, |config| {
-        for device in &mut config.paired_devices {
+        for device in &mut config.devices {
             device.send_to = public_keys.contains(&device.public_key);
         }
     })
@@ -3666,6 +4021,7 @@ pub fn run() {
             reopen_mawok_sign_in_page,
             mawok_account_status,
             sign_out_mawok,
+            reset_account_key,
             open_mawok_buy_page,
             open_mawok_pro_page,
             run_action,
@@ -3695,9 +4051,10 @@ pub fn run() {
             close_manual_window,
             open_license_source,
             start_pairing,
+            pairing_offer,
             cancel_pairing,
+            set_devices_open,
             join_pairing,
-            unpair_device,
             send_draft,
             probe_devices,
             set_send_targets,
@@ -3761,7 +4118,9 @@ pub fn run() {
                 // ホットキーの記録中に閉じた場合に、止めていたホットキーを戻す
                 ensure_hotkey_registered(app);
                 // 出していたコードは、画面から見えなくなるので使えなくする
-                app.state::<Arc<lan::Lan>>().cancel_pairing();
+                let lan = app.state::<Arc<lan::Lan>>();
+                lan.set_devices_open(false);
+                lan.cancel_pairing();
             }
             WindowEvent::Destroyed if window.label() == LICENSES_WINDOW => {
                 info!("licenses window closed");
@@ -3863,6 +4222,10 @@ pub fn run() {
                 pro_state: Mutex::new(pro_state),
                 mawok_account_signed_in: AtomicBool::new(false),
                 pro_generation: AtomicUsize::new(0),
+                account_key: Mutex::new(None),
+                account_key_id: Mutex::new(None),
+                account_key_status: Mutex::new(account_key::Status::None),
+                account_key_refresh: tokio::sync::Mutex::new(()),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]
@@ -3877,7 +4240,7 @@ pub fn run() {
                     move || resume_hotkey_after_menu(&end),
                 );
             }
-            // 組み合わせた機器があれば、待ち受けと名乗りを始める
+            // Pro でアカウントの鍵を持っていれば、待ち受けと名乗りを始める
             let lan = lan::Lan::new(key_path, device_name, Arc::new(app.handle().clone()));
             app.manage(Arc::clone(&lan));
             lan.refresh();
@@ -4120,5 +4483,120 @@ mod tests {
             settings_opening: true,
             ..blurred()
         }));
+    }
+
+    #[test]
+    fn remembers_found_devices_without_resetting_existing_send_targets() {
+        let mut devices = vec![
+            Device {
+                name: "desk".to_string(),
+                public_key: "aa".to_string(),
+                address: "192.168.0.2".to_string(),
+                send_to: false,
+            },
+            Device {
+                name: "laptop".to_string(),
+                public_key: "bb".to_string(),
+                address: "192.168.0.3".to_string(),
+                send_to: true,
+            },
+        ];
+        let peer = lan::Peer {
+            name: "new desk".to_string(),
+            public_key: vec![0xaa],
+        };
+
+        assert!(remember_found_device(
+            &mut devices,
+            peer.clone(),
+            "192.168.0.4".parse().unwrap()
+        ));
+        assert_eq!(devices[0].name, "new desk");
+        assert_eq!(devices[0].address, "192.168.0.4");
+        assert!(!devices[0].send_to);
+        assert_eq!(devices[1].public_key, "bb");
+
+        assert!(!remember_found_device(
+            &mut devices,
+            peer,
+            "192.168.0.4".parse().unwrap()
+        ));
+
+        assert!(remember_found_device(
+            &mut devices,
+            lan::Peer {
+                name: "phone".to_string(),
+                public_key: vec![0xcc],
+            },
+            "192.168.0.5".parse().unwrap()
+        ));
+        assert_eq!(devices[2].public_key, "cc");
+        assert!(devices[2].send_to);
+    }
+
+    #[test]
+    fn remembers_an_address_only_for_a_known_device() {
+        let mut devices = vec![Device {
+            name: "desk".to_string(),
+            public_key: "aabb".to_string(),
+            address: "192.168.0.2".to_string(),
+            send_to: false,
+        }];
+
+        assert!(remember_device_address(
+            &mut devices,
+            &[0xaa, 0xbb],
+            "192.168.0.3".parse().unwrap(),
+        ));
+        assert_eq!(devices[0].address, "192.168.0.3");
+        assert!(!devices[0].send_to);
+        assert!(!remember_device_address(
+            &mut devices,
+            &[0xaa, 0xbb],
+            "192.168.0.3".parse().unwrap(),
+        ));
+        assert!(!remember_device_address(
+            &mut devices,
+            &[0xcc],
+            "192.168.0.4".parse().unwrap(),
+        ));
+    }
+
+    #[test]
+    fn distinguishes_missing_keys_from_missing_pro() {
+        assert_eq!(
+            account_key_failure_for_lan(false, account_key::Status::Ready, true),
+            Some(lan::Failure::ProRequired)
+        );
+        assert_eq!(
+            account_key_failure_for_lan(true, account_key::Status::NeedsPairing, false),
+            Some(lan::Failure::NeedsPairing)
+        );
+        assert_eq!(
+            account_key_failure_for_lan(true, account_key::Status::None, false),
+            Some(lan::Failure::NeedsPairing)
+        );
+        assert_eq!(
+            account_key_failure_for_lan(true, account_key::Status::Ready, true),
+            None
+        );
+    }
+
+    #[test]
+    fn only_a_new_account_key_needs_to_be_stored() {
+        assert!(should_store_account_key(None));
+        assert!(!should_store_account_key(Some(&[7; 32])));
+    }
+
+    #[test]
+    fn labels_a_draft_from_a_device_before_it_is_in_the_list() {
+        let devices = vec![Device {
+            name: "desk".to_string(),
+            public_key: "aabb".to_string(),
+            address: String::new(),
+            send_to: true,
+        }];
+        assert_eq!(received_device_name(&devices, "aabb"), "desk");
+        assert_eq!(received_device_name(&devices, "ccdd"), "ccdd");
     }
 }

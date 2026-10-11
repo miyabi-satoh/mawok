@@ -2,13 +2,14 @@
 import type { Action } from "./Action";
 import type { AiService } from "./AiService";
 import type { CharWidths } from "./CharWidths";
+import type { Device } from "./Device";
 import type { DraftKeys } from "./DraftKeys";
 import type { Language } from "./Language";
-import type { PairedDevice } from "./PairedDevice";
 import type { Platform } from "./Platform";
 import type { PunctuationStyle } from "./PunctuationStyle";
 import type { Replacement } from "./Replacement";
 import type { Snippet } from "./Snippet";
+import type { Status } from "./Status";
 import type { Theme } from "./Theme";
 
 /**
@@ -56,17 +57,17 @@ textHistorySize: number, trimTrailingWhitespace: boolean, replacements: Array<Re
  */
 snippets: Array<Snippet>, 
 /**
- * 組み合わせた自分の機器。組み合わせた順
+ * 同じアカウントで見つけた自分のデバイス。見つけた順
  */
-pairedDevices: Array<PairedDevice>, 
+devices: Array<Device>, 
 /**
- * 組み合わせるときに相手へ名乗る、この機器の名前
+ * ペアリングと生存確認で相手へ名乗る、このデバイスの名前
  */
 deviceName: string, 
 /**
- * 機器の間の送受信を使える Pro か
+ * デバイスの間の送受信を使える Pro か
  */
-proAvailable: boolean, 
+proAvailable: boolean, accountKeyStatus: Status, 
 /**
  * Mawok のアカウントトークンを資格情報管理から読めたか
  */

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { formatKeys } from '$lib/keys';
 import { EVENTS } from '$lib/bindings/constants';
+import type { PairingOffer } from '$lib/bindings/PairingOffer';
 import type { UpdateView } from '$lib/bindings/UpdateView';
 import { draftGuidance } from '$lib/guidance';
 import { m } from '$lib/paraglide/messages';
@@ -94,6 +95,8 @@ async function renderAt(category: () => string) {
 beforeEach(() => {
 	invoked.mockClear();
 	invoked.mockImplementation(() => Promise.resolve(undefined));
+	vi.mocked(listen).mockReset();
+	vi.mocked(listen).mockImplementation(() => Promise.resolve(() => {}));
 	settings.current = view();
 });
 
@@ -1378,7 +1381,7 @@ describe('設定画面のほかのアプリに移ったら下書きを隠す', (
 	});
 });
 
-describe('設定画面の機器', () => {
+describe('設定画面のデバイス', () => {
 	const devices = [
 		{ name: 'mac-mini', publicKey: 'de03ffff', address: '', sendTo: true },
 		{ name: 'mac-mini', publicKey: 'a1b2ffff', address: '', sendTo: true },
@@ -1388,43 +1391,36 @@ describe('設定画面の機器', () => {
 	beforeEach(() => {
 		settings.current = {
 			...view(),
-			pairedDevices: devices,
+			devices,
 			proAvailable: true,
+			accountKeyStatus: 'ready',
 			mawokAccountSignedIn: true
 		};
 	});
 
-	it('同じ名前の機器は公開鍵の先頭4文字で見分け、解除はその機器に対して行う', async () => {
+	it('同じ名前のデバイスは公開鍵の先頭4文字で見分け、送信先の切り替えはそのデバイスに対して行う', async () => {
 		const screen = await renderAt(m.settings_category_devices);
 
-		await expect
-			.element(screen.getByText(m.settings_devices_paired({ name: 'mac-mini (a1b2)' })))
-			.toBeVisible();
-
-		await screen.getByRole('button', { name: m.settings_devices_unpair() }).nth(1).click();
-
-		expect(invoked).toHaveBeenCalledWith('unpair_device', { publicKey: 'a1b2ffff' });
+		await expect.element(screen.getByLabelText('mac-mini (a1b2)')).toBeChecked();
+		await screen.getByLabelText('mac-mini (a1b2)').click();
+		expect(invoked).toHaveBeenCalledWith('set_send_targets', {
+			publicKeys: ['de03ffff', 'c3d4ffff']
+		});
 	});
 
-	it('組み合わせた機器の説明は、台数によらず一度だけ出す', async () => {
+	it('デバイスが見つかっていなければ、その理由を出す', async () => {
+		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'ready' };
 		const screen = await renderAt(m.settings_category_devices);
-		const description = screen.getByText(
-			m.settings_devices_paired_description({ key: formatKeys(DEFAULT_DRAFT_KEYS.send, 'macos') })
-		);
 
-		await expect.element(description).toBeVisible();
-		expect(description.elements()).toHaveLength(1);
+		await expect.element(screen.getByText(m.settings_devices_empty())).toBeVisible();
 	});
 
-	it('Pro でなければペアリングを止め、サインイン前の案内を出す', async () => {
-		settings.current = { ...view(), pairedDevices: devices };
+	it('Pro でなければサインイン前の案内だけを出す', async () => {
+		settings.current = { ...view(), devices };
 		const screen = await renderAt(m.settings_category_devices);
 
 		await expect.element(screen.getByText(m.settings_devices_pro_sign_in())).toBeVisible();
-		await expect
-			.element(screen.getByRole('button', { name: m.settings_devices_offer_start() }))
-			.toBeDisabled();
-		await expect.element(screen.getByLabelText(m.settings_devices_join())).toBeDisabled();
+		expect(screen.getByLabelText(m.settings_devices_join()).query()).toBeNull();
 	});
 
 	it('Pro でないサインイン済みの人には料金のページを開く操作を出す', async () => {
@@ -1436,11 +1432,82 @@ describe('設定画面の機器', () => {
 		await vi.waitFor(() => expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1));
 	});
 
+	it('鍵がないデバイスでは、コードを入力して追加できる', async () => {
+		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
+		const screen = await renderAt(m.settings_category_devices);
+
+		await expect.element(screen.getByText(m.settings_devices_needs_pairing())).toBeVisible();
+		await screen.getByLabelText(m.settings_devices_join()).fill('123456');
+		await screen.getByRole('button', { name: m.settings_devices_join_submit() }).click();
+
+		expect(invoked).toHaveBeenCalledWith('join_pairing', { code: '123456' });
+	});
+
+	it('鍵を確認できなければ、設定を開き直す案内を出す', async () => {
+		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'none' };
+		const screen = await renderAt(m.settings_category_devices);
+
+		await expect.element(screen.getByText(m.settings_devices_not_ready())).toBeVisible();
+	});
+
+	it('すべてのデバイスの接続を解除する前に確かめる', async () => {
+		const screen = await renderAt(m.settings_category_devices);
+
+		await screen
+			.getByRole('button', { name: m.settings_devices_reset_key_start(), exact: true })
+			.click();
+		await expect
+			.element(
+				screen.getByRole('alertdialog', { name: m.settings_devices_reset_key_confirm_title() })
+			)
+			.toBeVisible();
+		expect(invoked).not.toHaveBeenCalledWith('reset_account_key', undefined);
+		await screen
+			.getByRole('alertdialog')
+			.getByRole('button', { name: m.settings_devices_reset_key_start(), exact: true })
+			.click();
+		expect(invoked).toHaveBeenCalledWith('reset_account_key', undefined);
+	});
+
+	it('新しいデバイスを見つけて自動でコードを出したときは、その案内を出す', async () => {
+		invoked.mockImplementation((command) =>
+			Promise.resolve(
+				command === 'pairing_offer'
+					? { code: '123456', remainingSeconds: 120, automatic: true }
+					: undefined
+			)
+		);
+		const screen = await renderAt(m.settings_category_devices);
+
+		await expect.element(screen.getByText('123456')).toBeVisible();
+		await expect.element(screen.getByText(m.settings_devices_offer_automatic())).toBeVisible();
+		expect(
+			screen.getByRole('button', { name: m.settings_devices_offer_cancel() }).query()
+		).toBeNull();
+	});
+
+	it('自動でコードを出したイベントを受け取り、ポーリングせずに表示する', async () => {
+		let offered: ((event: { payload: PairingOffer }) => void) | undefined;
+		vi.mocked(listen).mockImplementation((event, handler) => {
+			if (event === EVENTS.PAIRING_CODE_OFFERED) {
+				offered = handler as unknown as (event: { payload: PairingOffer }) => void;
+			}
+			return Promise.resolve(() => {});
+		});
+		const screen = await renderAt(m.settings_category_devices);
+
+		offered?.({ payload: { code: '654321', remainingSeconds: 120, automatic: true } });
+		await tick();
+
+		await expect.element(screen.getByText('654321')).toBeVisible();
+		expect(callsOf(invoked, 'pairing_offer')).toHaveLength(1);
+	});
+
 	it('コードの残り秒を減らし、取り消すとタイマーを止める', async () => {
 		vi.useFakeTimers();
 		invoked.mockImplementation((command) =>
 			command === 'start_pairing'
-				? Promise.resolve({ code: '123456', remainingSeconds: 120 })
+				? Promise.resolve({ code: '123456', remainingSeconds: 120, automatic: false })
 				: Promise.resolve(undefined)
 		);
 		const screen = await renderAt(m.settings_category_devices);
@@ -1468,7 +1535,7 @@ describe('設定画面の機器', () => {
 		vi.useFakeTimers();
 		invoked.mockImplementation((command) =>
 			command === 'start_pairing'
-				? Promise.resolve({ code: '123456', remainingSeconds: 3 })
+				? Promise.resolve({ code: '123456', remainingSeconds: 3, automatic: false })
 				: Promise.resolve(undefined)
 		);
 		const screen = await renderAt(m.settings_category_devices);

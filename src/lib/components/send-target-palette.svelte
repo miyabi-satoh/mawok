@@ -10,14 +10,14 @@
 	import { errorCode } from '$lib/errors';
 	import { isImeKey, toDraftKey, type Platform } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
-	import type { PairedDevice } from '$lib/settings.svelte';
+	import type { Device } from '$lib/settings.svelte';
 
 	type Props = {
-		devices: PairedDevice[];
+		devices: Device[];
 		platform: Platform;
 		/** 一覧を開くキー。開いている間に押すと閉じる。空文字は割り当てなし */
 		targetsKey: string;
-		/** チェックが入っていて、つながった機器の公開鍵を受け取り、その機器へ送る */
+		/** チェックが入っていて、つながったデバイスの公開鍵を受け取り、そのデバイスへ送る */
 		onsend: (publicKeys: string[]) => void;
 		/** 送らずに閉じる */
 		onclose: () => void;
@@ -29,15 +29,15 @@
 
 	const id = $props.id();
 	let active = $state(0);
-	// 生存確認でつながった機器の公開鍵。確かめている間は null
+	// 生存確認でつながったデバイスの公開鍵。確かめている間は null
 	let reachable = $state<Set<string> | null>(null);
-	/** この機器が Pro でないときだけ、送信先を選べない理由を一覧に出す。 */
+	/** このデバイスが Pro でないときだけ、送信先を選べない理由を一覧に出す。 */
 	let probeError = $state('');
 	const labels = $derived(deviceLabels(devices));
 	// 開いている間に設定が変わって台数が減っても、一覧の外を選ばないようにする
 	const selected = $derived(Math.min(active, devices.length - 1));
 
-	// 開いたときに一度だけ確かめる（docs/lan.md「同じ LAN の自分の機器へ送る」）。
+	// 開いたときに一度だけ確かめる（docs/lan.md「同じ LAN の自分のデバイスへ送る」）。
 	// 周期的には確かめない。使っていない間も通信し続けるのを避けるため
 	onMount(() => {
 		let closed = false;
@@ -60,17 +60,17 @@
 	// この一覧で押したチェック（公開鍵ごと）。設定の反映（settings-changed）を待たずに続けて押しても、
 	// 前に押した分を古い設定で上書きしないよう、押した状態をここで先に持つ
 	const pressed = new SvelteMap<string, boolean>();
-	const sendTo = (device: PairedDevice) => pressed.get(device.publicKey) ?? device.sendTo;
+	const sendTo = (device: Device) => pressed.get(device.publicKey) ?? device.sendTo;
 	// 保存は押した順に1つずつ行う。同時に投げると、後に押した分が先に書き終わり、前に押した古い状態で上書きされうる
 	let saving: Promise<unknown> = Promise.resolve();
 	// この一覧で最後に保存できた送信先の公開鍵。設定の反映（settings-changed）より先に分かる
 	let saved: Set<string> | null = null;
-	const canCheck = (device: PairedDevice) => reachable?.has(device.publicKey) ?? false;
-	// つながらない機器は、チェックを覚えていても送らないので、外れて見せる
-	const isChecked = (device: PairedDevice) => sendTo(device) && canCheck(device);
+	const canCheck = (device: Device) => reachable?.has(device.publicKey) ?? false;
+	// つながらないデバイスは、チェックを覚えていても送らないので、外れて見せる
+	const isChecked = (device: Device) => sendTo(device) && canCheck(device);
 
-	/** チェックを入れ外しして、設定に覚える。つながらない機器や、確かめている間は変えない */
-	function toggle(device: PairedDevice) {
+	/** チェックを入れ外しして、設定に覚える。つながらないデバイスや、確かめている間は変えない */
+	function toggle(device: Device) {
 		if (!canCheck(device)) return;
 		const next = !sendTo(device);
 		pressed.set(device.publicKey, next);

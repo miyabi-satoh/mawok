@@ -14,6 +14,7 @@
 	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import type { PairingOffer } from '$lib/bindings/PairingOffer';
 	import { deviceLabels } from '$lib/devices';
+	import { devicesPanel } from '$lib/devices-panel';
 	import { errorCode } from '$lib/errors';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
 	import SettingsActions from '$lib/components/settings-actions.svelte';
@@ -22,6 +23,7 @@
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SettingsUpdate from '$lib/components/settings-update.svelte';
 	import * as Alert from '$lib/components/ui/alert';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
 	import { Input } from '$lib/components/ui/input';
@@ -78,7 +80,7 @@
 	const callSettings = commandCaller(settingsFailed, showError);
 	/** アクションのコマンドを呼ぶ。失敗したら、アクションの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
 	const callActions = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
-	/** 組み合わせのコマンドを呼ぶ。Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする */
+	/** ペアリングのコマンドを呼ぶ。Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする */
 	const callLan = commandCaller(lanErrorMessage, showError);
 	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
 	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
@@ -421,8 +423,10 @@
 		focusFirstField(`replacement-${row.id}`);
 	}
 
-	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分の機器へ送る」） */
+	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分のデバイスへ送る」） */
 	let pairingCode = $state('');
+	/** `want` を受けて自動で出したコードか。相手のデバイスに出す案内だけを替える。 */
+	let pairingAutomatic = $state(false);
 	/** 相手に出ているコードを入れる欄 */
 	let joinCode = $state('');
 	/** コードを入れて、相手を探している最中か */
@@ -439,6 +443,7 @@
 			if (left <= 0) {
 				// Rust 側は期限切れを知らせないので、画面でコードごと消す
 				pairingCode = '';
+				pairingAutomatic = false;
 				pairingRemainingSeconds = 0;
 				return;
 			}
@@ -447,33 +452,36 @@
 		return () => clearInterval(timer);
 	});
 
-	// 出していたコードは、組み合わせが済んだとき、相手がつないで使い終えたとき（コードが違っていても）、切れたときに片付ける。
-	// 使えなくなったコードを出し続けると、入れ直した相手が見つからずに失敗する
-	// 組み合わせが済んだかは、機器が増えたかで見る（2台目からも組み合わせられるので、機器があるかでは見られない）
-	let pairedCount: number | undefined;
 	$effect(() => {
-		const count = settings.current?.pairedDevices.length;
-		if (count === undefined) return;
-		if (pairedCount !== undefined && count > pairedCount) pairingCode = '';
-		pairedCount = count;
-	});
-	$effect(() => {
-		const unlisten = listen(EVENTS.PAIRING_CODE_ENDED, () => (pairingCode = ''));
+		const unlistenEnded = listen(EVENTS.PAIRING_CODE_ENDED, () => {
+			pairingCode = '';
+			pairingAutomatic = false;
+		});
+		const unlistenOffered = listen<PairingOffer>(EVENTS.PAIRING_CODE_OFFERED, ({ payload }) => {
+			showPairingOffer(payload);
+		});
 		return () => {
-			unlisten.then((fn) => fn());
+			unlistenEnded.then((fn) => fn());
+			unlistenOffered.then((fn) => fn());
 		};
 	});
 
 	async function startPairing() {
 		const offer = await callLan<PairingOffer>('start_pairing');
 		if (!offer.ok) return;
-		pairingRemainingSeconds = offer.value.remainingSeconds;
-		pairingDeadline = performance.now() + offer.value.remainingSeconds * 1000;
-		pairingCode = offer.value.code;
+		showPairingOffer(offer.value);
+	}
+
+	function showPairingOffer(offer: PairingOffer) {
+		pairingRemainingSeconds = offer.remainingSeconds;
+		pairingDeadline = performance.now() + offer.remainingSeconds * 1000;
+		pairingCode = offer.code;
+		pairingAutomatic = offer.automatic;
 	}
 
 	function cancelPairing() {
 		pairingCode = '';
+		pairingAutomatic = false;
 		pairingRemainingSeconds = 0;
 		run('cancel_pairing');
 	}
@@ -483,6 +491,39 @@
 		if ((await callLan('join_pairing', { code: joinCode })).ok) joinCode = '';
 		joining = false;
 	}
+
+	/** 設定を開いた後に `want` を受けて自動で出したコードも、設定画面に表示する。 */
+	$effect(() => {
+		if (category !== 'devices' || settings.current?.accountKeyStatus !== 'ready') return;
+		let active = true;
+		void (async () => {
+			const offer = await invoke<PairingOffer | null>('pairing_offer').catch(() => null);
+			if (active && offer) showPairingOffer(offer);
+		})();
+		return () => {
+			active = false;
+		};
+	});
+
+	let resetKeyOpen = $state(false);
+	let resettingKey = $state(false);
+	async function resetAccountKey() {
+		resettingKey = true;
+		if ((await callLan('reset_account_key')).ok) resetKeyOpen = false;
+		resettingKey = false;
+	}
+
+	function setDeviceSendTo(publicKey: string, sendTo: boolean) {
+		const publicKeys = settings.current?.devices
+			.filter((device) => (device.publicKey === publicKey ? sendTo : device.sendTo))
+			.map((device) => device.publicKey);
+		if (publicKeys) void run('set_send_targets', { publicKeys });
+	}
+
+	$effect(() => {
+		void invoke('set_devices_open', { open: category === 'devices' });
+		return () => void invoke('set_devices_open', { open: false });
+	});
 
 	/** キーの記録中でないときのキー。記録中の Esc は記録の中止なので、そちらが受け取る */
 	function onKeydown(event: KeyboardEvent) {
@@ -505,6 +546,21 @@
 		void refreshMawokAccountStatus();
 	}
 </script>
+
+<!-- 鍵を待つ状態と持つ状態で、同じ形の行をいちばん下に置く -->
+{#snippet resetKeyRow(description?: string)}
+	<SettingsRow>
+		<Field.Field orientation="horizontal" class="min-h-8">
+			<Field.Title>{m.settings_devices_reset_key()}</Field.Title>
+			<Button variant="destructive" onclick={() => (resetKeyOpen = true)}>
+				{m.settings_devices_reset_key_start()}
+			</Button>
+		</Field.Field>
+		{#if description}
+			<Field.Description class="leading-snug">{description}</Field.Description>
+		{/if}
+	</SettingsRow>
+{/snippet}
 
 <!-- 記録中の表示。ホットキーと下書きの操作で同じ形にする -->
 {#snippet recordingStatus()}
@@ -1169,8 +1225,9 @@
 					{/if}
 				</Tabs.Content>
 				<Tabs.Content value="devices">
+					{@const panel = devicesPanel(view.proAvailable, view.accountKeyStatus)}
 					<SettingsSection>
-						{#if !view.proAvailable}
+						{#if panel === 'pro'}
 							<SettingsRow>
 								<Field.Description class="leading-snug">
 									{view.mawokAccountSignedIn
@@ -1192,100 +1249,102 @@
 									</Button>
 								{/if}
 							</SettingsRow>
-						{/if}
-						{#if view.pairedDevices.length > 0}
-							{@const labels = deviceLabels(view.pairedDevices)}
+						{:else if panel === 'none'}
 							<SettingsRow>
-								<!-- 同じ名前の機器は、送信先の一覧と同じく公開鍵の先頭4文字で見分け、どれを解除するか分かるようにする -->
-								<!-- 行の間を空けて、上下の「解除」のボタンがくっついて見えないようにする -->
-								<div class="flex flex-col gap-3">
-									{#each view.pairedDevices as device (device.publicKey)}
-										<Field.Field orientation="horizontal">
-											<Field.Title>
-												{m.settings_devices_paired({
-													name: labels.get(device.publicKey) ?? device.name
-												})}
-											</Field.Title>
-											<Button
-												variant="outline"
-												onclick={() => run('unpair_device', { publicKey: device.publicKey })}
-											>
-												{m.settings_devices_unpair()}
-											</Button>
-										</Field.Field>
-									{/each}
-								</div>
-								<!-- 題名の無い行なので、説明は一覧の下に置く。どの機器にも同じで、台数が増えても一度だけ出す -->
-								<Field.Description class="leading-snug">
-									{view.textWindowKeys.send
-										? m.settings_devices_paired_description({
-												key: formatKeys(view.textWindowKeys.send, view.platform)
-											})
-										: m.settings_devices_paired_description_no_key()}
-								</Field.Description>
+								<Field.Description class="leading-snug"
+									>{m.settings_devices_not_ready()}</Field.Description
+								>
 							</SettingsRow>
-						{/if}
-						<!-- 何台でも組み合わせられるので、組み合わせる操作はいつも一覧の下に出す -->
-						<SettingsRow>
-							<Field.Field orientation="horizontal" class="min-h-8">
-								<Field.Title>{m.settings_devices_offer()}</Field.Title>
-								{#if pairingCode}
-									<div class="flex items-center gap-2">
-										<span class="font-mono text-2xl tracking-widest tabular-nums">
-											{pairingCode}
-										</span>
-										<Button variant="ghost" onclick={cancelPairing}>
-											{m.settings_devices_offer_cancel()}
+						{:else if panel === 'needsPairing'}
+							<!-- 鍵を持つ状態の「デバイスを追加」と同じく、題名を左、操作を右、説明を下に置く -->
+							<SettingsRow>
+								<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+									<Field.Title>{m.settings_devices_join_title()}</Field.Title>
+									<div class="flex gap-2">
+										<Input
+											class="w-32 font-mono text-sm"
+											inputmode="numeric"
+											autocomplete="off"
+											maxlength={6}
+											aria-label={m.settings_devices_join()}
+											bind:value={joinCode}
+										/>
+										<Button
+											variant="outline"
+											disabled={joining || joinCode.length !== 6}
+											onclick={joinPairing}
+										>
+											{joining ? m.settings_devices_joining() : m.settings_devices_join_submit()}
 										</Button>
 									</div>
+								</Field.Field>
+								<Field.Description class="leading-snug">
+									{m.settings_devices_needs_pairing()}
+								</Field.Description>
+							</SettingsRow>
+							{@render resetKeyRow(m.settings_devices_reset_key_description_needs_pairing())}
+						{:else if panel === 'ready'}
+							<SettingsRow>
+								<Field.Title>{m.settings_devices_list_title()}</Field.Title>
+								{#if view.devices.length > 0}
+									{@const labels = deviceLabels(view.devices)}
+									<!-- 同じ名前のデバイスは、送信先の一覧と同じく公開鍵の先頭4文字で見分ける。 -->
+									<div class="flex flex-col gap-3">
+										{#each view.devices as device (device.publicKey)}
+											<Field.Field orientation="horizontal">
+												<Field.Label for={`send-to-${device.publicKey}`}>
+													{labels.get(device.publicKey) ?? device.name}
+												</Field.Label>
+												<Switch
+													id={`send-to-${device.publicKey}`}
+													bind:checked={
+														() => device.sendTo,
+														(sendTo) => setDeviceSendTo(device.publicKey, sendTo)
+													}
+												/>
+											</Field.Field>
+										{/each}
+									</div>
 								{:else}
-									<Button variant="outline" disabled={!view.proAvailable} onclick={startPairing}>
-										{m.settings_devices_offer_start()}
-									</Button>
-								{/if}
-							</Field.Field>
-							<Field.Description
-								class="leading-snug"
-								role={pairingCode ? 'timer' : undefined}
-								aria-live="off"
-							>
-								{pairingCode
-									? m.settings_devices_offer_waiting({ seconds: pairingRemainingSeconds })
-									: m.settings_devices_offer_description()}
-							</Field.Description>
-						</SettingsRow>
-						<SettingsRow>
-							<!-- ほかの節と同じく、題名を左、操作を右に置く -->
-							<!-- 狭い窓では、入力とボタンが幅を取って題名が縦に折れないよう、収まらなければ下の段へ回す -->
-							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-								<Field.Label for="pairing-code" class="min-w-48"
-									>{m.settings_devices_join()}</Field.Label
-								>
-								<div class="flex gap-2">
-									<Input
-										id="pairing-code"
-										class="w-32 font-mono text-sm"
-										inputmode="numeric"
-										autocomplete="off"
-										maxlength={6}
-										disabled={!view.proAvailable}
-										bind:value={joinCode}
-									/>
-									<Button
-										variant="outline"
-										disabled={!view.proAvailable || joining || joinCode.length !== 6}
-										onclick={joinPairing}
+									<Field.Description class="leading-snug"
+										>{m.settings_devices_empty()}</Field.Description
 									>
-										{joining ? m.settings_devices_joining() : m.settings_devices_join_submit()}
-									</Button>
-								</div>
-							</Field.Field>
-						</SettingsRow>
-						<SettingsRow>
-							<Field.Description class="leading-snug">
-								{m.settings_devices_this_device({ name: view.deviceName })}
-							</Field.Description>
-						</SettingsRow>
+								{/if}
+							</SettingsRow>
+							<SettingsRow>
+								<Field.Field orientation="horizontal" class="min-h-8">
+									<Field.Title>{m.settings_devices_offer()}</Field.Title>
+									{#if pairingCode}
+										<div class="flex items-center gap-2">
+											<span class="font-mono text-2xl tracking-widest tabular-nums"
+												>{pairingCode}</span
+											>
+											{#if !pairingAutomatic}
+												<Button variant="ghost" onclick={cancelPairing}
+													>{m.settings_devices_offer_cancel()}</Button
+												>
+											{/if}
+										</div>
+									{:else}
+										<Button variant="outline" onclick={startPairing}
+											>{m.settings_devices_offer_start()}</Button
+										>
+									{/if}
+								</Field.Field>
+								<Field.Description
+									class="leading-snug"
+									role={pairingCode && !pairingAutomatic ? 'timer' : undefined}
+									aria-live="off"
+								>
+									{pairingCode
+										? pairingAutomatic
+											? m.settings_devices_offer_automatic()
+											: m.settings_devices_offer_waiting({ seconds: pairingRemainingSeconds })
+										: m.settings_devices_offer_description()}
+								</Field.Description>
+							</SettingsRow>
+							{@render resetKeyRow()}
+						{/if}
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="account">
@@ -1366,6 +1425,24 @@
 			</div>
 		</Tabs.Root>
 	</main>
+	<AlertDialog.Root bind:open={resetKeyOpen}>
+		<AlertDialog.Content>
+			<AlertDialog.Header>
+				<AlertDialog.Title>{m.settings_devices_reset_key_confirm_title()}</AlertDialog.Title>
+				<AlertDialog.Description
+					>{m.settings_devices_reset_key_confirm_description()}</AlertDialog.Description
+				>
+			</AlertDialog.Header>
+			<AlertDialog.Footer>
+				<AlertDialog.Cancel disabled={resettingKey}
+					>{m.settings_devices_offer_cancel()}</AlertDialog.Cancel
+				>
+				<AlertDialog.Action disabled={resettingKey} onclick={resetAccountKey}>
+					{m.settings_devices_reset_key_start()}
+				</AlertDialog.Action>
+			</AlertDialog.Footer>
+		</AlertDialog.Content>
+	</AlertDialog.Root>
 {/if}
 
 <style>

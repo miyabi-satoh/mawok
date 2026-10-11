@@ -25,7 +25,7 @@ describe('linking Mawok', () => {
 
 		const page = await (await request(location!, { cookie })).text();
 		expect(page).toContain('「Taro の MacBook」をこのアカウントに登録します');
-		expect(page).toContain('この PC を登録');
+		expect(page).toContain('このデバイスを登録');
 
 		const code = await approve(fields, cookie);
 		const answer = await exchange(code, verifier);
@@ -38,7 +38,7 @@ describe('linking Mawok', () => {
 		).toBeNull();
 		// 答えの形は test/http/balance.test.ts が見る。ここは、替えたトークンでこのアカウントに届くことだけを見る。
 		expect(await (await app('/v1/balance', token)).json()).toMatchObject({ email });
-		// 窓口の画面で、どの機器の Mawok かが分かる。
+		// 窓口の画面で、どのデバイスの Mawok かが分かる。
 		expect(await (await request('/account/', { cookie })).text()).toContain('Taro の MacBook（');
 	});
 
@@ -49,8 +49,10 @@ describe('linking Mawok', () => {
 			email: 'same@example.com',
 			next: linkPath(fields)
 		});
-		expect(await linking.text()).toContain('Mawok を使っているこの PC で開いてください');
-		expect(String(log.mock.calls.at(-1)?.[0])).toContain('Mawok を使っている PC で開いてください');
+		expect(await linking.text()).toContain('Mawok を使っているこのデバイスで開いてください');
+		expect(String(log.mock.calls.at(-1)?.[0])).toContain(
+			'Mawok を使っているデバイスで開いてください'
+		);
 		const plain = await postForm('/account/login/email', {
 			email: 'same@example.com',
 			next: '/account/'
@@ -116,7 +118,7 @@ describe('app tokens', () => {
 	it('lists linked Mawok on the account page and removes one from there', async () => {
 		const { cookie, token } = await linkApp('apps@example.com');
 		const home = await (await request('/account/', { cookie })).text();
-		expect(home).toContain('登録している PC');
+		expect(home).toContain('登録しているデバイス');
 		const id = home.match(/name="id" value="([0-9a-f]+)"/)![1];
 		// ほかのアカウントからは外せない。
 		const other = await signIn('not-mine@example.com');
@@ -125,7 +127,7 @@ describe('app tokens', () => {
 		expect((await postForm('/account/apps/unlink', { id }, cookie)).status).toBe(303);
 		expect((await app('/v1/balance', token)).status).toBe(401);
 		expect(await (await request('/account/', { cookie })).text()).toContain(
-			'登録している PC はありません'
+			'登録しているデバイスはありません'
 		);
 	});
 });

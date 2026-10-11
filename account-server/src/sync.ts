@@ -86,7 +86,7 @@ function validItem(value: unknown): value is SyncItem {
 	);
 }
 
-/** 消した記録より古い位置、または窓口の版より先を読む機器は写しで組み直す。 */
+/** 消した記録より古い位置、または窓口の版より先を読むデバイスは写しで組み直す。 */
 export function shouldReset(
 	since: number,
 	purgedSeq: number,
@@ -360,7 +360,7 @@ export async function putSync(env: Env, accountId: string, body: unknown): Promi
 	}
 }
 
-/** 鍵を作り直した機器のため、前の暗号文と消した記録を一度に外す。 */
+/** 鍵を作り直したデバイスのため、前の暗号文と消した記録を一度に外す。 */
 export async function resetSync(env: Env, accountId: string, body: unknown) {
 	const key = body && typeof body === 'object' ? (body as { key_id?: unknown }).key_id : undefined;
 	if (!validKeyId(key)) return undefined;

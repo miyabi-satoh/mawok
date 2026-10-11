@@ -7,11 +7,11 @@ import { TOKUSHOHO_URL } from '../lib/links';
 const { data } = (await getEntry('product', 'index'))!;
 ---
 
-<Base title="料金 | Mawok" description="Mawok は無料で使えます。Pro（月額 480 円・年額 4,800 円、税込み）で、機器の間の送受信と同期が使え、AI アクションのクレジットが毎月付きます。クレジットだけを 300 円（税込み）で買い足すこともできます。">
+<Base title="料金 | Mawok" description="Mawok は無料で使えます。Pro（月額 480 円・年額 4,800 円、税込み）で、デバイスの間の送受信と同期が使え、AI アクションのクレジットが毎月付きます。クレジットだけを 300 円（税込み）で買い足すこともできます。">
   <Breadcrumb items={[{ label: 'Mawok', href: '/' }, { label: '料金' }]} />
   <div class="pricing" style={`--c: ${data.color}`}>
     <h1>料金</h1>
-    <p class="lead">Mawok は無料で使えます。Pro では、自分の機器の間でテキストを送り、設定と履歴を同期できます。AI アクションをキーなしで使うときは、アカウントのクレジットを使います。</p>
+    <p class="lead">Mawok は無料で使えます。Pro では、自分のデバイスの間でテキストを送り、設定と履歴を同期できます。AI アクションをキーなしで使うときは、アカウントのクレジットを使います。</p>
 
     <section class="plan" aria-labelledby="pro-title">
       <h2 id="pro-title">Mawok Pro</h2>
@@ -21,8 +21,8 @@ const { data } = (await getEntry('product', 'index'))!;
         <span class="amount">4,800&nbsp;円</span><span class="per">/年（税込み）</span>
       </p>
       <ul class="features">
-        <li>同じネットワークにある自分の機器の間で、テキストを送る</li>
-        <li>設定と履歴を、機器の間で同期する（暗号化して預かり、運営者は中身を読めません）</li>
+        <li>同じネットワークにある自分のデバイスの間で、テキストを送る</li>
+        <li>設定と履歴を、デバイスの間で同期する（暗号化して預かり、運営者は中身を読めません）</li>
         <li>AI アクションのクレジットが毎月付く</li>
         <li>初めての申し込みは、最初の 14&nbsp;日間が無料</li>
       </ul>
@@ -81,7 +81,7 @@ const { data } = (await getEntry('product', 'index'))!;
           <li>Windows 10（64ビット）以上。</li>
           <li>macOS 13（Ventura）以上。Apple シリコンの Mac に限ります。</li>
         </ul>
-        <p>AI アクションと同期を使うときに、インターネットへの接続が要ります。機器の間の送受信は、同じネットワークにある機器の間で使えます。</p>
+        <p>AI アクションと同期を使うときに、インターネットへの接続が要ります。デバイスの間の送受信は、同じネットワークにあるデバイスの間で使えます。</p>
       </dd>
     </dl>
   </div>

@@ -170,25 +170,25 @@ impl Default for Action {
     }
 }
 
-/// 組み合わせた自分の機器（docs/lan.md「同じ LAN の自分の機器へ送る」）
+/// 同じアカウントで見つけた自分のデバイス（docs/lan.md「同じ LAN の自分のデバイスへ送る」）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
 #[serde(default, rename_all = "camelCase")]
-pub struct PairedDevice {
-    /// 組み合わせたときに相手が名乗った名前
+pub struct Device {
+    /// ペアリングか生存確認で相手が名乗った名前
     pub name: String,
     /// 相手の公開鍵（小文字の16進）。この鍵を持つ相手とだけ送り合う
     pub public_key: String,
-    /// 最後に相手へ送れた、または組み合わせたときのアドレス。起動した直後で、相手の名乗りがまだ届いていないときに使う
+    /// 最後に相手へ送れた、または生存確認したときのアドレス。起動した直後で、相手の名乗りがまだ届いていないときに使う
     pub address: String,
-    /// 送信先にチェックを入れているか。送るキーとボタンは、チェックした機器へ送る
+    /// 送信先にチェックを入れているか。送るキーとボタンは、チェックしたデバイスへ送る
     pub send_to: bool,
 }
 
 /// 項目がない設定ファイル（送信先を選べるようになる前のもの）は、チェックを入れて読む。
-/// 組み合わせたのは送るためなので、新しく組み合わせた機器もチェックを入れる
-impl Default for PairedDevice {
+/// 新しく見つけたデバイスは送信先に加える
+impl Default for Device {
     fn default() -> Self {
         Self {
             name: String::new(),
@@ -239,8 +239,8 @@ pub struct Config {
     pub text_color_light: String,
     /// 下書きの入力欄の文字色（ダーク）。小文字の #rrggbb。空なら標準の文字色
     pub text_color_dark: String,
-    /// 組み合わせた自分の機器
-    pub paired_devices: Vec<PairedDevice>,
+    /// 同じアカウントで見つけた自分のデバイス
+    pub devices: Vec<Device>,
     /// 下書きの入力欄に出す案内。None なら既定の案内（画面側で今の言語とホットキーから作る）、空文字なら出さない。
     /// 既定のままのときは、設定ファイルに書かない
     pub input_guidance: Option<String>,
@@ -324,7 +324,7 @@ impl Default for Config {
             text_font_size: DEFAULT_DRAFT_FONT_SIZE,
             text_color_light: String::new(),
             text_color_dark: String::new(),
-            paired_devices: Vec::new(),
+            devices: Vec::new(),
             input_guidance: None,
             ai_service: AiService::default(),
             ai_consent: None,
@@ -368,7 +368,7 @@ mod key {
     pub const TEXT_FONT_SIZE: &str = "text_font_size";
     pub const TEXT_COLOR_LIGHT: &str = "text_color_light";
     pub const TEXT_COLOR_DARK: &str = "text_color_dark";
-    pub const PAIRED_DEVICES: &str = "paired_devices";
+    pub const DEVICES: &str = "devices";
     pub const INPUT_GUIDANCE: &str = "input_guidance";
     pub const AI_SERVICE: &str = "ai_service";
     pub const AI_CONSENT: &str = "ai_consent";
@@ -488,7 +488,7 @@ fn rows(item: &Item) -> Option<Vec<Option<&dyn TableLike>>> {
     }
 }
 
-/// 並びの1行（置き換え辞書・定型文・アクション・組み合わせた機器）
+/// 並びの1行（置き換え辞書・定型文・アクション・見つけたデバイス）
 trait Row: Sized + PartialEq {
     /// 行を読む。省いた項目は既定値として読み、型の合わない項目があれば None
     fn read(table: &dyn TableLike) -> Option<Self>;
@@ -578,9 +578,9 @@ impl Row for Action {
     }
 }
 
-impl Row for PairedDevice {
+impl Row for Device {
     fn read(table: &dyn TableLike) -> Option<Self> {
-        let default = PairedDevice::default();
+        let default = Device::default();
         Some(Self {
             name: text_field(table, "name", default.name)?,
             public_key: text_field(table, "public_key", default.public_key)?,
@@ -696,7 +696,7 @@ fn parse(text: &str) -> Result<(Config, Vec<String>), String> {
     reader.read_with(key::INPUT_GUIDANCE, &mut config.input_guidance, |item| {
         item.as_str().map(|text| Some(text.to_string()))
     });
-    reader.read_rows(key::PAIRED_DEVICES, &mut config.paired_devices);
+    reader.read_rows(key::DEVICES, &mut config.devices);
     // 知らない AI サービスの名前は、型の合わない値と同じく既定に戻す
     reader.read_with(key::AI_SERVICE, &mut config.ai_service, |item| {
         item.as_str().and_then(AiService::from_name)
@@ -1232,10 +1232,8 @@ fn apply(root: &mut Table, config: &Config, changes: &Changes<'_>) {
             Some(actions) => sync_rows_keeping_empty(root, key::ACTIONS, actions),
         }
     }
-    if changes.includes(key::PAIRED_DEVICES, |old| {
-        old.paired_devices != config.paired_devices
-    }) {
-        sync_rows(root, key::PAIRED_DEVICES, &config.paired_devices);
+    if changes.includes(key::DEVICES, |old| old.devices != config.devices) {
+        sync_rows(root, key::DEVICES, &config.devices);
     }
 }
 
@@ -1967,7 +1965,7 @@ body = "git status"
             text_font_size: 20,
             text_color_light: "#2f4f4f".to_string(),
             text_color_dark: "#e0e0e0".to_string(),
-            paired_devices: vec![PairedDevice {
+            devices: vec![Device {
                 name: "Mac".to_string(),
                 public_key: "ab".repeat(32),
                 address: "192.168.0.10".to_string(),
@@ -2681,18 +2679,18 @@ gemini = 3
     }
 
     #[test]
-    fn reads_paired_devices_without_send_to_as_checked() {
-        // 送信先を選べるようになる前の設定ファイルには send_to がない。組み合わせたのは送るためなので、チェックを入れて読む
+    fn reads_devices_without_send_to_as_checked() {
+        // 送信先を選べるようになる前の設定ファイルには send_to がない。見つけたデバイスを送信先にする既定で読む
         let path = temp_path("paired-devices");
         write(
             &path,
-            "[[paired_devices]]\nname = \"Mac\"\npublic_key = \"ab\"\naddress = \"192.168.0.10\"\n",
+            "[[devices]]\nname = \"Mac\"\npublic_key = \"ab\"\naddress = \"192.168.0.10\"\n",
         );
         let (config, error) = load_or_create(&path);
         assert_eq!(error, None);
         assert_eq!(
-            config.paired_devices,
-            vec![PairedDevice {
+            config.devices,
+            vec![Device {
                 name: "Mac".to_string(),
                 public_key: "ab".to_string(),
                 address: "192.168.0.10".to_string(),
