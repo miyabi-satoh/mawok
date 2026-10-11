@@ -158,6 +158,19 @@ async function readConfig() {
 }
 
 /**
+ * 置き換え辞書・定型文・アクションの行から、アプリが付ける `id` と `sync` を外す。
+ * テストが渡した中身と比べるときに使う (`id` は行ごとに乱数で付き、`sync` は読む口によって出たり出なかったりする)
+ */
+export function withoutSyncFields(rows) {
+	return rows.map((row) => {
+		const rest = { ...row };
+		delete rest.id;
+		delete rest.sync;
+		return rest;
+	});
+}
+
+/**
  * config.toml をポーリングして待つとき用。アプリは一時ファイルに書いてから差し替えるが、
  * 手で書き換えている最中などで TOML として不完全なことがある。そのタイミングで読んでも
  * テスト全体を失敗させず、単に「まだ条件を満たしていない」として次のポーリングに回す

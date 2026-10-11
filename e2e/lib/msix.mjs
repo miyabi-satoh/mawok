@@ -109,15 +109,19 @@ export async function launchExecutable(exePath) {
 /**
  * パッケージの中から、CDP を `port` で開けて mawok.exe を起動し、下書きの画面が読み込まれるまで待つ。
  * WebView2 は環境変数 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` を読むので、それを付けた cmd を
- * `Invoke-CommandInDesktopPackage` でパッケージの中に起こし、そこから mawok.exe を始める
+ * `Invoke-CommandInDesktopPackage` でパッケージの中に起こし、そこから mawok.exe を始める。
+ * `env` は、mawok.exe に足して渡す環境変数 (値に空白や cmd の記号を入れない)
  */
-export async function launchInPackage(pkg, port) {
+export async function launchInPackage(pkg, port, env = {}) {
 	const exe = path.join(pkg.installLocation, 'mawok.exe');
+	const extra = Object.entries(env)
+		.map(([name, value]) => `set ${name}=${value}&& `)
+		.join('');
 	await runPowerShell(
 		`
-Invoke-CommandInDesktopPackage -PackageFamilyName $args[0] -AppId $args[1] -Command 'cmd.exe' -Args ('/c set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=' + $args[2] + '&& start "" "' + $args[3] + '"')
+Invoke-CommandInDesktopPackage -PackageFamilyName $args[0] -AppId $args[1] -Command 'cmd.exe' -Args ('/c set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=' + $args[2] + '&& ' + $args[4] + 'start "" "' + $args[3] + '"')
 `,
-		[pkg.familyName, APPLICATION_ID, String(port), exe]
+		[pkg.familyName, APPLICATION_ID, String(port), exe, extra]
 	);
 	await waitFor(
 		() =>
@@ -410,6 +414,90 @@ ConvertTo-Json -Compress -InputObject @{ counted = $width * $rows; accent = $acc
 		[x, y, width, height].map(String)
 	);
 	return { name: button.name, width, height, ...JSON.parse(stdout.trim()) };
+}
+
+// 待ち受けを始めさせるための、仮の Pro の状態。待ち受けは、Pro でアカウントの鍵を持つときにだけ始まる (docs/lan.md)。
+// 起動の後の確かめは、トークンが無ければ Pro の状態を消し、窓口が答えればその答えに合わせるので、
+// 仮のトークンと鍵を資格情報マネージャーに、期限が先の Pro の状態を pro-state.json に置いたうえで、
+// 窓口へつながらないようにして起動する (`OFFLINE_ENV`)。つながらない間は、覚えている Pro の状態と手元の鍵で待ち受ける
+const PRO_STATE_PATH = path.join(APP_DATA_DIRS.roaming, 'pro-state.json');
+/** ai.rs の credential_user (Mawok)・account_key.rs の CREDENTIAL_USER と、secrets.rs のサービス名 */
+const PRO_CREDENTIALS = Object.freeze([
+	{ user: 'mawok-account-token', value: 'msix-check' },
+	{ user: 'mawok-account-key', value: 'ab'.repeat(32) }
+]);
+const credentialTarget = (user) => `${user}.${APP_IDENTIFIER}`;
+/** 仮の Pro の状態の account_id。pro-state.json がこの値のままなら、資格情報も仮のまま */
+const OFFLINE_ACCOUNT_ID = 'msix-check';
+// 仮の Pro の状態を置いている間の印。中断されて残ったら、中断のシグナルの処理か次の回が片付ける
+const OFFLINE_PRO_RECORD_PATH = recordPath('.msix-offline-pro.json');
+
+/**
+ * 窓口 (HTTPS) へつながらなくする環境変数。reqwest は環境変数のプロキシを使うので、誰も待ち受けていない口を指す。
+ * 画面 (WebView2) は環境変数のプロキシを見ない
+ */
+export const OFFLINE_ENV = Object.freeze({ HTTPS_PROXY: 'http://127.0.0.1:9' });
+
+/** pro-state.json が、置いた仮のもののままか。無い・読めないときは、仮のものとは見ない */
+function offlineProStateRemains() {
+	try {
+		return JSON.parse(fs.readFileSync(PRO_STATE_PATH, 'utf8')).account_id === OFFLINE_ACCOUNT_ID;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * 仮の Pro の状態を片付ける。資格情報の中身は cmdkey で読めないので、pro-state.json が仮のもののままのときだけ消す。
+ * 中断の後に利用者がサインインしていれば、Mawok が pro-state.json を本物のアカウントに書き換え、資格情報も本物なので、触らない。
+ * pro-state.json が無いのは、Mawok が資格情報ごと片付けた後 (窓口に届いて仮のトークンを断られたときなど)
+ */
+function removeOfflinePro() {
+	if (offlineProStateRemains()) {
+		for (const { user } of PRO_CREDENTIALS) {
+			try {
+				execFileSync('cmdkey', [`/delete:${credentialTarget(user)}`], { stdio: 'ignore' });
+			} catch {
+				// 無ければ失敗するが、それでよい (置く途中で止まったとき)
+			}
+		}
+		fs.rmSync(PRO_STATE_PATH, { force: true });
+	}
+	fs.rmSync(OFFLINE_PRO_RECORD_PATH, { force: true });
+}
+
+/**
+ * 置いたままの仮の Pro の状態があれば、片付ける。Mawok を止めてから呼ぶ。
+ * 同期なので、中断のシグナルを受けたときにも呼べる
+ */
+export function recoverOfflineProIfAny() {
+	if (fs.existsSync(OFFLINE_PRO_RECORD_PATH)) removeOfflinePro();
+}
+
+/**
+ * 仮の Pro の状態を置く。Mawok を止めた状態で、設定のフォルダーができてから呼ぶ。
+ * この機で Mawok のアカウントにサインインしていれば (トークンか鍵が前からあれば)、触らずに null を返す
+ *
+ * @returns {{ restore: () => void } | null}
+ */
+export function beginOfflinePro() {
+	const listed = execFileSync('cmdkey', ['/list'], { encoding: 'utf8' });
+	if (PRO_CREDENTIALS.some(({ user }) => listed.includes(credentialTarget(user)))) return null;
+	writeJsonAtomicSync(OFFLINE_PRO_RECORD_PATH, { savedAt: new Date().toISOString() });
+	// pro.rs の State。期限は1日先 (秒)。片付けはこのファイルで仮のものかを見分けるので、資格情報より先に置く
+	writeJsonAtomicSync(PRO_STATE_PATH, {
+		account_id: OFFLINE_ACCOUNT_ID,
+		until: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+		active: true
+	});
+	for (const { user, value } of PRO_CREDENTIALS) {
+		execFileSync(
+			'cmdkey',
+			[`/generic:${credentialTarget(user)}`, `/user:${user}`, `/pass:${value}`],
+			{ stdio: 'ignore' }
+		);
+	}
+	return { restore: removeOfflinePro };
 }
 
 /** パッケージごとの場所 (`%LOCALAPPDATA%\Packages\<ファミリー名>`) */

@@ -24,11 +24,13 @@ import { describeForegroundWindow, getMawokProcessId, stopPowerShell } from '../
 import { closeLeftoverTrayMenu, closeTrayMenu, openTrayMenu, readTrayMenu } from '../lib/tray.mjs';
 import { waitFor } from '../lib/wait.mjs';
 import {
+	OFFLINE_ENV,
 	PAGE,
 	STARTUP_TASK_STATE,
 	addPackage,
 	appUserModelId,
 	backupLocalCache,
+	beginOfflinePro,
 	builtMsixPath,
 	clearLocalCacheBackup,
 	clearOriginalRecord,
@@ -51,6 +53,7 @@ import {
 	readStartupTaskState,
 	readToastTitles,
 	recoverHeldAppDataIfAny,
+	recoverOfflineProIfAny,
 	redirectedDataDirs,
 	removePackage,
 	restoreLocalCache,
@@ -65,17 +68,6 @@ const CDP_PORT = 9340;
 /** i18n.rs の autostart_turned_off_in_windows (日本語) */
 const TURNED_OFF_IN_WINDOWS =
 	'Windows の設定の「スタートアップ アプリ」でオフになっています。そこでオンにしてください。';
-/**
- * 待ち受けを始めさせるための、組み合わせたデバイス。待ち受けは組み合わせたデバイスがあるときだけ始まる。
- * アドレスは文書用の予約 (TEST-NET-1) で、どこにも届かない
- */
-const PLACEHOLDER_DEVICE = {
-	name: 'msix-check',
-	publicKey: 'ab'.repeat(32),
-	address: '192.0.2.1',
-	sendTo: false
-};
-
 /**
  * 試す前の状態。後で戻す。`installed` は MSIX 版が入っていたか、`startupTask` はその StartupTask の状態、
  * `running` は動いていた Mawok (`'package'` は MSIX 版、文字列のパスは EXE 版、null は動いていなかった)。
@@ -99,6 +91,11 @@ before(async () => {
 		process.prependOnceListener(signal, () => {
 			if (!touched) return;
 			stopMawokSync();
+			try {
+				recoverOfflineProIfAny();
+			} catch (error) {
+				console.error('[msix] 中断時に、仮の Pro の状態を片付けられませんでした:', error);
+			}
 			try {
 				recoverHeldAppDataIfAny();
 			} catch (error) {
@@ -133,6 +130,7 @@ before(async () => {
 	await stopMawok();
 	await recoverStaleBackupIfAny();
 	recoverHeldAppDataIfAny();
+	recoverOfflineProIfAny();
 	if (!recorded) {
 		// 外すと LocalCache が消えるので、元の版の分を先に写す。前の回の記録があるときは、そのときに写してある。
 		// 写したかどうか ('copied'・'empty') を記録に残し、後始末はそれを見て戻す (控えのフォルダーがあるかでは決めない。
@@ -234,15 +232,14 @@ describe('EXE 版のファイルがある環境', () => {
 	let config;
 	/** 起動する前のログの位置。前の起動のログを読まないため */
 	let logMark;
+	/** 待ち受けを始めさせるための、仮の Pro の状態。この機でサインインしていれば置かず、null */
+	let offlinePro;
 
 	before(async () => {
-		config = await beginTestConfig({
-			language: 'ja',
-			autostart: false,
-			devices: [PLACEHOLDER_DEVICE]
-		});
+		config = await beginTestConfig({ language: 'ja', autostart: false });
+		offlinePro = beginOfflinePro();
 		logMark = markLog(LOG_FILE);
-		await launchInPackage(pkg, CDP_PORT);
+		await launchInPackage(pkg, CDP_PORT, offlinePro ? OFFLINE_ENV : {});
 	});
 
 	after(async () => {
@@ -250,7 +247,11 @@ describe('EXE 版のファイルがある環境', () => {
 			await closeLeftoverTrayMenu(await getMawokProcessId().catch(() => null));
 			await stopMawok();
 		} finally {
-			await config?.restore();
+			try {
+				offlinePro?.restore();
+			} finally {
+				await config?.restore();
+			}
 		}
 	});
 
@@ -262,7 +263,7 @@ describe('EXE 版のファイルがある環境', () => {
 		);
 	});
 
-	test('ファイアウォール: マニフェストの受信の規則があり、待ち受けても許可のダイアログが出ない', async () => {
+	test('ファイアウォール: マニフェストの受信の規則があり、待ち受けても許可のダイアログが出ない', async (t) => {
 		const program = path.join(pkg.installLocation, 'mawok.exe');
 		const rules = await readFirewallRules(program);
 		const inbound = rules.filter((rule) => rule.direction === 'Inbound');
@@ -278,10 +279,17 @@ describe('EXE 版のファイルがある環境', () => {
 				`${protocol} の受信をすべてのネットワークで許す規則がありません: ${JSON.stringify(rules)}`
 			);
 		}
+		if (!offlinePro) {
+			t.skip(
+				'この機で Mawok のアカウントにサインインしているので、待ち受けを始めさせる仮の Pro の状態を置けません (規則だけを見ました)'
+			);
+			return;
+		}
+		// 窓口へつながらないと分かってから始まるので、起動から数秒かかる
 		await waitFor(
 			() => readLogSince(LOG_FILE, logMark),
 			(text) => text.includes('lan: listening on tcp'),
-			{ label: '待ち受けの開始', timeout: 10000 }
+			{ label: '待ち受けの開始', timeout: 20000 }
 		);
 		// ダイアログは待ち受けを始めてすぐに出るので、少し見てから確かめる
 		await new Promise((resolve) => setTimeout(resolve, 3000));

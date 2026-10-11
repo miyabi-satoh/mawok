@@ -22,7 +22,7 @@ import {
 } from '../lib/os.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
 import { turnImeOff, turnImeOn, typeRomaji } from '../lib/ime.mjs';
-import { beginTestConfig } from '../lib/config.mjs';
+import { beginTestConfig, withoutSyncFields } from '../lib/config.mjs';
 import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { expectStays, waitFor } from '../lib/wait.mjs';
 
@@ -174,7 +174,10 @@ test.describe('定型文', () => {
 			assert.equal(draft.selectionStart, 2, 'カーソルは一覧を出したときの位置のまま');
 
 			const settings = await invokeApp(client, 'get_settings');
-			assert.deepEqual(settings.snippets, [...SNIPPETS, { name: '', body: 'あいう' }]);
+			assert.deepEqual(withoutSyncFields(settings.snippets), [
+				...SNIPPETS,
+				{ name: '', body: 'あいう' }
+			]);
 			const palette = await openPalette(client);
 			assert.equal(palette.options[2], 'あいう', JSON.stringify(palette.options));
 		} finally {
@@ -292,7 +295,10 @@ test.describe('定型文', () => {
 				(current) => current.snippets[0]?.name === `${SNIPPETS[0].name}X`,
 				{ label: '名前を直した定型文の保存' }
 			);
-			assert.deepEqual(settings.snippets.at(-1), { name: 'ねぎらい', body: 'おつかれさま' });
+			assert.deepEqual(withoutSyncFields(settings.snippets).at(-1), {
+				name: 'ねぎらい',
+				body: 'おつかれさま'
+			});
 			assert.equal(settings.snippets.length, SNIPPETS.length + 1);
 			assert.equal((await rowButtons()).length, SNIPPETS.length + 1, '足した行は画面にも残るはず');
 

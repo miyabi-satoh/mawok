@@ -25,6 +25,7 @@ import {
 	removeBrokenConfigCopy,
 	toConfigText,
 	tryReadConfig,
+	withoutSyncFields,
 	writeConfigText
 } from '../lib/config.mjs';
 import { waitFor } from '../lib/wait.mjs';
@@ -121,7 +122,7 @@ test.describe('再起動と設定ファイル', () => {
 		const settings = await launch();
 		assert.equal(settings.hotkey, OTHER_HOTKEY);
 		assert.equal(settings.theme, 'dark');
-		assert.deepEqual(settings.replacements, REPLACEMENTS);
+		assert.deepEqual(withoutSyncFields(settings.replacements), REPLACEMENTS);
 		// 残ったホットキーが、起動したときに登録されている
 		await sendKeySequence([[VK.CONTROL, VK.SHIFT, VK.J]]);
 		await waitDraftVisible('残ったホットキーで下書きが出る');
@@ -163,7 +164,11 @@ test.describe('再起動と設定ファイル', () => {
 		const settings = await launch();
 		assert.equal(settings.theme, 'system', '型を崩したテーマは既定に戻るはず');
 		assert.equal(settings.hotkey, OTHER_HOTKEY, 'ほかの項目はそのままのはず');
-		assert.deepEqual(settings.replacements, REPLACEMENTS, 'ほかの項目はそのままのはず');
+		assert.deepEqual(
+			withoutSyncFields(settings.replacements),
+			REPLACEMENTS,
+			'ほかの項目はそのままのはず'
+		);
 		await sendKeySequence([[VK.CONTROL, VK.SHIFT, VK.J]]);
 		await waitDraftVisible('型を崩していないホットキーで下書きが出る');
 
@@ -180,7 +185,13 @@ test.describe('再起動と設定ファイル', () => {
 			{ label: 'config.broken-….toml ができる' }
 		);
 		const created = copies.find((name) => !copiesBefore.includes(name));
-		assert.equal(await readBrokenConfigCopy(created), original, '写しは元の内容のはず');
+		// 起動のときに、ID の無い行へ ID を足して書き直すので、写しには ID の行だけが増えている
+		const copied = await readBrokenConfigCopy(created);
+		assert.equal(
+			copied.replace(/^id = "[0-9a-f]{32}"\n/m, ''),
+			original,
+			'写しは、行の ID のほかは元の内容のはず'
+		);
 		const saved = await tryReadConfig();
 		assert.equal(saved?.theme, 'light');
 		assert.equal(saved?.hotkey, OTHER_HOTKEY);
@@ -212,7 +223,7 @@ test.describe('再起動と設定ファイル', () => {
 			label: '設定ファイルのテーマが変わる'
 		});
 		assert.equal(saved.language, 'ja');
-		assert.deepEqual(saved.replacements, REPLACEMENTS);
+		assert.deepEqual(withoutSyncFields(saved.replacements), REPLACEMENTS);
 
 		const text = await readConfigText();
 		assert.match(text, /# E2E のメモ/, '先頭のコメントが残るはず');
