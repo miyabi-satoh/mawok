@@ -167,7 +167,7 @@
 			{m.settings_actions_description({ mark: TEXT_MARK })}
 		</p>
 		{#if view.proAvailable && (view.syncKinds.actions || view.syncKinds.settings)}
-			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
+			<p class="px-1 text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
 		{/if}
 		{#if view.proAvailable && !view.syncKinds.actions}
 			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_actions_off()}</p>

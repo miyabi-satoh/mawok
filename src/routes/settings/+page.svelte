@@ -679,6 +679,7 @@
 
 {#if settings.current}
 	{@const view = settings.current}
+	<!-- 見出しが折れる行では、見出しを inline にして印を同じ流れに置く。箱の右に並べると、印が最後の語でなくスイッチの隣に付くため -->
 	{#snippet syncSetting(name: string, label: string)}
 		{#if view.proAvailable && view.syncKinds.settings}
 			<SyncToggle
@@ -768,7 +769,7 @@
 				<Tabs.Content value="general">
 					<div class="flex flex-col gap-5">
 						{#if view.proAvailable && view.syncKinds.settings}
-							<p class="text-xs leading-snug text-muted-foreground">
+							<p class="px-1 text-xs leading-snug text-muted-foreground">
 								{m.settings_sync_description()}
 							</p>
 						{/if}
@@ -788,8 +789,8 @@
 						<SettingsSection title={m.settings_section_draft_window()}>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex flex-auto items-center gap-1">
-										<Field.Label for="draft-always-on-top"
+									<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+										<Field.Label class="inline" for="draft-always-on-top"
 											>{m.settings_draft_always_on_top()}</Field.Label
 										>
 										{@render syncSetting(
@@ -808,8 +809,8 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex flex-auto items-center gap-1">
-										<Field.Label for="hide-draft-on-blur"
+									<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+										<Field.Label class="inline" for="hide-draft-on-blur"
 											>{m.settings_hide_draft_on_blur()}</Field.Label
 										>
 										{@render syncSetting(
@@ -831,8 +832,10 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex flex-auto items-center gap-1">
-										<Field.Label for="show-draft-buttons">{m.settings_draft_buttons()}</Field.Label>
+									<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+										<Field.Label class="inline" for="show-draft-buttons"
+											>{m.settings_draft_buttons()}</Field.Label
+										>
 										{@render syncSetting('show_text_window_buttons', m.settings_draft_buttons())}
 									</div>
 									<Switch
@@ -846,8 +849,8 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex flex-auto items-center gap-1">
-										<Field.Label for="draft-history-size"
+									<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+										<Field.Label class="inline" for="draft-history-size"
 											>{m.settings_draft_history_size()}</Field.Label
 										>
 										{@render syncSetting('text_history_size', m.settings_draft_history_size())}
@@ -1028,7 +1031,7 @@
 				</Tabs.Content>
 				<Tabs.Content value="draft">
 					{#if view.proAvailable && view.syncKinds.settings}
-						<p class="mb-3 text-xs leading-snug text-muted-foreground">
+						<p class="mb-3 px-1 text-xs leading-snug text-muted-foreground">
 							{m.settings_sync_description()}
 						</p>
 					{/if}
@@ -1039,10 +1042,10 @@
 								{@render syncSetting('text_font_family', m.settings_draft_font())}
 							</div>
 							<!-- 入力欄の文字の大きさは class で決め打ちする。部品の既定はウィンドウの幅 768px で切り替わり、広げる途中で小さくなるため（辞書の欄も同じ） -->
-							<div class="flex gap-2">
+							<div class="flex flex-wrap gap-2">
 								<Input
 									id="draft-font-family"
-									class="flex-1 text-sm"
+									class="min-w-40 flex-1 text-sm"
 									bind:value={
 										() => fontFamily,
 										(value) => {
@@ -1095,10 +1098,10 @@
 								{#each textColorRows as row (row.theme)}
 									<div class="flex flex-col gap-0.5">
 										<Field.Field orientation="horizontal" class="flex-wrap">
-											<div class="flex flex-auto items-center gap-1">
+											<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
 												<Field.Label
 													for="draft-text-color-{row.theme}"
-													class="w-16 flex-none whitespace-nowrap"
+													class="inline whitespace-nowrap"
 												>
 													{row.label()}
 												</Field.Label>
@@ -1136,8 +1139,10 @@
 						<SettingsRow>
 							<!-- ほかの行のボタンと同じ高さにして、説明文までの間隔を揃える -->
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<div class="flex flex-auto items-center gap-1">
-									<Field.Label for="draft-guidance">{m.settings_draft_guidance()}</Field.Label>
+								<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+									<Field.Label class="inline" for="draft-guidance"
+										>{m.settings_draft_guidance()}</Field.Label
+									>
 									{@render syncSetting('input_guidance', m.settings_draft_guidance())}
 								</div>
 								<!-- 既定のままなら戻すものがないので押せなくする -->
@@ -1162,15 +1167,17 @@
 				</Tabs.Content>
 				<Tabs.Content value="copy">
 					{#if view.proAvailable && (view.syncKinds.settings || view.syncKinds.replacements)}
-						<p class="mb-3 text-xs leading-snug text-muted-foreground">
+						<p class="mb-3 px-1 text-xs leading-snug text-muted-foreground">
 							{m.settings_sync_description()}
 						</p>
 					{/if}
 					<SettingsSection>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<div class="flex flex-auto items-center gap-1">
-									<Field.Label for="trim-trailing">{m.settings_trim_trailing()}</Field.Label>
+								<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+									<Field.Label class="inline" for="trim-trailing"
+										>{m.settings_trim_trailing()}</Field.Label
+									>
 									{@render syncSetting('trim_trailing_whitespace', m.settings_trim_trailing())}
 								</div>
 								<Switch
@@ -1187,8 +1194,10 @@
 						</SettingsRow>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<div class="flex flex-auto items-center gap-1">
-									<Field.Label for="exclude-history">{m.settings_exclude_history()}</Field.Label>
+								<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+									<Field.Label class="inline" for="exclude-history"
+										>{m.settings_exclude_history()}</Field.Label
+									>
 									{@render syncSetting(
 										'exclude_from_clipboard_history',
 										m.settings_exclude_history()
@@ -1362,7 +1371,7 @@
 								: m.settings_snippets_description_no_key()}
 						</p>
 						{#if view.proAvailable && view.syncKinds.snippets}
-							<p class="text-xs leading-snug text-muted-foreground">
+							<p class="px-1 text-xs leading-snug text-muted-foreground">
 								{m.settings_sync_description()}
 							</p>
 						{:else if view.proAvailable}
