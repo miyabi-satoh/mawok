@@ -510,19 +510,12 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
     },
 ];
 
-/// 画面が持つ操作の名前（`historyOlder` など）。印の名前は画面が行と照らすので、設定ファイルの書き方でなく画面の書き方にする
-fn draft_key_view_name(action: DraftAction) -> String {
-    serde_json::to_value(action)
-        .ok()
-        .and_then(|name| name.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
 fn modified_setting_name(setting: ModifiedSetting) -> String {
     match setting {
         ModifiedSetting::Value { name, .. } => name.into(),
         ModifiedSetting::DraftKey(action) => {
-            format!("text_window_keys.{}", draft_key_view_name(action))
+            // 画面が行と照らすので、設定ファイルの書き方でなく画面の書き方（`historyOlder` など）
+            format!("text_window_keys.{}", choice_name(&action))
         }
     }
 }
@@ -2388,7 +2381,7 @@ body = "git status"
             *config.text_window_keys.get_mut(action) = "CommandOrControl+Alt+KeyM".to_string();
             assert_eq!(
                 modified_settings(&config),
-                [format!("text_window_keys.{}", draft_key_view_name(action))],
+                [format!("text_window_keys.{}", choice_name(&action))],
                 "{}",
                 action.name()
             );
