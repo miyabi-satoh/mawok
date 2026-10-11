@@ -16,6 +16,7 @@ export const CONSTANTS = {
 export const EVENTS = {
 	SETTINGS_CHANGED: "settings-changed",
 	DRAFT_HISTORY_CLEARED: "draft-history-cleared",
+	DRAFT_HISTORY_SYNCED: "draft-history-synced",
 	SNIPPET_ADDED: "snippet-added",
 	SYNC_APPLIED: "sync-applied",
 	PAIRING_CODE_ENDED: "pairing-code-ended",

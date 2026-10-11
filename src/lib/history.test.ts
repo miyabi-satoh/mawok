@@ -217,6 +217,117 @@ describe('DraftHistory の移れるかどうか', () => {
 		expect(history.hasEntries).toBe(false);
 		expect(history.canGoOlder).toBe(false);
 	});
+
+	describe('同期で替わった履歴の読み直し', () => {
+		function recorded(...texts: string[]): DraftHistory {
+			const history = new DraftHistory(5);
+			for (const text of texts) history.record(text);
+			return history;
+		}
+
+		it('読み直した履歴に入れ替える', () => {
+			const history = recorded('git status');
+			history.beginReload();
+			expect(history.isReloading).toBe(true);
+
+			expect(history.finishReload(['git log', 'git status', 'git diff'])).toBe(false);
+			expect(history.isReloading).toBe(false);
+			expect(history.entries).toEqual(['git log', 'git status', 'git diff']);
+		});
+
+		it('読み直している間に覚えたものは、読み直した履歴の後ろに残し、保存が要ると返す', () => {
+			const history = recorded('git status');
+			history.beginReload();
+			history.record('git push');
+
+			expect(history.finishReload(['git log', 'git status'])).toBe(true);
+			expect(history.entries).toEqual(['git log', 'git status', 'git push']);
+		});
+
+		it('読み直した履歴の最後と同じ内容を覚えていたら、重ねない', () => {
+			const history = recorded('git status');
+			history.beginReload();
+			history.record('git push');
+
+			history.finishReload(['git status', 'git push']);
+			expect(history.entries).toEqual(['git status', 'git push']);
+		});
+
+		it('読み直した履歴も、件数を超えた分は古いものから忘れる', () => {
+			const history = new DraftHistory(2);
+			history.beginReload();
+			history.record('git push');
+
+			history.finishReload(['git log', 'git status']);
+			expect(history.entries).toEqual(['git status', 'git push']);
+		});
+
+		it('たどっている途中なら、たどり終えてから入れ替える', () => {
+			const history = recorded('git status', 'git diff');
+			expect(history.older('書きかけ')).toBe('git diff');
+			history.beginReload();
+			history.finishReload(['git log', 'git status', 'git diff', 'git push']);
+
+			// 出している履歴の位置は、読み直す前の一覧のまま
+			expect(history.older('git diff')).toBe('git status');
+			expect(history.older('git status')).toBeNull();
+			expect(history.newer()).toBe('git diff');
+			expect(history.newer()).toBe('書きかけ');
+			expect(history.isBrowsing).toBe(false);
+			expect(history.older('書きかけ')).toBe('git push');
+		});
+
+		it('たどり終えるのを待っている間も、保存する履歴は読み直した方にする', () => {
+			const history = recorded('git status');
+			history.older('');
+			history.beginReload();
+			history.finishReload(['git log', 'git status']);
+
+			expect(history.entries).toEqual(['git log', 'git status']);
+		});
+
+		it('たどっている途中で覚えたら、読み直した履歴に入れ替えてから足す', () => {
+			const history = recorded('git status');
+			history.older('');
+			history.beginReload();
+			history.finishReload(['git log', 'git status']);
+
+			history.record('git push');
+			expect(history.entries).toEqual(['git log', 'git status', 'git push']);
+		});
+
+		it('読み直している間に消したら、消す前に覚えたものを戻さない', () => {
+			const history = recorded('git status');
+			history.beginReload();
+			history.record('git push');
+			history.clear();
+			history.record('git pull');
+
+			expect(history.finishReload([])).toBe(true);
+			expect(history.entries).toEqual(['git pull']);
+		});
+
+		it('たどり終えるのを待っている間に消したら、読み直した履歴を入れない', () => {
+			const history = recorded('git status');
+			history.older('');
+			history.beginReload();
+			history.finishReload(['git log', 'git status']);
+			history.clear();
+
+			expect(history.entries).toEqual([]);
+			expect(history.hasEntries).toBe(false);
+		});
+
+		it('読み直せなかったら、今の一覧のまま続ける', () => {
+			const history = recorded('git status');
+			history.beginReload();
+			history.record('git push');
+			history.cancelReload();
+
+			expect(history.isReloading).toBe(false);
+			expect(history.entries).toEqual(['git status', 'git push']);
+		});
+	});
 });
 
 describe('historyDirection', () => {

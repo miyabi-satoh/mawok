@@ -24,6 +24,7 @@ use crate::{
     atomic_file,
     config::{self, Action, Config, Language, Snippet, Theme},
     draft_keys::{DraftAction, Platform},
+    history_store::{self, History},
     text::{CharWidths, PunctuationStyle, Replacement},
 };
 
@@ -31,6 +32,8 @@ pub const STATE_FILE_NAME: &str = "sync-state.json";
 const KEY_INFO: &[u8] = b"mawok sync v1";
 const VERSION: u64 = 1;
 const SETTINGS: &str = "settings";
+const HISTORY: &str = "history";
+const HISTORY_ID: &str = "h";
 /// 窓口が1項目に受け付ける暗号文の上限（docs/account-server.md「同期」）。
 /// 超える項目を送ると、同じ要求のほかの項目まで断られるので、送る前に同じ値で測って外す。
 const MAX_ENCRYPTED_ITEM_BYTES: usize = 256 * 1024;
@@ -365,6 +368,16 @@ fn kind(key: &ItemKey) -> Option<Kind<'_>> {
         "o_actions" => Some(Kind::Order("actions")),
         _ => None,
     }
+}
+
+/// テキストウィンドウの履歴の全体を置く項目（docs/sync.md「履歴の同期」）。
+fn history_item() -> ItemKey {
+    ItemKey::new(HISTORY, HISTORY_ID)
+}
+
+/// この版が読み書きする項目か。
+fn handled(key: &ItemKey) -> bool {
+    kind(key).is_some() || *key == history_item()
 }
 
 fn known_setting(name: &str) -> bool {
@@ -1370,6 +1383,12 @@ pub trait SyncTransport {
         &'a mut self,
         writes: &'a [Write],
     ) -> Pin<Box<dyn Future<Output = Result<Vec<WrittenItem>, Error>> + Send + 'a>>;
+    /// 前に読んだ1項目を、もう一度読む。窓口の今の項目が `seq` のものでなければ None。
+    fn read_item<'a>(
+        &'a mut self,
+        key: &'a ItemKey,
+        seq: u64,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<RemoteItem>, Error>> + Send + 'a>>;
 }
 
 #[derive(Debug, Clone)]
@@ -1381,6 +1400,8 @@ pub struct SyncResult {
     /// この回に窓口へ書けた項目だけの記録。`config` を手元に入れずに捨てるときも、`merge_written` で残す。
     /// 並びは、同期を始めたときの手元の並びを書いたときだけ入る。
     pub written: State,
+    /// 窓口の履歴と混ぜて、`config` の履歴の件数に切り詰めた履歴。履歴を同期しなかった回は None。
+    pub history: Option<History>,
 }
 
 /// 失敗した同期。途中まで窓口へ書けていれば、その項目の記録を `merge_written` で残す。
@@ -1397,6 +1418,7 @@ pub async fn sync_once_with<T: SyncTransport>(
     config: &Config,
     state: Option<State>,
     key_id: &str,
+    history: Option<&History>,
 ) -> Result<SyncResult, Box<Failure>> {
     let read = match transport
         .read(state.as_ref().map_or(0, |state| state.since))
@@ -1466,6 +1488,16 @@ pub async fn sync_once_with<T: SyncTransport>(
         );
         changed |= result.changed;
     }
+    // 同じ回に履歴の件数が届いたら、届いた後の件数で合わせる
+    let history = sync_history(
+        transport,
+        &mut result.state,
+        &mut written,
+        &read.items,
+        history,
+        result.config.text_history_size as usize,
+    )
+    .await;
     Ok(SyncResult {
         // 同じ値を入れ直しただけなら、変わっていない。設定ファイルを書き直して次の同期を呼ばないため
         changed: changed && result.config != *config,
@@ -1473,7 +1505,215 @@ pub async fn sync_once_with<T: SyncTransport>(
         state: result.state,
         reset: read.reset,
         written,
+        history,
     })
+}
+
+/// 窓口に書く履歴。暗号文が1項目の上限を超えるときは、古い方から落として収める（docs/sync.md「混ぜ方」）。
+/// 1件だけで上限を超える本文は、先に外す。外さないと、それより古い履歴を全部落としても収まらず、
+/// 窓口の履歴を空にして書く
+fn fit_history(history: History) -> History {
+    let empty = History {
+        entries: Vec::new(),
+        cleared_at: history.cleared_at,
+    };
+    if encrypted_len(&Plain::value(json(&history))) <= MAX_ENCRYPTED_ITEM_BYTES {
+        return history;
+    }
+    let envelope = encrypted_len(&Plain::value(json(&empty)));
+    let mut len = envelope;
+    let mut kept = Vec::new();
+    for entry in history.entries.into_iter().rev() {
+        let entry_len = serde_json::to_vec(&entry).map_or(usize::MAX, |bytes| bytes.len());
+        if envelope.saturating_add(entry_len) > MAX_ENCRYPTED_ITEM_BYTES {
+            continue;
+        }
+        // 2件目からは、区切りのカンマの分が増える
+        let added = entry_len + usize::from(!kept.is_empty());
+        if len + added > MAX_ENCRYPTED_ITEM_BYTES {
+            break;
+        }
+        len += added;
+        kept.push(entry);
+    }
+    kept.reverse();
+    History {
+        entries: kept,
+        ..empty
+    }
+}
+
+/// 履歴の項目について、窓口が今持っているもの。
+enum RemoteHistory {
+    /// 項目が無いか、消した記録。`seq` は書くときの `base_seq`
+    Absent(Option<u64>),
+    Value(u64, History),
+    /// 復号できない・知らない `v`・形が合わない
+    Unreadable(u64),
+}
+
+impl RemoteHistory {
+    fn from_item(seq: u64, deleted: bool, plain: Option<&Plain>) -> Self {
+        if deleted {
+            return Self::Absent(Some(seq));
+        }
+        match plain {
+            Some(Plain {
+                value: Some(value),
+                detached: false,
+                ..
+            }) => parse::<History>(value)
+                // 今の形で書けない値は、新しい版が書いたものとして読み捨てる。混ぜて書き戻すと、その版の履歴を削る
+                .filter(|history| {
+                    history.entries.len() <= history_store::MAX_SYNCED_ENTRIES
+                        && history.entries.iter().all(|entry| entry.at > 0)
+                })
+                .map_or(Self::Unreadable(seq), |history| Self::Value(seq, history)),
+            _ => Self::Unreadable(seq),
+        }
+    }
+}
+
+/// 履歴の記録に置く SHA-256。窓口の値でなく、揃ったときの手元の履歴と件数のものにする（docs/sync.md「混ぜ方」）。
+/// 件数の少ないデバイスの手元は窓口の値と違うので、窓口の値の SHA-256 では、手元を変えたかを見分けられない。
+/// 件数を含めるのは、件数を増やしたときに、窓口にある古い履歴を入れるため
+fn history_hash(history: &History, size: usize) -> [u8; 32] {
+    hash_plain(&json!({ "history": history, "size": size }))
+}
+
+/// 履歴の項目を読み書きする（docs/sync.md「履歴の同期」）。設定の項目と違い、食い違いにせず混ぜる。
+/// 手元に入れる履歴（`size` 件に切り詰めたもの）を返す。同期しなかった・できなかった回は None で、
+/// 失敗しても設定の同期の結果は捨てない。`local` が None なら、手元の履歴を読めなかった。
+async fn sync_history<T: SyncTransport>(
+    transport: &mut T,
+    state: &mut State,
+    written: &mut State,
+    read: &[RemoteItem],
+    local: Option<&History>,
+    size: usize,
+) -> Option<History> {
+    let key = history_item();
+    let name = key.name();
+    let arrived = read
+        .iter()
+        .filter(|item| item.key == key && state.seen_seq(&name).is_none_or(|seq| item.seq > seq))
+        .max_by_key(|item| item.seq);
+    let record = state.items.get(&name).cloned();
+    if let Some(item) = arrived {
+        state.ignored.remove(&name);
+        // 届いた値は、読む位置が進むので次の回には届かない。この回に揃えられなかったときに、次の回が
+        // 読み直して混ぜるよう、どの履歴とも合わない SHA-256 で `seq` だけを置く。揃えば置き直す
+        if record.is_some() {
+            state.items.insert(
+                name.clone(),
+                Seen {
+                    seq: item.seq,
+                    hash: [0; 32],
+                },
+            );
+        }
+    }
+    let local = local?;
+    // このデバイスで初めて履歴を同期する回は、手元の消した時刻を使わない（docs/sync.md「混ぜ方」）
+    let first = record.is_none();
+    let mut remote = match arrived {
+        Some(item) => RemoteHistory::from_item(item.seq, item.deleted, item.plain.as_ref()),
+        // 読み捨てた値は、窓口の値が変わるまで書かない
+        None if state.ignored.contains_key(&name) => return None,
+        None => match &record {
+            Some(seen) if seen.hash == history_hash(local, size) => return None,
+            // 手元か件数を変えた。手元は件数に切り詰めてあって窓口の値の全部は持っていないので、窓口の値を
+            // 読み直して混ぜる。手元だけで書くと、件数の少ないデバイスが、ほかのデバイスの履歴を削る
+            Some(seen) => match transport.read_item(&key, seen.seq).await {
+                Ok(Some(item)) => {
+                    RemoteHistory::from_item(item.seq, item.deleted, item.plain.as_ref())
+                }
+                Ok(None) => RemoteHistory::Absent(None),
+                Err(error) => {
+                    log::warn!("couldn't read the synced history again: {error}");
+                    return None;
+                }
+            },
+            None => RemoteHistory::Absent(None),
+        },
+    };
+    for _ in 0..=MAX_CONFLICT_RETRIES {
+        let (base_seq, remote_history) = match remote {
+            RemoteHistory::Unreadable(seq) => {
+                state.ignored.insert(name, seq);
+                return None;
+            }
+            RemoteHistory::Absent(base_seq) => (base_seq, None),
+            RemoteHistory::Value(seq, history) => (Some(seq), Some(history)),
+        };
+        let theirs = remote_history.clone().unwrap_or_default();
+        let merged = if first {
+            let ours = History {
+                entries: local.entries.clone(),
+                cleared_at: 0,
+            };
+            history_store::merge(&ours, &theirs)
+        } else {
+            history_store::merge(local, &theirs)
+        };
+        let next = merged.clone().truncated(size);
+        let outgoing = fit_history(merged);
+        let seq = if remote_history.as_ref() == Some(&outgoing) {
+            base_seq.expect("a history value read from the server has a seq")
+        } else {
+            let write = Write {
+                key: key.clone(),
+                base_seq,
+                deleted: false,
+                plain: Some(json(&outgoing)),
+                detached: false,
+            };
+            match transport.write(std::slice::from_ref(&write)).await {
+                Ok(replies) => match replies.iter().find(|reply| reply.key == key) {
+                    Some(reply) => reply.seq,
+                    None => {
+                        log::warn!("the sync server didn't acknowledge the history");
+                        return None;
+                    }
+                },
+                Err(Error::Conflict(conflicts)) => {
+                    remote = match conflicts.iter().find(|conflict| conflict.key == key) {
+                        Some(conflict) => match conflict.seq {
+                            Some(seq) => RemoteHistory::from_item(
+                                seq,
+                                conflict.deleted,
+                                conflict.plain.as_ref(),
+                            ),
+                            None => RemoteHistory::Absent(None),
+                        },
+                        // `conflicts` が空なら、同じ要求を送り直す（docs/account-server.md「同期」）
+                        None => match remote_history {
+                            Some(history) => RemoteHistory::Value(
+                                base_seq.expect("a history value read from the server has a seq"),
+                                history,
+                            ),
+                            None => RemoteHistory::Absent(base_seq),
+                        },
+                    };
+                    continue;
+                }
+                Err(error) => {
+                    log::warn!("couldn't write the synced history: {error}");
+                    return None;
+                }
+            }
+        };
+        let seen = Seen {
+            seq,
+            hash: history_hash(&next, size),
+        };
+        // 設定の結果を手元に入れずに捨てる回も、履歴は手元に入れるので、記録に残す
+        state.settle_seen(name.clone(), seen.clone());
+        written.settle_seen(name, seen);
+        return Some(next);
+    }
+    log::warn!("history sync conflicts did not settle");
+    None
 }
 
 /// 書く項目を窓口へ送り、書けた分を記録に置く。`conflict` が返ったら、そこで止めて今の項目を返す。
@@ -1631,7 +1871,7 @@ where
         }
         for item in reply.items {
             let item_key = ItemKey::new(&item.collection, item.id);
-            if kind(&item_key).is_none() {
+            if !handled(&item_key) {
                 continue;
             }
             let plain = item
@@ -1661,6 +1901,7 @@ async fn get_page(
     client: &reqwest::Client,
     token: &str,
     since: u64,
+    limit: usize,
     rebuild: bool,
 ) -> Result<GetReply, Error> {
     let mut url = reqwest::Url::parse(&format!("{}/v1/sync", account::ACCOUNT_URL))
@@ -1668,7 +1909,7 @@ async fn get_page(
     {
         let mut query = url.query_pairs_mut();
         query.append_pair("since", &since.to_string());
-        query.append_pair("limit", &READ_LIMIT.to_string());
+        query.append_pair("limit", &limit.to_string());
         if rebuild {
             query.append_pair("rebuild", "1");
         }
@@ -1721,7 +1962,7 @@ struct ConflictReplyItem {
 fn put_items(key: &[u8; 32], key_id: &str, writes: &[Write]) -> Result<Vec<Value>, Error> {
     let mut items = Vec::new();
     for write in writes {
-        if kind(&write.key).is_none() {
+        if !handled(&write.key) {
             return Err(Error::Other("invalid local sync item".to_string()));
         }
         let mut item = json!({ "collection": write.key.collection, "id": write.key.id, "base_seq": write.base_seq, "deleted": write.deleted });
@@ -1747,7 +1988,7 @@ fn conflict_items(key: &[u8; 32], key_id: &str, body: Value) -> Result<Vec<Confl
         .into_iter()
         .filter_map(|item| {
             let item_key = ItemKey::new(&item.collection, item.id);
-            kind(&item_key)?;
+            handled(&item_key).then_some(())?;
             let plain = item
                 .data
                 .as_deref()
@@ -1820,7 +2061,7 @@ impl SyncTransport for HttpTransport<'_> {
     ) -> Pin<Box<dyn Future<Output = Result<ReadResult, Error>> + Send + 'a>> {
         let (client, token) = (self.client, self.token);
         Box::pin(read_pages(
-            move |since, rebuild| get_page(client, token, since, rebuild),
+            move |since, rebuild| get_page(client, token, since, READ_LIMIT, rebuild),
             self.key,
             self.key_id,
             since,
@@ -1845,6 +2086,47 @@ impl SyncTransport for HttpTransport<'_> {
                 })
         })
     }
+
+    fn read_item<'a>(
+        &'a mut self,
+        key: &'a ItemKey,
+        seq: u64,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<RemoteItem>, Error>> + Send + 'a>> {
+        Box::pin(async move {
+            // `seq` の1つ前から1項目だけ読む。その項目が書き換わっていなければ、先頭に返る
+            let reply = get_page(self.client, self.token, seq.saturating_sub(1), 1, false).await?;
+            Ok(item_at(reply, self.key, self.key_id, key, seq))
+        })
+    }
+}
+
+/// 1項目を読み直した応答から、`seq` のままの `key` の項目を取り出す。ほかの項目が返った
+/// （書き換わった・窓口が写しの先頭から返した）ときは None。
+fn item_at(
+    reply: GetReply,
+    key: &[u8; 32],
+    key_id: &str,
+    item_key: &ItemKey,
+    seq: u64,
+) -> Option<RemoteItem> {
+    if reply.key_id.as_deref() != Some(key_id) {
+        return None;
+    }
+    let item = reply.items.into_iter().next()?;
+    if item.collection != item_key.collection || item.id != item_key.id || item.seq != seq {
+        return None;
+    }
+    let plain = item
+        .data
+        .as_deref()
+        .filter(|_| !item.deleted)
+        .and_then(|data| decrypt(key, key_id, item_key, data));
+    Some(RemoteItem {
+        key: item_key.clone(),
+        seq,
+        deleted: item.deleted,
+        plain,
+    })
 }
 
 /// 1回の通信を走らせ、保存する前の結果を返す。呼び出し元が設定と記録を同じ世代で保存する。
@@ -1855,6 +2137,7 @@ pub async fn sync_once(
     key_id: &str,
     config: &Config,
     state: Option<State>,
+    history: Option<&History>,
 ) -> Result<SyncResult, Box<Failure>> {
     let mut transport = HttpTransport {
         client,
@@ -1867,6 +2150,7 @@ pub async fn sync_once(
         config,
         state.filter(|state| state.key_id == key_id),
         key_id,
+        history,
     )
     .await
 }
@@ -3205,6 +3489,8 @@ mod tests {
         fail_from_write: Option<usize>,
         seq: u64,
         read_since: Vec<u64>,
+        /// 1項目を読み直した `seq`
+        item_reads: Vec<u64>,
         writes: Vec<Vec<Write>>,
         stored: Vec<RemoteItem>,
     }
@@ -3279,6 +3565,18 @@ mod tests {
             };
             Box::pin(std::future::ready(result))
         }
+
+        fn read_item<'a>(
+            &'a mut self,
+            key: &'a ItemKey,
+            seq: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<RemoteItem>, Error>> + Send + 'a>> {
+            self.item_reads.push(seq);
+            let current = self.stored.iter().rev().find(|item| item.key == *key);
+            Box::pin(std::future::ready(Ok(current
+                .filter(|item| item.seq == seq)
+                .cloned())))
+        }
     }
 
     fn read(next: u64, items: impl IntoIterator<Item = RemoteItem>) -> ReadResult {
@@ -3294,7 +3592,7 @@ mod tests {
         config: &Config,
         state: Option<State>,
     ) -> Result<SyncResult, Box<Failure>> {
-        tauri::async_runtime::block_on(sync_once_with(transport, config, state, "key"))
+        tauri::async_runtime::block_on(sync_once_with(transport, config, state, "key", None))
     }
 
     #[test]
@@ -4152,5 +4450,616 @@ mod tests {
         assert!(result.state.conflicts.is_empty());
         assert_eq!(second.written(&ours.key.id)[0].base_seq, Some(ours.seq));
         assert_eq!(result.config, edited);
+    }
+    fn history(entries: &[(&str, u64)], cleared_at: u64) -> History {
+        History {
+            entries: entries
+                .iter()
+                .map(|(text, at)| history_store::Entry {
+                    text: text.to_string(),
+                    at: *at,
+                })
+                .collect(),
+            cleared_at,
+        }
+    }
+
+    fn numbered(range: std::ops::Range<u64>) -> History {
+        History {
+            entries: range
+                .map(|at| history_store::Entry {
+                    text: format!("draft {at}"),
+                    at,
+                })
+                .collect(),
+            cleared_at: 0,
+        }
+    }
+
+    fn remote_history(seq: u64, value: &History) -> RemoteItem {
+        remote(HISTORY, HISTORY_ID, seq, json(value))
+    }
+
+    fn run_history(
+        transport: &mut FakeTransport,
+        state: Option<State>,
+        local: &History,
+        size: usize,
+    ) -> SyncResult {
+        let config = Config {
+            text_history_size: size as u16,
+            ..Config::default()
+        };
+        let state = state.or_else(|| Some(recorded(&config)));
+        tauri::async_runtime::block_on(sync_once_with(
+            transport,
+            &config,
+            state,
+            "key",
+            Some(local),
+        ))
+        .unwrap()
+    }
+
+    /// 履歴の項目だけを持つ窓口と、そこへ順に同期するデバイス。
+    #[derive(Default)]
+    struct HistoryServer {
+        seq: u64,
+        item: Option<RemoteItem>,
+    }
+
+    struct HistoryDevice {
+        state: Option<State>,
+        local: History,
+        size: usize,
+    }
+
+    impl HistoryDevice {
+        fn new(local: History, size: usize) -> Self {
+            Self {
+                state: None,
+                local,
+                size,
+            }
+        }
+
+        /// 1回同期し、混ぜた履歴を手元に入れる。窓口へ書いたかを返す
+        fn sync(&mut self, server: &mut HistoryServer) -> bool {
+            // 記録の無いデバイスは、`recorded` の読む位置（1）から読む
+            let since = self.state.as_ref().map_or(1, |state| state.since);
+            let arriving = server.item.iter().filter(|item| item.seq > since).cloned();
+            let mut transport =
+                FakeTransport::reading([read(server.seq, arriving)]).after_seq(server.seq);
+            transport.stored.extend(server.item.clone());
+            let result = run_history(&mut transport, self.state.take(), &self.local, self.size);
+            server.seq = transport.seq;
+            server.item = transport.stored.last().cloned();
+            if let Some(next) = result.history {
+                self.local = next;
+            }
+            self.state = Some(result.state);
+            !transport.written(HISTORY_ID).is_empty()
+        }
+    }
+
+    /// 前の版のファイルから読んだ履歴。`name` で本文を分け、時刻は `newest` からさかのぼる
+    fn text_only_history(name: &str, count: usize, newest: u64) -> History {
+        let entries: Vec<String> = (0..count).map(|index| format!("{name}{index}")).collect();
+        let file = json!({ "version": 1, "entries": entries }).to_string();
+        history_store::parse(&file, newest).unwrap().0
+    }
+
+    /// 全部のデバイスを順に同期するのを繰り返し、どのデバイスも書かなくなるまでの回数を返す
+    fn settle(server: &mut HistoryServer, devices: &mut [HistoryDevice]) -> usize {
+        for round in 1..=5 {
+            let mut wrote = false;
+            for device in devices.iter_mut() {
+                wrote |= device.sync(server);
+            }
+            if !wrote {
+                return round;
+            }
+        }
+        panic!("the devices keep writing the history back to each other");
+    }
+
+    fn server_history(server: &HistoryServer) -> History {
+        let plain = server.item.as_ref().and_then(|item| item.plain.as_ref());
+        parse(plain.and_then(|plain| plain.value.as_ref()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn three_devices_with_text_only_histories_settle() {
+        let mut server = HistoryServer { seq: 1, item: None };
+        // 2台はファイルの更新時刻が同じで、時刻が重なる
+        let mut devices = [
+            HistoryDevice::new(text_only_history("a", 50, 5000), 50),
+            HistoryDevice::new(text_only_history("b", 50, 5000), 50),
+            HistoryDevice::new(text_only_history("c", 50, 5020), 50),
+        ];
+        let rounds = settle(&mut server, &mut devices);
+        assert!(rounds <= 3, "settled after {rounds} rounds");
+        let synced = server_history(&server);
+        assert_eq!(synced.entries.len(), 100);
+        for device in &devices {
+            assert_eq!(device.local, synced.clone().truncated(50));
+        }
+        // 落ち着いた後は、何度同期しても書かない
+        assert_eq!(settle(&mut server, &mut devices), 1);
+    }
+
+    #[test]
+    fn two_devices_holding_more_than_the_limit_together_settle() {
+        let mut server = HistoryServer { seq: 1, item: None };
+        let mut devices = [
+            HistoryDevice::new(text_only_history("a", 60, 5000), 100),
+            HistoryDevice::new(text_only_history("b", 60, 5000), 100),
+        ];
+        let rounds = settle(&mut server, &mut devices);
+        assert!(rounds <= 3, "settled after {rounds} rounds");
+        let synced = server_history(&server);
+        assert_eq!(synced.entries.len(), 100);
+        assert_eq!(devices[0].local, synced);
+        assert_eq!(devices[1].local, synced);
+    }
+
+    #[test]
+    fn a_device_syncing_history_for_the_first_time_does_not_spread_its_old_clear() {
+        let mut server = HistoryServer { seq: 1, item: None };
+        let mut synced = HistoryDevice::new(history(&[("a", 10), ("b", 30)], 0), 50);
+        synced.sync(&mut server);
+        // 同期に入る前に消したことがあるデバイス
+        let mut joining = HistoryDevice::new(history(&[("c", 40)], 20), 50);
+        joining.sync(&mut server);
+        let mixed = history(&[("a", 10), ("b", 30), ("c", 40)], 0);
+        assert_eq!(server_history(&server), mixed);
+        assert_eq!(joining.local, mixed);
+        synced.sync(&mut server);
+        assert_eq!(synced.local, mixed);
+    }
+
+    #[test]
+    fn a_device_syncing_history_for_the_first_time_takes_the_clear_of_the_server() {
+        let mut server = HistoryServer { seq: 1, item: None };
+        let mut synced = HistoryDevice::new(history(&[("x", 15)], 0), 50);
+        synced.sync(&mut server);
+        // 同期しているデバイスで消してから、1件覚えた
+        synced.local = history(&[("b", 30)], 20);
+        synced.sync(&mut server);
+        let mut joining = HistoryDevice::new(history(&[("a", 10), ("c", 40)], 5), 50);
+        joining.sync(&mut server);
+        assert_eq!(joining.local, history(&[("b", 30), ("c", 40)], 20));
+    }
+
+    #[test]
+    fn clearing_on_a_device_that_already_syncs_clears_the_other_devices() {
+        let mut server = HistoryServer { seq: 1, item: None };
+        let mut devices = [
+            HistoryDevice::new(history(&[("a", 10)], 0), 50),
+            HistoryDevice::new(history(&[("b", 20)], 0), 50),
+        ];
+        settle(&mut server, &mut devices);
+        devices[0].local = history(&[("c", 40)], 30);
+        settle(&mut server, &mut devices);
+        assert_eq!(server_history(&server), history(&[("c", 40)], 30));
+        assert_eq!(devices[1].local, history(&[("c", 40)], 30));
+    }
+
+    #[test]
+    fn setting_the_size_to_zero_clears_the_server_and_keeps_nothing_locally() {
+        let mut server = HistoryServer { seq: 1, item: None };
+        let mut devices = [
+            HistoryDevice::new(history(&[("a", 10)], 0), 50),
+            HistoryDevice::new(history(&[("b", 20)], 0), 50),
+        ];
+        settle(&mut server, &mut devices);
+        // 件数を 0 にして、消した時刻を置いた
+        devices[0].size = 0;
+        devices[0].local = history(&[], 30);
+        assert!(devices[0].sync(&mut server));
+        assert_eq!(server_history(&server), history(&[], 30));
+        // 件数が 0 のデバイスも、ほかのデバイスが後で覚えた履歴を窓口から消さず、手元には入れない
+        devices[1].sync(&mut server);
+        devices[1].local = history(&[("c", 40)], 30);
+        devices[1].sync(&mut server);
+        assert!(!devices[0].sync(&mut server));
+        assert_eq!(devices[0].local, history(&[], 30));
+        assert_eq!(server_history(&server), history(&[("c", 40)], 30));
+    }
+
+    #[test]
+    fn raising_the_size_brings_in_the_older_entries_on_the_server() {
+        let mut server = HistoryServer { seq: 1, item: None };
+        let mut devices = [
+            HistoryDevice::new(numbered(1..31), 50),
+            HistoryDevice::new(History::default(), 10),
+        ];
+        settle(&mut server, &mut devices);
+        assert_eq!(devices[1].local, numbered(21..31));
+        devices[1].size = 25;
+        assert!(!devices[1].sync(&mut server), "nothing new to write");
+        assert_eq!(devices[1].local, numbered(6..31));
+    }
+
+    #[test]
+    fn the_history_is_cut_to_a_size_arriving_in_the_same_sync() {
+        let local = numbered(1..6);
+        let mut transport = FakeTransport::reading([read(
+            4,
+            [remote(SETTINGS, "s_text_history_size", 4, json!(2))],
+        )])
+        .after_seq(4);
+        let result = run_history(&mut transport, None, &local, 50);
+        assert_eq!(result.config.text_history_size, 2);
+        assert_eq!(result.history, Some(numbered(4..6)));
+        // 窓口に書く値は切り詰めない
+        assert_eq!(written_history(&transport), [(None, local)]);
+    }
+
+    #[test]
+    fn an_arrived_history_that_could_not_be_mixed_is_read_again_next_time() {
+        let mut server = HistoryServer { seq: 1, item: None };
+        let mut device = HistoryDevice::new(history(&[("a", 10), ("c", 30)], 0), 50);
+        device.sync(&mut server);
+        let theirs = history(&[("b", 20)], 0);
+        let mut transport = FakeTransport::reading([read(5, [remote_history(5, &theirs)])])
+            .failing([Error::Other("offline".into())])
+            .after_seq(5);
+        let failed = run_history(&mut transport, device.state.take(), &device.local, 50);
+        assert_eq!(failed.history, None);
+        assert_eq!(failed.state.since, 5);
+
+        // 読む位置は進んでいて、届いた値は次の回には届かない
+        let mut transport = FakeTransport::reading([read(5, [])]).after_seq(5);
+        transport.stored.push(remote_history(5, &theirs));
+        let result = run_history(&mut transport, Some(failed.state), &device.local, 50);
+        assert_eq!(transport.item_reads, [5]);
+        let mixed = history(&[("a", 10), ("b", 20), ("c", 30)], 0);
+        assert_eq!(written_history(&transport), [(Some(5), mixed.clone())]);
+        assert_eq!(result.history, Some(mixed));
+    }
+
+    fn written_history(transport: &FakeTransport) -> Vec<(Option<u64>, History)> {
+        transport
+            .written(HISTORY_ID)
+            .into_iter()
+            .map(|write| {
+                assert_eq!(write.key.collection, HISTORY);
+                (
+                    write.base_seq,
+                    parse(
+                        write
+                            .plain
+                            .as_ref()
+                            .expect("the history is written as a value"),
+                    )
+                    .expect("the written history has the wire shape"),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_history_item_is_read_and_written_on_the_wire() {
+        let key = history_item();
+        assert!(valid_wire_id(&key.id));
+        let write = Write {
+            key: key.clone(),
+            base_seq: None,
+            deleted: false,
+            plain: Some(json(history(&[("draft", 5)], 3))),
+            detached: false,
+        };
+        let items = put_items(&[5; 32], "key", &[write]).unwrap();
+        assert_eq!(items[0]["collection"], "history");
+        assert_eq!(items[0]["id"], "h");
+        let plain = decrypt(&[5; 32], "key", &key, items[0]["data"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            plain.value,
+            Some(json!({ "entries": [{ "text": "draft", "at": 5 }], "cleared_at": 3 }))
+        );
+        let result = read_fake_pages(0, vec![page(false, false, 4, &[(&key, 4)])])
+            .0
+            .unwrap();
+        assert_eq!(result.items.len(), 1);
+    }
+
+    #[test]
+    fn a_first_history_sync_writes_the_local_history() {
+        let local = history(&[("a", 10), ("b", 20)], 0);
+        let mut transport = FakeTransport::reading([read(1, [])]).after_seq(1);
+        let result = run_history(&mut transport, None, &local, 50);
+        assert_eq!(written_history(&transport), [(None, local.clone())]);
+        assert_eq!(result.history, Some(local));
+        let name = history_item().name();
+        assert_eq!(result.state.items[&name].seq, 2);
+        assert_eq!(result.written.items[&name], result.state.items[&name]);
+    }
+
+    #[test]
+    fn an_unchanged_history_is_neither_read_again_nor_written() {
+        let local = history(&[("a", 10)], 0);
+        let mut transport = FakeTransport::reading([read(1, []), read(2, [])]).after_seq(1);
+        let first = run_history(&mut transport, None, &local, 50);
+        let second = run_history(&mut transport, Some(first.state), &local, 50);
+        assert_eq!(second.history, None);
+        assert_eq!(transport.written(HISTORY_ID).len(), 1);
+        assert!(transport.item_reads.is_empty());
+    }
+
+    #[test]
+    fn an_arriving_history_is_mixed_into_the_local_one_and_written_back() {
+        let local = history(&[("a", 10), ("c", 30)], 0);
+        let theirs = history(&[("b", 20)], 0);
+        let mut transport =
+            FakeTransport::reading([read(4, [remote_history(4, &theirs)])]).after_seq(4);
+        let result = run_history(&mut transport, None, &local, 50);
+        let mixed = history(&[("a", 10), ("b", 20), ("c", 30)], 0);
+        assert_eq!(written_history(&transport), [(Some(4), mixed.clone())]);
+        assert_eq!(result.history, Some(mixed));
+    }
+
+    #[test]
+    fn an_arriving_history_that_holds_everything_is_not_written_back() {
+        let local = history(&[("a", 10)], 0);
+        let theirs = history(&[("a", 10), ("b", 20), ("c", 30)], 0);
+        let mut transport = FakeTransport::reading([read(4, [remote_history(4, &theirs)])]);
+        // このデバイスの件数に切り詰めるのは、手元に入れる分だけ
+        let result = run_history(&mut transport, None, &local, 2);
+        assert!(transport.writes.is_empty());
+        assert_eq!(result.history, Some(history(&[("b", 20), ("c", 30)], 0)));
+        assert_eq!(result.state.items[&history_item().name()].seq, 4);
+    }
+
+    #[test]
+    fn a_clear_on_another_device_drops_the_older_local_entries() {
+        let local = history(&[("a", 10), ("c", 30)], 0);
+        let theirs = history(&[], 20);
+        let mut transport =
+            FakeTransport::reading([read(4, [remote_history(4, &theirs)])]).after_seq(4);
+        let result = run_history(&mut transport, None, &local, 50);
+        let mixed = history(&[("c", 30)], 20);
+        assert_eq!(written_history(&transport), [(Some(4), mixed.clone())]);
+        assert_eq!(result.history, Some(mixed));
+    }
+
+    #[test]
+    fn a_device_keeping_fewer_entries_does_not_trim_the_server_history() {
+        let theirs = numbered(1..101);
+        let mut transport = FakeTransport::reading([read(4, [remote_history(4, &theirs)])]);
+        transport.stored.push(remote_history(4, &theirs));
+        let first = run_history(&mut transport, None, &History::default(), 3);
+        let held = first.history.expect("the arrived history is applied");
+        assert_eq!(held, numbered(98..101));
+
+        // 手元で1件覚えた。窓口の値は届かないので、読み直して混ぜる
+        let mut local = held.clone();
+        local.entries.remove(0);
+        local.entries.push(history_store::Entry {
+            text: "new".into(),
+            at: 500,
+        });
+        transport.reads.push_back(read(4, []));
+        transport.seq = 4;
+        let second = run_history(&mut transport, Some(first.state), &local, 3);
+        assert_eq!(transport.item_reads, [4]);
+        let written = written_history(&transport);
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, Some(4));
+        // 100 件のうち、いちばん古い1件だけが新しい1件に押し出される
+        assert_eq!(written[0].1.entries.len(), 100);
+        assert_eq!(written[0].1.entries[0].at, 2);
+        assert_eq!(written[0].1.entries[99].text, "new");
+        assert_eq!(second.history, Some(local));
+    }
+
+    #[test]
+    fn a_history_changed_on_the_server_since_the_record_is_taken_from_the_conflict() {
+        let local = history(&[("a", 10)], 0);
+        let mut transport = FakeTransport::reading([read(1, []), read(2, [])]).after_seq(1);
+        let first = run_history(&mut transport, None, &local, 50);
+        // 読み直しても、記録の `seq` の項目はもう無い
+        transport.stored.clear();
+        let theirs = history(&[("a", 10), ("b", 20)], 0);
+        transport
+            .write_errors
+            .push_back(Error::Conflict(vec![ConflictItem {
+                key: history_item(),
+                seq: Some(7),
+                deleted: false,
+                plain: Some(Plain::value(json(&theirs))),
+            }]));
+        transport.seq = 7;
+        let changed = history(&[("a", 10), ("c", 30)], 0);
+        let second = run_history(&mut transport, Some(first.state), &changed, 50);
+        let mixed = history(&[("a", 10), ("b", 20), ("c", 30)], 0);
+        let written = written_history(&transport);
+        assert_eq!(written[1], (None, changed));
+        assert_eq!(written[2], (Some(7), mixed.clone()));
+        assert_eq!(second.history, Some(mixed));
+        assert_eq!(second.state.items[&history_item().name()].seq, 8);
+    }
+
+    #[test]
+    fn history_conflicts_are_retried_and_then_left_for_the_next_sync() {
+        let local = history(&[("a", 10)], 0);
+        let conflict = |seq: u64| {
+            Error::Conflict(vec![ConflictItem {
+                key: history_item(),
+                seq: Some(seq),
+                deleted: false,
+                plain: Some(Plain::value(json(history(&[("b", seq)], 0)))),
+            }])
+        };
+        let mut transport = FakeTransport::reading([read(1, [])])
+            .failing((2..=5).map(conflict).collect::<Vec<_>>());
+        let result = run_history(&mut transport, None, &local, 50);
+        assert_eq!(
+            transport.written(HISTORY_ID).len(),
+            MAX_CONFLICT_RETRIES + 1
+        );
+        assert_eq!(result.history, None);
+        let name = history_item().name();
+        assert!(!result.state.items.contains_key(&name));
+        assert!(
+            !result.state.conflicts.contains(&name),
+            "history never stops as a conflict"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_local_history_is_not_synced() {
+        let config = Config::default();
+        let theirs = history(&[("a", 10)], 0);
+        let mut transport = FakeTransport::reading([read(4, [remote_history(4, &theirs)])]);
+        let result = run(&mut transport, &config, Some(recorded(&config))).unwrap();
+        assert_eq!(result.history, None);
+        assert!(transport.writes.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_history_is_ignored_until_the_server_value_changes() {
+        let local = history(&[("a", 10)], 0);
+        let unreadable = [
+            remote(HISTORY, HISTORY_ID, 4, json!({ "entries": "future" })),
+            // 今の版が書かない値: 時刻の無い履歴と、上限を超える件数
+            remote_history(4, &history(&[("z", 0)], 0)),
+            remote_history(
+                4,
+                &numbered(1..history_store::MAX_SYNCED_ENTRIES as u64 + 2),
+            ),
+            RemoteItem {
+                key: history_item(),
+                seq: 4,
+                deleted: false,
+                plain: None,
+            },
+        ];
+        for item in unreadable {
+            let mut transport = FakeTransport::reading([read(4, [item]), read(4, [])]);
+            let first = run_history(&mut transport, None, &local, 50);
+            let name = history_item().name();
+            assert_eq!(first.history, None);
+            assert_eq!(first.state.ignored.get(&name), Some(&4));
+            let changed = history(&[("a", 10), ("b", 20)], 0);
+            let second = run_history(&mut transport, Some(first.state), &changed, 50);
+            assert_eq!(second.history, None);
+            assert!(transport.writes.is_empty());
+
+            let theirs = history(&[("c", 30)], 0);
+            transport
+                .reads
+                .push_back(read(6, [remote_history(6, &theirs)]));
+            transport.seq = 6;
+            let third = run_history(&mut transport, Some(second.state), &changed, 50);
+            assert_eq!(
+                third.history,
+                Some(history(&[("a", 10), ("b", 20), ("c", 30)], 0))
+            );
+            assert!(third.state.ignored.is_empty());
+        }
+    }
+
+    fn sized(at: u64, kib: usize) -> history_store::Entry {
+        history_store::Entry {
+            text: format!("{at}{}", "x".repeat(kib * 1024)),
+            at,
+        }
+    }
+
+    #[test]
+    fn a_history_over_the_size_limit_is_written_without_its_oldest_entries() {
+        let local = History {
+            entries: (1..=3).map(|at| sized(at, 100)).collect(),
+            cleared_at: 0,
+        };
+        let fitted = fit_history(local.clone());
+        assert_eq!(fitted.entries, local.entries[1..]);
+        assert!(encrypted_len(&Plain::value(json(&fitted))) <= MAX_ENCRYPTED_ITEM_BYTES);
+        assert_eq!(fit_history(fitted.clone()), fitted);
+
+        let mut transport = FakeTransport::reading([read(1, [])]).after_seq(1);
+        let result = run_history(&mut transport, None, &local, 50);
+        assert_eq!(written_history(&transport), [(None, fitted)]);
+        // 手元の履歴は削らない
+        assert_eq!(result.history, Some(local));
+    }
+
+    #[test]
+    fn a_text_too_large_on_its_own_is_left_out_without_emptying_the_history() {
+        // いちばん新しい1件だけで上限を超える
+        let local = History {
+            entries: vec![sized(1, 1), sized(2, 1), sized(3, 300)],
+            cleared_at: 7,
+        };
+        let fitted = fit_history(local.clone());
+        assert_eq!(fitted.entries, local.entries[..2]);
+        assert_eq!(fitted.cleared_at, 7);
+        // 途中にあっても、その1件だけを外し、残りは古い方から落とす
+        let mixed = History {
+            entries: vec![sized(1, 100), sized(2, 100), sized(3, 300), sized(4, 100)],
+            cleared_at: 0,
+        };
+        let fitted = fit_history(mixed.clone());
+        assert_eq!(
+            fitted.entries,
+            [mixed.entries[1].clone(), mixed.entries[3].clone()]
+        );
+        assert!(encrypted_len(&Plain::value(json(&fitted))) <= MAX_ENCRYPTED_ITEM_BYTES);
+
+        // 窓口に置けない本文が手元にあっても、同期のたびに書き直さない
+        let mut server = HistoryServer { seq: 1, item: None };
+        let mut device = HistoryDevice::new(local.clone(), 50);
+        // このデバイスは、消した時刻を使わない初めての同期
+        device.local.cleared_at = 0;
+        assert!(device.sync(&mut server));
+        assert_eq!(server_history(&server).entries, local.entries[..2]);
+        assert_eq!(device.local.entries, local.entries);
+        assert!(!device.sync(&mut server));
+    }
+
+    #[test]
+    fn the_size_limit_is_measured_to_the_byte() {
+        let exact = |text_len: usize| History {
+            entries: vec![
+                sized(1, 1),
+                history_store::Entry {
+                    text: "x".repeat(text_len),
+                    at: 2,
+                },
+            ],
+            cleared_at: 0,
+        };
+        // 2件でちょうど上限になる長さを探し、1バイト超えたら古い方を落とす
+        let base = encrypted_len(&Plain::value(json(exact(0))));
+        let room = MAX_ENCRYPTED_ITEM_BYTES - base;
+        assert_eq!(fit_history(exact(room)).entries.len(), 2);
+        let over = fit_history(exact(room + 1));
+        assert_eq!(over.entries.len(), 1);
+        assert_eq!(over.entries[0].at, 2);
+    }
+
+    #[test]
+    fn a_failed_history_write_keeps_the_settings_result() {
+        let local = history(&[("a", 10)], 0);
+        let mut transport =
+            FakeTransport::reading([read(1, [])]).failing([Error::Other("offline".into())]);
+        let result = run_history(&mut transport, None, &local, 50);
+        assert_eq!(result.history, None);
+        assert!(!result.state.items.contains_key(&history_item().name()));
+        assert_eq!(result.state.since, 1);
+    }
+
+    #[test]
+    fn rereading_one_item_only_accepts_the_item_at_the_recorded_seq() {
+        let key = history_item();
+        let other = setting_item("theme");
+        let read_at = |items: &[(&ItemKey, u64)]| {
+            item_at(page(false, false, 9, items), &[5; 32], "key", &key, 4)
+        };
+        assert_eq!(read_at(&[(&key, 4)]).map(|item| item.seq), Some(4));
+        assert!(read_at(&[(&key, 6)]).is_none(), "the item was rewritten");
+        assert!(read_at(&[(&other, 4)]).is_none());
+        assert!(read_at(&[]).is_none());
     }
 }

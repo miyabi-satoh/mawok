@@ -24,6 +24,7 @@ Copied text is kept in history.
 
 - Press `↑` at the start of the text box or `↓` at its end to show the previous or next text.
 - Change how many are kept under "General" in Settings. Set it to 0 to keep no history.
+- With Pro, history syncs with your other devices on the same account. Selecting "Clear history" in Settings or setting the number to 0 also clears the history on those devices.
 
 ## Use snippets
 
@@ -121,7 +122,8 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 ## What is sent and privacy
 
 - Mawok does not send usage statistics or error reports.
-- It sends your text outside the app only when you run an AI action (to the AI service you chose) or send it to another device (to another device you own on the same account).
+- It sends your text outside the app only when you run an AI action (to the AI service you chose), send it to another device (to another device you own on the same account), or sync with Pro.
+- While you sync with Pro, your settings (such as replacements, snippets, and actions) and history are encrypted and stored on Mawok's server. Mawok's server cannot read them.
 - Before you choose an AI service and select "Agree", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
 
 ## Settings file
@@ -133,6 +135,7 @@ Changes you make directly take effect after you restart the app. The file contai
 | -------------------------------- | -------------------------------- | ------------------------------------------------------------------------ |
 | `hotkey`                         | `"CommandOrControl+Shift+Space"` | Hotkey that brings up the text window; empty for none                    |
 | `autostart`                      | `true`                           | Launch at login                                                          |
+| `sync_enabled`                   | `true`                           | With Pro, sync settings and history with your other devices              |
 | `language`                       | `"system"`                       | Language (`"system"`, `"ja"`, `"en"`)                                    |
 | `theme`                          | `"system"`                       | Theme (`"system"`, `"light"`, `"dark"`)                                  |
 | `text_window_always_on_top`      | `true`                           | Keep the text window on top                                              |

@@ -42,7 +42,8 @@ function emit(
 		| typeof EVENTS.SHOWN
 		| typeof EVENTS.HIDE_REQUESTED
 		| typeof EVENTS.DRAFT_HIDDEN
-		| typeof EVENTS.DRAFT_RECEIVED,
+		| typeof EVENTS.DRAFT_RECEIVED
+		| typeof EVENTS.DRAFT_HISTORY_SYNCED,
 	payload?: unknown
 ) {
 	for (const handler of listeners.get(name) ?? []) handler({ payload });
@@ -328,6 +329,44 @@ describe('下書きの履歴', () => {
 		await expect.element(textarea).toHaveValue('git diff');
 		await userEvent.keyboard('{ArrowDown}');
 		await expect.element(textarea).toHaveValue('書きかけ');
+	});
+
+	it('同期で履歴が替わった知らせで読み直し、読み直している間にコピーした分を足して保存する', async () => {
+		let finishReload: (entries: string[]) => void = () => {};
+		let loads = 0;
+		invoked.mockImplementation((command) => {
+			if (command === 'commit') return Promise.resolve(true);
+			if (command !== 'load_draft_history') return Promise.resolve(undefined);
+			loads += 1;
+			// 1回目は起動のときの読み込み
+			if (loads === 1) return Promise.resolve(['git status']);
+			return new Promise((resolve) => (finishReload = resolve));
+		});
+		const screen = await render(Page);
+		const textarea = screen.getByRole('textbox');
+		await vi.waitFor(() => expect(loads).toBe(1));
+		await tick();
+
+		emit(EVENTS.DRAFT_HISTORY_SYNCED);
+		await vi.waitFor(() => expect(loads).toBe(2));
+		invoked.mockClear();
+		await copy(textarea, 'git push');
+		// 読み直す前の一覧は保存しない
+		expect(commandsCalled()).not.toContain('save_draft_history');
+
+		finishReload(['git log', 'git status']);
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('save_draft_history', {
+				entries: ['git log', 'git status', 'git push']
+			})
+		);
+		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
+		await userEvent.keyboard('{ArrowUp}');
+		await expect.element(textarea).toHaveValue('git push');
+		await userEvent.keyboard('{ArrowUp}');
+		await expect.element(textarea).toHaveValue('git status');
+		await userEvent.keyboard('{ArrowUp}');
+		await expect.element(textarea).toHaveValue('git log');
 	});
 
 	it('1行目の途中の上キーは先頭へ移り、もう一度押すと履歴を出す', async () => {

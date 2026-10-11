@@ -36,6 +36,7 @@ export const CONSTANTS = {{\n\
 export const EVENTS = {{\n\
 \tSETTINGS_CHANGED: {:?},\n\
 \tDRAFT_HISTORY_CLEARED: {:?},\n\
+\tDRAFT_HISTORY_SYNCED: {:?},\n\
 \tSNIPPET_ADDED: {:?},\n\
 \tSYNC_APPLIED: {:?},\n\
 \tPAIRING_CODE_ENDED: {:?},\n\
@@ -60,6 +61,7 @@ export const EVENTS = {{\n\
         new_action,
         events::SETTINGS_CHANGED,
         events::DRAFT_HISTORY_CLEARED,
+        events::DRAFT_HISTORY_SYNCED,
         events::SNIPPET_ADDED,
         events::SYNC_APPLIED,
         events::PAIRING_CODE_ENDED,

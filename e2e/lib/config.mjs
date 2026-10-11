@@ -158,6 +158,19 @@ async function readConfig() {
 }
 
 /**
+ * 置き換え辞書・定型文・アクションの行から、アプリが付ける `id` と `sync` を外す。
+ * テストが渡した中身と比べるときに使う (`id` は行ごとに乱数で付き、`sync` は読む口によって出たり出なかったりする)
+ */
+export function withoutSyncFields(rows) {
+	return rows.map((row) => {
+		const rest = { ...row };
+		delete rest.id;
+		delete rest.sync;
+		return rest;
+	});
+}
+
+/**
  * config.toml をポーリングして待つとき用。アプリは一時ファイルに書いてから差し替えるが、
  * 手で書き換えている最中などで TOML として不完全なことがある。そのタイミングで読んでも
  * テスト全体を失敗させず、単に「まだ条件を満たしていない」として次のポーリングに回す
@@ -471,9 +484,19 @@ export async function configExists() {
 	return fileExists(CONFIG_PATH);
 }
 
-/** 下書きの履歴のファイル (history.json) があるか */
-export async function historyExists() {
-	return fileExists(HISTORY_PATH);
+/**
+ * 下書きの履歴のファイル (history.json) にある履歴の件数。ファイルが無ければ 0。
+ * 履歴を消した後も、消した時刻を置いたファイルが残るので、ファイルのあるなしでは履歴があるかを見分けられない
+ */
+export async function historyEntryCount() {
+	const { existed, text } = await readOptionalText(HISTORY_PATH);
+	if (!existed) return 0;
+	try {
+		return JSON.parse(text).entries.length;
+	} catch {
+		// 書き換えの途中で読んだ。待つ側が読み直す
+		return 0;
+	}
 }
 
 /**

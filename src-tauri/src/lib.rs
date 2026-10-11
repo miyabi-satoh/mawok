@@ -914,7 +914,7 @@ fn save_as_typed(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<()
     if save_config(app, change)? {
         refresh_tray(app);
     }
-    schedule_sync_after_settings_change(app);
+    schedule_sync_after_change(app);
     Ok(())
 }
 
@@ -922,7 +922,7 @@ fn save_as_typed(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<()
 fn update_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
     let _ = save_config(app, change)?;
     apply_config(app);
-    schedule_sync_after_settings_change(app);
+    schedule_sync_after_change(app);
     Ok(())
 }
 
@@ -986,7 +986,7 @@ fn save_synced_config(
         retitle_windows(app);
     }
     if next.text_history_size == 0 && current.text_history_size != 0 {
-        if let Err(error) = clear_draft_history_file(app) {
+        if let Err(error) = clear_draft_history_file(app, true) {
             warn!("couldn't clear draft history after sync: {error}");
         }
     }
@@ -1094,16 +1094,24 @@ fn set_show_draft_buttons(app: AppHandle, enabled: bool) -> Result<(), String> {
 fn set_draft_history_size(app: AppHandle, size: u16) -> Result<(), String> {
     let size = size.min(config::MAX_DRAFT_HISTORY_SIZE);
     info!("set draft history size: {size}");
+    let previous = app
+        .state::<AppState>()
+        .config
+        .lock()
+        .unwrap()
+        .text_history_size;
     update_config(&app, |config| config.text_history_size = size)?;
     if size == 0 {
-        clear_draft_history_file(&app)?;
+        clear_draft_history_file(&app, previous != 0)?;
     }
     Ok(())
 }
 
 /// 履歴ファイルの読み込み・保存・消去を直列にする。保存の途中で消去が入ると、
-/// 消した後に古い中身が差し替わってしまう。終了時にも取り、書き込み中に落ちないようにする
-static HISTORY_FILE_LOCK: Mutex<()> = Mutex::new(());
+/// 消した後に古い中身が差し替わってしまう。終了時にも取り、書き込み中に落ちないようにする。
+/// 画面が持つ履歴の写しも、ファイルと一緒にこの排他で守る
+static HISTORY_FILE_LOCK: Mutex<history_store::ScreenCopy> =
+    Mutex::new(history_store::ScreenCopy::new());
 
 fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
@@ -1113,36 +1121,51 @@ fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(history_store::FILE_NAME))
 }
 
-#[tauri::command]
-fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
-    let size = app
-        .state::<AppState>()
+/// 履歴に付ける今の時刻。UNIX のミリ秒
+fn history_now() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64)
+}
+
+fn draft_history_size(app: &AppHandle) -> usize {
+    app.state::<AppState>()
         .config
         .lock()
         .unwrap()
-        .text_history_size as usize;
+        .text_history_size as usize
+}
+
+#[tauri::command]
+fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
+    let size = draft_history_size(&app);
     let path = history_path(&app)?;
     if size == 0 {
-        clear_draft_history_file(&app)?;
+        clear_draft_history_file(&app, false)?;
         return Ok(Vec::new());
     }
-    let _guard = HISTORY_FILE_LOCK.lock().unwrap();
-    match history_store::load(&path, size) {
-        Ok(entries) => {
+    let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
+    match history_store::load(&path) {
+        Ok(history) => {
+            screen.caught_up();
+            let entries = history.truncated(size).texts();
             info!("loaded draft history: {} entries", entries.len());
             Ok(entries)
         }
         Err(error) => {
             warn!("couldn't read draft history: {error}");
+            // 読めなかっただけ・除けられなかっただけなら、画面は同期で届いた履歴をまだ持っていない。
+            // 持ったことにすると、次の保存が届いた履歴を画面の古い一覧で上書きする
             if let history_store::LoadError::Invalid(_) = error {
                 match history_store::set_aside(&path, SystemTime::now()) {
                     Ok(Some(backup)) => {
+                        screen.caught_up();
                         info!(
                             "set aside the unreadable draft history to {}",
                             backup.display()
                         );
                     }
-                    Ok(None) => {}
+                    Ok(None) => screen.caught_up(),
                     Err(error) => warn!("couldn't set aside the unreadable draft history: {error}"),
                 }
             }
@@ -1156,36 +1179,75 @@ fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String
     let path = history_path(&app)?;
     // 件数の設定は、ロックを取ってから読む。読んだ後に件数 0 へ変えられて消されると、
     // 消した後に古い履歴を書き戻してしまう
-    let _guard = HISTORY_FILE_LOCK.lock().unwrap();
-    let size = app
-        .state::<AppState>()
-        .config
-        .lock()
-        .unwrap()
-        .text_history_size as usize;
-    let entries = history_store::truncate(entries, size);
-    // 空の履歴（件数 0 を含む）は、ファイルを空で作らず、無い状態にする
-    // （消去の後に順番待ちの保存が来ても同じ）
-    if entries.is_empty() {
-        return history_store::clear(&path).map_err(|error| error.to_string());
+    let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
+    let size = draft_history_size(&app);
+    let texts = history_store::truncate(entries, size);
+    let file = history_store::load(&path).unwrap_or_else(|error| {
+        warn!("couldn't read draft history before saving: {error}");
+        history_store::History::default()
+    });
+    let next = screen.saved(&file, texts, size, history_now());
+    // 画面は、読み込んだ履歴をそのまま保存し直すことがある。変わっていなければ、書かず、同期もさせない
+    if next == file {
+        return Ok(());
     }
-    info!("saving draft history: {} entries", entries.len());
-    history_store::save(&path, &entries).map_err(|error| error.to_string())
+    info!("saving draft history: {} entries", next.entries.len());
+    history_store::save(&path, &next).map_err(|error| error.to_string())?;
+    drop(screen);
+    schedule_sync_after_change(&app);
+    Ok(())
 }
 
 #[tauri::command]
 fn clear_draft_history(app: AppHandle) -> Result<(), String> {
-    clear_draft_history_file(&app)?;
+    // 件数が 0 のデバイスの画面は、起動のたびにこれを呼ぶ。そのたびに消した時刻を置くと、まだ件数が届いていない
+    // デバイスが覚えた履歴まで消す（docs/sync.md「混ぜ方」）
+    let asked = draft_history_size(&app) != 0;
+    clear_draft_history_file(&app, asked)?;
     app.emit(events::DRAFT_HISTORY_CLEARED, ())
         .map_err(|error| error.to_string())
 }
 
-fn clear_draft_history_file(app: &AppHandle) -> Result<(), String> {
+/// 履歴を消し、消した時刻を置く（docs/sync.md「履歴の同期」）。`always` が false なら、消す履歴があるときだけ置く
+fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String> {
     let path = history_path(app)?;
-    let _guard = HISTORY_FILE_LOCK.lock().unwrap();
-    history_store::clear(&path).map_err(|error| error.to_string())?;
+    let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
+    screen.caught_up();
+    let file = history_store::load(&path);
+    if !always && matches!(&file, Ok(history) if history.entries.is_empty()) {
+        return Ok(());
+    }
+    let cleared = file.unwrap_or_default().cleared(history_now());
+    history_store::save(&path, &cleared).map_err(|error| error.to_string())?;
     info!("cleared draft history");
+    drop(screen);
+    schedule_sync_after_change(app);
     Ok(())
+}
+
+/// 同期で混ぜた履歴を保存し、テキストウィンドウに知らせる（docs/sync.md「履歴の同期」）。`snapshot` は、同期を
+/// 始めたときの手元の履歴。保存した履歴が `next` と違う（もう一度同期して窓口へ書く分がある）かを返す
+fn apply_synced_history(
+    app: &AppHandle,
+    snapshot: &history_store::History,
+    next: history_store::History,
+) -> Result<bool, String> {
+    let path = history_path(app)?;
+    let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
+    let size = draft_history_size(app);
+    let current = history_store::load(&path).map_err(|error| error.to_string())?;
+    let merged = history_store::applied_from_sync(&current, snapshot, &next, size);
+    if merged != current {
+        history_store::save(&path, &merged).map_err(|error| error.to_string())?;
+        info!(
+            "applied synced draft history: {} entries",
+            merged.entries.len()
+        );
+        screen.replaced_by_sync(current);
+        let _ = app.emit(events::DRAFT_HISTORY_SYNCED, ());
+    }
+    // 届いた履歴を今の件数に切り詰めた分は、手元を変えたことにしない。もう一度同期しても同じ値が届く
+    Ok(merged != next.truncated(size))
 }
 
 #[tauri::command]
@@ -1546,8 +1608,8 @@ fn http_client(app: &AppHandle) -> Result<reqwest::Client, String> {
     Ok(state.client.get_or_init(|| client).clone())
 }
 
-/// 設定を続けて変えたときは最後から3秒だけ待ち、1回の同期へまとめる。
-fn schedule_sync_after_settings_change(app: &AppHandle) {
+/// 設定か履歴を続けて変えたときは最後から3秒だけ待ち、1回の同期へまとめる。
+fn schedule_sync_after_change(app: &AppHandle) {
     let debounce = &app.state::<AppState>().sync_debounce;
     let app = app.clone();
     debounce.trigger(Duration::from_secs(3), move || request_sync(&app));
@@ -1640,6 +1702,17 @@ async fn run_settings_sync(app: &AppHandle) {
             return;
         }
     };
+    // 読めない履歴ファイルは、画面が読み込むときに除けるので、この回は履歴を同期しない
+    let local_history = match history_path(app) {
+        Ok(path) => run_blocking(move || {
+            let _guard = HISTORY_FILE_LOCK.lock().unwrap();
+            history_store::load(&path).ok()
+        })
+        .await
+        .ok()
+        .flatten(),
+        _ => None,
+    };
     let path = app.state::<AppState>().sync_state_path.clone();
     let before = run_blocking({
         let path = path.clone();
@@ -1649,7 +1722,17 @@ async fn run_settings_sync(app: &AppHandle) {
     .ok()
     .flatten()
     .filter(|state| state.key_id == key_id);
-    match sync::sync_once(&client, &token, &key, &key_id, &config, before.clone()).await {
+    let synced = sync::sync_once(
+        &client,
+        &token,
+        &key,
+        &key_id,
+        &config,
+        before.clone(),
+        local_history.as_ref(),
+    )
+    .await;
+    match synced {
         Ok(mut result) => {
             if result.reset {
                 info!("sync server reset the local record");
@@ -1690,6 +1773,13 @@ async fn run_settings_sync(app: &AppHandle) {
                         warn!("couldn't save settings received by sync: {error}");
                         discard = true;
                     }
+                }
+            }
+            // 履歴は設定と別に手元へ入れる。設定の結果を捨てる回も、混ぜた履歴は捨てない
+            if let (Some(snapshot), Some(next)) = (&local_history, result.history.take()) {
+                match apply_synced_history(app, snapshot, next) {
+                    Ok(again) => retry |= again,
+                    Err(error) => warn!("couldn't save draft history received by sync: {error}"),
                 }
             }
             let record = if discard {
