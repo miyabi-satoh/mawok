@@ -1221,6 +1221,32 @@ fn dedupe_initial_config_rows(config: &mut Config, state: &State, initial: &Init
     changed
 }
 
+/// 控えと今の行で id だけが違う同じ内容の行は、今の id を控えの並びの位置へ置く。
+/// 控えを戻すときにその行を消して足すと、次の同期でほかのデバイスからも消してしまう。
+fn match_restore_rows<T: SyncRow>(backup_rows: &mut [T], current_rows: &[T]) {
+    let backup_ids: BTreeSet<_> = backup_rows.iter().map(|row| row.id().to_string()).collect();
+    let current_ids: BTreeSet<_> = current_rows.iter().map(|row| row.id()).collect();
+    let mut matched_current_ids = BTreeSet::new();
+    for backup in backup_rows
+        .iter_mut()
+        .filter(|row| row.sync() && !current_ids.contains(row.id()))
+    {
+        let matching_id = current_rows
+            .iter()
+            .find(|current| {
+                current.sync()
+                    && !backup_ids.contains(current.id())
+                    && !matched_current_ids.contains(current.id())
+                    && row_value(*current) == row_value(&*backup)
+            })
+            .map(|current| current.id().to_string());
+        if let Some(id) = matching_id {
+            matched_current_ids.insert(id.clone());
+            backup.set_id(id);
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RemoteItem {
     pub key: ItemKey,
@@ -1724,6 +1750,20 @@ pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
     let mut effective_backup = backup.clone();
     if effective_backup.actions.is_none() {
         effective_backup.actions = Some(default_actions_for(restored.language));
+    }
+    if current.sync_replacements {
+        match_restore_rows(&mut effective_backup.replacements, &current.replacements);
+    }
+    if current.sync_snippets {
+        match_restore_rows(&mut effective_backup.snippets, &current.snippets);
+    }
+    if current.sync_actions {
+        if let Some(backup_actions) = &mut effective_backup.actions {
+            match_restore_rows(
+                backup_actions,
+                current.actions.as_deref().unwrap_or_default(),
+            );
+        }
     }
     let backup_items = config_items(&effective_backup);
     // ホットキーとキー操作は互いに重なりを見るので、同期と同じく組にして入れる
@@ -7058,6 +7098,67 @@ mod tests {
             .map(|change| change.id)
             .collect();
         assert_eq!(removed, [row_id('a', &received.id)]);
+    }
+
+    #[test]
+    fn restoring_an_implicit_default_backup_keeps_an_identical_received_action() {
+        let mut received = default_action(0, crate::i18n::Lang::system());
+        received.id = "e".repeat(32);
+        let current = Config {
+            actions: Some(vec![
+                received.clone(),
+                default_action(1, crate::i18n::Lang::system()),
+            ]),
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &Config::default());
+        assert!(restored.rejected.is_empty());
+        assert_eq!(restored.config.actions, current.actions);
+        assert!(backup_differences(&current, &restored.config).is_empty());
+    }
+
+    #[test]
+    fn restoring_an_implicit_default_backup_keeps_different_actions_separate() {
+        let mut received = default_action(0, crate::i18n::Lang::system());
+        received.id = "e".repeat(32);
+        received.command.push_str(" --different");
+        let default_id = default_action(0, crate::i18n::Lang::system()).id;
+        let current = Config {
+            actions: Some(vec![
+                received.clone(),
+                default_action(1, crate::i18n::Lang::system()),
+            ]),
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &Config::default());
+        assert!(restored.rejected.is_empty());
+        assert_eq!(
+            restored.config.actions,
+            Some(default_actions_for(restored.config.language))
+        );
+        let changes = backup_differences(&current, &restored.config);
+        assert!(changes
+            .iter()
+            .any(|change| change.id == row_id('a', &received.id)));
+        assert!(changes
+            .iter()
+            .any(|change| change.id == row_id('a', &default_id)));
+    }
+
+    #[test]
+    fn restoring_a_backup_keeps_an_identical_snippet_with_a_different_id() {
+        let backup = Config {
+            snippets: vec![snippet('a', "body".into())],
+            ..Config::default()
+        };
+        let current = Config {
+            snippets: vec![snippet('b', "body".into())],
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert!(restored.rejected.is_empty());
+        assert_eq!(restored.config.snippets, current.snippets);
+        assert!(backup_differences(&current, &restored.config).is_empty());
     }
 
     #[test]
