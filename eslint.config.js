@@ -13,7 +13,14 @@ export default defineConfig(
 	includeIgnoreFile(gitignorePath),
 	{
 		// shadcn-svelte が生成するコンポーネント (registry からの取得物なので対象外)
-		ignores: ['src/lib/components/ui/**', 'src/lib/bindings/**', 'account-server/**', 'site/**']
+		ignores: [
+			'src/lib/components/ui/**',
+			'src/lib/bindings/**',
+			'account-server/**',
+			'site/**',
+			// Claude Code が作る worktree (別のブランチの作業フォルダで、そちらの検査が見る)
+			'.claude/worktrees/**'
+		]
 	},
 	js.configs.recommended,
 	ts.configs.recommended,
