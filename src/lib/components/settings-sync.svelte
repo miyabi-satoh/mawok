@@ -14,8 +14,14 @@
 	let {
 		view,
 		call,
+		onopendevices,
 		choiceOpen = $bindable(false)
-	}: { view: SettingsView; call: Call; choiceOpen: boolean } = $props();
+	}: {
+		view: SettingsView;
+		call: Call;
+		onopendevices: () => void;
+		choiceOpen: boolean;
+	} = $props();
 	let backupOpen = $state(false);
 
 	const kinds = [
@@ -31,6 +37,14 @@
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
+	{#if view.accountKeyStatus === 'needsPairing'}
+		<SettingsRow>
+			<p class="text-sm">{m.settings_sync_needs_pairing()}</p>
+			<Button variant="outline" size="sm" class="w-fit" onclick={onopendevices}>
+				{m.settings_sync_open_devices()}
+			</Button>
+		</SettingsRow>
+	{/if}
 	{#each kinds as { kind, label } (kind)}
 		<SettingsRow modified={modifiedName(`sync_${kind}`)}>
 			<Field.Field orientation="horizontal" class="min-h-8">

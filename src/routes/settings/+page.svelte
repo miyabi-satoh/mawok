@@ -133,6 +133,10 @@
 		category = 'account';
 	}
 
+	function openDevices() {
+		category = 'devices';
+	}
+
 	/** ほかのデバイスと別々に変えた設定の、どちらを使うか選ぶ画面を出しているか */
 	let syncChoiceOpen = $state(false);
 
@@ -620,13 +624,13 @@
 	}
 </script>
 
-<!-- 鍵を待つ状態と持つ状態で、同じ形の行をいちばん下に置く -->
-{#snippet resetKeyRow(description?: string)}
+<!-- 鍵を作り直す操作。鍵を待つ状態では、ほかのデバイスを使えない人向けの出口として案内する。 -->
+{#snippet resetKeyRow(title: string, start: string, description?: string)}
 	<SettingsRow>
 		<Field.Field orientation="horizontal" class="min-h-8">
-			<Field.Title>{m.settings_devices_reset_key()}</Field.Title>
+			<Field.Title>{title}</Field.Title>
 			<Button variant="destructive" onclick={() => (resetKeyOpen = true)}>
-				{m.settings_devices_reset_key_start()}
+				{start}
 			</Button>
 		</Field.Field>
 		{#if description}
@@ -1491,7 +1495,11 @@
 									{m.settings_devices_needs_pairing()}
 								</Field.Description>
 							</SettingsRow>
-							{@render resetKeyRow(m.settings_devices_reset_key_description_needs_pairing())}
+							{@render resetKeyRow(
+								m.settings_devices_restart(),
+								m.settings_devices_restart_start(),
+								m.settings_devices_restart_description()
+							)}
 						{:else if panel === 'ready'}
 							<SettingsRow>
 								<Field.Title>{m.settings_devices_list_title()}</Field.Title>
@@ -1552,7 +1560,10 @@
 										: m.settings_devices_offer_description()}
 								</Field.Description>
 							</SettingsRow>
-							{@render resetKeyRow()}
+							{@render resetKeyRow(
+								m.settings_devices_reset_key(),
+								m.settings_devices_reset_key_start()
+							)}
 						{/if}
 					</SettingsSection>
 				</Tabs.Content>
@@ -1571,7 +1582,12 @@
 								</SettingsRow>
 							</SettingsSection>
 							{#if view.proAvailable}
-								<SettingsSync {view} call={callSettings} bind:choiceOpen={syncChoiceOpen} />
+								<SettingsSync
+									{view}
+									call={callSettings}
+									onopendevices={openDevices}
+									bind:choiceOpen={syncChoiceOpen}
+								/>
 							{/if}
 						</div>
 					{/if}
@@ -1642,9 +1658,15 @@
 	<AlertDialog.Root bind:open={resetKeyOpen}>
 		<AlertDialog.Content>
 			<AlertDialog.Header>
-				<AlertDialog.Title>{m.settings_devices_reset_key_confirm_title()}</AlertDialog.Title>
+				<AlertDialog.Title>
+					{settings.current?.accountKeyStatus === 'needsPairing'
+						? m.settings_devices_restart_confirm_title()
+						: m.settings_devices_reset_key_confirm_title()}
+				</AlertDialog.Title>
 				<AlertDialog.Description
-					>{m.settings_devices_reset_key_confirm_description()}</AlertDialog.Description
+					>{settings.current?.accountKeyStatus === 'needsPairing'
+						? m.settings_devices_restart_confirm_description()
+						: m.settings_devices_reset_key_confirm_description()}</AlertDialog.Description
 				>
 			</AlertDialog.Header>
 			<AlertDialog.Footer>
@@ -1652,7 +1674,9 @@
 					>{m.settings_devices_offer_cancel()}</AlertDialog.Cancel
 				>
 				<AlertDialog.Action disabled={resettingKey} onclick={resetAccountKey}>
-					{m.settings_devices_reset_key_start()}
+					{settings.current?.accountKeyStatus === 'needsPairing'
+						? m.settings_devices_restart_confirm_start()
+						: m.settings_devices_reset_key_start()}
 				</AlertDialog.Action>
 			</AlertDialog.Footer>
 		</AlertDialog.Content>
