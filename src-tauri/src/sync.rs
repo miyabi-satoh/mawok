@@ -194,11 +194,15 @@ impl State {
         let mut changed = false;
         for group in paused_groups(config) {
             if !self.paused.contains_key(&group) {
-                // 種類「設定」を止めている間に外した項目は、種類を止めたときから読んでいない
-                let since = self
-                    .paused
-                    .get(SyncKind::Settings.group())
-                    .map_or(self.since, |settings| self.since.min(*settings));
+                // 種類「設定」を止めている間に外した項目は、種類を止めたときから読んでいない。
+                // 種類のまとまりは、ほかの種類の位置に依らず、止めたときの位置にする
+                let settings = self.paused.get(SyncKind::Settings.group());
+                let since = match settings {
+                    Some(settings) if SyncKind::of_group(&group).is_none() => {
+                        self.since.min(*settings)
+                    }
+                    _ => self.since,
+                };
                 self.paused.insert(group, since);
                 changed = true;
             }
@@ -239,6 +243,10 @@ impl SyncKind {
         Self::Actions,
         Self::History,
     ];
+
+    fn of_group(group: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.group() == group)
+    }
 
     fn group(self) -> &'static str {
         match self {
@@ -601,10 +609,7 @@ fn paused_groups(config: &Config) -> Vec<String> {
 }
 
 fn paused_group(config: &Config, group: &str) -> bool {
-    SyncKind::ALL
-        .into_iter()
-        .find(|kind| kind.group() == group)
-        .is_some_and(|kind| !kinds(config).enabled(kind))
+    SyncKind::of_group(group).is_some_and(|kind| !kinds(config).enabled(kind))
         || config
             .sync_excluded_settings
             .iter()
@@ -659,7 +664,11 @@ fn handled(key: &ItemKey) -> bool {
 }
 
 fn known_setting(name: &str) -> bool {
-    known_syncable_setting(setting_config_name(name)) || is_key_setting(name)
+    let config_name = setting_config_name(name);
+    // 窓口の id として正しい名前だけ（OS ごとに分ける書体は、接尾辞の付いた名前だけ）
+    (known_syncable_setting(config_name)
+        && syncable_setting_item(config_name).id == setting_id(name))
+        || is_key_setting(name)
 }
 
 /// 設定を、窓口に置く粒度の平文値へ変換する。同期しない項目はここに現れない。
@@ -6302,6 +6311,12 @@ mod tests {
         assert!(state.pause(&excluded));
         let theme = syncable_setting_item("theme").name();
         assert_eq!(state.paused.get(&theme), Some(&1));
+
+        // 別の種類を止めた位置は、設定を止めた位置に引きずられない
+        let mut snippets_off = excluded.clone();
+        snippets_off.sync_snippets = false;
+        assert!(state.pause(&snippets_off));
+        assert_eq!(state.paused.get("snippets"), Some(&8));
     }
 
     #[test]
