@@ -1109,11 +1109,9 @@ fn set_draft_history_size(app: AppHandle, size: u16) -> Result<(), String> {
 
 /// 履歴ファイルの読み込み・保存・消去を直列にする。保存の途中で消去が入ると、
 /// 消した後に古い中身が差し替わってしまう。終了時にも取り、書き込み中に落ちないようにする。
-///
-/// 中身は、同期が履歴ファイルを入れ替えてから画面が読み直すまでの間の、画面が持つ履歴。その間に画面から届く
-/// 保存は、入れ替える前の一覧を元にしている。今のファイルと照らして時刻を付けると、届いた履歴を画面の古い一覧で
-/// 上書きするので、これと照らして時刻を付け、今のファイルと混ぜる
-static HISTORY_FILE_LOCK: Mutex<Option<history_store::History>> = Mutex::new(None);
+/// 画面が持つ履歴の写しも、ファイルと一緒にこの排他で守る
+static HISTORY_FILE_LOCK: Mutex<history_store::ScreenCopy> =
+    Mutex::new(history_store::ScreenCopy::new());
 
 fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
@@ -1147,7 +1145,7 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
-    *screen = None;
+    screen.caught_up();
     match history_store::load(&path) {
         Ok(history) => {
             let entries = history.truncated(size).texts();
@@ -1185,15 +1183,7 @@ fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String
         warn!("couldn't read draft history before saving: {error}");
         history_store::History::default()
     });
-    let next = match screen.take() {
-        Some(seen) => {
-            let (next, seen) =
-                history_store::saved_over_sync(&file, seen, texts, size, history_now());
-            *screen = Some(seen);
-            next
-        }
-        None => file.restamped(texts, history_now()),
-    };
+    let next = screen.saved(&file, texts, size, history_now());
     // 画面は、読み込んだ履歴をそのまま保存し直すことがある。変わっていなければ、書かず、同期もさせない
     if next == file {
         return Ok(());
@@ -1207,8 +1197,8 @@ fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String
 
 #[tauri::command]
 fn clear_draft_history(app: AppHandle) -> Result<(), String> {
-    // 件数が 0 のデバイスの画面は、起動のたびにこれを呼ぶ。そのたびに消した時刻を進めると、件数を戻したときに、
-    // 件数が 0 の間にほかのデバイスで覚えた履歴まで消す
+    // 件数が 0 のデバイスの画面は、起動のたびにこれを呼ぶ。そのたびに消した時刻を置くと、まだ件数が届いていない
+    // デバイスが覚えた履歴まで消す（docs/sync.md「混ぜ方」）
     let asked = draft_history_size(&app) != 0;
     clear_draft_history_file(&app, asked)?;
     app.emit(events::DRAFT_HISTORY_CLEARED, ())
@@ -1219,7 +1209,7 @@ fn clear_draft_history(app: AppHandle) -> Result<(), String> {
 fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String> {
     let path = history_path(app)?;
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
-    *screen = None;
+    screen.caught_up();
     let file = history_store::load(&path);
     if !always && matches!(&file, Ok(history) if history.entries.is_empty()) {
         return Ok(());
@@ -1242,10 +1232,6 @@ fn apply_synced_history(
     let path = history_path(app)?;
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     let size = draft_history_size(app);
-    // 通信の間に件数を 0 にした。消した履歴を、届いた履歴で戻さない
-    if size == 0 {
-        return Ok(false);
-    }
     let current = history_store::load(&path).map_err(|error| error.to_string())?;
     let merged = history_store::applied_from_sync(&current, snapshot, &next, size);
     if merged != current {
@@ -1254,8 +1240,7 @@ fn apply_synced_history(
             "applied synced draft history: {} entries",
             merged.entries.len()
         );
-        // 先の入れ替えを画面がまだ読み直していなければ、画面が持つのはそのときの履歴のまま
-        screen.get_or_insert(current);
+        screen.replaced_by_sync(current);
         let _ = app.emit(events::DRAFT_HISTORY_SYNCED, ());
     }
     Ok(merged != next)
@@ -1713,11 +1698,9 @@ async fn run_settings_sync(app: &AppHandle) {
             return;
         }
     };
-    // 履歴の件数が 0 のデバイスは、履歴を読みも書きもしない（docs/sync.md「混ぜ方」）。読めない履歴ファイルは、
-    // 画面が読み込むときに除けるので、この回は同期しない
-    let history_size = config.text_history_size as usize;
+    // 読めない履歴ファイルは、画面が読み込むときに除けるので、この回は履歴を同期しない
     let local_history = match history_path(app) {
-        Ok(path) if history_size > 0 => run_blocking(move || {
+        Ok(path) => run_blocking(move || {
             let _guard = HISTORY_FILE_LOCK.lock().unwrap();
             history_store::load(&path).ok()
         })
@@ -1742,10 +1725,7 @@ async fn run_settings_sync(app: &AppHandle) {
         &key_id,
         &config,
         before.clone(),
-        local_history.as_ref().map(|history| sync::LocalHistory {
-            history,
-            size: history_size,
-        }),
+        local_history.as_ref(),
     )
     .await;
     match synced {
