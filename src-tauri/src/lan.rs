@@ -11,7 +11,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -428,6 +428,15 @@ fn hello_message(kind: &Hello) -> String {
     }
 }
 
+/// コードを出した側の組み合わせの失敗
+#[derive(Debug)]
+struct OfferFailure {
+    message: String,
+    /// 確認コードを確かめる握手が通らなかった。握手が通った後の失敗（相手の拒否・途中の切断）は、
+    /// コードが合っていたので、違うコードとして知らせない
+    wrong_code: bool,
+}
+
 /// コードを出した側の組み合わせ
 fn pair_as_offerer(
     stream: &mut (impl Read + Write),
@@ -436,31 +445,45 @@ fn pair_as_offerer(
     name: &str,
     account_tag: &[u8; ACCOUNT_TAG_LEN],
     account_key: &[u8; 32],
-) -> Result<Peer> {
-    let psk = spake2_key(stream, code)?;
-    let mut noise = builder(PAIR_PATTERN)?
-        .local_private_key(&key.private)
-        .and_then(|builder| builder.psk(2, &psk))
-        .and_then(Builder::build_responder)
-        .map_err(|error| format!("handshake: {error}"))?;
-    handshake_read(&mut noise, stream)?;
-    handshake_write(&mut noise, name.as_bytes(), stream)?;
-    let remote_name = handshake_read(&mut noise, stream)?;
-    let peer = remote_peer(&noise, &remote_name)?;
-    let mut transport = noise
-        .into_transport_mode()
-        .map_err(|error| format!("handshake: {error}"))?;
-    transport_write(&mut transport, account_tag, stream)?;
-    match transport_read(&mut transport, stream)?.as_slice() {
-        READY => {}
-        REJECT_PRO_REQUIRED => return Err("the joining device is not Pro".to_string()),
-        REJECT_ACCOUNT_MISMATCH => return Err("the devices use different accounts".to_string()),
-        _ => return Err("the joining device refused".to_string()),
-    }
-    transport_write(&mut transport, account_key, stream)?;
-    if transport_read(&mut transport, stream)? != ACK {
-        return Err("the joining device did not store the account key".to_string());
-    }
+) -> std::result::Result<Peer, OfferFailure> {
+    let handshake = (|| -> Result<_> {
+        let psk = spake2_key(stream, code)?;
+        let mut noise = builder(PAIR_PATTERN)?
+            .local_private_key(&key.private)
+            .and_then(|builder| builder.psk(2, &psk))
+            .and_then(Builder::build_responder)
+            .map_err(|error| format!("handshake: {error}"))?;
+        handshake_read(&mut noise, stream)?;
+        handshake_write(&mut noise, name.as_bytes(), stream)?;
+        let remote_name = handshake_read(&mut noise, stream)?;
+        let peer = remote_peer(&noise, &remote_name)?;
+        let transport = noise
+            .into_transport_mode()
+            .map_err(|error| format!("handshake: {error}"))?;
+        Ok((peer, transport))
+    })();
+    let (peer, mut transport) = handshake.map_err(|message| OfferFailure {
+        message,
+        wrong_code: true,
+    })?;
+    (|| -> Result<()> {
+        transport_write(&mut transport, account_tag, stream)?;
+        match transport_read(&mut transport, stream)?.as_slice() {
+            READY => {}
+            REJECT_PRO_REQUIRED => return Err("the joining device is not Pro".to_string()),
+            REJECT_ACCOUNT_MISMATCH => return Err("the devices use different accounts".to_string()),
+            _ => return Err("the joining device refused".to_string()),
+        }
+        transport_write(&mut transport, account_key, stream)?;
+        if transport_read(&mut transport, stream)? != ACK {
+            return Err("the joining device did not store the account key".to_string());
+        }
+        Ok(())
+    })()
+    .map_err(|message| OfferFailure {
+        message,
+        wrong_code: false,
+    })?;
     Ok(peer)
 }
 
@@ -775,6 +798,9 @@ pub struct Lan {
     /// 動いている間の、止める印
     running: Mutex<Option<Arc<AtomicBool>>>,
     offer: Mutex<Option<Offer>>,
+    /// 「キャンセル」と「デバイス」を離れる操作の回数。握手や差し替えでコードを取り出している間の操作を、
+    /// 次のコードを置く前に見分ける。`offer` のロックを持って読み書きする
+    offer_stops: AtomicU64,
     /// コードを出している相手を、名乗りで最後に見た場所
     offer_seen: Mutex<Option<IpAddr>>,
     /// 組み合わせのやり取りの最中か（コードを入れて、出している相手を探している間を含む）。その間は待ち受けを止めない
@@ -798,6 +824,7 @@ impl Lan {
             host,
             running: Mutex::new(None),
             offer: Mutex::new(None),
+            offer_stops: AtomicU64::new(0),
             offer_seen: Mutex::new(None),
             pairing: AtomicBool::new(false),
             devices_open: AtomicBool::new(false),
@@ -840,7 +867,7 @@ impl Lan {
 
     pub fn set_devices_open(self: &Arc<Self>, open: bool) {
         self.devices_open.store(open, Ordering::Relaxed);
-        if !open && self.offer.lock().unwrap().take().is_some() {
+        if !open && self.stop_offering() {
             self.host.on_pairing_code_ended();
         }
         if open
@@ -1018,28 +1045,20 @@ impl Lan {
         ip: IpAddr,
         key: &DeviceKey,
     ) -> Result<()> {
-        let offer = self
-            .offer
-            .lock()
-            .unwrap()
-            .take()
+        let (offer, stops) = self
+            .take_offer(|_| true)
             .ok_or("no pairing code is shown")?;
         if offer.expires <= Instant::now() {
-            if self.continues_offering(offer.automatic) {
-                if let Err(error) = self.replace_pairing_offer(offer.automatic, false) {
-                    warn!("lan: couldn't replace expired pairing code: {error}");
-                    self.host.on_pairing_code_ended();
-                }
-            } else {
-                self.host.on_pairing_code_ended();
-            }
+            self.replace_or_end(offer.automatic, false, stops);
             return Err("pairing code expired".to_string());
         }
-        let account_tag = self
-            .host
-            .pro_account_tag()
-            .ok_or("this device is not Pro")?;
-        let account_key = self.host.account_key().ok_or("no account key")?;
+        let (Some(account_tag), Some(account_key)) =
+            (self.host.pro_account_tag(), self.host.account_key())
+        else {
+            // 鍵を渡せないデバイスは、次のコードも出さない
+            self.host.on_pairing_code_ended();
+            return Err("this device is not ready to pair".to_string());
+        };
         let result = pair_as_offerer(
             stream,
             &offer.code,
@@ -1053,9 +1072,9 @@ impl Lan {
                 self.host.on_pairing_code_ended();
                 peer
             }
-            Err(error) => {
-                self.replace_after_failed_pairing(offer, &error);
-                return Err(error);
+            Err(failure) => {
+                self.replace_or_end(offer.automatic, failure.wrong_code, stops);
+                return Err(failure.message);
             }
         };
         info!("lan: paired");
@@ -1253,29 +1272,27 @@ impl Lan {
         self.discovering.lock().unwrap().remove(&remote_public);
     }
 
+    /// 条件に合うコードを取り出す。取り出した時点の `offer_stops` を一緒に返す
+    fn take_offer(&self, wanted: impl FnOnce(&Offer) -> bool) -> Option<(Offer, u64)> {
+        let mut offer = self.offer.lock().unwrap();
+        if !offer.as_ref().is_some_and(wanted) {
+            return None;
+        }
+        let stops = self.offer_stops.load(Ordering::Relaxed);
+        offer.take().map(|offer| (offer, stops))
+    }
+
+    /// 「キャンセル」・「デバイス」を離れる操作で、コードを出すのをやめる。出ていたコードがあったかを返す
+    fn stop_offering(&self) -> bool {
+        let mut offer = self.offer.lock().unwrap();
+        self.offer_stops.fetch_add(1, Ordering::Relaxed);
+        offer.take().is_some()
+    }
+
     /// 期限が切れたコードを次へ替える。待ち受けはすでに続いているので、ここでは作り直さない。
     fn replace_expired_pairing_offer(self: &Arc<Self>) {
-        let expired = {
-            let mut offer = self.offer.lock().unwrap();
-            if offer
-                .as_ref()
-                .is_some_and(|offer| offer.expires <= Instant::now())
-            {
-                offer.take()
-            } else {
-                None
-            }
-        };
-        let Some(expired) = expired else {
-            return;
-        };
-        if self.continues_offering(expired.automatic) {
-            if let Err(error) = self.replace_pairing_offer(expired.automatic, false) {
-                warn!("lan: couldn't replace expired pairing code: {error}");
-                self.host.on_pairing_code_ended();
-            }
-        } else {
-            self.host.on_pairing_code_ended();
+        if let Some((expired, stops)) = self.take_offer(|offer| offer.expires <= Instant::now()) {
+            self.replace_or_end(expired.automatic, false, stops);
         }
     }
 
@@ -1283,45 +1300,47 @@ impl Lan {
         &self,
         automatic: bool,
         previous_code_was_wrong: bool,
-    ) -> Result<PairingOffer> {
+        // 取り出したコードの次を置くときの、取り出した時点の `offer_stops`
+        replacing: Option<u64>,
+    ) -> Result<Option<PairingOffer>> {
         let code = new_code()?;
         let expires = Instant::now() + OFFER_TTL;
-        *self.offer.lock().unwrap() = Some(Offer {
+        let mut offer = self.offer.lock().unwrap();
+        if replacing.is_some_and(|stops| {
+            stops != self.offer_stops.load(Ordering::Relaxed) || offer.is_some()
+        }) {
+            return Ok(None);
+        }
+        *offer = Some(Offer {
             code: code.clone(),
             expires,
             automatic,
             previous_code_was_wrong,
         });
-        Ok(PairingOffer {
+        Ok(Some(PairingOffer {
             code,
             remaining_seconds: offer_remaining_seconds(expires),
             automatic,
             previous_code_was_wrong,
-        })
+        }))
     }
 
-    fn replace_pairing_offer(
+    /// 取り出したコード（期限切れ・試された後）の次を出す。画面がコードを出し続けていなければ、出さずに終える
+    fn replace_or_end(
         self: &Arc<Self>,
         automatic: bool,
         previous_code_was_wrong: bool,
-    ) -> Result<()> {
-        let offer = self.make_pairing_offer(automatic, previous_code_was_wrong)?;
-        self.host.on_pairing_code_offered(offer);
-        Ok(())
-    }
-
-    fn replace_after_failed_pairing(self: &Arc<Self>, offer: Offer, error: &str) {
-        // 確認コードが合う相手は、握手の後に拒否の符号を返せる。返らずに握手が途切れた
-        // 試行は、違う確認コードとして次のコードの案内を出す。
-        let wrong_code = !error.starts_with("the joining device");
-        if self.continues_offering(offer.automatic) {
-            if let Err(refresh_error) = self.replace_pairing_offer(offer.automatic, wrong_code) {
-                warn!("lan: couldn't replace pairing code: {refresh_error}");
-                self.host.on_pairing_code_ended();
+        stops: u64,
+    ) {
+        if self.continues_offering(automatic) {
+            match self.make_pairing_offer(automatic, previous_code_was_wrong, Some(stops)) {
+                Ok(Some(offer)) => return self.host.on_pairing_code_offered(offer),
+                // 取り出している間に「キャンセル」されたか、新しいコードが出ている。画面はそちらに合っている
+                Ok(None) => return,
+                Err(error) => warn!("lan: couldn't replace pairing code: {error}"),
             }
-        } else {
-            self.host.on_pairing_code_ended();
         }
+        self.host.on_pairing_code_ended();
     }
 
     /// コードを出して、相手が入れるのを待つ。コードと画面表示用の残り秒を返す
@@ -1342,8 +1361,9 @@ impl Lan {
             ));
         }
         let offer = self
-            .make_pairing_offer(automatic, false)
-            .fail_as(Failure::Internal)?;
+            .make_pairing_offer(automatic, false, None)
+            .fail_as(Failure::Internal)?
+            .expect("an offer that replaces nothing is always stored");
         // 待ち受けを始められなければ、相手はつなげないので、コードを出さない
         if !self.refresh() {
             *self.offer.lock().unwrap() = None;
@@ -1370,7 +1390,7 @@ impl Lan {
     }
 
     pub fn cancel_pairing(self: &Arc<Self>) {
-        if self.offer.lock().unwrap().take().is_some() {
+        if self.stop_offering() {
             self.host.on_pairing_code_ended();
         }
         self.refresh();
@@ -1737,7 +1757,7 @@ mod tests {
         drop(client);
 
         assert!(joined.is_err());
-        assert!(offered.join().unwrap().is_err());
+        assert!(offered.join().unwrap().unwrap_err().wrong_code);
     }
 
     #[test]
@@ -1764,11 +1784,9 @@ mod tests {
             |_| panic!("a different account must not receive a key"),
         );
         assert!(joined.unwrap_err().contains("different accounts"));
-        assert!(offered
-            .join()
-            .unwrap()
-            .unwrap_err()
-            .contains("different accounts"));
+        let failure = offered.join().unwrap().unwrap_err();
+        assert!(failure.message.contains("different accounts"));
+        assert!(!failure.wrong_code);
     }
 
     #[test]
@@ -1795,11 +1813,9 @@ mod tests {
             |_| panic!("a mismatched key must not be stored"),
         );
         assert!(joined.unwrap_err().contains("does not match"));
-        assert!(offered
-            .join()
-            .unwrap()
-            .unwrap_err()
-            .contains("did not store"));
+        let failure = offered.join().unwrap().unwrap_err();
+        assert!(failure.message.contains("did not store"));
+        assert!(!failure.wrong_code);
     }
 
     #[test]
@@ -2056,9 +2072,9 @@ mod tests {
             automatic: false,
             previous_code_was_wrong: false,
         });
-        let failed = lan.offer.lock().unwrap().take().unwrap();
+        let (failed, stops) = lan.take_offer(|_| true).unwrap();
 
-        lan.replace_after_failed_pairing(failed, "read: connection closed");
+        lan.replace_or_end(failed.automatic, true, stops);
 
         let offer = lan.pairing_offer().unwrap();
         assert!(offer.previous_code_was_wrong);
@@ -2089,6 +2105,58 @@ mod tests {
             assert!(host.offered.lock().unwrap().is_empty());
             assert_eq!(host.ended.load(Ordering::Relaxed), 1);
         }
+    }
+
+    #[test]
+    fn canceling_or_leaving_while_a_code_is_being_tried_does_not_replace_it() {
+        for cancel in [true, false] {
+            let (lan, host) = lan_with_recording_host();
+            lan.devices_open.store(true, Ordering::Relaxed);
+            *lan.offer.lock().unwrap() = Some(Offer {
+                code: "123456".to_string(),
+                expires: Instant::now() + OFFER_TTL,
+                automatic: false,
+                previous_code_was_wrong: false,
+            });
+            let (tried, stops) = lan.take_offer(|_| true).unwrap();
+
+            if cancel {
+                lan.cancel_pairing();
+                // 「キャンセル」は「デバイス」を開いたまま押す
+                assert!(lan.continues_offering(false));
+            } else {
+                lan.set_devices_open(false);
+                lan.devices_open.store(true, Ordering::Relaxed);
+            }
+            lan.replace_or_end(tried.automatic, true, stops);
+
+            assert!(lan.pairing_offer().is_none());
+            assert!(host.offered.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn a_code_shown_while_another_was_being_tried_is_kept() {
+        let (lan, host) = lan_with_recording_host();
+        lan.devices_open.store(true, Ordering::Relaxed);
+        *lan.offer.lock().unwrap() = Some(Offer {
+            code: "111111".to_string(),
+            expires: Instant::now() + OFFER_TTL,
+            automatic: false,
+            previous_code_was_wrong: false,
+        });
+        let (tried, stops) = lan.take_offer(|_| true).unwrap();
+        *lan.offer.lock().unwrap() = Some(Offer {
+            code: "222222".to_string(),
+            expires: Instant::now() + OFFER_TTL,
+            automatic: false,
+            previous_code_was_wrong: false,
+        });
+
+        lan.replace_or_end(tried.automatic, true, stops);
+
+        assert_eq!(lan.pairing_offer().unwrap().code, "222222");
+        assert!(host.offered.lock().unwrap().is_empty());
     }
 
     #[test]
