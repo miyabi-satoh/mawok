@@ -56,6 +56,15 @@ impl Lang {
         }
     }
 
+    /// トレイの、ほかのデバイスと別々に変えた設定のどちらを使うか選ぶ画面を開く項目。
+    /// 選ぶものがあるあいだだけ出す
+    pub fn sync_choice(self) -> &'static str {
+        match self {
+            Lang::En => "Choose Which Settings to Use…",
+            Lang::Ja => "どちらの設定を使うか選ぶ…",
+        }
+    }
+
     pub fn settings_title(self) -> &'static str {
         match self {
             Lang::En => "Settings",

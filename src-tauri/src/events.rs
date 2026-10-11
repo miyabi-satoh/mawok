@@ -7,6 +7,8 @@ pub const DRAFT_HISTORY_SYNCED: &str = "draft-history-synced";
 pub const SNIPPET_ADDED: &str = "snippet-added";
 /// 同期で設定の行一覧が替わった。設定画面は行を新しい設定から写し直す。
 pub const SYNC_APPLIED: &str = "sync-applied";
+/// トレイから、食い違いを選ぶ画面を頼まれた。設定画面は「アカウント」に移って、選ぶ画面を出す。
+pub const SYNC_CHOICE_REQUESTED: &str = "sync-choice-requested";
 pub const PAIRING_CODE_ENDED: &str = "pairing-code-ended";
 pub const PAIRING_CODE_OFFERED: &str = "pairing-code-offered";
 pub const DRAFT_RECEIVED: &str = "draft-received";

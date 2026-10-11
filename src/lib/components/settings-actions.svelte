@@ -16,6 +16,7 @@
 	import { isImeKey } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 	import type { ActionsEditor } from '$lib/actions-editor.svelte';
+	import { ENCODINGS, OUTPUTS } from '$lib/action-options';
 	import { aiInstruction, hasDelayedExpansionChars, TEXT_MARK } from '$lib/action-target';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { Switch } from '$lib/components/ui/switch';
@@ -49,6 +50,11 @@
 	let keyState = $state<{ service: AiService; hasKey: boolean | null } | null>(null);
 	/** 今の AI サービスのキーがあるか。まだ確かめていなければ undefined、確かめられなかったときは null */
 	const hasKey = $derived(keyState?.service === view.aiService ? keyState.hasKey : undefined);
+	const syncSettingsAvailable = $derived(view.proAvailable && view.syncKinds.settings);
+
+	function setSyncSetting(name: string, sync: boolean) {
+		void editor.call('set_sync_excluded_setting', { name, sync });
+	}
 	/**
 	 * キーを確かめるたびに振る番号。後から確かめ始めていれば、先の確かめの返事は古いので捨てる
 	 * （遅れて返った前のサービスの確かめが、替えた後の表示を上書きしないため）
@@ -148,22 +154,6 @@
 	 */
 	let modelCleared = $state(false);
 
-	/** 結果の出し方の選択肢 */
-	const OUTPUTS: { value: ActionOutput; name: () => string }[] = [
-		{ value: 'replace', name: m.settings_actions_output_replace },
-		{ value: 'insert', name: m.settings_actions_output_insert },
-		{ value: 'none', name: m.settings_actions_output_none }
-	];
-
-	/** コマンドの文字コードの選択肢（docs/actions.md「コマンド」）。名前は文字コードの名前なので、表示言語で変えない */
-	const ENCODINGS: { value: ActionEncoding; name: string }[] = [
-		{ value: 'utf-8', name: 'UTF-8' },
-		{ value: 'shift_jis', name: 'Shift_JIS' },
-		{ value: 'euc-jp', name: 'EUC-JP' },
-		{ value: 'iso-2022-jp', name: 'JIS (ISO-2022-JP)' },
-		{ value: 'utf-16le', name: 'UTF-16 LE' }
-	];
-
 	async function setService(service: AiService) {
 		consentService = null;
 		await editor.call('set_ai_service', { service });
@@ -176,8 +166,11 @@
 		<p id="actions-description" class="settings-lead">
 			{m.settings_actions_description({ mark: TEXT_MARK })}
 		</p>
-		{#if view.proAvailable}
-			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
+		{#if view.proAvailable && (view.syncKinds.actions || view.syncKinds.settings)}
+			<p class="px-1 text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
+		{/if}
+		{#if view.proAvailable && !view.syncKinds.actions}
+			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_actions_off()}</p>
 		{/if}
 		<SettingsSection>
 			<SettingsRow>
@@ -195,7 +188,7 @@
 					searchText={(row) => [row.name, row.command]}
 				>
 					{#snippet trailing(row)}
-						{#if view.proAvailable}
+						{#if view.proAvailable && view.syncKinds.actions}
 							<SyncToggle
 								pressed={row.sync}
 								name={row.name || row.command}
@@ -327,7 +320,18 @@
 	<SettingsSection>
 		<SettingsRow>
 			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-				<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
+				<div class="flex flex-auto items-center gap-1">
+					<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
+					{#if syncSettingsAvailable}
+						<SyncToggle
+							compact
+							settingName="ai_service"
+							pressed={!view.syncExcludedSettings.includes('ai_service')}
+							name={m.settings_ai_service()}
+							onchange={(sync) => setSyncSetting('ai_service', sync)}
+						/>
+					{/if}
+				</div>
 				<!-- 5つ並べると最小の幅に収まらないので、ボタンの並びではなく一覧から選ぶ -->
 				<NativeSelect.Root
 					aria-labelledby="ai-service"
@@ -426,6 +430,15 @@
 							class="min-h-8 *:data-[slot=field-label]:flex-none!"
 						>
 							<Field.Label for="ai-model">{m.settings_ai_model()}</Field.Label>
+							{#if syncSettingsAvailable}
+								<SyncToggle
+									compact
+									settingName="ai_models"
+									pressed={!view.syncExcludedSettings.includes('ai_models')}
+									name={m.settings_ai_model()}
+									onchange={(sync) => setSyncSetting('ai_models', sync)}
+								/>
+							{/if}
 							<Input
 								id="ai-model"
 								class="w-56 min-w-0 font-mono text-sm"

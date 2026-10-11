@@ -10,7 +10,8 @@ export const CONSTANTS = {
 	SUPPORTED_CODES: ["Digit0", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "KeyA", "KeyB", "KeyC", "KeyD", "KeyE", "KeyF", "KeyG", "KeyH", "KeyI", "KeyJ", "KeyK", "KeyL", "KeyM", "KeyN", "KeyO", "KeyP", "KeyQ", "KeyR", "KeyS", "KeyT", "KeyU", "KeyV", "KeyW", "KeyX", "KeyY", "KeyZ", "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "Backquote", "Backslash", "BracketLeft", "BracketRight", "Comma", "Equal", "Minus", "Period", "Quote", "Semicolon", "Slash", "Backspace", "CapsLock", "Enter", "Space", "Tab", "Delete", "End", "Home", "Insert", "PageDown", "PageUp", "Pause", "PrintScreen", "ScrollLock", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "NumLock", "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadEnter", "NumpadEqual", "NumpadMultiply", "NumpadSubtract", "Escape", "AudioVolumeDown", "AudioVolumeUp", "AudioVolumeMute", "MediaPlay", "MediaPause", "MediaPlayPause", "MediaStop", "MediaTrackNext", "MediaTrackPrevious"],
 	AI_PREFIX: "@ai",
 	TEXT_MARK: "{{t}}",
-	NEW_ACTION: {"id":"","name":"","command":"","output":"replace","encoding":"utf-8","enabled":true,"sync":true}
+	NEW_ACTION: {"id":"","name":"","command":"","output":"replace","encoding":"utf-8","enabled":true,"sync":true},
+	SYNCABLE_SETTINGS: ["language", "theme", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "trim_trailing_whitespace", "punctuation_style", "char_widths", "exclude_from_clipboard_history", "text_font_family", "text_font_size", "text_color_light", "text_color_dark", "input_guidance", "ai_service", "ai_models"]
 } as const;
 
 export const EVENTS = {
@@ -19,6 +20,7 @@ export const EVENTS = {
 	DRAFT_HISTORY_SYNCED: "draft-history-synced",
 	SNIPPET_ADDED: "snippet-added",
 	SYNC_APPLIED: "sync-applied",
+	SYNC_CHOICE_REQUESTED: "sync-choice-requested",
 	PAIRING_CODE_ENDED: "pairing-code-ended",
 	PAIRING_CODE_OFFERED: "pairing-code-offered",
 	DRAFT_RECEIVED: "draft-received",

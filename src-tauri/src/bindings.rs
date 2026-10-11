@@ -2,7 +2,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use crate::{actions, ai, config, draft_keys, events};
+use crate::{actions, ai, config, draft_keys, events, sync};
 
 #[test]
 fn writes_constants() {
@@ -31,7 +31,8 @@ export const CONSTANTS = {{\n\
 \tSUPPORTED_CODES: {:?},\n\
 \tAI_PREFIX: {:?},\n\
 \tTEXT_MARK: {:?},\n\
-\tNEW_ACTION: {}\n\
+\tNEW_ACTION: {},\n\
+\tSYNCABLE_SETTINGS: {:?}\n\
 }} as const;\n\n\
 export const EVENTS = {{\n\
 \tSETTINGS_CHANGED: {:?},\n\
@@ -39,6 +40,7 @@ export const EVENTS = {{\n\
 \tDRAFT_HISTORY_SYNCED: {:?},\n\
 \tSNIPPET_ADDED: {:?},\n\
 \tSYNC_APPLIED: {:?},\n\
+\tSYNC_CHOICE_REQUESTED: {:?},\n\
 \tPAIRING_CODE_ENDED: {:?},\n\
 \tPAIRING_CODE_OFFERED: {:?},\n\
 \tDRAFT_RECEIVED: {:?},\n\
@@ -59,11 +61,13 @@ export const EVENTS = {{\n\
         actions::AI_PREFIX,
         actions::TEXT_MARK,
         new_action,
+        sync::SYNCABLE_SETTING_NAMES,
         events::SETTINGS_CHANGED,
         events::DRAFT_HISTORY_CLEARED,
         events::DRAFT_HISTORY_SYNCED,
         events::SNIPPET_ADDED,
         events::SYNC_APPLIED,
+        events::SYNC_CHOICE_REQUESTED,
         events::PAIRING_CODE_ENDED,
         events::PAIRING_CODE_OFFERED,
         events::DRAFT_RECEIVED,

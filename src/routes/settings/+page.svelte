@@ -22,6 +22,7 @@
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
+	import SettingsSync from '$lib/components/settings-sync.svelte';
 	import SettingsUpdate from '$lib/components/settings-update.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -127,6 +128,24 @@
 	function openAccount() {
 		category = 'account';
 	}
+
+	/** ほかのデバイスと別々に変えた設定の、どちらを使うか選ぶ画面を出しているか */
+	let syncChoiceOpen = $state(false);
+
+	// トレイから頼まれたら、「アカウント」に移って選ぶ画面を出す。設定ウィンドウを作る前の頼みは、
+	// イベントでは届かないので、載せたときに Rust 側に尋ねる
+	$effect(() => {
+		const show = async () => {
+			if (!(await invoke<boolean>('take_sync_choice_request').catch(() => false))) return;
+			category = 'account';
+			syncChoiceOpen = true;
+		};
+		void show();
+		const unlisten = listen(EVENTS.SYNC_CHOICE_REQUESTED, show);
+		return () => {
+			unlisten.then((fn) => fn());
+		};
+	});
 
 	/** 設定を変えるコマンドを呼び、できたかを返す。変わった設定は settings-changed で届き、画面に反映される */
 	async function run(command: string, args?: Record<string, unknown>) {
@@ -660,6 +679,17 @@
 
 {#if settings.current}
 	{@const view = settings.current}
+	{#snippet syncSetting(name: string, label: string)}
+		{#if view.proAvailable && view.syncKinds.settings}
+			<SyncToggle
+				compact
+				settingName={name}
+				pressed={!view.syncExcludedSettings.includes(name)}
+				name={label}
+				onchange={(sync) => void run('set_sync_excluded_setting', { name, sync })}
+			/>
+		{/if}
+	{/snippet}
 	<main class="settings-page flex h-dvh" {@attach showWindow}>
 		<Tabs.Root
 			orientation="vertical"
@@ -737,6 +767,11 @@
 				{/if}
 				<Tabs.Content value="general">
 					<div class="flex flex-col gap-5">
+						{#if view.proAvailable && view.syncKinds.settings}
+							<p class="px-1 text-xs leading-snug text-muted-foreground">
+								{m.settings_sync_description()}
+							</p>
+						{/if}
 						<SettingsSection title={m.settings_section_startup()}>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
@@ -753,9 +788,15 @@
 						<SettingsSection title={m.settings_section_draft_window()}>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Label for="draft-always-on-top"
-										>{m.settings_draft_always_on_top()}</Field.Label
-									>
+									<div class="flex-auto">
+										<Field.Label class="inline" for="draft-always-on-top"
+											>{m.settings_draft_always_on_top()}</Field.Label
+										>
+										{@render syncSetting(
+											'text_window_always_on_top',
+											m.settings_draft_always_on_top()
+										)}
+									</div>
 									<Switch
 										id="draft-always-on-top"
 										bind:checked={
@@ -767,9 +808,15 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Label for="hide-draft-on-blur"
-										>{m.settings_hide_draft_on_blur()}</Field.Label
-									>
+									<div class="flex-auto">
+										<Field.Label class="inline" for="hide-draft-on-blur"
+											>{m.settings_hide_draft_on_blur()}</Field.Label
+										>
+										{@render syncSetting(
+											'hide_text_window_on_blur',
+											m.settings_hide_draft_on_blur()
+										)}
+									</div>
 									<Switch
 										id="hide-draft-on-blur"
 										bind:checked={
@@ -784,7 +831,12 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Label for="show-draft-buttons">{m.settings_draft_buttons()}</Field.Label>
+									<div class="flex-auto">
+										<Field.Label class="inline" for="show-draft-buttons"
+											>{m.settings_draft_buttons()}</Field.Label
+										>
+										{@render syncSetting('show_text_window_buttons', m.settings_draft_buttons())}
+									</div>
 									<Switch
 										id="show-draft-buttons"
 										bind:checked={
@@ -796,9 +848,12 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Label for="draft-history-size"
-										>{m.settings_draft_history_size()}</Field.Label
-									>
+									<div class="flex-auto">
+										<Field.Label class="inline" for="draft-history-size"
+											>{m.settings_draft_history_size()}</Field.Label
+										>
+										{@render syncSetting('text_history_size', m.settings_draft_history_size())}
+									</div>
 									<Input
 										id="draft-history-size"
 										type="number"
@@ -817,7 +872,10 @@
 						<SettingsSection title={m.settings_section_appearance()}>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="flex-wrap">
-									<Field.Title id="language">{m.settings_language()}</Field.Title>
+									<div class="flex flex-auto items-center gap-1">
+										<Field.Title id="language">{m.settings_language()}</Field.Title>
+										{@render syncSetting('language', m.settings_language())}
+									</div>
 									<!-- 選択中の項目を押すと空になるので、空は無視して今の設定のまま表示する -->
 									<ToggleGroup.Root
 										type="single"
@@ -840,7 +898,10 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="flex-wrap">
-									<Field.Title id="theme">{m.settings_theme()}</Field.Title>
+									<div class="flex flex-auto items-center gap-1">
+										<Field.Title id="theme">{m.settings_theme()}</Field.Title>
+										{@render syncSetting('theme', m.settings_theme())}
+									</div>
 									<ToggleGroup.Root
 										type="single"
 										variant="outline"
@@ -968,14 +1029,22 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="draft">
+					{#if view.proAvailable && view.syncKinds.settings}
+						<p class="mb-3 px-1 text-xs leading-snug text-muted-foreground">
+							{m.settings_sync_description()}
+						</p>
+					{/if}
 					<SettingsSection>
 						<SettingsRow>
-							<Field.Label for="draft-font-family">{m.settings_draft_font()}</Field.Label>
+							<div class="flex items-center gap-1">
+								<Field.Label for="draft-font-family">{m.settings_draft_font()}</Field.Label>
+								{@render syncSetting('text_font_family', m.settings_draft_font())}
+							</div>
 							<!-- 入力欄の文字の大きさは class で決め打ちする。部品の既定はウィンドウの幅 768px で切り替わり、広げる途中で小さくなるため（辞書の欄も同じ） -->
-							<div class="flex gap-2">
+							<div class="flex flex-wrap gap-2">
 								<Input
 									id="draft-font-family"
-									class="flex-1 text-sm"
+									class="min-w-40 flex-1 text-sm"
 									bind:value={
 										() => fontFamily,
 										(value) => {
@@ -984,25 +1053,38 @@
 										}
 									}
 								/>
-								<Input
-									type="number"
-									class="w-20 text-sm"
-									aria-label={m.settings_draft_font_size()}
-									min={MIN_DRAFT_FONT_SIZE}
-									max={MAX_DRAFT_FONT_SIZE}
-									bind:value={
-										() => fontSize,
-										(value) => {
-											// 空にした途中の状態では保存しない
-											const size = Number(value);
-											if (!Number.isFinite(size) || size <= 0) return;
-											// 画面側でも範囲に収める。Rust 側も収めるが、そちらだけだと画面の表示と実際の値がずれたまま残る。
-											// 整数でない値や u16 に収まらない値は、そもそも invoke が受け取れずに保存が落ちる
-											fontSize = clamp(Math.round(size), MIN_DRAFT_FONT_SIZE, MAX_DRAFT_FONT_SIZE);
-											saveFont();
+								<div class="flex items-center gap-1">
+									<span
+										id="draft-font-size-label"
+										class="text-xs whitespace-nowrap text-muted-foreground"
+										>{m.settings_draft_font_size()}</span
+									>
+									{@render syncSetting('text_font_size', m.settings_draft_font_size())}
+									<Input
+										id="draft-font-size"
+										type="number"
+										class="w-20 text-sm"
+										aria-labelledby="draft-font-size-label"
+										min={MIN_DRAFT_FONT_SIZE}
+										max={MAX_DRAFT_FONT_SIZE}
+										bind:value={
+											() => fontSize,
+											(value) => {
+												// 空にした途中の状態では保存しない
+												const size = Number(value);
+												if (!Number.isFinite(size) || size <= 0) return;
+												// 画面側でも範囲に収める。Rust 側も収めるが、そちらだけだと画面の表示と実際の値がずれたまま残る。
+												// 整数でない値や u16 に収まらない値は、そもそも invoke が受け取れずに保存が落ちる
+												fontSize = clamp(
+													Math.round(size),
+													MIN_DRAFT_FONT_SIZE,
+													MAX_DRAFT_FONT_SIZE
+												);
+												saveFont();
+											}
 										}
-									}
-								/>
+									/>
+								</div>
 							</div>
 							<Field.Description class="leading-snug">
 								{m.settings_draft_font_description()}
@@ -1015,12 +1097,15 @@
 								{#each textColorRows as row (row.theme)}
 									<div class="flex flex-col gap-0.5">
 										<Field.Field orientation="horizontal" class="flex-wrap">
-											<Field.Label
-												for="draft-text-color-{row.theme}"
-												class="w-16 flex-none whitespace-nowrap"
-											>
-												{row.label()}
-											</Field.Label>
+											<div class="flex-auto">
+												<Field.Label
+													for="draft-text-color-{row.theme}"
+													class="inline whitespace-nowrap"
+												>
+													{row.label()}
+												</Field.Label>
+												{@render syncSetting(`text_color_${row.theme}`, row.label())}
+											</div>
 											<!-- 色見本は #rrggbb しか扱えないので、既定のときは標準の色を見せる -->
 											<input
 												type="color"
@@ -1053,7 +1138,12 @@
 						<SettingsRow>
 							<!-- ほかの行のボタンと同じ高さにして、説明文までの間隔を揃える -->
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<Field.Label for="draft-guidance">{m.settings_draft_guidance()}</Field.Label>
+								<div class="flex-auto">
+									<Field.Label class="inline" for="draft-guidance"
+										>{m.settings_draft_guidance()}</Field.Label
+									>
+									{@render syncSetting('input_guidance', m.settings_draft_guidance())}
+								</div>
 								<!-- 既定のままなら戻すものがないので押せなくする -->
 								<Button variant="outline" disabled={guidance === null} onclick={resetGuidance}>
 									{m.settings_draft_guidance_reset()}
@@ -1075,10 +1165,20 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="copy">
+					{#if view.proAvailable && (view.syncKinds.settings || view.syncKinds.replacements)}
+						<p class="mb-3 px-1 text-xs leading-snug text-muted-foreground">
+							{m.settings_sync_description()}
+						</p>
+					{/if}
 					<SettingsSection>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<Field.Label for="trim-trailing">{m.settings_trim_trailing()}</Field.Label>
+								<div class="flex-auto">
+									<Field.Label class="inline" for="trim-trailing"
+										>{m.settings_trim_trailing()}</Field.Label
+									>
+									{@render syncSetting('trim_trailing_whitespace', m.settings_trim_trailing())}
+								</div>
 								<Switch
 									id="trim-trailing"
 									bind:checked={
@@ -1093,7 +1193,15 @@
 						</SettingsRow>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<Field.Label for="exclude-history">{m.settings_exclude_history()}</Field.Label>
+								<div class="flex-auto">
+									<Field.Label class="inline" for="exclude-history"
+										>{m.settings_exclude_history()}</Field.Label
+									>
+									{@render syncSetting(
+										'exclude_from_clipboard_history',
+										m.settings_exclude_history()
+									)}
+								</div>
 								<Switch
 									id="exclude-history"
 									bind:checked={
@@ -1107,15 +1215,21 @@
 							</Field.Description>
 						</SettingsRow>
 						<SettingsRow>
-							<Field.Title>{m.settings_char_width()}</Field.Title>
+							<div class="flex items-center gap-1">
+								<Field.Title>{m.settings_char_width()}</Field.Title>
+								{@render syncSetting('char_widths', m.settings_char_width())}
+							</div>
 							<Field.Description class="leading-snug">
 								{m.settings_char_width_description()}
 							</Field.Description>
 							<!-- 句読点は幅でなく形を選ぶ。「、。」と「，．」はどちらも全角で、「、。」にはふつうに使う半角が無いため -->
 							<Field.Field orientation="horizontal" class="flex-wrap justify-between">
-								<span id="char-width-punctuation" class="text-sm"
-									>{m.settings_char_width_punctuation()}</span
-								>
+								<div class="flex items-center gap-1">
+									<span id="char-width-punctuation" class="text-sm"
+										>{m.settings_char_width_punctuation()}</span
+									>
+									{@render syncSetting('punctuation_style', m.settings_char_width_punctuation())}
+								</div>
 								<ToggleGroup.Root
 									type="single"
 									variant="outline"
@@ -1165,9 +1279,9 @@
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<Field.Title>{m.settings_replacements()}</Field.Title>
 							</Field.Field>
-							{#if view.proAvailable}
+							{#if view.proAvailable && !view.syncKinds.replacements}
 								<p class="text-xs leading-snug text-muted-foreground">
-									{m.settings_sync_description()}
+									{m.settings_sync_replacements_off()}
 								</p>
 							{/if}
 							{#if showsFilter(replacements.rows.length, replacementFilter)}
@@ -1216,7 +1330,7 @@
 													}
 												}
 											/>
-											{#if view.proAvailable}
+											{#if view.proAvailable && view.syncKinds.replacements}
 												<SyncToggle
 													pressed={replacement.sync}
 													name={replacement.from}
@@ -1255,9 +1369,13 @@
 									})
 								: m.settings_snippets_description_no_key()}
 						</p>
-						{#if view.proAvailable}
-							<p class="text-xs leading-snug text-muted-foreground">
+						{#if view.proAvailable && view.syncKinds.snippets}
+							<p class="px-1 text-xs leading-snug text-muted-foreground">
 								{m.settings_sync_description()}
+							</p>
+						{:else if view.proAvailable}
+							<p class="text-xs leading-snug text-muted-foreground">
+								{m.settings_sync_snippets_off()}
 							</p>
 						{/if}
 						<SettingsSection>
@@ -1276,7 +1394,7 @@
 									searchText={(row) => [row.name, row.body]}
 								>
 									{#snippet trailing(row)}
-										{#if view.proAvailable}
+										{#if view.proAvailable && view.syncKinds.snippets}
 											<SyncToggle
 												pressed={row.sync}
 												name={row.name}
@@ -1432,17 +1550,22 @@
 				</Tabs.Content>
 				<Tabs.Content value="account">
 					{#if category === 'account'}
-						<SettingsSection>
-							<SettingsRow>
-								<SettingsMawokAccount
-									call={callActions}
-									signedIn={view.mawokAccountSignedIn}
-									status={mawokAccountStatus}
-									proAvailable={view.proAvailable}
-									onchanged={() => refreshMawokAccountStatus(true)}
-								/>
-							</SettingsRow>
-						</SettingsSection>
+						<div class="flex flex-col gap-5">
+							<SettingsSection>
+								<SettingsRow>
+									<SettingsMawokAccount
+										call={callActions}
+										signedIn={view.mawokAccountSignedIn}
+										status={mawokAccountStatus}
+										proAvailable={view.proAvailable}
+										onchanged={() => refreshMawokAccountStatus(true)}
+									/>
+								</SettingsRow>
+							</SettingsSection>
+							{#if view.proAvailable}
+								<SettingsSync {view} call={callSettings} bind:choiceOpen={syncChoiceOpen} />
+							{/if}
+						</div>
 					{/if}
 				</Tabs.Content>
 				<Tabs.Content value="about">

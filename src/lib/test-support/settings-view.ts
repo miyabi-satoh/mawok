@@ -63,6 +63,16 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		proAvailable: false,
 		accountKeyStatus: 'none',
 		mawokAccountSignedIn: false,
+		syncKinds: {
+			settings: true,
+			keys: true,
+			replacements: true,
+			snippets: true,
+			actions: true,
+			history: true
+		},
+		syncExcludedSettings: [],
+		syncConflicts: 0,
 		version: '0.1.0',
 		locale: 'ja',
 		platform: 'macos',

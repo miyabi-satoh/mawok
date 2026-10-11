@@ -4,6 +4,7 @@ import type { AiService } from "./AiService";
 import type { CharWidths } from "./CharWidths";
 import type { Device } from "./Device";
 import type { DraftKeys } from "./DraftKeys";
+import type { Kinds } from "./Kinds";
 import type { Language } from "./Language";
 import type { Platform } from "./Platform";
 import type { PunctuationStyle } from "./PunctuationStyle";
@@ -71,7 +72,19 @@ proAvailable: boolean, accountKeyStatus: Status,
 /**
  * Mawok のアカウントトークンを資格情報管理から読めたか
  */
-mawokAccountSignedIn: boolean, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
+mawokAccountSignedIn: boolean, 
+/**
+ * デバイスごとに選ぶ同期する種類
+ */
+syncKinds: Kinds, 
+/**
+ * 種類「設定」から外した設定ファイルの項目名
+ */
+syncExcludedSettings: Array<string>, 
+/**
+ * ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
+ */
+syncConflicts: number, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
 /**
  * コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
  */
