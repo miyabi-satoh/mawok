@@ -583,7 +583,13 @@
 	});
 
 	let resetKeyOpen = $state(false);
+	/** 確かめを「このデバイスから始め直す」の言い方で出すか。開いたときに決め、実行して鍵の状態が変わっても、閉じるまで文を替えない */
+	let resetKeyRestarts = $state(false);
 	let resettingKey = $state(false);
+	function openResetKey(restarts: boolean) {
+		resetKeyRestarts = restarts;
+		resetKeyOpen = true;
+	}
 	async function resetAccountKey() {
 		resettingKey = true;
 		if ((await callLan('reset_account_key')).ok) resetKeyOpen = false;
@@ -625,11 +631,11 @@
 </script>
 
 <!-- 鍵を作り直す操作。鍵を待つ状態では、ほかのデバイスを使えない人向けの出口として案内する。 -->
-{#snippet resetKeyRow(title: string, start: string, description?: string)}
+{#snippet resetKeyRow(restarts: boolean, title: string, start: string, description?: string)}
 	<SettingsRow>
 		<Field.Field orientation="horizontal" class="min-h-8">
 			<Field.Title>{title}</Field.Title>
-			<Button variant="destructive" onclick={() => (resetKeyOpen = true)}>
+			<Button variant="destructive" onclick={() => openResetKey(restarts)}>
 				{start}
 			</Button>
 		</Field.Field>
@@ -1496,6 +1502,7 @@
 								</Field.Description>
 							</SettingsRow>
 							{@render resetKeyRow(
+								true,
 								m.settings_devices_restart(),
 								m.settings_devices_restart_start(),
 								m.settings_devices_restart_description()
@@ -1561,6 +1568,7 @@
 								</Field.Description>
 							</SettingsRow>
 							{@render resetKeyRow(
+								false,
 								m.settings_devices_reset_key(),
 								m.settings_devices_reset_key_start()
 							)}
@@ -1659,12 +1667,12 @@
 		<AlertDialog.Content>
 			<AlertDialog.Header>
 				<AlertDialog.Title>
-					{settings.current?.accountKeyStatus === 'needsPairing'
+					{resetKeyRestarts
 						? m.settings_devices_restart_confirm_title()
 						: m.settings_devices_reset_key_confirm_title()}
 				</AlertDialog.Title>
 				<AlertDialog.Description
-					>{settings.current?.accountKeyStatus === 'needsPairing'
+					>{resetKeyRestarts
 						? m.settings_devices_restart_confirm_description()
 						: m.settings_devices_reset_key_confirm_description()}</AlertDialog.Description
 				>
@@ -1674,7 +1682,7 @@
 					>{m.settings_devices_offer_cancel()}</AlertDialog.Cancel
 				>
 				<AlertDialog.Action disabled={resettingKey} onclick={resetAccountKey}>
-					{settings.current?.accountKeyStatus === 'needsPairing'
+					{resetKeyRestarts
 						? m.settings_devices_restart_confirm_start()
 						: m.settings_devices_reset_key_start()}
 				</AlertDialog.Action>

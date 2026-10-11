@@ -2,6 +2,8 @@
 
 use std::sync::Mutex;
 
+use log::warn;
+
 use serde::{Deserialize, Serialize};
 
 use crate::secrets::{self, ReadError};
@@ -63,8 +65,12 @@ fn migrate_locked() -> Result<Credentials, ReadError> {
     };
     let credentials = Credentials { token, key };
     secrets::write(CREDENTIAL_USER, &to_json(&credentials)).map_err(ReadError::Unreadable)?;
-    secrets::delete(LEGACY_TOKEN_USER).map_err(ReadError::Unreadable)?;
-    secrets::delete(LEGACY_KEY_USER).map_err(ReadError::Unreadable)?;
+    // 新しい項目に書けていれば、値は読める。前の項目を消せなくても、読み取りは失敗にしない
+    for user in [LEGACY_TOKEN_USER, LEGACY_KEY_USER] {
+        if let Err(error) = secrets::delete(user) {
+            warn!("couldn't delete the previous credential {user}: {error}");
+        }
+    }
     Ok(credentials)
 }
 
@@ -78,18 +84,15 @@ pub fn read_key() -> Result<Option<String>, ReadError> {
     Ok(read_locked()?.key)
 }
 
+/// サインインで受け取ったトークンを置く。前の中身は読まずに置き換える。
+/// 鍵はサインインの前に消してあり（lib.rs の save_mawok_token）、読めない項目が残っていてもサインインできるようにするため
 pub fn write_token(token: &str) -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    let key = match read_locked() {
-        Ok(credentials) => credentials.key,
-        Err(ReadError::NotFound) => None,
-        Err(ReadError::Unreadable(error)) => return Err(error),
-    };
     secrets::write(
         CREDENTIAL_USER,
         &to_json(&Credentials {
             token: token.to_string(),
-            key,
+            key: None,
         }),
     )
 }

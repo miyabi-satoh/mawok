@@ -1590,16 +1590,14 @@ async fn delete_ai_key(app: AppHandle) -> Result<(), String> {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
     let service = app.state::<AppState>().config.lock().unwrap().ai_service;
-    if service == AiService::None {
+    // Mawok はキーを持たない。トークンはサインアウトで消す（sign_out_mawok）
+    if service == AiService::None || service == AiService::Mawok {
         return Err(actions::Failure::Disabled.code().to_string());
     }
     info!("delete the AI key for {}", service.name());
-    run_blocking(move || match service {
-        AiService::Mawok => account_credentials::delete(),
-        _ => secrets::delete(service.credential_user()),
-    })
-    .await?
-    .inspect_err(|error| error!("couldn't delete the AI key: {error}"))?;
+    run_blocking(move || secrets::delete(service.credential_user()))
+        .await?
+        .inspect_err(|error| error!("couldn't delete the AI key: {error}"))?;
     app.state::<AppState>().remember_ai_key(service, false);
     apply_config(&app);
     Ok(())
