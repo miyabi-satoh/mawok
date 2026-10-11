@@ -2757,6 +2757,9 @@ fn start_periodic_pro_checks(app: AppHandle) {
 
 fn start_periodic_sync(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        // アプリを止めて設定ファイルで同期をオフにしたときは、スイッチを切り替えた時点が無いので、
+        // 起動のときに置く
+        mark_paused_sync_kinds(&app).await;
         let mut interval = tokio::time::interval(SYNC_INTERVAL);
         loop {
             interval.tick().await;
