@@ -1774,15 +1774,10 @@ pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
     }) {
         let _ = remove_local(&mut restored, key);
     }
-    // 控えがアクションの項目を持たないなら、既定のままという設定ファイルの表現へ戻す。
-    if backup.actions.is_none()
-        && current.sync_actions
-        && (current.actions.is_none()
-            || restored
-                .actions
-                .as_ref()
-                .is_some_and(|actions| actions == &default_actions_for(restored.language)))
-    {
+    // 今も控えも既定のアクションのままなら、比べるために実体化した行を、既定のままという表現へ戻す。
+    // 今が行を持っているときは戻さない。None にすると行の項目が無くなり、次の同期が、記録にある行を
+    // 消したものとして窓口へ書いて、ほかのデバイスの行まで消す
+    if backup.actions.is_none() && current.actions.is_none() && current.sync_actions {
         restored.actions = None;
     }
     RestoreConfig {
@@ -7036,7 +7031,7 @@ mod tests {
     }
 
     #[test]
-    fn restoring_implicit_default_actions_keeps_the_compact_config_representation() {
+    fn restoring_implicit_default_actions_keeps_the_rows_when_the_device_has_rows() {
         let received = Action {
             id: "e".repeat(32),
             name: "received action".into(),
@@ -7052,13 +7047,17 @@ mod tests {
         };
         let restored = restore_config(&current, &Config::default());
         assert!(restored.rejected.is_empty());
-        assert_eq!(restored.config.actions, None);
-        let shown = restored
-            .config
-            .actions
-            .unwrap_or_else(|| default_actions_for(restored.config.language));
-        assert_eq!(shown, default_actions_for(restored.config.language));
-        assert!(!shown.iter().any(|action| action.id == received.id));
+        // None にはしない。行の項目が無くなると、次の同期が既定の行まで消した記録として書く
+        assert_eq!(
+            restored.config.actions,
+            Some(default_actions_for(restored.config.language))
+        );
+        let removed: Vec<String> = backup_differences(&current, &restored.config)
+            .into_iter()
+            .filter(|change| change.restored == SyncValue::Deleted)
+            .map(|change| change.id)
+            .collect();
+        assert_eq!(removed, [row_id('a', &received.id)]);
     }
 
     #[test]
