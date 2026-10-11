@@ -187,7 +187,7 @@
 	"lan_error_account_mismatch": "確認コードを表示したデバイスは、別のアカウントにサインインしています。同じアカウントでサインインしてください。",
 	"lan_error_too_long": "テキストが長すぎて送れません（1 MB まで）。",
 	"lan_error_bad_code": "確認コードは6桁の数字で入力してください。",
-	"lan_error_wrong_code": "接続できませんでした。もう一方のデバイスに今表示されている確認コードを、入力し直してください。",
+	"lan_error_wrong_code": "接続できませんでした。もう一方のデバイスの設定の「デバイス」に今表示されている確認コードを、入力し直してください。",
 	"lan_error_internal": "エラーが起きました。詳しくはログに残しています。",
 	"key_hint": "{label}（{keys}）",
 	"draft_history_older_hint_key": "前にコピーしたテキストを出す（{keys}、入力欄の先頭で ↑）",

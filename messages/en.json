@@ -187,7 +187,7 @@
 	"lan_error_account_mismatch": "The device that showed the verification code is signed in to another account. Sign in to the same account.",
 	"lan_error_too_long": "The text is too long to send (up to 1 MB).",
 	"lan_error_bad_code": "Enter the 6-digit verification code.",
-	"lan_error_wrong_code": "Couldn't connect the device. Enter the verification code currently shown on the other device again.",
+	"lan_error_wrong_code": "Couldn't connect the device. Open Devices in Settings on the other device, and enter the verification code shown there again.",
 	"lan_error_internal": "Something went wrong. Details are in the log.",
 	"key_hint": "{label} ({keys})",
 	"draft_history_older_hint_key": "Show earlier text you copied ({keys}, or ↑ at the start of the text box)",
