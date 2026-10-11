@@ -1866,7 +1866,11 @@ async fn run_settings_sync(app: &AppHandle) {
             } else {
                 result.state
             };
-            let conflicts = record.active_conflict_count(&config);
+            // 通信の間に止められた種類・項目の食い違いを数えないよう、今の設定で数える
+            let conflicts = {
+                let current = app_state.config.lock().unwrap();
+                record.active_conflict_count(&current)
+            };
             if let Err(error) = save_sync_record(app, record).await {
                 warn!("couldn't save sync state: {error}");
             }
