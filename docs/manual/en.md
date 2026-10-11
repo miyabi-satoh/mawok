@@ -123,6 +123,7 @@ You can change the keys under "Keyboard" in Settings.
 
 Choose "Settings…" in the {macos:menu bar}{windows:system tray} menu, or press {macos:`Cmd+,`}{windows:`Ctrl+,`} in the text window.
 You can change the hotkey, the text's appearance, and the cleanup applied when copying (such as removing trailing whitespace, unifying full-width and half-width characters, and replacements). Changes take effect immediately.
+Settings you've changed from the default show a vertical line at the left edge of the row.
 
 ## If something does not work
 

@@ -5,7 +5,7 @@ import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { formatKeys } from '$lib/keys';
-import { EVENTS } from '$lib/bindings/constants';
+import { CONSTANTS, EVENTS } from '$lib/bindings/constants';
 import type { PairingOffer } from '$lib/bindings/PairingOffer';
 import type { UpdateView } from '$lib/bindings/UpdateView';
 import { draftGuidance } from '$lib/guidance';
@@ -130,6 +130,61 @@ beforeEach(() => {
 	vi.mocked(listen).mockReset();
 	vi.mocked(listen).mockImplementation(() => Promise.resolve(() => {}));
 	settings.current = view();
+});
+
+describe('既定の値から変えた設定の印', () => {
+	it('変更した行にだけ印と読み上げる文言を出す', async () => {
+		settings.current = settingsView({ modifiedSettings: ['autostart'] });
+		const screen = await render(Page);
+
+		const changed = screen
+			.getByLabelText(m.settings_autostart())
+			.element()
+			.closest<HTMLElement>('[data-settings-row]');
+		const unchanged = screen
+			.getByLabelText(m.settings_draft_always_on_top())
+			.element()
+			.closest<HTMLElement>('[data-settings-row]');
+		expect(changed).not.toBeNull();
+		expect(unchanged).not.toBeNull();
+		expect(changed).toHaveAttribute('data-modified', 'autostart');
+		expect(changed).not.toHaveAttribute('title');
+		expect(changed?.querySelector('[title]')).toHaveAttribute('title', m.settings_modified());
+		expect(changed?.textContent).toContain(m.settings_modified());
+		expect(unchanged).not.toHaveAttribute('data-modified');
+	});
+
+	it('すべての印の名前に対応する行を出す', async () => {
+		settings.current = settingsView({
+			modifiedSettings: [...CONSTANTS.MODIFIED_SETTINGS],
+			aiService: 'gemini',
+			aiModels: { gemini: 'gemini-3.8-flash' },
+			mawokAccountSignedIn: true,
+			proAvailable: true
+		});
+		const screen = await render(Page);
+		const found = new Set<string>();
+		const collect = () => {
+			for (const mark of screen.container.querySelectorAll<HTMLElement>('[data-modified]')) {
+				if (mark.dataset.modified) found.add(mark.dataset.modified);
+			}
+		};
+
+		collect();
+		for (const category of [
+			m.settings_category_keys,
+			m.settings_category_draft,
+			m.settings_category_copy,
+			m.settings_category_actions,
+			m.settings_category_account
+		]) {
+			await screen.getByRole('tab', { name: category() }).click();
+			collect();
+		}
+
+		expect(found.size).toBe(CONSTANTS.MODIFIED_SETTINGS.length);
+		expect([...found].sort()).toEqual([...CONSTANTS.MODIFIED_SETTINGS].sort());
+	});
 });
 
 describe('設定画面の置き換え辞書', () => {

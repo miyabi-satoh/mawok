@@ -281,6 +281,8 @@ struct SettingsView {
     revision: u64,
     /// 下書きウィンドウを出すグローバルホットキー
     hotkey: String,
+    /// 設定画面で既定から変えた印を付ける項目名
+    modified_settings: Vec<String>,
     text_window_keys: DraftKeys,
     /// 「既定に戻す」を押せるかを見るための既定のキー。既定は Rust 側だけで決める
     default_draft_keys: DraftKeys,
@@ -364,6 +366,7 @@ fn settings_view(state: &AppState) -> SettingsView {
         .unwrap()
         .as_ref()
         .is_some_and(|pro| pro.available_at(pro::now()));
+    let modified_settings = config::modified_settings(&config);
     SettingsView {
         revision,
         sync_kinds: sync::kinds(&config),
@@ -383,6 +386,7 @@ fn settings_view(state: &AppState) -> SettingsView {
             .unwrap_or_else(|| actions::default_actions(lang)),
         platform: Platform::current(),
         hotkey: config.hotkey,
+        modified_settings,
         text_window_keys: config.text_window_keys,
         default_draft_keys: DraftKeys::default(),
         default_hotkey: config::DEFAULT_HOTKEY,

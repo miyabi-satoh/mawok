@@ -22,6 +22,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 	return {
 		revision: 1,
 		hotkey: 'CommandOrControl+Shift+Space',
+		modifiedSettings: [],
 		textWindowKeys: { ...DEFAULT_DRAFT_KEYS },
 		defaultDraftKeys: DEFAULT_DRAFT_KEYS,
 		defaultHotkey: 'CommandOrControl+Shift+Space',

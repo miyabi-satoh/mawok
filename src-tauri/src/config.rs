@@ -376,6 +376,178 @@ impl Default for Config {
     }
 }
 
+/// 設定画面で既定から変えた印を付ける項目。複数の設定を1行に出すものも、行ごとに1つの名前にする。
+#[derive(Clone, Copy)]
+enum ModifiedSetting {
+    Value {
+        name: &'static str,
+        differs: fn(&Config, &Config) -> bool,
+    },
+    DraftKey(DraftAction),
+}
+
+const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
+    ModifiedSetting::Value {
+        name: key::HOTKEY,
+        differs: |config, defaults| config.hotkey != defaults.hotkey,
+    },
+    ModifiedSetting::DraftKey(DraftAction::Copy),
+    ModifiedSetting::DraftKey(DraftAction::Send),
+    ModifiedSetting::DraftKey(DraftAction::Settings),
+    ModifiedSetting::DraftKey(DraftAction::Snippets),
+    ModifiedSetting::DraftKey(DraftAction::Actions),
+    ModifiedSetting::DraftKey(DraftAction::HistoryOlder),
+    ModifiedSetting::DraftKey(DraftAction::HistoryNewer),
+    ModifiedSetting::DraftKey(DraftAction::SendTargets),
+    ModifiedSetting::DraftKey(DraftAction::InsertReceived),
+    ModifiedSetting::DraftKey(DraftAction::DiscardReceived),
+    ModifiedSetting::DraftKey(DraftAction::ChangeFolder),
+    ModifiedSetting::Value {
+        name: key::AUTOSTART,
+        differs: |config, defaults| config.autostart != defaults.autostart,
+    },
+    ModifiedSetting::Value {
+        name: key::TEXT_WINDOW_ALWAYS_ON_TOP,
+        differs: |config, defaults| {
+            config.text_window_always_on_top != defaults.text_window_always_on_top
+        },
+    },
+    ModifiedSetting::Value {
+        name: key::HIDE_TEXT_WINDOW_ON_BLUR,
+        differs: |config, defaults| {
+            config.hide_text_window_on_blur != defaults.hide_text_window_on_blur
+        },
+    },
+    ModifiedSetting::Value {
+        name: key::SHOW_TEXT_WINDOW_BUTTONS,
+        differs: |config, defaults| {
+            config.show_text_window_buttons != defaults.show_text_window_buttons
+        },
+    },
+    ModifiedSetting::Value {
+        name: key::TEXT_HISTORY_SIZE,
+        differs: |config, defaults| config.text_history_size != defaults.text_history_size,
+    },
+    ModifiedSetting::Value {
+        name: key::LANGUAGE,
+        differs: |config, defaults| config.language != defaults.language,
+    },
+    ModifiedSetting::Value {
+        name: key::THEME,
+        differs: |config, defaults| config.theme != defaults.theme,
+    },
+    ModifiedSetting::Value {
+        name: "text_font",
+        differs: |config, defaults| {
+            config.text_font_family != defaults.text_font_family
+                || config.text_font_size != defaults.text_font_size
+        },
+    },
+    ModifiedSetting::Value {
+        name: "text_color",
+        differs: |config, defaults| {
+            config.text_color_light != defaults.text_color_light
+                || config.text_color_dark != defaults.text_color_dark
+        },
+    },
+    ModifiedSetting::Value {
+        name: key::INPUT_GUIDANCE,
+        differs: |config, defaults| config.input_guidance != defaults.input_guidance,
+    },
+    ModifiedSetting::Value {
+        name: key::TRIM_TRAILING_WHITESPACE,
+        differs: |config, defaults| {
+            config.trim_trailing_whitespace != defaults.trim_trailing_whitespace
+        },
+    },
+    ModifiedSetting::Value {
+        name: key::EXCLUDE_FROM_CLIPBOARD_HISTORY,
+        differs: |config, defaults| {
+            config.exclude_from_clipboard_history != defaults.exclude_from_clipboard_history
+        },
+    },
+    ModifiedSetting::Value {
+        name: "char_width",
+        differs: |config, defaults| {
+            config.char_widths != defaults.char_widths
+                || config.punctuation_style != defaults.punctuation_style
+        },
+    },
+    ModifiedSetting::Value {
+        name: key::AI_SERVICE,
+        differs: |config, defaults| config.ai_service != defaults.ai_service,
+    },
+    ModifiedSetting::Value {
+        name: key::AI_MODELS,
+        differs: |config, _| {
+            config.ai_service != AiService::None
+                && config.ai_models.contains_key(&config.ai_service)
+        },
+    },
+    ModifiedSetting::Value {
+        name: key::SYNC_SETTINGS,
+        differs: |config, defaults| config.sync_settings != defaults.sync_settings,
+    },
+    ModifiedSetting::Value {
+        name: key::SYNC_KEYS,
+        differs: |config, defaults| config.sync_keys != defaults.sync_keys,
+    },
+    ModifiedSetting::Value {
+        name: key::SYNC_REPLACEMENTS,
+        differs: |config, defaults| config.sync_replacements != defaults.sync_replacements,
+    },
+    ModifiedSetting::Value {
+        name: key::SYNC_SNIPPETS,
+        differs: |config, defaults| config.sync_snippets != defaults.sync_snippets,
+    },
+    ModifiedSetting::Value {
+        name: key::SYNC_ACTIONS,
+        differs: |config, defaults| config.sync_actions != defaults.sync_actions,
+    },
+    ModifiedSetting::Value {
+        name: key::SYNC_HISTORY,
+        differs: |config, defaults| config.sync_history != defaults.sync_history,
+    },
+];
+
+fn modified_setting_name(setting: ModifiedSetting) -> String {
+    match setting {
+        ModifiedSetting::Value { name, .. } => name.into(),
+        ModifiedSetting::DraftKey(action) => {
+            // 画面が行と照らすので、設定ファイルの書き方でなく画面の書き方（`historyOlder` など）
+            format!("text_window_keys.{}", choice_name(&action))
+        }
+    }
+}
+
+/// 設定画面で既定から変えた印を付ける項目名の並び。画面側の印とテストで同じ名前を使う。
+#[cfg(test)]
+pub fn modified_setting_names() -> Vec<String> {
+    MODIFIED_SETTINGS
+        .iter()
+        .copied()
+        .map(modified_setting_name)
+        .collect()
+}
+
+/// 設定画面で既定から変えた印を付ける項目名。設定ファイルに書かない、競合で黙って外した既定のキーは変えた扱いにしない。
+pub fn modified_settings(config: &Config) -> Vec<String> {
+    let defaults = Config::default();
+    MODIFIED_SETTINGS
+        .iter()
+        .filter(|setting| match setting {
+            ModifiedSetting::Value { differs, .. } => differs(config, &defaults),
+            ModifiedSetting::DraftKey(action) => {
+                !config.yielded_draft_keys.contains(action)
+                    && config.text_window_keys.get(*action)
+                        != defaults.text_window_keys.get(*action)
+            }
+        })
+        .copied()
+        .map(modified_setting_name)
+        .collect()
+}
+
 /// 設定ファイルをそのまま読めなかった理由
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadProblem {
@@ -1679,6 +1851,8 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    type ConfigChange = fn(&mut Config);
+
     fn has_valid_ids(ids: impl IntoIterator<Item = String>) -> bool {
         let ids: Vec<_> = ids.into_iter().collect();
         ids.iter().all(|id| valid_item_id(id))
@@ -2196,6 +2370,135 @@ body = "git status"
         assert_eq!(config.language, Language::Ja);
         assert_eq!(config.theme, Theme::Dark);
         assert_eq!(error, None);
+    }
+
+    #[test]
+    fn finds_settings_changed_from_the_defaults() {
+        assert!(modified_settings(&Config::default()).is_empty());
+
+        for action in DraftAction::ALL {
+            let mut config = Config::default();
+            *config.text_window_keys.get_mut(action) = "CommandOrControl+Alt+KeyM".to_string();
+            assert_eq!(
+                modified_settings(&config),
+                [format!("text_window_keys.{}", choice_name(&action))],
+                "{}",
+                action.name()
+            );
+        }
+
+        let cases: &[(&str, ConfigChange)] = &[
+            (key::HOTKEY, |config| {
+                config.hotkey = "CommandOrControl+Alt+KeyM".to_string();
+            }),
+            (key::AUTOSTART, |config| config.autostart = false),
+            (key::TEXT_WINDOW_ALWAYS_ON_TOP, |config| {
+                config.text_window_always_on_top = false;
+            }),
+            (key::HIDE_TEXT_WINDOW_ON_BLUR, |config| {
+                config.hide_text_window_on_blur = false;
+            }),
+            (key::SHOW_TEXT_WINDOW_BUTTONS, |config| {
+                config.show_text_window_buttons = false;
+            }),
+            (key::TEXT_HISTORY_SIZE, |config| {
+                config.text_history_size = 10
+            }),
+            (key::LANGUAGE, |config| config.language = Language::Ja),
+            (key::THEME, |config| config.theme = Theme::Dark),
+            ("text_font", |config| {
+                config.text_font_family = "Monaco".to_string();
+            }),
+            ("text_color", |config| {
+                config.text_color_light = "#123456".to_string();
+            }),
+            (key::INPUT_GUIDANCE, |config| {
+                config.input_guidance = Some("入力してください".to_string());
+            }),
+            (key::TRIM_TRAILING_WHITESPACE, |config| {
+                config.trim_trailing_whitespace = false;
+            }),
+            (key::EXCLUDE_FROM_CLIPBOARD_HISTORY, |config| {
+                config.exclude_from_clipboard_history = false;
+            }),
+            ("char_width", |config| {
+                config.char_widths.alphabet = WidthStyle::Full;
+            }),
+            (key::AI_SERVICE, |config| {
+                config.ai_service = AiService::Gemini
+            }),
+            (key::AI_MODELS, |config| {
+                config.ai_service = AiService::Gemini;
+                config
+                    .ai_models
+                    .insert(AiService::Gemini, "gemini-3.8-flash".to_string());
+            }),
+            (key::SYNC_SETTINGS, |config| config.sync_settings = false),
+            (key::SYNC_KEYS, |config| config.sync_keys = false),
+            (key::SYNC_REPLACEMENTS, |config| {
+                config.sync_replacements = false;
+            }),
+            (key::SYNC_SNIPPETS, |config| config.sync_snippets = false),
+            (key::SYNC_ACTIONS, |config| config.sync_actions = false),
+            (key::SYNC_HISTORY, |config| config.sync_history = false),
+        ];
+        assert_eq!(
+            modified_setting_names()
+                .into_iter()
+                .filter(|name| !name.starts_with("text_window_keys."))
+                .collect::<Vec<_>>(),
+            cases
+                .iter()
+                .map(|(name, _)| (*name).to_string())
+                .collect::<Vec<String>>()
+        );
+        for &(name, change) in cases {
+            let mut config = Config::default();
+            change(&mut config);
+            let expected: Vec<String> = if name == key::AI_MODELS {
+                vec![key::AI_SERVICE.into(), key::AI_MODELS.into()]
+            } else {
+                vec![name.into()]
+            };
+            assert_eq!(modified_settings(&config), expected, "{name}");
+        }
+
+        let alternatives: &[(&str, ConfigChange)] = &[
+            ("text_font", |config: &mut Config| {
+                config.text_font_size = 20
+            }),
+            ("text_color", |config: &mut Config| {
+                config.text_color_dark = "#abcdef".to_string();
+            }),
+            ("char_width", |config: &mut Config| {
+                config.punctuation_style = PunctuationStyle::Comma;
+            }),
+        ];
+        for &(name, change) in alternatives {
+            let mut config = Config::default();
+            change(&mut config);
+            assert_eq!(modified_settings(&config), [name], "{name}");
+        }
+    }
+
+    #[test]
+    fn only_marks_the_current_ai_service_model_and_ignores_yielded_default_keys() {
+        let mut config = Config::default();
+        config
+            .ai_models
+            .insert(AiService::Gemini, "gemini-3.8-flash".to_string());
+        assert!(modified_settings(&config).is_empty());
+
+        config.ai_service = AiService::Gemini;
+        assert_eq!(
+            modified_settings(&config),
+            [key::AI_SERVICE, key::AI_MODELS]
+        );
+
+        let mut config = Config::default();
+        config.text_window_keys.copy.clear();
+        config.yielded_draft_keys = vec![DraftAction::Copy];
+        assert!(modified_settings(&config).is_empty());
     }
 
     /// 既定値と違う値を、すべての項目に入れた設定
