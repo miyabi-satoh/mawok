@@ -55,7 +55,7 @@ function rowName(row: Row): string {
 }
 
 /** 項目の名前。設定の画面でのその項目のラベルと同じ言い方にし、行は種類と行の名前にする */
-function label(value: Exclude<SyncValue, { type: 'deleted' }>): string {
+function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefined {
 	switch (value.type) {
 		case 'language':
 			return m.settings_language();
@@ -110,7 +110,14 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string {
 			return m.sync_choice_row_snippet({ name: rowName(value) });
 		case 'action':
 			return m.sync_choice_row_action({ name: rowName(value) });
+		default:
+			return undefined;
 	}
+}
+
+/** 種類「設定」から外す項目の名前。食い違いを選ぶ画面と同じラベルを使う。 */
+export function syncSettingLabel(name: string): string {
+	return label({ type: name } as Exclude<SyncValue, { type: 'deleted' }>) ?? name;
 }
 
 /** `other` と同じ種類の値なら、その値。行は、片方が「削除」のことがある */
@@ -243,7 +250,7 @@ export function choiceText(conflict: SyncConflict, platform: Platform): ChoiceTe
 	const oneSided = thisDevice.type === 'deleted' || otherDevice.type === 'deleted';
 	const [mine, theirs] = oneSided ? texts : fromDifference(...texts);
 	return {
-		label: named.type === 'deleted' ? '' : label(named),
+		label: named.type === 'deleted' ? '' : (label(named) ?? ''),
 		thisDevice: mine,
 		otherDevice: theirs
 	};

@@ -1184,9 +1184,13 @@
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<Field.Title>{m.settings_replacements()}</Field.Title>
 							</Field.Field>
-							{#if view.proAvailable}
+							{#if view.proAvailable && view.syncKinds.replacements}
 								<p class="text-xs leading-snug text-muted-foreground">
 									{m.settings_sync_description()}
+								</p>
+							{:else if view.proAvailable}
+								<p class="text-xs leading-snug text-muted-foreground">
+									{m.settings_sync_replacements_off()}
 								</p>
 							{/if}
 							{#if showsFilter(replacements.rows.length, replacementFilter)}
@@ -1235,7 +1239,7 @@
 													}
 												}
 											/>
-											{#if view.proAvailable}
+											{#if view.proAvailable && view.syncKinds.replacements}
 												<SyncToggle
 													pressed={replacement.sync}
 													name={replacement.from}
@@ -1274,9 +1278,13 @@
 									})
 								: m.settings_snippets_description_no_key()}
 						</p>
-						{#if view.proAvailable}
+						{#if view.proAvailable && view.syncKinds.snippets}
 							<p class="text-xs leading-snug text-muted-foreground">
 								{m.settings_sync_description()}
+							</p>
+						{:else if view.proAvailable}
+							<p class="text-xs leading-snug text-muted-foreground">
+								{m.settings_sync_snippets_off()}
 							</p>
 						{/if}
 						<SettingsSection>
@@ -1295,7 +1303,7 @@
 									searchText={(row) => [row.name, row.body]}
 								>
 									{#snippet trailing(row)}
-										{#if view.proAvailable}
+										{#if view.proAvailable && view.syncKinds.snippets}
 											<SyncToggle
 												pressed={row.sync}
 												name={row.name}

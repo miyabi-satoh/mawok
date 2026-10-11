@@ -161,8 +161,10 @@
 		<p id="actions-description" class="settings-lead">
 			{m.settings_actions_description({ mark: TEXT_MARK })}
 		</p>
-		{#if view.proAvailable}
+		{#if view.proAvailable && view.syncKinds.actions}
 			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
+		{:else if view.proAvailable}
+			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_actions_off()}</p>
 		{/if}
 		<SettingsSection>
 			<SettingsRow>
@@ -180,7 +182,7 @@
 					searchText={(row) => [row.name, row.command]}
 				>
 					{#snippet trailing(row)}
-						{#if view.proAvailable}
+						{#if view.proAvailable && view.syncKinds.actions}
 							<SyncToggle
 								pressed={row.sync}
 								name={row.name || row.command}

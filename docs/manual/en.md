@@ -93,10 +93,10 @@ With Pro, your settings and history stay the same across the devices on your acc
 
 The device you added receives the same settings and history.
 
-- Synced: settings, replacements, snippets, actions, and history.
+- Synced: settings, keyboard shortcuts, replacements, snippets, actions, and history. Turn each kind on or off under "Account" in Settings.
 - Kept per device: launch at login, API keys for AI services, and the devices you send to. The hotkey, keyboard shortcuts, and text font sync only between {macos:Macs}{windows:Windows devices}.
 - For replacements, snippets, and actions, turn off the cloud mark on a row to stop syncing just that row.
-- To stop syncing, turn off "Sync settings" or "Sync history" under "Sync" in "Account" in Settings.
+- For settings, choose individual items under "Choose settings to sync...". To stop syncing, turn off that kind.
 
 If you change the same setting on different devices, "Choose Which to Use..." appears under "Account" in Settings. Select it, choose "This device" or "Other device" for each item, then select "Apply Selected Settings". You can also open it from "Choose Which Settings to Use…" in the {macos:menu bar}{windows:system tray} menu.
 
@@ -152,7 +152,12 @@ Changes you make directly take effect after you restart the app. The file contai
 | `hotkey`                         | `"CommandOrControl+Shift+Space"` | Hotkey that brings up the text window; empty for none                    |
 | `autostart`                      | `true`                           | Launch at login                                                          |
 | `sync_settings`                  | `true`                           | With Pro, sync settings with your other devices                          |
+| `sync_keys`                      | `true`                           | With Pro, sync keyboard shortcuts with your other devices                |
+| `sync_replacements`              | `true`                           | With Pro, sync replacements with your other devices                      |
+| `sync_snippets`                  | `true`                           | With Pro, sync snippets with your other devices                          |
+| `sync_actions`                   | `true`                           | With Pro, sync actions with your other devices                           |
 | `sync_history`                   | `true`                           | With Pro, sync history with your other devices                           |
+| `sync_excluded_settings`         | `[]`                             | Setting-file item names to exclude from settings sync                    |
 | `language`                       | `"system"`                       | Language (`"system"`, `"ja"`, `"en"`)                                    |
 | `theme`                          | `"system"`                       | Theme (`"system"`, `"light"`, `"dark"`)                                  |
 | `text_window_always_on_top`      | `true`                           | Keep the text window on top                                              |

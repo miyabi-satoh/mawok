@@ -67,19 +67,59 @@ describe('設定画面の同期', () => {
 			.not.toBeInTheDocument();
 	});
 
-	it('Pro なら同期する種類を切り替えられ、別々に変えた設定が無ければ知らせを出さない', async () => {
+	it('Pro なら同期する種類を切り替えられ、設定ごとの同期も選べる', async () => {
 		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
 		const screen = await openAccount();
 		await screen.getByRole('switch', { name: m.settings_sync_settings() }).click();
-		expect(callsOf(invoked, 'set_sync_settings')).toEqual([
-			['set_sync_settings', { enabled: false }]
+		expect(callsOf(invoked, 'set_sync_kind')).toEqual([
+			['set_sync_kind', { kind: 'settings', enabled: false }]
 		]);
+		await screen.getByRole('switch', { name: m.settings_sync_keys() }).click();
+		await screen.getByRole('switch', { name: m.settings_sync_replacements() }).click();
+		await screen.getByRole('switch', { name: m.settings_sync_snippets() }).click();
+		await screen.getByRole('switch', { name: m.settings_sync_actions() }).click();
 		await screen.getByRole('switch', { name: m.settings_sync_history() }).click();
-		expect(callsOf(invoked, 'set_sync_history')).toEqual([
-			['set_sync_history', { enabled: false }]
+		expect(callsOf(invoked, 'set_sync_kind')).toEqual(
+			expect.arrayContaining([
+				['set_sync_kind', { kind: 'keys', enabled: false }],
+				['set_sync_kind', { kind: 'replacements', enabled: false }],
+				['set_sync_kind', { kind: 'snippets', enabled: false }],
+				['set_sync_kind', { kind: 'actions', enabled: false }],
+				['set_sync_kind', { kind: 'history', enabled: false }]
+			])
+		);
+		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
+		await screen.getByRole('button', { name: m.settings_sync_select_settings() }).click();
+		await expect
+			.element(screen.getByRole('alertdialog', { name: m.settings_sync_select_settings_title() }))
+			.toBeVisible();
+		await screen.getByRole('checkbox', { name: m.settings_theme() }).click();
+		expect(callsOf(invoked, 'set_sync_excluded_setting')).toEqual([
+			['set_sync_excluded_setting', { name: 'theme', sync: false }]
 		]);
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_sync_choice_open() }))
+			.not.toBeInTheDocument();
+	});
+
+	it('定型文の同期がオフなら、雲の印の代わりにオフの説明を出す', async () => {
+		settings.current = settingsView({
+			proAvailable: true,
+			syncKinds: {
+				settings: true,
+				keys: true,
+				replacements: true,
+				snippets: false,
+				actions: true,
+				history: true
+			},
+			snippets: [{ id: 'a', name: '挨拶', body: 'こんにちは', sync: true }]
+		});
+		const screen = await render(Page);
+		await screen.getByRole('tab', { name: m.settings_category_snippets() }).click();
+		await expect.element(screen.getByText(m.settings_sync_snippets_off())).toBeVisible();
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_sync_item({ name: '挨拶' }) }))
 			.not.toBeInTheDocument();
 	});
 

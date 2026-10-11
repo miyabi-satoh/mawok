@@ -232,8 +232,18 @@ pub struct Config {
     pub autostart: bool,
     /// Pro で、設定をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
     pub sync_settings: bool,
+    /// Pro で、キー操作をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
+    pub sync_keys: bool,
+    /// Pro で、置き換え辞書をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
+    pub sync_replacements: bool,
+    /// Pro で、定型文をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
+    pub sync_snippets: bool,
+    /// Pro で、アクションをほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
+    pub sync_actions: bool,
     /// Pro で、テキストウィンドウの履歴をほかのデバイスと同期するか。同じく同期しない
     pub sync_history: bool,
+    /// 種類「設定」から外した設定ファイルの項目名。知らない名前は残し、同期では無視する
+    pub sync_excluded_settings: Vec<String>,
     pub language: Language,
     pub theme: Theme,
     /// 下書きウィンドウを常に最前面に表示するか
@@ -334,7 +344,12 @@ impl Default for Config {
             yielded_draft_keys: Vec::new(),
             autostart: true,
             sync_settings: true,
+            sync_keys: true,
+            sync_replacements: true,
+            sync_snippets: true,
+            sync_actions: true,
             sync_history: true,
+            sync_excluded_settings: Vec::new(),
             language: Language::default(),
             theme: Theme::default(),
             text_window_always_on_top: true,
@@ -376,7 +391,12 @@ mod key {
     pub const TEXT_WINDOW_KEYS: &str = "text_window_keys";
     pub const AUTOSTART: &str = "autostart";
     pub const SYNC_SETTINGS: &str = "sync_settings";
+    pub const SYNC_KEYS: &str = "sync_keys";
+    pub const SYNC_REPLACEMENTS: &str = "sync_replacements";
+    pub const SYNC_SNIPPETS: &str = "sync_snippets";
+    pub const SYNC_ACTIONS: &str = "sync_actions";
     pub const SYNC_HISTORY: &str = "sync_history";
+    pub const SYNC_EXCLUDED_SETTINGS: &str = "sync_excluded_settings";
     pub const LANGUAGE: &str = "language";
     pub const THEME: &str = "theme";
     pub const TEXT_WINDOW_ALWAYS_ON_TOP: &str = "text_window_always_on_top";
@@ -757,7 +777,24 @@ fn parse(text: &str) -> Result<(Config, Vec<String>, bool), String> {
     reader.read_str(key::HOTKEY, &mut config.hotkey);
     reader.read_bool(key::AUTOSTART, &mut config.autostart);
     reader.read_bool(key::SYNC_SETTINGS, &mut config.sync_settings);
+    reader.read_bool(key::SYNC_KEYS, &mut config.sync_keys);
+    reader.read_bool(key::SYNC_REPLACEMENTS, &mut config.sync_replacements);
+    reader.read_bool(key::SYNC_SNIPPETS, &mut config.sync_snippets);
+    reader.read_bool(key::SYNC_ACTIONS, &mut config.sync_actions);
     reader.read_bool(key::SYNC_HISTORY, &mut config.sync_history);
+    reader.read_with(
+        key::SYNC_EXCLUDED_SETTINGS,
+        &mut config.sync_excluded_settings,
+        |item| {
+            item.as_array().and_then(|items| {
+                items
+                    .iter()
+                    .map(toml_edit::Value::as_str)
+                    .collect::<Option<Vec<_>>>()
+                    .map(|items| items.into_iter().map(str::to_string).collect())
+            })
+        },
+    );
     reader.read_choice(key::LANGUAGE, &mut config.language);
     reader.read_choice(key::THEME, &mut config.theme);
     reader.read_bool(
@@ -1239,7 +1276,20 @@ fn apply(root: &mut Table, config: &Config, changes: &Changes<'_>) {
     scalar!(key::SYNC_SETTINGS, sync_settings, |v: &bool| Value::from(
         *v
     ));
+    scalar!(key::SYNC_KEYS, sync_keys, |v: &bool| Value::from(*v));
+    scalar!(key::SYNC_REPLACEMENTS, sync_replacements, |v: &bool| {
+        Value::from(*v)
+    });
+    scalar!(key::SYNC_SNIPPETS, sync_snippets, |v: &bool| Value::from(
+        *v
+    ));
+    scalar!(key::SYNC_ACTIONS, sync_actions, |v: &bool| Value::from(*v));
     scalar!(key::SYNC_HISTORY, sync_history, |v: &bool| Value::from(*v));
+    scalar!(
+        key::SYNC_EXCLUDED_SETTINGS,
+        sync_excluded_settings,
+        |v: &Vec<String>| { Value::Array(v.iter().cloned().map(Value::from).collect()) }
+    );
     scalar!(key::LANGUAGE, language, |v: &Language| Value::from(
         choice_name(v)
     ));
@@ -2162,7 +2212,12 @@ body = "git status"
             yielded_draft_keys: Vec::new(),
             autostart: false,
             sync_settings: false,
+            sync_keys: false,
+            sync_replacements: false,
+            sync_snippets: false,
+            sync_actions: false,
             sync_history: false,
+            sync_excluded_settings: Vec::new(),
             language: Language::En,
             theme: Theme::Light,
             text_window_always_on_top: false,

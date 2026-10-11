@@ -3,46 +3,53 @@
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SyncChoiceDialog from '$lib/components/sync-choice-dialog.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import * as Field from '$lib/components/ui/field';
 	import { Switch } from '$lib/components/ui/switch';
 	import type { Call } from '$lib/call';
 	import { m } from '$lib/paraglide/messages';
 	import type { SettingsView } from '$lib/settings.svelte';
+	import { syncSettingLabel } from '$lib/sync-choices';
 
-	/**
-	 * 設定の「アカウント」の「同期」のまとまり（docs/sync.md 冒頭・「食い違い」）。
-	 * choiceOpen は、どちらを使うか選ぶ画面を出しているか。トレイから頼まれたときは、呼んだ側が開く
-	 */
+	/** アカウントの同期。種類ごとの切り替えと、設定を1つずつ外す選択画面を置く。 */
 	let {
 		view,
 		call,
 		choiceOpen = $bindable(false)
 	}: { view: SettingsView; call: Call; choiceOpen: boolean } = $props();
+
+	let settingsOpen = $state(false);
+	const kinds = [
+		{ kind: 'settings', label: m.settings_sync_settings },
+		{ kind: 'keys', label: m.settings_sync_keys },
+		{ kind: 'replacements', label: m.settings_sync_replacements },
+		{ kind: 'snippets', label: m.settings_sync_snippets },
+		{ kind: 'actions', label: m.settings_sync_actions },
+		{ kind: 'history', label: m.settings_sync_history }
+	] as const;
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
-	<SettingsRow>
-		<Field.Field orientation="horizontal" class="min-h-8">
-			<Field.Label for="sync-settings">{m.settings_sync_settings()}</Field.Label>
-			<Switch
-				id="sync-settings"
-				bind:checked={
-					() => view.syncSettings, (enabled) => void call('set_sync_settings', { enabled })
-				}
-			/>
-		</Field.Field>
-	</SettingsRow>
-	<SettingsRow>
-		<Field.Field orientation="horizontal" class="min-h-8">
-			<Field.Label for="sync-history">{m.settings_sync_history()}</Field.Label>
-			<Switch
-				id="sync-history"
-				bind:checked={
-					() => view.syncHistory, (enabled) => void call('set_sync_history', { enabled })
-				}
-			/>
-		</Field.Field>
-	</SettingsRow>
+	{#each kinds as { kind, label } (kind)}
+		<SettingsRow>
+			<Field.Field orientation="horizontal" class="min-h-8">
+				<Field.Label for="sync-{kind}">{label()}</Field.Label>
+				<Switch
+					id="sync-{kind}"
+					bind:checked={
+						() => view.syncKinds[kind], (enabled) => void call('set_sync_kind', { kind, enabled })
+					}
+				/>
+			</Field.Field>
+		</SettingsRow>
+	{/each}
+	{#if view.syncKinds.settings}
+		<SettingsRow>
+			<Button variant="outline" size="sm" class="w-fit" onclick={() => (settingsOpen = true)}>
+				{m.settings_sync_select_settings()}
+			</Button>
+		</SettingsRow>
+	{/if}
 	{#if view.syncConflicts > 0}
 		<SettingsRow>
 			<p class="text-sm">{m.settings_sync_choice_notice()}</p>
@@ -52,4 +59,32 @@
 		</SettingsRow>
 	{/if}
 </SettingsSection>
+
+<AlertDialog.Root bind:open={settingsOpen}>
+	<AlertDialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+		<AlertDialog.Header>
+			<AlertDialog.Title>{m.settings_sync_select_settings_title()}</AlertDialog.Title>
+		</AlertDialog.Header>
+		<div class="flex flex-col gap-3">
+			{#each view.syncableSettings as name (name)}
+				<label class="flex items-center gap-2 text-sm">
+					<input
+						type="checkbox"
+						class="size-4 accent-primary"
+						checked={!view.syncExcludedSettings.includes(name)}
+						onchange={(event) =>
+							void call('set_sync_excluded_setting', {
+								name,
+								sync: event.currentTarget.checked
+							})}
+					/>
+					{syncSettingLabel(name)}
+				</label>
+			{/each}
+		</div>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>{m.settings_sync_select_settings_close()}</AlertDialog.Cancel>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
 <SyncChoiceDialog bind:open={choiceOpen} platform={view.platform} />

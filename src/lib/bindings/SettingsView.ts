@@ -4,6 +4,7 @@ import type { AiService } from "./AiService";
 import type { CharWidths } from "./CharWidths";
 import type { Device } from "./Device";
 import type { DraftKeys } from "./DraftKeys";
+import type { Kinds } from "./Kinds";
 import type { Language } from "./Language";
 import type { Platform } from "./Platform";
 import type { PunctuationStyle } from "./PunctuationStyle";
@@ -73,13 +74,17 @@ proAvailable: boolean, accountKeyStatus: Status,
  */
 mawokAccountSignedIn: boolean, 
 /**
- * 設定をほかのデバイスと同期するか
+ * デバイスごとに選ぶ同期する種類
  */
-syncSettings: boolean, 
+syncKinds: Kinds, 
 /**
- * テキストウィンドウの履歴をほかのデバイスと同期するか
+ * 種類「設定」から外した設定ファイルの項目名
  */
-syncHistory: boolean, 
+syncExcludedSettings: Array<string>, 
+/**
+ * 種類「設定」から外せる設定ファイルの項目名
+ */
+syncableSettings: Array<string>, 
 /**
  * ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
  */

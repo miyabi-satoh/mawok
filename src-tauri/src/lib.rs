@@ -311,10 +311,12 @@ struct SettingsView {
     account_key_status: account_key::Status,
     /// Mawok のアカウントトークンを資格情報管理から読めたか
     mawok_account_signed_in: bool,
-    /// 設定をほかのデバイスと同期するか
-    sync_settings: bool,
-    /// テキストウィンドウの履歴をほかのデバイスと同期するか
-    sync_history: bool,
+    /// デバイスごとに選ぶ同期する種類
+    sync_kinds: sync::Kinds,
+    /// 種類「設定」から外した設定ファイルの項目名
+    sync_excluded_settings: Vec<String>,
+    /// 種類「設定」から外せる設定ファイルの項目名
+    syncable_settings: Vec<String>,
     /// ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
     sync_conflicts: u32,
     punctuation_style: PunctuationStyle,
@@ -366,8 +368,12 @@ fn settings_view(state: &AppState) -> SettingsView {
         .is_some_and(|pro| pro.available_at(pro::now()));
     SettingsView {
         revision,
-        sync_settings: config.sync_settings,
-        sync_history: config.sync_history,
+        sync_kinds: sync::kinds(&config),
+        sync_excluded_settings: config.sync_excluded_settings.clone(),
+        syncable_settings: sync::SYNCABLE_SETTING_NAMES
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect(),
         sync_conflicts: shown_sync_conflicts(state, &config, pro_available),
         locale: lang.code(),
         ai_service: config.ai_service,
@@ -1756,6 +1762,10 @@ fn remember_sync_conflicts(app: &AppHandle, count: usize) {
     }
 }
 
+fn sync_is_enabled(config: &Config) -> bool {
+    sync::kinds(config).any()
+}
+
 async fn run_settings_sync(app: &AppHandle) {
     let (config, generation, record_generation) = {
         let state = app.state::<AppState>();
@@ -1763,11 +1773,8 @@ async fn run_settings_sync(app: &AppHandle) {
         let record_generation = state.sync_record_generation.load(Ordering::SeqCst);
         (config, generation, record_generation)
     };
-    let kinds = sync::Kinds {
-        settings: config.sync_settings,
-        history: config.sync_history,
-    };
-    if !kinds.any() {
+    let kinds = sync::kinds(&config);
+    if !sync_is_enabled(&config) {
         return;
     }
     let Some(SyncAccess {
@@ -1802,7 +1809,6 @@ async fn run_settings_sync(app: &AppHandle) {
         &config,
         before.clone(),
         local_history.as_ref(),
-        kinds,
     )
     .await;
     match synced {
@@ -1860,7 +1866,7 @@ async fn run_settings_sync(app: &AppHandle) {
             } else {
                 result.state
             };
-            let conflicts = record.conflict_count();
+            let conflicts = record.active_conflict_count(&config);
             if let Err(error) = save_sync_record(app, record).await {
                 warn!("couldn't save sync state: {error}");
             }
@@ -1901,22 +1907,12 @@ async fn run_settings_sync(app: &AppHandle) {
 
 /// 同期する種類を変える（docs/sync.md 冒頭）。オンにした種類は、すぐに同期する。
 /// オフにした種類の記録は消さないので、オンに戻すと続きから合わせる
-async fn set_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
+async fn change_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
     let _ = save_config(app, change)?;
     apply_config(app);
     mark_paused_sync_kinds(app).await;
     request_sync(app);
     Ok(())
-}
-
-/// 今の設定で同期する種類。
-fn sync_kinds(app: &AppHandle) -> sync::Kinds {
-    let state = app.state::<AppState>();
-    let config = state.config.lock().unwrap();
-    sync::Kinds {
-        settings: config.sync_settings,
-        history: config.sync_history,
-    }
 }
 
 /// オフにした種類を、同期の記録に残す。オフにした後の同期の回に任せると、両方オフの間（通信しない）と
@@ -1925,13 +1921,13 @@ fn sync_kinds(app: &AppHandle) -> sync::Kinds {
 async fn mark_paused_sync_kinds(app: &AppHandle) {
     let state = app.state::<AppState>();
     let _commit = state.sync_commit.lock().await;
-    let kinds = sync_kinds(app);
     let path = state.sync_state_path.clone();
+    let config = state.config.lock().unwrap().clone();
     let saved = run_blocking(move || {
         let Some(mut record) = sync::load(&path) else {
             return Ok(());
         };
-        if record.pause(kinds) {
+        if record.pause(&config) {
             sync::save(&path, &record)
         } else {
             Ok(())
@@ -1946,21 +1942,44 @@ async fn mark_paused_sync_kinds(app: &AppHandle) {
 /// 同期の記録を保存する。通信の間にスイッチがオフになった種類は、前の記録から作った結果で
 /// オフの印を上書きしないよう、保存する前に置き直す。`sync_commit` の中で呼ぶ
 async fn save_sync_record(app: &AppHandle, mut record: sync::State) -> Result<(), String> {
-    record.pause(sync_kinds(app));
+    let config = {
+        let state = app.state::<AppState>();
+        let config = state.config.lock().unwrap().clone();
+        config
+    };
+    record.pause(&config);
     let path = app.state::<AppState>().sync_state_path.clone();
     run_blocking(move || sync::save(&path, &record)).await?
 }
 
 #[tauri::command]
-async fn set_sync_settings(app: AppHandle, enabled: bool) -> Result<(), String> {
-    info!("set sync settings: {enabled}");
-    set_sync_kind(&app, |config| config.sync_settings = enabled).await
+async fn set_sync_kind(app: AppHandle, kind: sync::SyncKind, enabled: bool) -> Result<(), String> {
+    info!("set sync kind {kind:?}: {enabled}");
+    change_sync_kind(&app, |config| match kind {
+        sync::SyncKind::Settings => config.sync_settings = enabled,
+        sync::SyncKind::Keys => config.sync_keys = enabled,
+        sync::SyncKind::Replacements => config.sync_replacements = enabled,
+        sync::SyncKind::Snippets => config.sync_snippets = enabled,
+        sync::SyncKind::Actions => config.sync_actions = enabled,
+        sync::SyncKind::History => config.sync_history = enabled,
+    })
+    .await
 }
 
 #[tauri::command]
-async fn set_sync_history(app: AppHandle, enabled: bool) -> Result<(), String> {
-    info!("set sync history: {enabled}");
-    set_sync_kind(&app, |config| config.sync_history = enabled).await
+async fn set_sync_excluded_setting(app: AppHandle, name: String, sync: bool) -> Result<(), String> {
+    if !sync::known_syncable_setting(&name) {
+        return Err("unknown syncable setting".to_string());
+    }
+    change_sync_kind(&app, move |config| {
+        config
+            .sync_excluded_settings
+            .retain(|excluded| excluded != &name);
+        if !sync {
+            config.sync_excluded_settings.push(name);
+        }
+    })
+    .await
 }
 
 /// 食い違いを選ぶ画面で、窓口と話せなかった。
@@ -1994,16 +2013,13 @@ async fn sync_conflicts_held(app: &AppHandle) -> Result<SyncConflictList, String
     let app_state = app.state::<AppState>();
     let (mut config, generation) = config_with_generation(&app_state);
     let record_generation = app_state.sync_record_generation.load(Ordering::SeqCst);
-    if !config.sync_settings {
-        return Ok(none());
-    }
     let access = sync_access(app)
         .await
         .ok_or_else(|| SYNC_UNREACHABLE.to_string())?;
     let Some(mut record) = load_sync_record(app, &access.key_id).await else {
         return Ok(none());
     };
-    let remote = sync::read_conflicts(access.transport(), &record)
+    let remote = sync::read_conflicts(access.transport(), &config, &record)
         .await
         .map_err(|error| {
             warn!("couldn't read the settings changed on both devices: {error}");
@@ -2026,7 +2042,7 @@ async fn sync_conflicts_held(app: &AppHandle) -> Result<SyncConflictList, String
     }
     let items = sync::conflicts(&config, &record, &remote);
     Ok(SyncConflictList {
-        unreadable: record.conflict_count() > items.len(),
+        unreadable: record.active_conflict_count(&config) > items.len(),
         items,
     })
 }
@@ -2100,7 +2116,7 @@ async fn resolve_sync_conflicts_held(
     let Some(before) = load_sync_record(app, &access.key_id).await else {
         return Ok(stale());
     };
-    let remote = sync::read_conflicts(access.transport(), &before)
+    let remote = sync::read_conflicts(access.transport(), &config, &before)
         .await
         .map_err(|error| {
             warn!("couldn't read the settings changed on both devices: {error}");
@@ -2175,7 +2191,7 @@ async fn commit_sync_change(
             None => return Ok(None),
         }
     }
-    let conflicts = record.conflict_count();
+    let conflicts = record.active_conflict_count(change.config);
     save_sync_record(app, record).await.map_err(|error| {
         warn!("couldn't save sync state: {error}");
         error
@@ -4830,8 +4846,8 @@ pub fn run() {
             dismiss,
             page_ready,
             get_settings,
-            set_sync_settings,
-            set_sync_history,
+            set_sync_kind,
+            set_sync_excluded_setting,
             sync_conflicts,
             resolve_sync_conflicts,
             take_sync_choice_request,
@@ -5019,9 +5035,6 @@ pub fn run() {
             let config_path = app.path().app_config_dir()?.join(config::FILE_NAME);
             let pro_state_path = app.path().app_config_dir()?.join(pro::STATE_FILE_NAME);
             let sync_state_path = app.path().app_config_dir()?.join(sync::STATE_FILE_NAME);
-            // つながらないまま起動しても、前に止めた食い違いを知らせる
-            let sync_conflicts =
-                sync::load(&sync_state_path).map_or(0, |record| record.conflict_count());
             let pro_state = match pro::load(&pro_state_path) {
                 Ok(state) => state,
                 Err(error) => {
@@ -5032,6 +5045,9 @@ pub fn run() {
             // 読むとファイルができるので、その前に見る
             let config_missing = config::is_missing(&config_path);
             let (mut config, config_problem) = config::load_or_create(&config_path);
+            // つながらないまま起動しても、今このデバイスで同期する食い違いだけを知らせる
+            let sync_conflicts = sync::load(&sync_state_path)
+                .map_or(0, |record| record.active_conflict_count(&config));
             let first_launch = is_first_launch(config_missing, config_problem.as_ref());
             let mut problems = Problems::default();
             match &config_problem {
@@ -5181,6 +5197,20 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_sync_kinds_off_do_not_start_a_sync() {
+        let config = Config {
+            sync_settings: false,
+            sync_keys: false,
+            sync_replacements: false,
+            sync_snippets: false,
+            sync_actions: false,
+            sync_history: false,
+            ..Config::default()
+        };
+        assert!(!sync_is_enabled(&config));
+    }
 
     #[test]
     fn takes_the_callback_even_behind_a_silent_connection() {

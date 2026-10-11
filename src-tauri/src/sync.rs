@@ -125,13 +125,9 @@ pub struct State {
     /// 読み捨てた項目と、その `seq`。新しい版が書いた項目を壊さないよう、窓口の値が変わるまで書かない。
     #[serde(default)]
     pub ignored: BTreeMap<String, u64>,
-    /// 設定の同期をオフにしている間、読まずに置いてある位置。オンに戻したら、ここから読む
-    /// （docs/sync.md「同期する種類」）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settings_paused_at: Option<u64>,
-    /// 履歴の同期をオフにしている間、読まずに置いてある位置。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history_paused_at: Option<u64>,
+    /// 読まずに置いてある種類・設定項目ごとの位置（docs/sync.md「同期する種類」）。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub paused: BTreeMap<String, u64>,
 }
 
 impl State {
@@ -178,64 +174,122 @@ impl State {
         self.retired.insert(name, seq);
     }
 
-    /// 設定の項目を次に読む位置。
-    fn settings_since(&self) -> u64 {
-        self.settings_paused_at.unwrap_or(self.since)
-    }
-
-    /// まだ窓口の写しの設定を読み終えたことが無い。記録が無いデバイスと同じく、初めての同期として合わせる。
-    fn awaits_first_read(&self) -> bool {
-        self.settings_since() == 0
-    }
-
     /// この回に読み始める位置。オフにしていた種類をオンに戻した回は、置いてあった位置まで戻る。
     /// もう見た項目は `seq` で飛ばすので、戻って読んでも入れ直さない
-    fn read_since(&self, kinds: Kinds) -> u64 {
-        [
-            Some(self.since),
-            self.settings_paused_at.filter(|_| kinds.settings),
-            self.history_paused_at.filter(|_| kinds.history),
-        ]
-        .into_iter()
-        .flatten()
-        .min()
-        .unwrap_or(self.since)
+    fn read_since(&self, config: &Config) -> u64 {
+        std::iter::once(self.since)
+            .chain(
+                self.paused
+                    .iter()
+                    .filter(|(group, _)| !paused_group(config, group))
+                    .map(|(_, since)| *since),
+            )
+            .min()
+            .unwrap_or(self.since)
     }
 
     /// 今オフにしている種類に、読まずに置いてある位置を置く（docs/sync.md 冒頭）。もう置いてあれば変えない。
     /// スイッチを切り替えたときと、記録を保存する前に通す。変えたかを返す
-    pub fn pause(&mut self, kinds: Kinds) -> bool {
+    pub fn pause(&mut self, config: &Config) -> bool {
         let mut changed = false;
-        if !kinds.settings && self.settings_paused_at.is_none() {
-            self.settings_paused_at = Some(self.since);
-            changed = true;
-        }
-        if !kinds.history && self.history_paused_at.is_none() {
-            self.history_paused_at = Some(self.since);
-            changed = true;
+        for group in paused_groups(config) {
+            if !self.paused.contains_key(&group) {
+                self.paused.insert(group, self.since);
+                changed = true;
+            }
         }
         changed
     }
 
-    /// 利用者が選ぶのを待っている食い違いの数。
-    pub fn conflict_count(&self) -> usize {
+    pub fn active_conflict_count(&self, config: &Config) -> usize {
         self.conflicts
             .iter()
-            .filter(|name| key_of(name).is_some_and(|key| choosable(&key)))
+            .filter(|name| {
+                key_of(name).is_some_and(|key| choosable(&key) && sync_enabled(config, &key))
+            })
             .count()
     }
 }
 
 /// 同期する種類（docs/sync.md 冒頭）。オフの種類は読みも書きもしない。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "snake_case")]
+pub enum SyncKind {
+    Settings,
+    Keys,
+    Replacements,
+    Snippets,
+    Actions,
+    History,
+}
+
+impl SyncKind {
+    pub const ALL: [Self; 6] = [
+        Self::Settings,
+        Self::Keys,
+        Self::Replacements,
+        Self::Snippets,
+        Self::Actions,
+        Self::History,
+    ];
+
+    fn group(self) -> &'static str {
+        match self {
+            Self::Settings => "settings",
+            Self::Keys => "keys",
+            Self::Replacements => "replacements",
+            Self::Snippets => "snippets",
+            Self::Actions => "actions",
+            Self::History => "history",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
 pub struct Kinds {
     pub settings: bool,
+    pub keys: bool,
+    pub replacements: bool,
+    pub snippets: bool,
+    pub actions: bool,
     pub history: bool,
 }
 
 impl Kinds {
     pub fn any(self) -> bool {
-        self.settings || self.history
+        self.settings
+            || self.keys
+            || self.replacements
+            || self.snippets
+            || self.actions
+            || self.history
+    }
+
+    pub fn enabled(self, kind: SyncKind) -> bool {
+        match kind {
+            SyncKind::Settings => self.settings,
+            SyncKind::Keys => self.keys,
+            SyncKind::Replacements => self.replacements,
+            SyncKind::Snippets => self.snippets,
+            SyncKind::Actions => self.actions,
+            SyncKind::History => self.history,
+        }
+    }
+}
+
+pub fn kinds(config: &Config) -> Kinds {
+    Kinds {
+        settings: config.sync_settings,
+        keys: config.sync_keys,
+        replacements: config.sync_replacements,
+        snippets: config.sync_snippets,
+        actions: config.sync_actions,
+        history: config.sync_history,
     }
 }
 
@@ -380,6 +434,16 @@ pub fn setting_item(name: &str) -> ItemKey {
     ItemKey::new(SETTINGS, setting_id(name))
 }
 
+/// 設定ファイルの項目名に対応する窓口の項目。OS ごとに分ける書体だけは、ここで接尾辞を付ける。
+fn syncable_setting_item(name: &str) -> ItemKey {
+    let wire_name = if name == "text_font_family" {
+        format!("{name}_{}", platform_suffix())
+    } else {
+        name.to_string()
+    };
+    setting_item(&wire_name)
+}
+
 /// 設定ファイルと同じ項目名で書く。黙って外した操作は、設定ファイルと同じく書かない
 /// （書くと、ほかのデバイスで、重なりが解けても既定のキーに戻らなくなる）。
 fn draft_keys_value(config: &Config) -> Value {
@@ -411,6 +475,19 @@ enum Kind<'a> {
     Snippet(&'a str),
     Action(&'a str),
     Order(&'a str),
+}
+
+impl Kind<'_> {
+    fn sync_kind(self) -> SyncKind {
+        match self {
+            Self::Setting(name) if is_key_setting(name) => SyncKind::Keys,
+            Self::Setting(_) => SyncKind::Settings,
+            Self::Replacement(_) | Self::Order("replacements") => SyncKind::Replacements,
+            Self::Snippet(_) | Self::Order("snippets") => SyncKind::Snippets,
+            Self::Action(_) | Self::Order("actions") => SyncKind::Actions,
+            Self::Order(_) => unreachable!("only the three row orders are known"),
+        }
+    }
 }
 
 /// 窓口の別用途の項目は、古い版が消したり書き戻したりしないよう最初に除く。
@@ -447,6 +524,116 @@ fn choosable(key: &ItemKey) -> bool {
     kind(key).is_some() && !is_order(key)
 }
 
+/// この設定ファイルの項目名を、種類「設定」から外せる。画面に渡す一覧と窓口の id の検査を同じ定義から作る。
+pub const SYNCABLE_SETTING_NAMES: &[&str] = &[
+    "language",
+    "theme",
+    "text_window_always_on_top",
+    "hide_text_window_on_blur",
+    "show_text_window_buttons",
+    "text_history_size",
+    "trim_trailing_whitespace",
+    "punctuation_style",
+    "char_widths",
+    "exclude_from_clipboard_history",
+    "text_font_size",
+    "text_color_light",
+    "text_color_dark",
+    "input_guidance",
+    "ai_service",
+    "ai_models",
+    "text_font_family",
+];
+
+pub fn known_syncable_setting(name: &str) -> bool {
+    SYNCABLE_SETTING_NAMES.contains(&name)
+}
+
+fn is_key_setting(name: &str) -> bool {
+    ["hotkey", "text_window_keys"]
+        .into_iter()
+        .any(|setting| name == format!("{setting}_{}", platform_suffix()))
+}
+
+fn setting_config_name(name: &str) -> &str {
+    let suffix = format!("_{}", platform_suffix());
+    name.strip_suffix(&suffix).unwrap_or(name)
+}
+
+fn sync_enabled(config: &Config, key: &ItemKey) -> bool {
+    let Some(kind) = kind(key) else {
+        return false;
+    };
+    if !kinds(config).enabled(kind.sync_kind()) {
+        return false;
+    }
+    !matches!(kind, Kind::Setting(name) if !is_key_setting(name) && config.sync_excluded_settings.iter().any(|excluded| excluded == setting_config_name(name)))
+}
+
+fn paused_groups(config: &Config) -> Vec<String> {
+    let mut groups = SyncKind::ALL
+        .into_iter()
+        .filter(|kind| !kinds(config).enabled(*kind))
+        .map(|kind| kind.group().to_string())
+        .collect::<Vec<_>>();
+    groups.extend(
+        config
+            .sync_excluded_settings
+            .iter()
+            .filter(|name| known_syncable_setting(name))
+            .map(|name| syncable_setting_item(name).name()),
+    );
+    groups
+}
+
+fn paused_group(config: &Config, group: &str) -> bool {
+    SyncKind::ALL
+        .into_iter()
+        .find(|kind| kind.group() == group)
+        .is_some_and(|kind| !kinds(config).enabled(kind))
+        || config
+            .sync_excluded_settings
+            .iter()
+            .filter(|name| known_syncable_setting(name))
+            .any(|name| syncable_setting_item(name).name() == group)
+        // 種類「設定」がオフの間に除外をやめた項目は、まだ読んでいない。種類をオンに戻して読む回まで位置を残す
+        || (!config.sync_settings
+            && key_of(group).is_some_and(
+                |key| matches!(kind(&key), Some(Kind::Setting(name)) if !is_key_setting(name)),
+            ))
+}
+
+/// 同期の開始時点で決めた、まとまりごとの「初めての同期」。当て直しでも同じ記録を使う。
+#[derive(Clone)]
+struct Initial {
+    no_record: bool,
+    since: u64,
+    paused: BTreeMap<String, u64>,
+}
+
+impl Initial {
+    fn new(no_record: bool, state: &State) -> Self {
+        Self {
+            no_record,
+            since: state.since,
+            paused: state.paused.clone(),
+        }
+    }
+
+    fn for_kind(&self, kind: SyncKind) -> bool {
+        self.no_record || self.paused.get(kind.group()).copied().unwrap_or(self.since) == 0
+    }
+
+    fn for_key(&self, key: &ItemKey) -> bool {
+        let Some(kind) = kind(key) else {
+            return false;
+        };
+        self.for_kind(kind.sync_kind())
+            || matches!(kind, Kind::Setting(name) if !is_key_setting(name))
+                && self.paused.get(&key.name()).copied().unwrap_or(self.since) == 0
+    }
+}
+
 /// テキストウィンドウの履歴の全体を置く項目（docs/sync.md「履歴の同期」）。
 fn history_item() -> ItemKey {
     ItemKey::new(HISTORY, HISTORY_ID)
@@ -458,66 +645,34 @@ fn handled(key: &ItemKey) -> bool {
 }
 
 fn known_setting(name: &str) -> bool {
-    matches!(
-        name,
-        "language"
-            | "theme"
-            | "text_window_always_on_top"
-            | "hide_text_window_on_blur"
-            | "show_text_window_buttons"
-            | "text_history_size"
-            | "trim_trailing_whitespace"
-            | "punctuation_style"
-            | "char_widths"
-            | "exclude_from_clipboard_history"
-            | "text_font_size"
-            | "text_color_light"
-            | "text_color_dark"
-            | "input_guidance"
-            | "ai_service"
-            | "ai_models"
-    ) || ["hotkey", "text_window_keys", "text_font_family"]
-        .into_iter()
-        .any(|platform_name| name == format!("{platform_name}_{}", platform_suffix()))
+    known_syncable_setting(setting_config_name(name)) || is_key_setting(name)
 }
 
 /// 設定を、窓口に置く粒度の平文値へ変換する。同期しない項目はここに現れない。
 pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
     let mut items = BTreeMap::new();
-    for (id, value) in [
-        ("language", json(config.language)),
-        ("theme", json(config.theme)),
-        (
-            "text_window_always_on_top",
-            json(config.text_window_always_on_top),
-        ),
-        (
-            "hide_text_window_on_blur",
-            json(config.hide_text_window_on_blur),
-        ),
-        (
-            "show_text_window_buttons",
-            json(config.show_text_window_buttons),
-        ),
-        ("text_history_size", json(config.text_history_size)),
-        (
-            "trim_trailing_whitespace",
-            json(config.trim_trailing_whitespace),
-        ),
-        ("punctuation_style", json(config.punctuation_style)),
-        ("char_widths", json(config.char_widths)),
-        (
-            "exclude_from_clipboard_history",
-            json(config.exclude_from_clipboard_history),
-        ),
-        ("text_font_size", json(config.text_font_size)),
-        ("text_color_light", json(config.text_color_light.clone())),
-        ("text_color_dark", json(config.text_color_dark.clone())),
-        ("input_guidance", json(config.input_guidance.clone())),
-        ("ai_service", json(config.ai_service)),
-        ("ai_models", json(config.ai_models.clone())),
-    ] {
-        set(&mut items, setting_id(id), value);
+    for name in SYNCABLE_SETTING_NAMES {
+        let value = match *name {
+            "language" => json(config.language),
+            "theme" => json(config.theme),
+            "text_window_always_on_top" => json(config.text_window_always_on_top),
+            "hide_text_window_on_blur" => json(config.hide_text_window_on_blur),
+            "show_text_window_buttons" => json(config.show_text_window_buttons),
+            "text_history_size" => json(config.text_history_size),
+            "trim_trailing_whitespace" => json(config.trim_trailing_whitespace),
+            "punctuation_style" => json(config.punctuation_style),
+            "char_widths" => json(config.char_widths),
+            "exclude_from_clipboard_history" => json(config.exclude_from_clipboard_history),
+            "text_font_family" => json(config.text_font_family.clone()),
+            "text_font_size" => json(config.text_font_size),
+            "text_color_light" => json(config.text_color_light.clone()),
+            "text_color_dark" => json(config.text_color_dark.clone()),
+            "input_guidance" => json(config.input_guidance.clone()),
+            "ai_service" => json(config.ai_service),
+            "ai_models" => json(config.ai_models.clone()),
+            _ => unreachable!("all syncable setting names have a value"),
+        };
+        items.insert(syncable_setting_item(name), value);
     }
     let suffix = platform_suffix();
     set(
@@ -529,11 +684,6 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
         &mut items,
         setting_id(&format!("text_window_keys_{suffix}")),
         draft_keys_value(config),
-    );
-    set(
-        &mut items,
-        setting_id(&format!("text_font_family_{suffix}")),
-        json(config.text_font_family.clone()),
     );
     for row in &config.replacements {
         if row.sync {
@@ -588,6 +738,14 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
         );
     }
     items
+}
+
+/// 今のデバイスで同期を許可している項目だけ。`config_items` は食い違いと受信時の比較にも使うため、全項目を返す。
+fn sync_items(config: &Config) -> BTreeMap<ItemKey, Value> {
+    config_items(config)
+        .into_iter()
+        .filter(|(key, _)| sync_enabled(config, key))
+        .collect()
 }
 
 fn row_value<T: Serialize>(row: &T) -> Value {
@@ -1032,6 +1190,33 @@ fn dedupe_initial_rows<T: SyncRow>(rows: &mut Vec<T>, on_server: &BTreeSet<Strin
     before != rows.len()
 }
 
+/// 初めて同期する種類だけ、同じ内容で別の id の行を 1 つにする。行ごとの id を作らず、種類の開始状態で決める。
+fn dedupe_initial_config_rows(config: &mut Config, state: &State, initial: &Initial) -> bool {
+    // 記録にある行（この回に窓口から入れた行と、前の回に自分が書いた行）が、窓口にある行
+    let on_server = |prefix: &str| {
+        let prefix = ItemKey::new(SETTINGS, prefix).name();
+        state
+            .items
+            .keys()
+            .filter_map(|name| name.strip_prefix(&prefix))
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>()
+    };
+    let mut changed = false;
+    if initial.for_kind(SyncKind::Replacements) {
+        changed |= dedupe_initial_rows(&mut config.replacements, &on_server("r_"));
+    }
+    if initial.for_kind(SyncKind::Snippets) {
+        changed |= dedupe_initial_rows(&mut config.snippets, &on_server("n_"));
+    }
+    if initial.for_kind(SyncKind::Actions) {
+        if let Some(actions) = &mut config.actions {
+            changed |= dedupe_initial_rows(actions, &on_server("a_"));
+        }
+    }
+    changed
+}
+
 #[derive(Debug, Clone)]
 pub struct RemoteItem {
     pub key: ItemKey,
@@ -1096,6 +1281,7 @@ pub struct Reconcile {
 
 /// 通信を含まない同期の決まり。読む結果を検査済みの `RemoteItem` として渡し、次の設定・記録・書く項目を返す。
 /// 書く項目の記録は、窓口に書けてから `sync_once_with` が置く。
+#[cfg(test)]
 pub fn reconcile(
     local: &Config,
     old: Option<State>,
@@ -1103,15 +1289,10 @@ pub fn reconcile(
     key_id: &str,
     since: u64,
 ) -> Reconcile {
-    let initial = old.as_ref().is_none_or(State::awaits_first_read);
-    reconcile_as(
-        local,
-        old.unwrap_or_default(),
-        initial,
-        remote,
-        key_id,
-        since,
-    )
+    let no_record = old.is_none();
+    let state = old.unwrap_or_default();
+    let initial = Initial::new(no_record, &state);
+    reconcile_as(local, state, &initial, remote, key_id, since)
 }
 
 /// まだ見ていない、この版が扱う項目か。
@@ -1297,7 +1478,7 @@ fn receive_key_pair(
 fn reconcile_as(
     local: &Config,
     mut state: State,
-    initial: bool,
+    initial: &Initial,
     remote: &[RemoteItem],
     key_id: &str,
     since: u64,
@@ -1323,7 +1504,11 @@ fn reconcile_as(
         .retain(|name| !key_of(name).is_some_and(|key| detached(&config, &key)));
     let mut changed = false;
     let local_items = config_items(local);
-    let mut sorted = remote.to_vec();
+    let mut sorted: Vec<RemoteItem> = remote
+        .iter()
+        .filter(|remote| sync_enabled(local, &remote.key))
+        .cloned()
+        .collect();
     // 言語を先に入れてから、None のアクションを既定から実体化する。並びは最後にしないと同じ回の行を並べ替えられない。
     // 外した印は行より先に入れる。行が先に既定のアクションを実体化すると、外された既定のアクションを残せない。
     sorted.sort_by_key(|item| {
@@ -1351,33 +1536,25 @@ fn reconcile_as(
                     &mut config,
                     &mut state,
                     &local_items,
-                    initial,
+                    initial.for_key(&sorted[hotkey].key),
                     &sorted[hotkey],
                     &sorted[keys],
                 );
             }
             Some((hotkey, keys)) if index == hotkey.max(keys) => {}
-            _ => changed |= receive(&mut config, &mut state, &local_items, initial, remote),
+            _ => {
+                changed |= receive(
+                    &mut config,
+                    &mut state,
+                    &local_items,
+                    initial.for_key(&remote.key),
+                    remote,
+                )
+            }
         }
     }
-    if initial {
-        // 記録にある行（この回に窓口から入れた行と、前の回に自分が書いた行）が、窓口にある行
-        let on_server = |prefix: &str| {
-            let prefix = ItemKey::new(SETTINGS, prefix).name();
-            state
-                .items
-                .keys()
-                .filter_map(|name| name.strip_prefix(&prefix))
-                .map(str::to_string)
-                .collect::<BTreeSet<_>>()
-        };
-        changed |= dedupe_initial_rows(&mut config.replacements, &on_server("r_"));
-        changed |= dedupe_initial_rows(&mut config.snippets, &on_server("n_"));
-        if let Some(actions) = &mut config.actions {
-            changed |= dedupe_initial_rows(actions, &on_server("a_"));
-        }
-    }
-    let now = config_items(&config);
+    changed |= dedupe_initial_config_rows(&mut config, &state, initial);
+    let now = sync_items(&config);
     let hashes: BTreeMap<String, [u8; 32]> = now
         .iter()
         .map(|(key, value)| (key.name(), hash_plain(value)))
@@ -1393,22 +1570,24 @@ fn reconcile_as(
     // 既定で同期する既定のアクションを、一度も書かないまま同期から外した。窓口に項目が無いと、ほかのデバイスには
     // 並びから消えたことしか伝わらず、消した行と見分けられないので、外した印を書く。
     // 何回かに分けて書くときに、その行を抜いた並びだけが先に届かないよう、ほかの項目より前に積む
-    for default in actions::default_actions(crate::i18n::Lang::En) {
-        let key = ItemKey::new(SETTINGS, row_id('a', &default.id));
-        let name = key.name();
-        if default.sync
-            && detached(&config, &key)
-            && !state.items.contains_key(&name)
-            && !state.retired.contains_key(&name)
-            && !held(&state, &name)
-        {
-            writes.push(Write {
-                key,
-                base_seq: None,
-                deleted: false,
-                plain: None,
-                detached: true,
-            });
+    if kinds(&config).actions {
+        for default in actions::default_actions(crate::i18n::Lang::En) {
+            let key = ItemKey::new(SETTINGS, row_id('a', &default.id));
+            let name = key.name();
+            if default.sync
+                && detached(&config, &key)
+                && !state.items.contains_key(&name)
+                && !state.retired.contains_key(&name)
+                && !held(&state, &name)
+            {
+                writes.push(Write {
+                    key,
+                    base_seq: None,
+                    deleted: false,
+                    plain: None,
+                    detached: true,
+                });
+            }
         }
     }
     for (key, value) in &now {
@@ -1433,7 +1612,11 @@ fn reconcile_as(
         let Some(key) = key_of(name) else {
             continue;
         };
-        if kind(&key).is_none() || now.contains_key(&key) || held(&state, name) {
+        if kind(&key).is_none()
+            || !sync_enabled(&config, &key)
+            || now.contains_key(&key)
+            || held(&state, name)
+        {
             continue;
         }
         let detached = detached(&config, &key);
@@ -1609,12 +1792,13 @@ fn remote_sync_value(config: &Config, remote: Option<&RemoteItem>) -> Option<Syn
 }
 
 /// 止めている項目のうち、利用者が選ぶもの。
-fn held_conflicts(state: &State) -> impl Iterator<Item = ItemKey> + '_ {
+fn held_conflicts<'a>(config: &'a Config, state: &'a State) -> impl Iterator<Item = ItemKey> + 'a {
     state
         .conflicts
         .iter()
         .filter_map(|name| key_of(name))
         .filter(choosable)
+        .filter(move |key| sync_enabled(config, key))
 }
 
 /// `remote`（`read_conflicts_with` が読んだもの）のうち、`key` の今の項目。
@@ -1628,7 +1812,7 @@ fn current_item<'a>(remote: &'a [RemoteItem], key: &ItemKey) -> Option<&'a Remot
 /// 選ぶ画面に出す、食い違っている項目の一覧。設定の項目を先に、行を後に並べる。
 /// 行の「消した」は値として出す。設定の項目は消せないので、窓口に値が無いものは出さない。
 pub fn conflicts(config: &Config, state: &State, remote: &[RemoteItem]) -> Vec<SyncConflict> {
-    let mut list: Vec<SyncConflict> = held_conflicts(state)
+    let mut list: Vec<SyncConflict> = held_conflicts(config, state)
         .filter_map(|key| {
             let item = current_item(remote, &key);
             let other_device = remote_sync_value(config, item)?;
@@ -1655,7 +1839,7 @@ pub fn release_detached(
 ) -> Option<(Config, State)> {
     let (mut config, mut state) = (config.clone(), state.clone());
     let mut released = false;
-    let held: Vec<ItemKey> = held_conflicts(&state).collect();
+    let held: Vec<ItemKey> = held_conflicts(&config, &state).collect();
     for key in held {
         if let Some(item) = current_item(remote, &key) {
             released |= release_detached_item(&mut config, &mut state, item);
@@ -1668,9 +1852,10 @@ pub fn release_detached(
 /// まとめて1回で読む（1項目ずつ読むと、項目の数だけ窓口の回数の上限を使う）。
 pub async fn read_conflicts_with<T: SyncTransport>(
     transport: &mut T,
+    config: &Config,
     state: &State,
 ) -> Result<Vec<RemoteItem>, Error> {
-    let held: BTreeSet<ItemKey> = held_conflicts(state).collect();
+    let held: BTreeSet<ItemKey> = held_conflicts(config, state).collect();
     let Some(since) = held
         .iter()
         .map(|key| state.seen_seq(&key.name()).unwrap_or(0))
@@ -1752,7 +1937,8 @@ pub fn resolve(
         }
     }
     let (key_id, since) = (state.key_id.clone(), state.since);
-    let mut result = reconcile_as(config, state, false, &incoming, &key_id, since);
+    let initial = Initial::new(false, &state);
+    let mut result = reconcile_as(config, state, &initial, &incoming, &key_id, since);
     for key in absent {
         let name = key.name();
         remove_local(&mut result.config, &key);
@@ -1866,10 +2052,9 @@ pub async fn sync_once_with<T: SyncTransport>(
     state: Option<State>,
     key_id: &str,
     history: Option<&History>,
-    kinds: Kinds,
 ) -> Result<SyncResult, Box<Failure>> {
     let read = match transport
-        .read(state.as_ref().map_or(0, |state| state.read_since(kinds)))
+        .read(state.as_ref().map_or(0, |state| state.read_since(config)))
         .await
     {
         Ok(read) => read,
@@ -1883,39 +2068,32 @@ pub async fn sync_once_with<T: SyncTransport>(
     };
     // 窓口が写しで組み直すよう知らせたら、前の記録は使えない
     let state = state.filter(|_| !read.reset);
-    let initial = state.as_ref().is_none_or(State::awaits_first_read);
-    // オフの種類は、この回に読んだ分を入れていないので、オンに戻したときに読む位置を置いておく
-    let paused = |paused_at: Option<u64>| {
-        paused_at
-            .or_else(|| state.as_ref().map(|state| state.since))
-            .or(Some(0))
-    };
-    let settings_paused_at = (!kinds.settings)
-        .then(|| paused(state.as_ref().and_then(|state| state.settings_paused_at)))
-        .flatten();
-    let history_paused_at = (!kinds.history)
-        .then(|| paused(state.as_ref().and_then(|state| state.history_paused_at)))
-        .flatten();
+    let no_record = state.is_none();
     // 履歴の同期をオンに戻した回なら、オフの間に置いてあった位置
     let history_resumed_from = state
         .as_ref()
-        .and_then(|state| state.history_paused_at)
-        .filter(|_| kinds.history);
-    let mut result = if kinds.settings {
-        reconcile(config, state, &read.items, key_id, read.next)
+        .and_then(|state| state.paused.get(SyncKind::History.group()).copied())
+        .filter(|_| kinds(config).history);
+    let mut recorded = state.unwrap_or_default();
+    recorded.pause(config);
+    let initial = Initial::new(no_record, &recorded);
+    let mut result = if kinds(config).settings
+        || kinds(config).keys
+        || kinds(config).replacements
+        || kinds(config).snippets
+        || kinds(config).actions
+    {
+        reconcile_as(config, recorded, &initial, &read.items, key_id, read.next)
     } else {
-        let mut state = state.unwrap_or_default();
-        state.key_id = key_id.to_string();
-        state.since = read.next;
+        recorded.key_id = key_id.to_string();
+        recorded.since = read.next;
         Reconcile {
             config: config.clone(),
-            state,
+            state: recorded,
             writes: Vec::new(),
             changed: false,
         }
     };
-    result.state.settings_paused_at = settings_paused_at;
-    result.state.history_paused_at = history_paused_at;
     let mut changed = result.changed;
     let mut written = State::new(key_id);
     let local_items = config_items(config);
@@ -1960,7 +2138,7 @@ pub async fn sync_once_with<T: SyncTransport>(
         result = reconcile_as(
             &result.config,
             result.state,
-            initial,
+            &initial,
             &current,
             key_id,
             read.next,
@@ -1968,7 +2146,7 @@ pub async fn sync_once_with<T: SyncTransport>(
         changed |= result.changed;
     }
     // 同じ回に履歴の件数が届いたら、届いた後の件数で合わせる
-    let synced_history = if kinds.history {
+    let synced_history = if kinds(config).history {
         sync_history(
             transport,
             &mut result.state,
@@ -1993,8 +2171,20 @@ pub async fn sync_once_with<T: SyncTransport>(
             .is_some_and(|seen| seen.hash == history_hash(local, size))
     });
     if !settled {
-        result.state.history_paused_at = result.state.history_paused_at.or(history_resumed_from);
+        if let Some(since) = history_resumed_from {
+            result
+                .state
+                .paused
+                .entry(SyncKind::History.group().to_string())
+                .or_insert(since);
+        }
+    } else if kinds(config).history {
+        result.state.paused.remove(SyncKind::History.group());
     }
+    // 成功した回だけ、再び読んだ設定の種類と個別項目の位置を外す。履歴は揃った回だけ上で外す。
+    result.state.paused.retain(|group, _| {
+        group == SyncKind::History.group() || paused_group(&result.config, group)
+    });
     let history = synced_history;
     Ok(SyncResult {
         // 同じ値を入れ直しただけなら、変わっていない。設定ファイルを書き直して次の同期を呼ばないため
@@ -2634,9 +2824,10 @@ fn item_at(
 /// 止めている項目の、窓口の今の値を読む。
 pub async fn read_conflicts(
     mut transport: HttpTransport<'_>,
+    config: &Config,
     state: &State,
 ) -> Result<Vec<RemoteItem>, Error> {
-    read_conflicts_with(&mut transport, state).await
+    read_conflicts_with(&mut transport, config, state).await
 }
 
 /// 1回の通信を走らせ、保存する前の結果を返す。呼び出し元が設定と記録を同じ世代で保存する。
@@ -2645,7 +2836,6 @@ pub async fn sync_once(
     config: &Config,
     state: Option<State>,
     history: Option<&History>,
-    kinds: Kinds,
 ) -> Result<SyncResult, Box<Failure>> {
     let key_id = transport.key_id;
     sync_once_with(
@@ -2654,7 +2844,6 @@ pub async fn sync_once(
         state.filter(|state| state.key_id == key_id),
         key_id,
         history,
-        kinds,
     )
     .await
 }
@@ -2662,11 +2851,6 @@ pub async fn sync_once(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const ALL_KINDS: Kinds = Kinds {
-        settings: true,
-        history: true,
-    };
 
     #[test]
     fn corrupt_state_is_treated_as_missing() {
@@ -2723,6 +2907,85 @@ mod tests {
             .writes
             .iter()
             .any(|write| write.key == ItemKey::new("settings", "s_theme")));
+    }
+
+    #[test]
+    fn a_record_with_zero_since_is_still_an_initial_sync_after_reading() {
+        let local = Config {
+            theme: Theme::Dark,
+            ..Config::default()
+        };
+        let mut state = recorded(&Config::default());
+        state.since = 0;
+        state.items.remove(&syncable_setting_item("theme").name());
+        let result = reconcile(
+            &local,
+            Some(state),
+            &[remote(SETTINGS, "s_theme", 4, json!("light"))],
+            "key",
+            9,
+        );
+        assert_eq!(result.config.theme, Theme::Light);
+        assert!(result.state.conflicts.is_empty());
+    }
+
+    #[test]
+    fn a_kind_started_later_is_initial_only_for_that_kind() {
+        let local = Config {
+            snippets: vec![
+                snippet('a', "same".to_string()),
+                snippet('b', "same".to_string()),
+            ],
+            replacements: vec![replacement('c', "same"), replacement('d', "same")],
+            ..Config::default()
+        };
+        let mut state = State {
+            key_id: "key".to_string(),
+            since: 9,
+            paused: BTreeMap::from([(SyncKind::Snippets.group().to_string(), 0)]),
+            ..State::default()
+        };
+        let replacement_key = row_key('r', 'c');
+        state.items.insert(
+            replacement_key.name(),
+            Seen {
+                seq: 1,
+                hash: hash_plain(&row_value(&local.replacements[0])),
+            },
+        );
+        let snippet_key = row_key('n', 'a');
+        let result = reconcile(
+            &local,
+            Some(state),
+            &[remote(
+                SETTINGS,
+                &snippet_key.id,
+                10,
+                row_value(&local.snippets[0]),
+            )],
+            "key",
+            10,
+        );
+        assert_eq!(result.config.snippets.len(), 1);
+        assert_eq!(result.config.replacements.len(), 2);
+    }
+
+    #[test]
+    fn paused_positions_are_not_replaced_and_resuming_reads_the_earliest_one() {
+        let mut state = State {
+            since: 7,
+            ..State::default()
+        };
+        let settings_off = Config {
+            sync_settings: false,
+            ..Config::default()
+        };
+        assert!(state.pause(&settings_off));
+        state.since = 9;
+        assert!(!state.pause(&settings_off));
+        assert_eq!(state.paused.get(SyncKind::Settings.group()), Some(&7));
+        state.paused.insert(SyncKind::Keys.group().to_string(), 3);
+        assert_eq!(state.read_since(&Config::default()), 3);
     }
 
     #[test]
@@ -4102,9 +4365,7 @@ mod tests {
         config: &Config,
         state: Option<State>,
     ) -> Result<SyncResult, Box<Failure>> {
-        tauri::async_runtime::block_on(sync_once_with(
-            transport, config, state, "key", None, ALL_KINDS,
-        ))
+        tauri::async_runtime::block_on(sync_once_with(transport, config, state, "key", None))
     }
 
     #[test]
@@ -5009,7 +5270,6 @@ mod tests {
             state,
             "key",
             Some(local),
-            ALL_KINDS,
         ))
         .unwrap()
     }
@@ -5710,17 +5970,14 @@ mod tests {
         assert_eq!(written.last().unwrap().plain, Some(order_of("abc")));
     }
 
-    fn run_kinds(
+    fn run_sync(
         transport: &mut FakeTransport,
         config: &Config,
         state: Option<State>,
         history: Option<&History>,
-        kinds: Kinds,
     ) -> SyncResult {
-        tauri::async_runtime::block_on(sync_once_with(
-            transport, config, state, "key", history, kinds,
-        ))
-        .unwrap()
+        tauri::async_runtime::block_on(sync_once_with(transport, config, state, "key", history))
+            .unwrap()
     }
 
     #[test]
@@ -5728,106 +5985,326 @@ mod tests {
         let base = Config::default();
         let local = Config {
             theme: Theme::Dark,
+            sync_settings: false,
             ..base.clone()
         };
         let arriving = || remote(SETTINGS, "s_language", 5, json!("en"));
         let drafts = history(&[("a", 10)], 0);
         let mut transport = FakeTransport::reading([read(5, [arriving()])]).after_seq(5);
-        let off = run_kinds(
-            &mut transport,
-            &local,
-            Some(recorded(&base)),
-            Some(&drafts),
-            Kinds {
-                settings: false,
-                history: true,
-            },
-        );
+        let off = run_sync(&mut transport, &local, Some(recorded(&base)), Some(&drafts));
         assert_eq!(off.config, local);
         assert!(!off.changed);
         assert!(transport.written("s_theme").is_empty());
         assert_eq!(transport.written(HISTORY_ID).len(), 1);
         assert_eq!(off.state.since, 5);
-        assert_eq!(off.state.settings_paused_at, Some(1));
+        assert_eq!(off.state.paused.get("settings"), Some(&1));
 
         let mut transport = FakeTransport::reading([read(6, [arriving()])]).after_seq(6);
-        let on = run_kinds(
-            &mut transport,
-            &local,
-            Some(off.state),
-            Some(&drafts),
-            ALL_KINDS,
-        );
+        let resumed = Config {
+            theme: Theme::Dark,
+            ..base
+        };
+        let on = run_sync(&mut transport, &resumed, Some(off.state), Some(&drafts));
         assert_eq!(transport.read_since, [1]);
         assert_eq!(on.config.language, Language::En);
         assert_eq!(transport.written("s_theme").len(), 1);
-        assert_eq!(on.state.settings_paused_at, None);
+        assert_eq!(on.state.paused.get("settings"), None);
         assert_eq!(on.state.since, 6);
     }
 
     #[test]
     fn history_turned_off_is_neither_read_nor_written_and_resumes_where_it_stopped() {
         let config = Config::default();
+        let off_config = Config {
+            sync_history: false,
+            ..config.clone()
+        };
         let drafts = history(&[("a", 10)], 0);
         let theirs = history(&[("b", 20)], 0);
         let mut transport =
             FakeTransport::reading([read(5, [remote_history(5, &theirs)])]).after_seq(5);
-        let off = run_kinds(
+        let off = run_sync(
             &mut transport,
-            &config,
+            &off_config,
             Some(recorded(&config)),
             Some(&drafts),
-            Kinds {
-                settings: true,
-                history: false,
-            },
         );
         assert_eq!(off.history, None);
         assert!(transport.written(HISTORY_ID).is_empty());
         assert!(!off.state.items.contains_key(&history_item().name()));
-        assert_eq!(off.state.history_paused_at, Some(1));
+        assert_eq!(off.state.paused.get("history"), Some(&1));
 
         let mut transport =
             FakeTransport::reading([read(5, [remote_history(5, &theirs)])]).after_seq(5);
-        let on = run_kinds(
-            &mut transport,
-            &config,
-            Some(off.state),
-            Some(&drafts),
-            ALL_KINDS,
-        );
+        let on = run_sync(&mut transport, &config, Some(off.state), Some(&drafts));
         assert_eq!(transport.read_since, [1]);
         assert_eq!(on.history, Some(history(&[("a", 10), ("b", 20)], 0)));
-        assert_eq!(on.state.history_paused_at, None);
+        assert_eq!(on.state.paused.get("history"), None);
     }
 
     #[test]
     fn settings_turned_on_for_the_first_time_follow_the_first_sync_rules() {
         let local = Config {
             theme: Theme::Dark,
+            sync_settings: false,
             ..Config::default()
         };
         let mut transport = FakeTransport::reading([read(9, [])]).after_seq(9);
-        let off = run_kinds(
-            &mut transport,
-            &local,
-            None,
-            None,
-            Kinds {
-                settings: false,
-                history: true,
-            },
-        );
-        assert_eq!(off.state.settings_paused_at, Some(0));
+        let off = run_sync(&mut transport, &local, None, None);
+        assert_eq!(off.state.paused.get("settings"), Some(&0));
         assert_eq!(off.state.since, 9);
 
         let mut transport =
             FakeTransport::reading([read(9, [remote(SETTINGS, "s_theme", 4, json!("light"))])])
                 .after_seq(9);
-        let on = run_kinds(&mut transport, &local, Some(off.state), None, ALL_KINDS);
+        let on = run_sync(&mut transport, &Config::default(), Some(off.state), None);
         assert_eq!(transport.read_since, [0]);
         assert_eq!(on.config.theme, Theme::Light);
         assert!(on.state.conflicts.is_empty());
+    }
+
+    #[test]
+    fn disabled_kinds_and_excluded_settings_neither_read_nor_write_their_items() {
+        let mut config = Config {
+            theme: Theme::Dark,
+            ..Config::default()
+        };
+        config.sync_excluded_settings = vec!["theme".to_string()];
+        config.sync_replacements = false;
+        config.sync_snippets = false;
+        config.sync_actions = false;
+        config.sync_keys = false;
+        let replacement = replacement('a', "remote");
+        let items = [
+            remote(SETTINGS, "s_theme", 2, json!("light")),
+            remote(SETTINGS, &row_key('r', 'a').id, 3, row_value(&replacement)),
+            remote(SETTINGS, &hotkey_item().id, 4, json!("Alt+KeyT")),
+        ];
+        let result = reconcile(
+            &config,
+            Some(recorded(&Config::default())),
+            &items,
+            "key",
+            4,
+        );
+        assert_eq!(result.config.theme, Theme::Dark);
+        assert!(result.config.replacements.is_empty());
+        assert_eq!(result.config.hotkey, config.hotkey);
+        assert!(result
+            .writes
+            .iter()
+            .all(|write| !items.iter().any(|item| item.key == write.key)));
+    }
+
+    #[test]
+    fn disabled_row_kinds_leave_missing_recorded_rows_on_the_server() {
+        let custom_action = Action {
+            id: "a".repeat(32),
+            name: "custom".to_string(),
+            command: "echo".to_string(),
+            ..Action::default()
+        };
+        let cases = [
+            (
+                SyncKind::Replacements,
+                row_key('r', 'b'),
+                row_value(&replacement('b', "remote")),
+            ),
+            (
+                SyncKind::Snippets,
+                row_key('n', 'c'),
+                row_value(&snippet('c', "remote".to_string())),
+            ),
+            (
+                SyncKind::Actions,
+                ItemKey::new(SETTINGS, row_id('a', &custom_action.id)),
+                row_value(&custom_action),
+            ),
+        ];
+        for (kind, key, value) in cases {
+            let mut off = Config::default();
+            match kind {
+                SyncKind::Replacements => off.sync_replacements = false,
+                SyncKind::Snippets => off.sync_snippets = false,
+                SyncKind::Actions => off.sync_actions = false,
+                _ => unreachable!(),
+            }
+            let mut old = State::new("key");
+            old.items.insert(
+                key.name(),
+                Seen {
+                    seq: 1,
+                    hash: hash_plain(&value),
+                },
+            );
+            let stopped = reconcile(&off, Some(old.clone()), &[], "key", 2);
+            assert!(
+                stopped.writes.iter().all(|write| write.key != key),
+                "{kind:?}"
+            );
+            if kind == SyncKind::Actions {
+                assert!(
+                    stopped
+                        .writes
+                        .iter()
+                        .all(|write| !write.key.id.starts_with("a_")),
+                    "default action marks stay unwritten while actions are off"
+                );
+            }
+
+            let active = reconcile(&Config::default(), Some(old), &[], "key", 2);
+            assert!(
+                active
+                    .writes
+                    .iter()
+                    .any(|write| write.key == key && (write.deleted || write.detached)),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_keys_are_not_applied_and_apply_again_when_enabled() {
+        let remote = remote(SETTINGS, &hotkey_item().id, 2, json!("Alt+KeyT"));
+        let stopped = Config {
+            sync_keys: false,
+            ..Config::default()
+        };
+        let off = reconcile(
+            &stopped,
+            Some(recorded(&Config::default())),
+            std::slice::from_ref(&remote),
+            "key",
+            2,
+        );
+        assert_eq!(off.config.hotkey, stopped.hotkey);
+        assert!(off.writes.iter().all(|write| write.key != remote.key));
+
+        let on = reconcile(
+            &Config::default(),
+            Some(recorded(&Config::default())),
+            &[remote],
+            "key",
+            2,
+        );
+        assert_eq!(on.config.hotkey, "Alt+KeyT");
+    }
+
+    #[test]
+    fn an_excluded_setting_resumes_from_its_own_position() {
+        let base = Config::default();
+        let mut stopped = base.clone();
+        stopped.sync_excluded_settings = vec!["theme".to_string()];
+        let mut transport = FakeTransport::reading([read(5, [])]).after_seq(5);
+        let off = run_sync(&mut transport, &stopped, Some(recorded(&base)), None);
+        let theme_name = ItemKey::new(SETTINGS, setting_id("theme")).name();
+        assert_eq!(off.state.paused.get(&theme_name), Some(&1));
+
+        let theirs = remote(SETTINGS, "s_theme", 5, json!("dark"));
+        let resumed = base.clone();
+        let mut transport = FakeTransport::reading([read(6, [theirs])]).after_seq(6);
+        let on = run_sync(&mut transport, &resumed, Some(off.state), None);
+        assert_eq!(transport.read_since, [1]);
+        assert_eq!(on.config.theme, Theme::Dark);
+        assert_eq!(on.state.paused.get(&theme_name), None);
+    }
+
+    #[test]
+    fn text_font_family_exclusion_uses_its_wire_item_for_the_paused_position() {
+        let base = Config::default();
+        let mut stopped = base.clone();
+        stopped.sync_excluded_settings = vec!["text_font_family".to_string()];
+        let mut transport = FakeTransport::reading([read(5, [])]).after_seq(5);
+        let off = run_sync(&mut transport, &stopped, Some(recorded(&base)), None);
+        let name = syncable_setting_item("text_font_family").name();
+        assert_eq!(off.state.paused.get(&name), Some(&1));
+
+        let remote = remote(
+            SETTINGS,
+            &syncable_setting_item("text_font_family").id,
+            5,
+            json!("Fira Code"),
+        );
+        let mut transport = FakeTransport::reading([read(6, [remote])]).after_seq(6);
+        let on = run_sync(&mut transport, &base, Some(off.state), None);
+        assert_eq!(transport.read_since, [1]);
+        assert_eq!(on.config.text_font_family, "Fira Code");
+        assert_eq!(on.state.paused.get(&name), None);
+    }
+
+    #[test]
+    fn an_excluded_setting_keeps_its_position_while_settings_are_off() {
+        let base = Config::default();
+        let mut stopped = base.clone();
+        stopped.sync_settings = false;
+        stopped.sync_excluded_settings = vec!["theme".to_string()];
+        let mut transport = FakeTransport::reading([read(5, [])]).after_seq(5);
+        let off = run_sync(&mut transport, &stopped, Some(recorded(&base)), None);
+        let theme = syncable_setting_item("theme").name();
+        assert_eq!(off.state.paused.get("settings"), Some(&1));
+        assert_eq!(off.state.paused.get(&theme), Some(&1));
+
+        let mut settings_on = stopped.clone();
+        settings_on.sync_settings = true;
+        let arriving = remote(SETTINGS, "s_theme", 5, json!("dark"));
+        let mut transport = FakeTransport::reading([read(6, [arriving.clone()])]).after_seq(6);
+        let still_excluded = run_sync(&mut transport, &settings_on, Some(off.state), None);
+        assert_eq!(still_excluded.state.paused.get("settings"), None);
+        assert_eq!(still_excluded.state.paused.get(&theme), Some(&1));
+
+        let mut transport = FakeTransport::reading([read(7, [arriving])]).after_seq(7);
+        let resumed = run_sync(&mut transport, &base, Some(still_excluded.state), None);
+        assert_eq!(transport.read_since, [1]);
+        assert_eq!(resumed.config.theme, Theme::Dark);
+        assert_eq!(resumed.state.paused.get(&theme), None);
+    }
+
+    #[test]
+    fn a_setting_returned_while_settings_are_off_keeps_its_position_until_it_is_read() {
+        let base = Config::default();
+        let mut excluded = base.clone();
+        excluded.sync_excluded_settings = vec!["theme".to_string()];
+        let mut transport = FakeTransport::reading([read(5, [])]).after_seq(5);
+        let off = run_sync(&mut transport, &excluded, Some(recorded(&base)), None);
+        let theme = syncable_setting_item("theme").name();
+        assert_eq!(off.state.paused.get(&theme), Some(&1));
+
+        // 設定をオフにしてから除外をやめる。この回は設定を読まないので、項目の位置は残る
+        let mut settings_off = base.clone();
+        settings_off.sync_settings = false;
+        let arriving = remote(SETTINGS, "s_theme", 5, json!("dark"));
+        let mut transport = FakeTransport::reading([read(8, [])]).after_seq(8);
+        let returned = run_sync(&mut transport, &settings_off, Some(off.state), None);
+        assert_eq!(returned.state.paused.get(&theme), Some(&1));
+        assert_eq!(returned.state.paused.get("settings"), Some(&5));
+
+        let mut transport = FakeTransport::reading([read(9, [arriving])]).after_seq(9);
+        let resumed = run_sync(&mut transport, &base, Some(returned.state), None);
+        assert_eq!(transport.read_since, [1]);
+        assert_eq!(resumed.config.theme, Theme::Dark);
+        assert_eq!(resumed.state.paused.get(&theme), None);
+    }
+
+    #[test]
+    fn returning_an_excluded_setting_holds_a_value_changed_on_both_devices() {
+        let base = Config::default();
+        let mut stopped = base.clone();
+        stopped.sync_excluded_settings = vec!["theme".to_string()];
+        let mut transport = FakeTransport::reading([read(4, [])]).after_seq(4);
+        let off = run_sync(&mut transport, &stopped, Some(recorded(&base)), None);
+        let local = Config {
+            theme: Theme::Dark,
+            ..base.clone()
+        };
+        let mut transport =
+            FakeTransport::reading([read(5, [remote(SETTINGS, "s_theme", 5, json!("light"))])])
+                .after_seq(5);
+        let resumed = run_sync(&mut transport, &local, Some(off.state), None);
+        assert_eq!(resumed.config.theme, Theme::Dark);
+        assert!(resumed
+            .state
+            .conflicts
+            .contains(&syncable_setting_item("theme").name()));
     }
 
     /// 設定の項目1つと、片方で消した行2つが食い違っている状態。
@@ -5847,6 +6324,18 @@ mod tests {
         let result = reconcile(&local, Some(recorded(&base)), &items, "key", 4);
         assert_eq!(result.config, local);
         (local, result.state, items)
+    }
+
+    #[test]
+    fn stopped_conflicts_are_hidden_until_their_item_is_enabled_again() {
+        let (mut config, state, items) = held_conflicts_fixture();
+        config.sync_excluded_settings = vec!["theme".to_string()];
+        assert_eq!(state.active_conflict_count(&config), 2);
+        assert_eq!(conflicts(&config, &state, &items).len(), 2);
+
+        config.sync_excluded_settings.clear();
+        assert_eq!(state.active_conflict_count(&config), 3);
+        assert_eq!(conflicts(&config, &state, &items).len(), 3);
     }
 
     fn choice(id: &str, seq: u64, side: SyncSide) -> SyncChoice {
@@ -5870,7 +6359,7 @@ mod tests {
     #[test]
     fn conflicts_list_both_values_with_settings_first_and_deletions_as_values() {
         let (local, state, items) = held_conflicts_fixture();
-        assert_eq!(state.conflict_count(), 3);
+        assert_eq!(state.active_conflict_count(&Config::default()), 3);
         let mut theirs = replacement('b', "b");
         theirs.to = "there".into();
         assert_eq!(
@@ -5920,12 +6409,13 @@ mod tests {
 
     #[test]
     fn the_current_values_of_held_items_are_read_in_one_request() {
-        let (_, state, items) = held_conflicts_fixture();
+        let (config, state, items) = held_conflicts_fixture();
         let unrelated = remote(SETTINGS, "s_language", 5, json!("en"));
         let mut transport =
             FakeTransport::reading([read(5, items.iter().cloned().chain([unrelated]))]);
         let read =
-            tauri::async_runtime::block_on(read_conflicts_with(&mut transport, &state)).unwrap();
+            tauri::async_runtime::block_on(read_conflicts_with(&mut transport, &config, &state))
+                .unwrap();
         assert_eq!(transport.read_since, [1]);
         assert_eq!(
             read.iter().map(|item| item.seq).collect::<Vec<_>>(),
@@ -5935,6 +6425,7 @@ mod tests {
         let mut idle = FakeTransport::default();
         let none = tauri::async_runtime::block_on(read_conflicts_with(
             &mut idle,
+            &Config::default(),
             &recorded(&Config::default()),
         ))
         .unwrap();
@@ -5958,7 +6449,7 @@ mod tests {
         );
         assert_eq!(config, local);
         assert!(rejected.is_empty());
-        assert_eq!(state.conflict_count(), 0);
+        assert_eq!(state.active_conflict_count(&Config::default()), 0);
         let since = state.since;
         let next = reconcile(&config, Some(state), &[], "key", since);
         let write = |id: &str| {
@@ -5988,7 +6479,7 @@ mod tests {
             ],
         );
         assert!(rejected.is_empty());
-        assert_eq!(state.conflict_count(), 0);
+        assert_eq!(state.active_conflict_count(&Config::default()), 0);
         assert_eq!(config.theme, Theme::Light);
         assert_eq!(replacement_ids(&config), "b");
         assert_eq!(config.replacements[0].to, "there");
@@ -6014,7 +6505,7 @@ mod tests {
         );
         assert_eq!(config.theme, Theme::Light);
         assert_eq!(replacement_ids(&config), "a");
-        assert_eq!(state.conflict_count(), 2);
+        assert_eq!(state.active_conflict_count(&Config::default()), 2);
     }
 
     #[test]
@@ -6038,7 +6529,7 @@ mod tests {
         let key = hotkey_item();
         let items = [remote(SETTINGS, &key.id, 2, json!("Alt+KeyP"))];
         let held = reconcile(&local, Some(recorded(&base)), &items, "key", 2).state;
-        assert_eq!(held.conflict_count(), 1);
+        assert_eq!(held.active_conflict_count(&Config::default()), 1);
         // 止めている間に、届いたホットキーと同じキーを操作に割り当てた。選ぶ画面には、重なっていても出す
         *local.text_window_keys.get_mut(DraftAction::Copy) = "Alt+KeyP".into();
         assert_eq!(
@@ -6087,7 +6578,7 @@ mod tests {
             ),
         ];
         let held = reconcile(&local, Some(recorded(&base)), &items, "key", 3).state;
-        assert_eq!(held.conflict_count(), 2);
+        assert_eq!(held.active_conflict_count(&Config::default()), 2);
         assert_eq!(conflicts(&local, &held, &items).len(), 2);
         let (config, state, rejected) = resolved(
             &local,
@@ -6101,7 +6592,7 @@ mod tests {
         assert!(rejected.is_empty());
         assert_eq!(config.hotkey, copy);
         assert_eq!(config.text_window_keys, theirs.text_window_keys);
-        assert_eq!(state.conflict_count(), 0);
+        assert_eq!(state.active_conflict_count(&Config::default()), 0);
     }
 
     #[test]
@@ -6114,18 +6605,18 @@ mod tests {
         theirs.to = "there".into();
         let changed = remote(SETTINGS, &key.id, 2, row_value(&theirs));
         let held = reconcile(&local, Some(recorded(&base)), &[changed], "key", 2).state;
-        assert_eq!(held.conflict_count(), 1);
+        assert_eq!(held.active_conflict_count(&Config::default()), 1);
         let mark = [detached_mark(&key, 5)];
         assert!(conflicts(&local, &held, &mark).is_empty());
         // 選ぶ画面を出す前
         let (config, state) = release_detached(&local, &held, &mark).unwrap();
         assert!(!config.replacements[0].sync);
         assert_eq!(config.replacements[0].to, "here");
-        assert_eq!(state.conflict_count(), 0);
+        assert_eq!(state.active_conflict_count(&Config::default()), 0);
         // 止めている間の同期に印が届いたとき
         let synced = reconcile(&local, Some(held.clone()), &mark, "key", 5);
         assert!(!synced.config.replacements[0].sync);
-        assert_eq!(synced.state.conflict_count(), 0);
+        assert_eq!(synced.state.active_conflict_count(&Config::default()), 0);
         assert!(synced.writes.iter().all(|write| write.key != key));
         // 印でなければ、止めたままにする
         assert!(release_detached(&local, &held, &[]).is_none());
@@ -6136,51 +6627,43 @@ mod tests {
         let config = Config::default();
         let shared = history(&[("a", 10)], 0);
         let mut transport = FakeTransport::reading([read(1, [])]).after_seq(1);
-        let synced = run_kinds(
+        let synced = run_sync(
             &mut transport,
             &config,
             Some(recorded(&config)),
             Some(&shared),
-            ALL_KINDS,
         );
         let on_server = transport.stored.clone();
         let mut transport = FakeTransport::reading([read(2, [])]).after_seq(2);
-        let off = run_kinds(
+        let off_config = Config {
+            sync_history: false,
+            ..config.clone()
+        };
+        let off = run_sync(
             &mut transport,
-            &config,
+            &off_config,
             Some(synced.state),
             Some(&shared),
-            Kinds {
-                settings: true,
-                history: false,
-            },
         );
         // オフの間に、このデバイスの履歴を消した
         let cleared = history(&[], 100);
         let mut transport = FakeTransport::reading([read(2, [])]).after_seq(2);
         transport.stored = on_server;
-        let on = run_kinds(
-            &mut transport,
-            &config,
-            Some(off.state),
-            Some(&cleared),
-            ALL_KINDS,
-        );
+        let on = run_sync(&mut transport, &config, Some(off.state), Some(&cleared));
         assert!(transport.written(HISTORY_ID).is_empty());
         assert_eq!(on.history, Some(shared));
-        assert_eq!(on.state.history_paused_at, None);
+        assert_eq!(on.state.paused.get("history"), None);
     }
 
     /// 履歴を1回同期した記録と、そのとき窓口に置いた項目。
     fn history_synced_once(shared: &History) -> (State, Vec<RemoteItem>) {
         let config = Config::default();
         let mut transport = FakeTransport::reading([read(1, [])]).after_seq(1);
-        let synced = run_kinds(
+        let synced = run_sync(
             &mut transport,
             &config,
             Some(recorded(&config)),
             Some(shared),
-            ALL_KINDS,
         );
         (synced.state, transport.stored)
     }
@@ -6192,13 +6675,7 @@ mod tests {
     ) -> (SyncResult, FakeTransport) {
         let mut transport = FakeTransport::reading([read(2, [])]).after_seq(2);
         transport.stored = on_server.to_vec();
-        let result = run_kinds(
-            &mut transport,
-            &Config::default(),
-            Some(state),
-            Some(local),
-            ALL_KINDS,
-        );
+        let result = run_sync(&mut transport, &Config::default(), Some(state), Some(local));
         (result, transport)
     }
 
@@ -6207,29 +6684,30 @@ mod tests {
         let shared = history(&[("a", 10)], 0);
         let (mut state, on_server) = history_synced_once(&shared);
         // 両方オフの間は通信しないので、印はスイッチを切り替えたときに置く
-        let both_off = Kinds {
-            settings: false,
-            history: false,
+        let both_off = Config {
+            sync_settings: false,
+            sync_history: false,
+            ..Config::default()
         };
-        assert!(state.pause(both_off));
-        assert!(!state.pause(both_off));
+        assert!(state.pause(&both_off));
+        assert!(!state.pause(&both_off));
         let (on, transport) = resume_history(state, &on_server, &history(&[], 100));
         assert!(transport.written(HISTORY_ID).is_empty());
         assert_eq!(on.history, Some(shared));
-        assert_eq!(on.state.history_paused_at, None);
+        assert_eq!(on.state.paused.get("history"), None);
     }
 
     #[test]
     fn a_history_cleared_after_turning_it_off_offline_does_not_clear_the_other_devices() {
         let shared = history(&[("a", 10)], 0);
         let (mut state, on_server) = history_synced_once(&shared);
-        state.pause(Kinds {
-            settings: true,
-            history: false,
+        state.pause(&Config {
+            sync_history: false,
+            ..Config::default()
         });
         // オフにした回は窓口につながらず、途中まで書けた分だけを記録に足す
         let state = merge_written(Some(state), &State::new("key"), false, "key");
-        assert!(state.history_paused_at.is_some());
+        assert!(state.paused.contains_key("history"));
         let (on, transport) = resume_history(state, &on_server, &history(&[], 100));
         assert!(transport.written(HISTORY_ID).is_empty());
         assert_eq!(on.history, Some(shared));
@@ -6239,29 +6717,28 @@ mod tests {
     fn a_history_that_could_not_be_mixed_when_turned_back_on_is_resumed_again_next_time() {
         let shared = history(&[("a", 10)], 0);
         let (mut state, on_server) = history_synced_once(&shared);
-        state.pause(Kinds {
-            settings: true,
-            history: false,
+        state.pause(&Config {
+            sync_history: false,
+            ..Config::default()
         });
-        let paused_at = state.history_paused_at;
+        let paused_at = state.paused.get("history").copied();
         // オフの間に消してから、1件覚えた
         let local = history(&[("b", 200)], 100);
         let mut transport =
             FakeTransport::reading([read(2, [])]).failing([Error::Other("offline".into())]);
         transport.stored = on_server.clone();
-        let failed = run_kinds(
+        let failed = run_sync(
             &mut transport,
             &Config::default(),
             Some(state),
             Some(&local),
-            ALL_KINDS,
         );
         assert_eq!(failed.history, None);
-        assert_eq!(failed.state.history_paused_at, paused_at);
+        assert_eq!(failed.state.paused.get("history").copied(), paused_at);
 
         let (on, transport) = resume_history(failed.state, &on_server, &local);
         assert_eq!(on.history, Some(history(&[("a", 10), ("b", 200)], 0)));
         assert_eq!(transport.written(HISTORY_ID).len(), 1);
-        assert_eq!(on.state.history_paused_at, None);
+        assert_eq!(on.state.paused.get("history"), None);
     }
 }
