@@ -92,6 +92,11 @@ before(async () => {
 			if (!touched) return;
 			stopMawokSync();
 			try {
+				recoverOfflineProIfAny();
+			} catch (error) {
+				console.error('[msix] 中断時に、仮の Pro の状態を片付けられませんでした:', error);
+			}
+			try {
 				recoverHeldAppDataIfAny();
 			} catch (error) {
 				console.error('[msix] 中断時に、退かしたフォルダーを戻せませんでした:', error);

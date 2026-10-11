@@ -427,7 +427,9 @@ const PRO_CREDENTIALS = Object.freeze([
 	{ user: 'mawok-account-key', value: 'ab'.repeat(32) }
 ]);
 const credentialTarget = (user) => `${user}.${APP_IDENTIFIER}`;
-// 仮の Pro の状態を置いている間の印。中断されて残ったら、次の回が片付ける (本物を消さないよう、置いた回だけが消す)
+/** 仮の Pro の状態の account_id。pro-state.json がこの値のままなら、資格情報も仮のまま */
+const OFFLINE_ACCOUNT_ID = 'msix-check';
+// 仮の Pro の状態を置いている間の印。中断されて残ったら、中断のシグナルの処理か次の回が片付ける
 const OFFLINE_PRO_RECORD_PATH = recordPath('.msix-offline-pro.json');
 
 /**
@@ -436,19 +438,38 @@ const OFFLINE_PRO_RECORD_PATH = recordPath('.msix-offline-pro.json');
  */
 export const OFFLINE_ENV = Object.freeze({ HTTPS_PROXY: 'http://127.0.0.1:9' });
 
-function removeOfflinePro() {
-	for (const { user } of PRO_CREDENTIALS) {
-		try {
-			execFileSync('cmdkey', [`/delete:${credentialTarget(user)}`], { stdio: 'ignore' });
-		} catch {
-			// 無ければ失敗するが、それでよい (アプリが先に消したとき)
-		}
+/** pro-state.json が、置いた仮のもののままか。無い・読めないときは、仮のものとは見ない */
+function offlineProStateRemains() {
+	try {
+		return JSON.parse(fs.readFileSync(PRO_STATE_PATH, 'utf8')).account_id === OFFLINE_ACCOUNT_ID;
+	} catch {
+		return false;
 	}
-	fs.rmSync(PRO_STATE_PATH, { force: true });
+}
+
+/**
+ * 仮の Pro の状態を片付ける。資格情報の中身は cmdkey で読めないので、pro-state.json が仮のもののままのときだけ消す。
+ * 中断の後に利用者がサインインしていれば、Mawok が pro-state.json を本物のアカウントに書き換え、資格情報も本物なので、触らない。
+ * pro-state.json が無いのは、Mawok が資格情報ごと片付けた後 (窓口に届いて仮のトークンを断られたときなど)
+ */
+function removeOfflinePro() {
+	if (offlineProStateRemains()) {
+		for (const { user } of PRO_CREDENTIALS) {
+			try {
+				execFileSync('cmdkey', [`/delete:${credentialTarget(user)}`], { stdio: 'ignore' });
+			} catch {
+				// 無ければ失敗するが、それでよい (置く途中で止まったとき)
+			}
+		}
+		fs.rmSync(PRO_STATE_PATH, { force: true });
+	}
 	fs.rmSync(OFFLINE_PRO_RECORD_PATH, { force: true });
 }
 
-/** 前の回が置いたままの仮の Pro の状態があれば、片付ける。Mawok を止めてから呼ぶ */
+/**
+ * 置いたままの仮の Pro の状態があれば、片付ける。Mawok を止めてから呼ぶ。
+ * 同期なので、中断のシグナルを受けたときにも呼べる
+ */
 export function recoverOfflineProIfAny() {
 	if (fs.existsSync(OFFLINE_PRO_RECORD_PATH)) removeOfflinePro();
 }
@@ -463,6 +484,12 @@ export function beginOfflinePro() {
 	const listed = execFileSync('cmdkey', ['/list'], { encoding: 'utf8' });
 	if (PRO_CREDENTIALS.some(({ user }) => listed.includes(credentialTarget(user)))) return null;
 	writeJsonAtomicSync(OFFLINE_PRO_RECORD_PATH, { savedAt: new Date().toISOString() });
+	// pro.rs の State。期限は1日先 (秒)。片付けはこのファイルで仮のものかを見分けるので、資格情報より先に置く
+	writeJsonAtomicSync(PRO_STATE_PATH, {
+		account_id: OFFLINE_ACCOUNT_ID,
+		until: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+		active: true
+	});
 	for (const { user, value } of PRO_CREDENTIALS) {
 		execFileSync(
 			'cmdkey',
@@ -470,12 +497,6 @@ export function beginOfflinePro() {
 			{ stdio: 'ignore' }
 		);
 	}
-	// pro.rs の State。期限は1日先 (秒)
-	writeJsonAtomicSync(PRO_STATE_PATH, {
-		account_id: 'msix-check',
-		until: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-		active: true
-	});
 	return { restore: removeOfflinePro };
 }
 
