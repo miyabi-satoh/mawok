@@ -421,12 +421,51 @@ ConvertTo-Json -Compress -InputObject @{ counted = $width * $rows; accent = $acc
 // 仮のトークンと鍵を資格情報マネージャーに、期限が先の Pro の状態を pro-state.json に置いたうえで、
 // 窓口へつながらないようにして起動する (`OFFLINE_ENV`)。つながらない間は、覚えている Pro の状態と手元の鍵で待ち受ける
 const PRO_STATE_PATH = path.join(APP_DATA_DIRS.roaming, 'pro-state.json');
-/** ai.rs の credential_user (Mawok)・account_key.rs の CREDENTIAL_USER と、secrets.rs のサービス名 */
+/** ai.rs の credential_user (Mawok)・account_credentials.rs の項目名と、secrets.rs のサービス名 */
 const PRO_CREDENTIALS = Object.freeze([
-	{ user: 'mawok-account-token', value: 'msix-check' },
-	{ user: 'mawok-account-key', value: 'ab'.repeat(32) }
+	{ user: 'mawok-account', value: JSON.stringify({ token: 'msix-check', key: 'ab'.repeat(32) }) }
 ]);
 const credentialTarget = (user) => `${user}.${APP_IDENTIFIER}`;
+
+/**
+ * 資格情報マネージャーに汎用の資格情報を書く。中身は、Mawok の読み方 (windows-native-keyring-store) に合わせて UTF-16LE で置く。
+ * cmdkey の `/pass:` は二重引用符を含む値 (JSON) を受け取れないので、CredWrite を直接呼ぶ
+ */
+async function writeCredential(target, user, value) {
+	await runPowerShell(
+		`
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class MawokE2eCredential {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct CREDENTIAL {
+        public int Flags; public int Type; public string TargetName; public string Comment;
+        public long LastWritten; public int CredentialBlobSize; public IntPtr CredentialBlob;
+        public int Persist; public int AttributeCount; public IntPtr Attributes;
+        public string TargetAlias; public string UserName;
+    }
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CredWrite(ref CREDENTIAL credential, int flags);
+    public static void Write(string target, string user, string value) {
+        byte[] blob = System.Text.Encoding.Unicode.GetBytes(value);
+        // Type 1 は CRED_TYPE_GENERIC、Persist 2 は CRED_PERSIST_LOCAL_MACHINE (cmdkey の /generic と同じ)
+        CREDENTIAL credential = new CREDENTIAL { Type = 1, TargetName = target, UserName = user, Persist = 2, CredentialBlobSize = blob.Length };
+        credential.CredentialBlob = Marshal.AllocHGlobal(blob.Length);
+        try {
+            Marshal.Copy(blob, 0, credential.CredentialBlob, blob.Length);
+            if (!CredWrite(ref credential, 0)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        } finally {
+            Marshal.FreeHGlobal(credential.CredentialBlob);
+        }
+    }
+}
+"@
+[MawokE2eCredential]::Write($args[0], $args[1], $args[2])
+`,
+		[target, user, value]
+	);
+}
 /** 仮の Pro の状態の account_id。pro-state.json がこの値のままなら、資格情報も仮のまま */
 const OFFLINE_ACCOUNT_ID = 'msix-check';
 // 仮の Pro の状態を置いている間の印。中断されて残ったら、中断のシグナルの処理か次の回が片付ける
@@ -478,9 +517,9 @@ export function recoverOfflineProIfAny() {
  * 仮の Pro の状態を置く。Mawok を止めた状態で、設定のフォルダーができてから呼ぶ。
  * この機で Mawok のアカウントにサインインしていれば (トークンか鍵が前からあれば)、触らずに null を返す
  *
- * @returns {{ restore: () => void } | null}
+ * @returns {Promise<{ restore: () => void } | null>}
  */
-export function beginOfflinePro() {
+export async function beginOfflinePro() {
 	const listed = execFileSync('cmdkey', ['/list'], { encoding: 'utf8' });
 	if (PRO_CREDENTIALS.some(({ user }) => listed.includes(credentialTarget(user)))) return null;
 	writeJsonAtomicSync(OFFLINE_PRO_RECORD_PATH, { savedAt: new Date().toISOString() });
@@ -491,11 +530,7 @@ export function beginOfflinePro() {
 		active: true
 	});
 	for (const { user, value } of PRO_CREDENTIALS) {
-		execFileSync(
-			'cmdkey',
-			[`/generic:${credentialTarget(user)}`, `/user:${user}`, `/pass:${value}`],
-			{ stdio: 'ignore' }
-		);
+		await writeCredential(credentialTarget(user), user, value);
 	}
 	return { restore: removeOfflinePro };
 }

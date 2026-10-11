@@ -1626,7 +1626,7 @@ describe('設定画面のデバイス', () => {
 		await vi.waitFor(() => expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1));
 	});
 
-	it('鍵がないデバイスでは、コードを入力して追加できる', async () => {
+	it('鍵がないデバイスでは、確認コードを入力して接続できる', async () => {
 		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
 		const screen = await renderAt(m.settings_category_devices);
 
@@ -1635,6 +1635,27 @@ describe('設定画面のデバイス', () => {
 		await screen.getByRole('button', { name: m.settings_devices_join_submit() }).click();
 
 		expect(invoked).toHaveBeenCalledWith('join_pairing', { code: '123456' });
+	});
+
+	it('鍵がないデバイスでは、アカウントに同期を始める案内を出してデバイスを開ける', async () => {
+		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
+		const screen = await renderAt(m.settings_category_account);
+
+		await expect.element(screen.getByText(m.settings_sync_needs_pairing())).toBeVisible();
+		await screen.getByRole('button', { name: m.settings_sync_open_devices() }).click();
+		await expect.element(screen.getByText(m.settings_devices_join_title())).toBeVisible();
+	});
+
+	it('鍵がないデバイスでは、このデバイスから始め直す前に確かめる', async () => {
+		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
+		const screen = await renderAt(m.settings_category_devices);
+
+		await screen.getByRole('button', { name: m.settings_devices_restart_start() }).click();
+		await expect
+			.element(
+				screen.getByRole('alertdialog', { name: m.settings_devices_restart_confirm_title() })
+			)
+			.toBeVisible();
 	});
 
 	it('鍵を確認できなければ、設定を開き直す案内を出す', async () => {

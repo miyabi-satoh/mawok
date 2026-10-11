@@ -237,7 +237,7 @@ describe('EXE 版のファイルがある環境', () => {
 
 	before(async () => {
 		config = await beginTestConfig({ language: 'ja', autostart: false });
-		offlinePro = beginOfflinePro();
+		offlinePro = await beginOfflinePro();
 		logMark = markLog(LOG_FILE);
 		await launchInPackage(pkg, CDP_PORT, offlinePro ? OFFLINE_ENV : {});
 	});

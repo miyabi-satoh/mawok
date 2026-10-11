@@ -75,7 +75,7 @@ You can send text to Mawok on another device you own on the same network. This r
 
 1. On your first device, sign in to Mawok under "Account" in Settings.
 2. From the second device onward, sign in to the same Mawok account on the new device, then open "Devices" in Settings.
-3. Enter the code shown under "Devices" in Settings on a device you already use, then select "Add" on the new device.
+3. Enter the verification code shown under "Devices" in Settings on a device you already use, then select "Connect" on the new device.
 
 Devices you have added appear automatically under "Send to" in "Devices" in Settings when they are on the same network. To disconnect all other devices, select "Disconnect" next to "Disconnect all devices" under "Devices" in Settings, then add the devices you still use again.
 
