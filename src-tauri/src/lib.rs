@@ -1924,18 +1924,42 @@ fn set_sync_history(app: AppHandle, enabled: bool) -> Result<(), String> {
 /// 食い違いを選ぶ画面で、窓口と話せなかった。
 const SYNC_UNREACHABLE: &str = "sync.unreachable";
 
+/// 選ぶ画面に出す一覧。
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+struct SyncConflictList {
+    items: Vec<sync::SyncConflict>,
+    /// ほかのデバイスの値をこの版では出せず、一覧に入れなかった項目があるか
+    unreadable: bool,
+}
+
 /// 食い違っている設定と、窓口から読んだほかのデバイスの値（docs/sync.md「食い違い」）。
 #[tauri::command]
-async fn sync_conflicts(app: AppHandle) -> Result<Vec<sync::SyncConflict>, String> {
-    let (config, _) = config_with_generation(&app.state::<AppState>());
+async fn sync_conflicts(app: AppHandle) -> Result<SyncConflictList, String> {
+    hold_sync(&app).await;
+    let result = sync_conflicts_held(&app).await;
+    release_sync(&app);
+    result
+}
+
+async fn sync_conflicts_held(app: &AppHandle) -> Result<SyncConflictList, String> {
+    let none = || SyncConflictList {
+        items: Vec::new(),
+        unreadable: false,
+    };
+    let app_state = app.state::<AppState>();
+    let (mut config, generation) = config_with_generation(&app_state);
+    let record_generation = app_state.sync_record_generation.load(Ordering::SeqCst);
     if !config.sync_settings {
-        return Ok(Vec::new());
+        return Ok(none());
     }
-    let access = sync_access(&app)
+    let access = sync_access(app)
         .await
         .ok_or_else(|| SYNC_UNREACHABLE.to_string())?;
-    let Some(record) = load_sync_record(&app, &access.key_id).await else {
-        return Ok(Vec::new());
+    let Some(mut record) = load_sync_record(app, &access.key_id).await else {
+        return Ok(none());
     };
     let remote = sync::read_conflicts(access.transport(), &record)
         .await
@@ -1943,7 +1967,26 @@ async fn sync_conflicts(app: AppHandle) -> Result<Vec<sync::SyncConflict>, Strin
             warn!("couldn't read the settings changed on both devices: {error}");
             SYNC_UNREACHABLE.to_string()
         })?;
-    Ok(sync::conflicts(&config, &record, &remote))
+    // ほかのデバイスが同期から外した行は、選ばせずに、こちらでも同期しない行にする
+    if let Some((next, released)) = sync::release_detached(&config, &record, &remote) {
+        let change = SyncChange {
+            config: &config,
+            generation,
+            record_generation,
+            before: &record,
+        };
+        if commit_sync_change(app, change, next.clone(), released.clone())
+            .await?
+            .is_some()
+        {
+            (config, record) = (next, released);
+        }
+    }
+    let items = sync::conflicts(&config, &record, &remote);
+    Ok(SyncConflictList {
+        unreadable: record.conflict_count() > items.len(),
+        items,
+    })
 }
 
 /// 食い違いを選んだ結果。
@@ -2023,35 +2066,71 @@ async fn resolve_sync_conflicts_held(
         })?;
     let Some(sync::Resolution {
         config: next,
-        state: mut record,
+        state: record,
         mut rejected,
     }) = sync::resolve(&config, &before, &remote, choices)
     else {
         return Ok(stale());
     };
+    let change = SyncChange {
+        config: &config,
+        generation,
+        record_generation,
+        before: &before,
+    };
+    Ok(match commit_sync_change(app, change, next, record).await? {
+        Some(unapplied) => {
+            rejected.extend(unapplied);
+            SyncResolution {
+                stale: false,
+                rejected,
+            }
+        }
+        None => stale(),
+    })
+}
+
+/// 同期の外で設定と記録を変えるときの、変える前に読んだもの。
+struct SyncChange<'a> {
+    config: &'a Config,
+    generation: usize,
+    record_generation: usize,
+    before: &'a sync::State,
+}
+
+/// `hold_sync` の中で作った次の設定と記録を置く。反映できずに止め直した項目の id を返す。
+/// 読んでいる間に設定か記録が変わっていたら、何も変えずに None を返す
+async fn commit_sync_change(
+    app: &AppHandle,
+    change: SyncChange<'_>,
+    next: Config,
+    mut record: sync::State,
+) -> Result<Option<Vec<String>>, String> {
+    let app_state = app.state::<AppState>();
     // 排他は、同期が結果を入れるときと同じ順に取る（`run_settings_sync`）
     let action_state = app.state::<ActionState>();
-    let _settings = if next.ai_service != config.ai_service {
+    let _settings = if next.ai_service != change.config.ai_service {
         Some(action_state.settings.lock().await)
     } else {
         None
     };
     let _commit = app_state.sync_commit.lock().await;
-    if app_state.sync_record_generation.load(Ordering::SeqCst) != record_generation {
-        return Ok(stale());
+    if app_state.sync_record_generation.load(Ordering::SeqCst) != change.record_generation {
+        return Ok(None);
     }
-    if next != config {
-        match save_synced_config(app, generation, next)? {
+    let mut rejected = Vec::new();
+    if next != *change.config {
+        match save_synced_config(app, change.generation, next)? {
             Some(unapplied) => {
                 for item in &unapplied {
-                    sync::hold_again(&mut record, &before, item);
+                    sync::hold_again(&mut record, change.before, item);
                     rejected.push(item.id.clone());
                 }
                 apply_config(app);
                 let _ = app.emit(events::SYNC_APPLIED, settings_view(&app_state));
             }
-            // 読んでいる間に、画面から設定が変わった。選んだ値を、変わる前の設定に重ねて入れない
-            None => return Ok(stale()),
+            // 読んでいる間に、画面から設定が変わった。変わる前の設定から作った値を重ねて入れない
+            None => return Ok(None),
         }
     }
     let conflicts = record.conflict_count();
@@ -2063,10 +2142,7 @@ async fn resolve_sync_conflicts_held(
             error
         })?;
     remember_sync_conflicts(app, conflicts);
-    Ok(SyncResolution {
-        stale: false,
-        rejected,
-    })
+    Ok(Some(rejected))
 }
 
 /// トレイから食い違いを選ぶ画面を頼まれていたかを返し、頼みを受け取ったことにする

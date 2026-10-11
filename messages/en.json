@@ -340,7 +340,7 @@
 	"settings_section_sync": "Sync",
 	"settings_sync_settings": "Sync settings",
 	"settings_sync_history": "Sync history",
-	"settings_sync_choice_notice": "The same setting was changed separately on this device and on another device.",
+	"settings_sync_choice_notice": "The same setting was changed separately on this device and on another device. It won't sync until you choose.",
 	"settings_sync_choice_open": "Choose Which to Use...",
 	"sync_choice_title": "Which settings do you want to use?",
 	"sync_choice_this_device": "This device",
@@ -351,8 +351,7 @@
 	"sync_choice_loading": "Loading…",
 	"sync_choice_unreachable": "Couldn't load the settings from your other devices. Check your internet connection and try again.",
 	"sync_choice_stale": "The settings changed again while you were choosing. Choose again.",
-	"sync_choice_rejected": "The other device's setting couldn't be used on this device: {names}",
-	"sync_choice_none": "There's nothing to choose. Update Mawok to the latest version and try again.",
+	"sync_choice_rejected": "The other device's setting couldn't be used on this device: {names}. Choose “This device” instead.",
 	"sync_choice_on": "On",
 	"sync_choice_off": "Off",
 	"sync_choice_deleted": "Deleted",
@@ -362,5 +361,7 @@
 	"sync_choice_label_sub": "{group} ({item})",
 	"sync_choice_row_replacement": "Replacement “{name}”",
 	"sync_choice_row_snippet": "Snippet “{name}”",
-	"sync_choice_row_action": "Action “{name}”"
+	"sync_choice_row_action": "Action “{name}”",
+	"sync_choice_later": "Choose later",
+	"sync_choice_unreadable": "This version of Mawok can't load the settings from your other devices. Update Mawok to the latest version and try again."
 }

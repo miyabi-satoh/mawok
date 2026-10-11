@@ -88,10 +88,10 @@ If the text box on the other device is empty, the text goes in as it is; if it h
 
 With Pro, your settings and history stay the same across the devices on your account.
 
-1. On each device, sign in to Mawok under "Account" in Settings.
-2. Add the devices by following the steps in "Send to other devices".
+1. Sign in to Mawok under "Account" in Settings. With Pro, syncing starts.
+2. To use another device too, sign in on that device, then add it by following the steps in "Send to other devices".
 
-Syncing starts automatically once a device is added.
+The device you added receives the same settings and history.
 
 - Synced: settings, replacements, snippets, actions, and history.
 - Kept per device: launch at login, API keys for AI services, and the devices you send to. The hotkey, keyboard shortcuts, and text font sync only between {macos:Macs}{windows:Windows devices}.

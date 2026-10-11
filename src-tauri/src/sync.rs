@@ -1107,6 +1107,24 @@ fn is_new(state: &State, remote: &RemoteItem) -> bool {
         && state.seen_seq(&name).is_none_or(|seq| remote.seq > seq)
 }
 
+/// 食い違いで止めている行に、ほかのデバイスが同期から外した印が届いていたら、止めるのをやめて、届いたときと
+/// 同じく手元の行を同期しない行にする（docs/sync.md「食い違い」）。印は選ばせる値でないので、止めたままにすると
+/// 利用者が抜けられない。そうしたかを返す
+fn release_detached_item(config: &mut Config, state: &mut State, remote: &RemoteItem) -> bool {
+    let name = remote.key.name();
+    if !matches!(remote.incoming(), Incoming::Detached)
+        || !choosable(&remote.key)
+        || !state.conflicts.contains(&name)
+        || state.seen_seq(&name).is_some_and(|seq| remote.seq <= seq)
+    {
+        return false;
+    }
+    state.conflicts.remove(&name);
+    detach_local(config, &remote.key);
+    state.retire(name, remote.seq);
+    true
+}
+
 /// 窓口の1項目を、決まりに照らして手元の設定と記録に入れる。手元の設定を変えたかを返す。
 fn receive(
     config: &mut Config,
@@ -1115,6 +1133,9 @@ fn receive(
     initial: bool,
     remote: &RemoteItem,
 ) -> bool {
+    if release_detached_item(config, state, remote) {
+        return true;
+    }
     if !is_new(state, remote) {
         return false;
     }
@@ -1554,9 +1575,15 @@ fn remote_sync_value(config: &Config, remote: Option<&RemoteItem>) -> Option<Syn
         Incoming::Deleted => Some(SyncValue::Deleted),
         Incoming::Value(value) => {
             let mut applied = config.clone();
-            // キー操作は、手元のホットキーと重なっていても出す。ホットキーも食い違っていれば、組で選べば通る
+            // キー操作とホットキーは、手元のもう片方と重なっていても出す。重なりは、選んだ後の検査が見る。
+            // 両方が食い違っていれば、組で選べば通る
             if remote.key == text_window_keys_item() {
                 applied.hotkey.clear();
+            }
+            if remote.key == hotkey_item() {
+                for action in DraftAction::ALL {
+                    applied.text_window_keys.get_mut(action).clear();
+                }
             }
             apply_value(&mut applied, &remote.key, value)
                 .then(|| sync_value(&applied, &remote.key))
@@ -1602,6 +1629,24 @@ pub fn conflicts(config: &Config, state: &State, remote: &[RemoteItem]) -> Vec<S
         .collect();
     list.sort_by_key(|conflict| !conflict.id.starts_with("s_"));
     list
+}
+
+/// 止めている項目のうち、窓口の今の値が同期から外した印のものを、止めるのをやめて同期しない行にする
+/// （`release_detached_item`）。選ぶ画面を出す前に通す。変えたものがあれば、次の設定と記録を返す
+pub fn release_detached(
+    config: &Config,
+    state: &State,
+    remote: &[RemoteItem],
+) -> Option<(Config, State)> {
+    let (mut config, mut state) = (config.clone(), state.clone());
+    let mut released = false;
+    let held: Vec<ItemKey> = held_conflicts(&state).collect();
+    for key in held {
+        if let Some(item) = current_item(remote, &key) {
+            released |= release_detached_item(&mut config, &mut state, item);
+        }
+    }
+    released.then_some((config, state))
 }
 
 /// 止めている項目の、窓口の今の値を読む。記録には値を置いていないので、止める前に見た `seq` の後ろを
@@ -1836,6 +1881,10 @@ pub async fn sync_once_with<T: SyncTransport>(
     let history_paused_at = (!kinds.history)
         .then(|| paused(state.as_ref().and_then(|state| state.history_paused_at)))
         .flatten();
+    let history_resumed = kinds.history
+        && state
+            .as_ref()
+            .is_some_and(|state| state.history_paused_at.is_some());
     let mut result = if kinds.settings {
         reconcile(config, state, &read.items, key_id, read.next)
     } else {
@@ -1911,6 +1960,7 @@ pub async fn sync_once_with<T: SyncTransport>(
             &read.items,
             history,
             result.config.text_history_size as usize,
+            history_resumed,
         )
         .await
     } else {
@@ -2002,6 +2052,7 @@ fn history_hash(history: &History, size: usize) -> [u8; 32] {
 /// 履歴の項目を読み書きする（docs/sync.md「履歴の同期」）。設定の項目と違い、食い違いにせず混ぜる。
 /// 手元に入れる履歴（`size` 件に切り詰めたもの）を返す。同期しなかった・できなかった回は None で、
 /// 失敗しても設定の同期の結果は捨てない。`local` が None なら、手元の履歴を読めなかった。
+/// `resumed` は、オフにしていた履歴の同期をオンに戻した回か。
 async fn sync_history<T: SyncTransport>(
     transport: &mut T,
     state: &mut State,
@@ -2009,6 +2060,7 @@ async fn sync_history<T: SyncTransport>(
     read: &[RemoteItem],
     local: Option<&History>,
     size: usize,
+    resumed: bool,
 ) -> Option<History> {
     let key = history_item();
     let name = key.name();
@@ -2032,8 +2084,9 @@ async fn sync_history<T: SyncTransport>(
         }
     }
     let local = local?;
-    // このデバイスで初めて履歴を同期する回は、手元の消した時刻を使わない（docs/sync.md「混ぜ方」）
-    let first = record.is_none();
+    // このデバイスで初めて履歴を同期する回と、オフにしていた履歴の同期をオンに戻した回（`resumed`）は、
+    // 手元の消した時刻を使わない（docs/sync.md「混ぜ方」）
+    let first = record.is_none() || resumed;
     let mut remote = match arrived {
         Some(item) => RemoteHistory::from_item(item.seq, item.deleted, item.plain.as_ref()),
         // 読み捨てた値は、窓口の値が変わるまで書かない
@@ -5956,9 +6009,15 @@ mod tests {
         let items = [remote(SETTINGS, &key.id, 2, json!("Alt+KeyP"))];
         let held = reconcile(&local, Some(recorded(&base)), &items, "key", 2).state;
         assert_eq!(held.conflict_count(), 1);
-        // 止めている間に、届いたホットキーと同じキーを操作に割り当てた
+        // 止めている間に、届いたホットキーと同じキーを操作に割り当てた。選ぶ画面には、重なっていても出す
         *local.text_window_keys.get_mut(DraftAction::Copy) = "Alt+KeyP".into();
-        assert!(conflicts(&local, &held, &items).is_empty());
+        assert_eq!(
+            conflicts(&local, &held, &items)
+                .into_iter()
+                .map(|conflict| conflict.other_device)
+                .collect::<Vec<_>>(),
+            [SyncValue::Hotkey("Alt+KeyP".into())]
+        );
         let (config, state, rejected) = resolved(
             &local,
             &held,
@@ -6013,5 +6072,72 @@ mod tests {
         assert_eq!(config.hotkey, copy);
         assert_eq!(config.text_window_keys, theirs.text_window_keys);
         assert_eq!(state.conflict_count(), 0);
+    }
+
+    #[test]
+    fn a_detached_mark_on_a_held_row_releases_it_as_an_unsynced_row() {
+        let base = with_replacements("a");
+        let mut local = base.clone();
+        local.replacements[0].to = "here".into();
+        let key = row_key('r', 'a');
+        let mut theirs = replacement('a', "a");
+        theirs.to = "there".into();
+        let changed = remote(SETTINGS, &key.id, 2, row_value(&theirs));
+        let held = reconcile(&local, Some(recorded(&base)), &[changed], "key", 2).state;
+        assert_eq!(held.conflict_count(), 1);
+        let mark = [detached_mark(&key, 5)];
+        assert!(conflicts(&local, &held, &mark).is_empty());
+        // 選ぶ画面を出す前
+        let (config, state) = release_detached(&local, &held, &mark).unwrap();
+        assert!(!config.replacements[0].sync);
+        assert_eq!(config.replacements[0].to, "here");
+        assert_eq!(state.conflict_count(), 0);
+        // 止めている間の同期に印が届いたとき
+        let synced = reconcile(&local, Some(held.clone()), &mark, "key", 5);
+        assert!(!synced.config.replacements[0].sync);
+        assert_eq!(synced.state.conflict_count(), 0);
+        assert!(synced.writes.iter().all(|write| write.key != key));
+        // 印でなければ、止めたままにする
+        assert!(release_detached(&local, &held, &[]).is_none());
+    }
+
+    #[test]
+    fn a_history_cleared_while_its_sync_was_off_does_not_clear_the_other_devices() {
+        let config = Config::default();
+        let shared = history(&[("a", 10)], 0);
+        let mut transport = FakeTransport::reading([read(1, [])]).after_seq(1);
+        let synced = run_kinds(
+            &mut transport,
+            &config,
+            Some(recorded(&config)),
+            Some(&shared),
+            ALL_KINDS,
+        );
+        let on_server = transport.stored.clone();
+        let mut transport = FakeTransport::reading([read(2, [])]).after_seq(2);
+        let off = run_kinds(
+            &mut transport,
+            &config,
+            Some(synced.state),
+            Some(&shared),
+            Kinds {
+                settings: true,
+                history: false,
+            },
+        );
+        // オフの間に、このデバイスの履歴を消した
+        let cleared = history(&[], 100);
+        let mut transport = FakeTransport::reading([read(2, [])]).after_seq(2);
+        transport.stored = on_server;
+        let on = run_kinds(
+            &mut transport,
+            &config,
+            Some(off.state),
+            Some(&cleared),
+            ALL_KINDS,
+        );
+        assert!(transport.written(HISTORY_ID).is_empty());
+        assert_eq!(on.history, Some(shared));
+        assert_eq!(on.state.history_paused_at, None);
     }
 }

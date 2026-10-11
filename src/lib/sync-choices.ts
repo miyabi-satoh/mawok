@@ -212,21 +212,53 @@ function valueText(value: SyncValue, other: SyncValue, platform: Platform): stri
 	}
 }
 
+/** 前の行を略したことを示す印 */
+const OMITTED = '…';
+
+/**
+ * 複数行の2つの値を、違いが始まる行の1行前から出す。略したら、先頭の行に印を置く。
+ * 先頭から出すと、後ろだけが違う長い本文は、見える範囲では両方が同じに見える
+ */
+export function fromDifference(mine: string, theirs: string): [string, string] {
+	const [a, b] = [mine.split('\n'), theirs.split('\n')];
+	const shorter = Math.min(a.length, b.length);
+	let first = 0;
+	while (first < shorter && a[first] === b[first]) first++;
+	const start = first - 1;
+	if (start <= 0 || mine === theirs) return [mine, theirs];
+	const cut = (lines: string[]) => [OMITTED, ...lines.slice(start)].join('\n');
+	return [cut(a), cut(b)];
+}
+
 /** 1項目の名前と、このデバイスの値・ほかのデバイスの値。名前は、消していない方の値から付ける */
 export function choiceText(conflict: SyncConflict, platform: Platform): ChoiceText {
 	const { thisDevice, otherDevice } = conflict;
 	const named = thisDevice.type !== 'deleted' ? thisDevice : otherDevice;
+	const texts: [string, string] = [
+		valueText(thisDevice, otherDevice, platform),
+		valueText(otherDevice, thisDevice, platform)
+	];
+	// 片方で消した行は、比べる相手が無いので、残っている方を先頭から出す
+	const oneSided = thisDevice.type === 'deleted' || otherDevice.type === 'deleted';
+	const [mine, theirs] = oneSided ? texts : fromDifference(...texts);
 	return {
 		label: named.type === 'deleted' ? '' : label(named),
-		thisDevice: valueText(thisDevice, otherDevice, platform),
-		otherDevice: valueText(otherDevice, thisDevice, platform)
+		thisDevice: mine,
+		otherDevice: theirs
 	};
 }
 
-/** 読み上げで、どの項目のどちらの側かを見分ける名前 */
-export function sideName(itemLabel: string, side: 'this_device' | 'other_device'): string {
-	return m.sync_choice_side_of({
-		name: itemLabel,
-		side: side === 'this_device' ? m.sync_choice_this_device() : m.sync_choice_other_device()
-	});
+/** 項目ごとの選択肢。`later` は、この項目を今は選ばない */
+export type ChoiceSide = 'this_device' | 'other_device' | 'later';
+
+export const CHOICE_SIDES: { side: ChoiceSide; name: () => string }[] = [
+	{ side: 'this_device', name: m.sync_choice_this_device },
+	{ side: 'other_device', name: m.sync_choice_other_device },
+	{ side: 'later', name: m.sync_choice_later }
+];
+
+/** 読み上げで、どの項目のどの選択肢かを見分ける名前 */
+export function sideName(itemLabel: string, side: ChoiceSide): string {
+	const name = CHOICE_SIDES.find((choice) => choice.side === side)?.name() ?? '';
+	return m.sync_choice_side_of({ name: itemLabel, side: name });
 }

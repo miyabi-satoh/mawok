@@ -47,7 +47,7 @@ describe('設定画面の同期', () => {
 				case 'take_sync_choice_request':
 					return Promise.resolve(requested);
 				case 'sync_conflicts':
-					return Promise.resolve(conflicts);
+					return Promise.resolve({ items: conflicts, unreadable: false });
 				case 'resolve_sync_conflicts':
 					return Promise.resolve({ stale: false, rejected: [] });
 				default:
@@ -100,7 +100,15 @@ describe('設定画面の同期', () => {
 		await expect
 			.element(screen.getByRole('alertdialog').getByText(m.settings_theme_light(), { exact: true }))
 			.toBeVisible();
-		await screen.getByRole('radio', { name: sideName(m.settings_theme(), 'other_device') }).click();
+		const side = (name: Parameters<typeof sideName>[1]) =>
+			screen.getByRole('radio', { name: sideName(m.settings_theme(), name) });
+		await expect.element(side('later')).toBeChecked();
+		// 選んだ項目を「あとで選ぶ」に戻すと、適用するものが無くなる
+		await side('this_device').click();
+		await expect.element(apply).toBeEnabled();
+		await side('later').click();
+		await expect.element(apply).toBeDisabled();
+		await side('other_device').click();
 		await apply.click();
 		expect(callsOf(invoked, 'resolve_sync_conflicts')).toEqual([
 			['resolve_sync_conflicts', { choices: [{ id: 's_theme', seq: 7, side: 'other_device' }] }]
@@ -115,7 +123,8 @@ describe('設定画面の同期', () => {
 			syncConflicts: 2
 		});
 		invoked.mockImplementation((command) => {
-			if (command === 'sync_conflicts') return Promise.resolve(conflicts);
+			if (command === 'sync_conflicts')
+				return Promise.resolve({ items: conflicts, unreadable: false });
 			if (command === 'resolve_sync_conflicts')
 				return Promise.resolve({ stale: true, rejected: [] });
 			return Promise.resolve(undefined);
@@ -141,6 +150,35 @@ describe('設定画面の同期', () => {
 		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
 		await expect.element(screen.getByText(m.sync_choice_unreachable())).toBeVisible();
 		await expect.element(screen.getByRole('radio')).not.toBeInTheDocument();
+	});
+
+	it('このバージョンで読めない設定だけが残っていれば、更新を案内する', async () => {
+		settings.current = settingsView({
+			mawokAccountSignedIn: true,
+			proAvailable: true,
+			syncConflicts: 1
+		});
+		invoked.mockImplementation((command) =>
+			Promise.resolve(command === 'sync_conflicts' ? { items: [], unreadable: true } : undefined)
+		);
+		const screen = await openAccount();
+		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
+		await expect.element(screen.getByText(m.sync_choice_unreadable())).toBeVisible();
+	});
+
+	it('開いたときに選ぶものが残っていなければ、閉じる', async () => {
+		settings.current = settingsView({
+			mawokAccountSignedIn: true,
+			proAvailable: true,
+			syncConflicts: 1
+		});
+		invoked.mockImplementation((command) =>
+			Promise.resolve(command === 'sync_conflicts' ? { items: [], unreadable: false } : undefined)
+		);
+		const screen = await openAccount();
+		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
+		await vi.waitFor(() => expect(callsOf(invoked, 'sync_conflicts')).toHaveLength(1));
+		await expect.element(screen.getByRole('alertdialog')).not.toBeInTheDocument();
 	});
 
 	it('トレイから頼まれたら、「アカウント」に移って選ぶ画面を出す', async () => {

@@ -4,12 +4,12 @@
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import type { SyncChoice } from '$lib/bindings/SyncChoice';
 	import type { SyncConflict } from '$lib/bindings/SyncConflict';
+	import type { SyncConflictList } from '$lib/bindings/SyncConflictList';
 	import type { SyncResolution } from '$lib/bindings/SyncResolution';
-	import type { SyncSide } from '$lib/bindings/SyncSide';
 	import { errorCode } from '$lib/errors';
 	import type { Platform } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
-	import { choiceText, sideName } from '$lib/sync-choices';
+	import { CHOICE_SIDES, choiceText, sideName, type ChoiceSide } from '$lib/sync-choices';
 
 	/**
 	 * このデバイスとほかのデバイスで別々に変えた設定の、どちらを使うかを選ぶ（docs/sync.md「食い違い」）。
@@ -19,26 +19,22 @@
 
 	/** 選ぶ項目。null は読んでいる途中 */
 	let conflicts = $state<SyncConflict[] | null>(null);
-	/** 項目の id ごとに選んだ側。選んでいない項目は入れない */
-	let chosen = $state<Record<string, SyncSide>>({});
+	/** 項目の id ごとの選択。読んだときは、どれも「あとで選ぶ」 */
+	let chosen = $state<Record<string, ChoiceSide>>({});
 	/** 一覧の上に出す知らせ（読めなかった・選び直し・使えなかった） */
 	let notice = $state('');
 	let applying = $state(false);
 	/** 読み込みの通し番号。閉じた後や読み直した後に届いた前の答えを捨てる */
 	let loads = 0;
 
-	const SIDES: { side: SyncSide; name: () => string }[] = [
-		{ side: 'this_device', name: m.sync_choice_this_device },
-		{ side: 'other_device', name: m.sync_choice_other_device }
-	];
-
 	const items = $derived(
 		(conflicts ?? []).map((conflict) => ({ conflict, text: choiceText(conflict, platform) }))
 	);
 	const choices = $derived<SyncChoice[]>(
-		(conflicts ?? [])
-			.filter(({ id }) => chosen[id] !== undefined)
-			.map(({ id, seq }) => ({ id, seq, side: chosen[id] }))
+		(conflicts ?? []).flatMap(({ id, seq }) => {
+			const side = chosen[id];
+			return side === 'this_device' || side === 'other_device' ? [{ id, seq, side }] : [];
+		})
 	);
 
 	const failure = (e: unknown) =>
@@ -52,10 +48,14 @@
 		chosen = {};
 		notice = message;
 		try {
-			const list = await invoke<SyncConflict[]>('sync_conflicts');
+			const list = await invoke<SyncConflictList>('sync_conflicts');
 			if (load !== loads) return;
-			conflicts = list;
-			if (list.length === 0 && !message) notice = m.sync_choice_none();
+			conflicts = list.items;
+			chosen = Object.fromEntries(list.items.map(({ id }) => [id, 'later']));
+			if (list.items.length > 0) return;
+			// 選ぶものが残っていない。読んだときに片付いた（ほかのデバイスが同期から外した行）なら、知らせずに閉じる
+			if (list.unreadable) notice = m.sync_choice_unreadable();
+			else if (!message) open = false;
 		} catch (e) {
 			if (load !== loads) return;
 			conflicts = [];
@@ -77,7 +77,7 @@
 			if (result.stale) {
 				await load(m.sync_choice_stale());
 			} else if (result.rejected.length > 0) {
-				const names = result.rejected.map((id) => labels.get(id) ?? id).join(' / ');
+				const names = result.rejected.map((id) => labels.get(id) ?? id).join(', ');
 				await load(m.sync_choice_rejected({ names }));
 			} else {
 				open = false;
@@ -108,11 +108,15 @@
 				<fieldset class="flex min-w-0 flex-col gap-1.5">
 					<legend class="mb-1.5 text-sm font-medium">{text.label}</legend>
 					<div class="grid grid-cols-2 gap-2">
-						{#each SIDES as { side, name } (side)}
+						{#each CHOICE_SIDES as { side, name } (side)}
 							<label
-								class="flex min-w-0 flex-col gap-1 rounded-lg border p-2 has-checked:border-primary has-focus-visible:ring-3 has-focus-visible:ring-ring/50"
+								class={[
+									'flex min-w-0 flex-col gap-1 rounded-lg p-2 text-sm has-focus-visible:ring-3 has-focus-visible:ring-ring/50',
+									// 「あとで選ぶ」は値を持たないので、枠で囲まずに2つの値の下に置く
+									side === 'later' ? 'col-span-2' : 'border has-checked:border-primary'
+								]}
 							>
-								<span class="flex items-center gap-2 text-sm">
+								<span class="flex items-center gap-2">
 									<input
 										type="radio"
 										class="size-4 accent-primary"
@@ -124,12 +128,16 @@
 									/>
 									{name()}
 								</span>
-								<!-- 長い本文は数行で切る。違いを見比べるのに全文は要らない -->
-								<span
-									class="line-clamp-4 text-xs leading-snug break-all whitespace-pre-line text-muted-foreground"
-								>
-									{side === 'this_device' ? text.thisDevice : text.otherDevice}
-								</span>
+								{#if side !== 'later'}
+									<!-- 長い値は切らずに、欄の中で送って読めるようにする。キーボードでも送れるよう、フォーカスを置ける -->
+									<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+									<span
+										tabindex="0"
+										class="max-h-24 overflow-y-auto rounded-sm text-xs leading-snug wrap-anywhere whitespace-pre-wrap text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+									>
+										{side === 'this_device' ? text.thisDevice : text.otherDevice}
+									</span>
+								{/if}
 							</label>
 						{/each}
 					</div>

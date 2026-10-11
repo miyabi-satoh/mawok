@@ -5,7 +5,7 @@ import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { m } from '$lib/paraglide/messages';
 import type { Action, Replacement, Snippet } from '$lib/settings.svelte';
 import { DEFAULT_DRAFT_KEYS } from '$lib/test-support/settings-view';
-import { choiceText, sideName } from './sync-choices';
+import { choiceText, fromDifference, sideName } from './sync-choices';
 
 function conflict(thisDevice: SyncValue, otherDevice: SyncValue): SyncConflict {
 	return { id: 's_item', seq: 2, thisDevice, otherDevice };
@@ -265,19 +265,19 @@ describe('choiceText', () => {
 		});
 	});
 
-	it('アクションは、名前とコマンドに、違っている項目だけを添える', () => {
+	it('アクションは、名前とコマンドに、違っている項目だけを添え、違いの1行前から出す', () => {
 		const theirs: Action = { ...action, output: 'insert', encoding: 'shift_jis', enabled: false };
 		expect(text({ type: 'action', value: action }, { type: 'action', value: theirs })).toEqual({
 			label: m.sync_choice_row_action({ name: '英訳' }),
 			thisDevice: [
-				'英訳',
+				'…',
 				'@ai 英語に訳す',
 				pair(m.settings_actions_output(), m.settings_actions_output_replace()),
 				pair(m.settings_actions_encoding(), 'UTF-8'),
 				pair(m.settings_actions_enabled_unnamed(), m.sync_choice_on())
 			].join('\n'),
 			otherDevice: [
-				'英訳',
+				'…',
 				'@ai 英語に訳す',
 				pair(m.settings_actions_output(), m.settings_actions_output_insert()),
 				pair(m.settings_actions_encoding(), 'Shift_JIS'),
@@ -287,10 +287,67 @@ describe('choiceText', () => {
 	});
 });
 
+describe('choiceText の長い値', () => {
+	const body = (...lines: string[]): SyncValue => ({
+		type: 'snippet',
+		value: { ...snippet, name: '', body: lines.join('\n') }
+	});
+
+	it('後ろだけが違う本文は、違いが始まる行の1行前から出す', () => {
+		expect(text(body('1', '2', '3', '4', 'here'), body('1', '2', '3', '4', 'there'))).toMatchObject(
+			{
+				thisDevice: '…\n4\nhere',
+				otherDevice: '…\n4\nthere'
+			}
+		);
+	});
+
+	it('片方で消した行は、残っている方を先頭から出す', () => {
+		expect(text(body('1', '2', '3'), { type: 'deleted' })).toMatchObject({
+			thisDevice: '1\n2\n3',
+			otherDevice: m.sync_choice_deleted()
+		});
+	});
+
+	it('入力欄の案内も、違いが始まる行の1行前から出す', () => {
+		const guidance = (value: string): SyncValue => ({ type: 'input_guidance', value });
+		expect(text(guidance('a\nb\nc\nd'), guidance('a\nb\nc\ne'))).toMatchObject({
+			thisDevice: '…\nc\nd',
+			otherDevice: '…\nc\ne'
+		});
+	});
+});
+
+describe('fromDifference', () => {
+	it('先頭の行が違えば、略さない', () => {
+		expect(fromDifference('a\nb\nc', 'x\nb\nc')).toEqual(['a\nb\nc', 'x\nb\nc']);
+	});
+
+	it('2行目が違うときも、1行前が先頭なので略さない', () => {
+		expect(fromDifference('a\nb', 'a\nx')).toEqual(['a\nb', 'a\nx']);
+	});
+
+	it('末尾が違えば、その1行前から出し、略した印を先頭に置く', () => {
+		expect(fromDifference('a\nb\nc\nd', 'a\nb\nc\nx')).toEqual(['…\nc\nd', '…\nc\nx']);
+	});
+
+	it('片方が長いときは、短い方の最後の行から出す', () => {
+		expect(fromDifference('a\nb\nc\nd\ne', 'a\nb\nc')).toEqual(['…\nc\nd\ne', '…\nc']);
+	});
+
+	it('同じ値は、そのまま出す', () => {
+		expect(fromDifference('a\nb\nc', 'a\nb\nc')).toEqual(['a\nb\nc', 'a\nb\nc']);
+	});
+});
+
 describe('sideName', () => {
-	it('読み上げの名前に、項目の名前と側を入れる', () => {
-		expect(sideName(m.settings_theme(), 'other_device')).toBe(
-			m.sync_choice_side_of({ name: m.settings_theme(), side: m.sync_choice_other_device() })
+	it.each([
+		['this_device', m.sync_choice_this_device()],
+		['other_device', m.sync_choice_other_device()],
+		['later', m.sync_choice_later()]
+	] as const)('%s の読み上げの名前に、項目の名前を入れる', (side, name) => {
+		expect(sideName(m.settings_theme(), side)).toBe(
+			m.sync_choice_side_of({ name: m.settings_theme(), side: name })
 		);
 	});
 });
