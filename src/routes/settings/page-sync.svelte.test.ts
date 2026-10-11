@@ -115,10 +115,21 @@ describe('設定画面の同期', () => {
 		const screen = await openAccount();
 		await screen.getByRole('button', { name: m.settings_sync_restore_open() }).click();
 		const dialog = screen.getByRole('alertdialog', { name: m.sync_restore_title() });
-		await expect.element(dialog.getByText(m.settings_theme(), { exact: false })).toBeVisible();
+		const backupDate = new Intl.DateTimeFormat('ja', {
+			year: 'numeric',
+			month: 'numeric',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit',
+			second: '2-digit'
+		}).format(new Date(Date.UTC(2026, 9, 11, 12, 34, 56)));
+		const backup = dialog.getByRole('radio', {
+			name: new RegExp(`${backupDate}.*${m.settings_theme()}`)
+		});
+		await expect.element(backup).toBeVisible();
 		const confirm = dialog.getByRole('button', { name: m.sync_restore_confirm() });
 		await expect.element(confirm).toBeDisabled();
-		await dialog.getByRole('radio').click();
+		await backup.click();
 		await expect.element(confirm).toBeEnabled();
 		await confirm.click();
 		expect(callsOf(invoked, 'restore_sync_backup')).toEqual([

@@ -380,5 +380,6 @@
 	"sync_restore_changes": "Changes when restored: {names}",
 	"sync_restore_more": "{count} more",
 	"sync_restore_confirm": "Restore these settings",
-	"sync_restore_order": "Order of {name}"
+	"sync_restore_order": "Order of {name}",
+	"sync_restore_partial": "Some settings couldn't be restored."
 }

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { SyncBackupDifference } from '$lib/bindings/SyncBackupDifference';
 import type { SyncConflict } from '$lib/bindings/SyncConflict';
 import type { SyncValue } from '$lib/bindings/SyncValue';
 import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { m } from '$lib/paraglide/messages';
 import type { Action, Replacement, Snippet } from '$lib/settings.svelte';
 import { DEFAULT_DRAFT_KEYS } from '$lib/test-support/settings-view';
-import { choiceText, fromDifference, sideName } from './sync-choices';
+import { choiceText, fromDifference, restoreChangeText, sideName } from './sync-choices';
 
 function conflict(thisDevice: SyncValue, otherDevice: SyncValue): SyncConflict {
 	return { id: 's_item', seq: 2, thisDevice, otherDevice };
@@ -284,6 +285,63 @@ describe('choiceText', () => {
 				pair(m.settings_actions_enabled_unnamed(), m.sync_choice_off())
 			].join('\n')
 		});
+	});
+});
+
+describe('restoreChangeText', () => {
+	it('消した行は今の名前で示し、先頭3件と残りを日本語の区切りで出す', () => {
+		const changes: SyncBackupDifference[] = [
+			{
+				id: 's_theme',
+				current: { type: 'theme', value: 'dark' },
+				restored: { type: 'theme', value: 'light' }
+			},
+			{
+				id: 'r_a',
+				current: { type: 'replacement', value: replacement },
+				restored: { type: 'deleted' }
+			},
+			{
+				id: 'o_replacements',
+				current: { type: 'order', value: 'replacements' },
+				restored: { type: 'order', value: 'replacements' }
+			},
+			{
+				id: 'n_b',
+				current: { type: 'snippet', value: snippet },
+				restored: { type: 'deleted' }
+			}
+		];
+		expect(restoreChangeText(changes, 'ja')).toBe(
+			m.sync_restore_changes({
+				names: [
+					m.settings_theme(),
+					m.sync_choice_row_replacement({ name: '濃度' }),
+					m.sync_restore_order({ name: m.settings_sync_replacements() }),
+					m.sync_restore_more({ count: 1 })
+				].join('、')
+			})
+		);
+	});
+
+	it('英語では項目名をコンマで区切る', () => {
+		const changes: SyncBackupDifference[] = [
+			{
+				id: 's_theme',
+				current: { type: 'theme', value: 'dark' },
+				restored: { type: 'theme', value: 'light' }
+			},
+			{
+				id: 'r_a',
+				current: { type: 'replacement', value: replacement },
+				restored: { type: 'deleted' }
+			}
+		];
+		expect(restoreChangeText(changes, 'en')).toBe(
+			m.sync_restore_changes({
+				names: [m.settings_theme(), m.sync_choice_row_replacement({ name: '濃度' })].join(', ')
+			})
+		);
 	});
 });
 

@@ -1,11 +1,13 @@
 import { ENCODINGS, OUTPUTS } from '$lib/action-options';
 import { aiServiceInfo } from '$lib/ai-services';
 import type { SyncConflict } from '$lib/bindings/SyncConflict';
+import type { SyncBackupDifference } from '$lib/bindings/SyncBackupDifference';
 import type { SyncValue } from '$lib/bindings/SyncValue';
 import { CONSTANTS } from '$lib/bindings/constants';
 import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { DRAFT_ACTIONS_IN_SETTINGS, draftActionLabel, formatKeys, type Platform } from '$lib/keys';
 import { m } from '$lib/paraglide/messages';
+import type { Locale } from '$lib/paraglide/runtime';
 import type { CharWidths } from '$lib/settings.svelte';
 import { snippetLabel } from '$lib/snippets';
 
@@ -122,6 +124,20 @@ export function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | 
 		default:
 			return undefined;
 	}
+}
+
+/** 同期前の控えへ戻すと変わる項目。消した行は、今ある側の名前で示す。 */
+export function restoreChangeText(changes: SyncBackupDifference[], locale: Locale): string {
+	const names = changes
+		.map(({ current, restored }) => {
+			const value = restored.type === 'deleted' ? current : restored;
+			return value.type === 'deleted' ? undefined : label(value);
+		})
+		.filter((name): name is string => Boolean(name));
+	const shown = names.slice(0, 3);
+	if (names.length > shown.length)
+		shown.push(m.sync_restore_more({ count: names.length - shown.length }));
+	return m.sync_restore_changes({ names: shown.join(locale === 'ja' ? '、' : ', ') });
 }
 
 /** `other` と同じ種類の値なら、その値。行は、片方が「削除」のことがある */

@@ -1697,25 +1697,41 @@ pub struct SyncBackup {
     pub changes: Vec<SyncBackupDifference>,
 }
 
+pub struct RestoreConfig {
+    pub config: Config,
+    pub rejected: Vec<ItemKey>,
+}
+
 /// 控えの値を、同期する設定だけへ入れる。デバイス固有の項目と、設定ファイルの知らない項目は呼び出し元が持つ現在値のままになる。
-pub fn restore_config(current: &Config, backup: &Config) -> Config {
+pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
     let mut restored = current.clone();
     let current_items = config_items(current);
     let backup_items = config_items(backup);
-    for (key, value) in &backup_items {
-        let _ = apply_value(&mut restored, key, value);
+    let mut rejected = Vec::new();
+    // 行を先に入れてから並びを入れる。届いた同期の項目を手元へ入れるのと同じ順にする。
+    for (key, value) in backup_items
+        .iter()
+        .filter(|(key, _)| !is_order(key))
+        .chain(backup_items.iter().filter(|(key, _)| is_order(key)))
+    {
+        // 現在同期していない行は、以前の同期前の値で上書きしない。今は無い行は、控えで同期していたものだけを戻せる。
+        if sync_enabled(current, key)
+            && !detached(current, key)
+            && !apply_value(&mut restored, key, value)
+        {
+            rejected.push(key.clone());
+        }
     }
     for key in current_items
         .keys()
-        .filter(|key| !backup_items.contains_key(*key))
+        .filter(|key| sync_enabled(current, key) && !backup_items.contains_key(*key))
     {
         let _ = remove_local(&mut restored, key);
     }
-    // 行の `id` と `sync` も控えの状態へ戻す。同期を止めていた行も、控えを作った時点の状態へ戻せる。
-    restored.replacements = backup.replacements.clone();
-    restored.snippets = backup.snippets.clone();
-    restored.actions.clone_from(&backup.actions);
-    restored
+    RestoreConfig {
+        config: restored,
+        rejected,
+    }
 }
 
 /// 現在の設定と控えへ戻した後の設定を、同期の項目と同じ粒度で比べる。
@@ -6806,29 +6822,97 @@ mod tests {
     }
 
     #[test]
-    fn restoring_a_backup_keeps_device_settings_and_reports_synced_changes() {
+    fn restoring_a_backup_keeps_disabled_and_excluded_settings() {
         let current = Config {
             theme: Theme::Dark,
             autostart: false,
-            sync_settings: false,
-            replacements: vec![replacement('a', "current")],
+            language: Language::En,
+            sync_excluded_settings: vec!["theme".to_string()],
             ..Config::default()
         };
         let backup = Config {
             theme: Theme::Light,
             autostart: true,
-            sync_settings: true,
+            language: Language::Ja,
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(restored.config.theme, Theme::Dark);
+        assert_eq!(restored.config.language, Language::Ja);
+        assert!(!restored.config.autostart);
+        assert!(restored.rejected.is_empty());
+        assert_eq!(
+            backup_differences(&current, &restored.config)
+                .iter()
+                .map(|change| change.id.as_str())
+                .collect::<Vec<_>>(),
+            ["s_language"]
+        );
+    }
+
+    #[test]
+    fn restoring_a_backup_keeps_rows_when_their_kind_is_disabled() {
+        let current = Config {
+            sync_replacements: false,
+            replacements: vec![replacement('a', "current")],
+            ..Config::default()
+        };
+        let backup = Config {
             replacements: vec![replacement('b', "backup")],
             ..Config::default()
         };
         let restored = restore_config(&current, &backup);
-        assert_eq!(restored.theme, Theme::Light);
-        assert!(!restored.autostart);
-        assert!(!restored.sync_settings);
-        assert_eq!(restored.replacements, backup.replacements);
-        let changes = backup_differences(&current, &restored);
-        assert!(changes.iter().any(|change| change.id == "s_theme"));
+        assert_eq!(restored.config.replacements, current.replacements);
+        assert!(restored.rejected.is_empty());
+        assert!(backup_differences(&current, &restored.config).is_empty());
+    }
+
+    #[test]
+    fn restoring_a_backup_merges_synced_rows_and_their_order() {
+        let mut local_only = replacement('b', "local only");
+        local_only.sync = false;
+        let current = Config {
+            replacements: vec![local_only.clone(), replacement('a', "current")],
+            ..Config::default()
+        };
+        let mut backup_only = replacement('d', "backup only");
+        backup_only.sync = false;
+        let backup = Config {
+            replacements: vec![replacement('c', "backup"), backup_only],
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(
+            restored.config.replacements,
+            [local_only, replacement('c', "backup")]
+        );
+        assert!(restored.rejected.is_empty());
+        let changes = backup_differences(&current, &restored.config);
+        assert!(changes
+            .iter()
+            .any(|change| change.id == row_key('r', 'a').id));
+        assert!(changes
+            .iter()
+            .any(|change| change.id == row_key('r', 'c').id));
         assert!(changes.iter().any(|change| change.id == "o_replacements"));
+        assert!(!changes
+            .iter()
+            .any(|change| change.id == row_key('r', 'b').id));
+        assert!(!changes
+            .iter()
+            .any(|change| change.id == row_key('r', 'd').id));
+    }
+
+    #[test]
+    fn restoring_a_backup_reports_values_that_cannot_be_applied() {
+        let current = Config::default();
+        let backup = Config {
+            text_font_size: config::MAX_DRAFT_FONT_SIZE + 1,
+            ..Config::default()
+        };
+        let restored = restore_config(&current, &backup);
+        assert_eq!(restored.config.text_font_size, current.text_font_size);
+        assert_eq!(restored.rejected, [setting_item("text_font_size")]);
     }
 
     #[test]

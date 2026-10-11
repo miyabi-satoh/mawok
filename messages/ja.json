@@ -380,5 +380,6 @@
 	"sync_restore_changes": "戻すと変わるもの: {names}",
 	"sync_restore_more": "ほか {count} 件",
 	"sync_restore_confirm": "この設定に戻す",
-	"sync_restore_order": "{name}の並び"
+	"sync_restore_order": "{name}の並び",
+	"sync_restore_partial": "一部の設定を戻せませんでした"
 }

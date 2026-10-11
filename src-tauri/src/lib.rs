@@ -1998,6 +1998,7 @@ async fn set_sync_excluded_setting(app: AppHandle, name: String, sync: bool) -> 
 
 /// 食い違いを選ぶ画面で、窓口と話せなかった。
 const SYNC_UNREACHABLE: &str = "sync.unreachable";
+const SYNC_RESTORE_PARTIAL: &str = "sync.restore_partial";
 
 /// 選ぶ画面に出す一覧。
 #[derive(Serialize)]
@@ -2185,7 +2186,7 @@ async fn sync_backups(app: AppHandle) -> Result<Vec<sync::SyncBackup>, String> {
                 }
             };
             let restored = sync::restore_config(&current, &backup_config);
-            let changes = sync::backup_differences(&current, &restored);
+            let changes = sync::backup_differences(&current, &restored.config);
             if !changes.is_empty() {
                 backups.push(sync::SyncBackup {
                     name: name.to_string(),
@@ -2214,9 +2215,16 @@ async fn restore_sync_backup(app: AppHandle, name: String) -> Result<(), String>
         let backup = run_blocking(move || config::load_sync_backup(&path, &name))
             .await?
             .map_err(|error| error.to_string())?;
-        let next = sync::restore_config(&current, &backup);
+        let sync::RestoreConfig {
+            config: next,
+            rejected: locally_rejected,
+        } = sync::restore_config(&current, &backup);
         if next == current {
-            return Ok(());
+            return if locally_rejected.is_empty() {
+                Ok(())
+            } else {
+                Err(SYNC_RESTORE_PARTIAL.to_string())
+            };
         }
         let action_state = app.state::<ActionState>();
         let _settings = if next.ai_service != current.ai_service {
@@ -2226,14 +2234,15 @@ async fn restore_sync_backup(app: AppHandle, name: String) -> Result<(), String>
         };
         let _commit = state.sync_commit.lock().await;
         match save_synced_config(&app, generation, next)? {
-            Some(rejected) => {
+            Some(mut rejected) => {
+                rejected.extend(locally_rejected);
                 // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
                 apply_config(&app);
                 let _ = app.emit(events::SYNC_APPLIED, settings_view(&state));
                 if rejected.is_empty() {
                     Ok(())
                 } else {
-                    Err("some restored settings couldn't be applied".to_string())
+                    Err(SYNC_RESTORE_PARTIAL.to_string())
                 }
             }
             None => Err("settings changed while restoring the backup".to_string()),
