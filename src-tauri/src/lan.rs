@@ -1340,8 +1340,11 @@ impl Lan {
     ) {
         if self.continues_offering(automatic) {
             match self.make_pairing_offer(automatic, previous_code_was_wrong, Some(stops)) {
-                // 取り出している間に「キャンセル」されたか、新しいコードが出ていれば、画面はそちらに合っている
-                Ok(_) => return,
+                Ok(Some(_)) => return,
+                // 取り出している間に新しいコードが出ていれば、画面はそちらに合っている。「キャンセル」や
+                // 「デバイス」を離れる操作だったなら、そのときコードが無くて知らせていないので、ここで知らせる
+                Ok(None) if self.offer.lock().unwrap().is_some() => return,
+                Ok(None) => {}
                 Err(error) => warn!("lan: couldn't replace pairing code: {error}"),
             }
         }
@@ -2137,6 +2140,7 @@ mod tests {
 
             assert!(lan.pairing_offer().is_none());
             assert!(host.offered.lock().unwrap().is_empty());
+            assert_eq!(host.ended.load(Ordering::Relaxed), 1);
         }
     }
 
@@ -2162,6 +2166,7 @@ mod tests {
 
         assert_eq!(lan.pairing_offer().unwrap().code, "222222");
         assert!(host.offered.lock().unwrap().is_empty());
+        assert_eq!(host.ended.load(Ordering::Relaxed), 0);
     }
 
     #[test]
