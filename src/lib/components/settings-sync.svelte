@@ -64,7 +64,7 @@
 		<AlertDialog.Header>
 			<AlertDialog.Title>{m.settings_sync_select_settings_title()}</AlertDialog.Title>
 		</AlertDialog.Header>
-		<div class="flex flex-col gap-3 overflow-y-auto">
+		<div class="-mx-4 flex flex-col gap-3 overflow-y-auto px-4">
 			{#each CONSTANTS.SYNCABLE_SETTINGS as name (name)}
 				<label class="flex items-center gap-2 text-sm">
 					<input
