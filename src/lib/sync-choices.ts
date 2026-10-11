@@ -1,0 +1,232 @@
+import { ENCODINGS, OUTPUTS } from '$lib/action-options';
+import { aiServiceInfo } from '$lib/ai-services';
+import type { SyncConflict } from '$lib/bindings/SyncConflict';
+import type { SyncValue } from '$lib/bindings/SyncValue';
+import { CONSTANTS } from '$lib/bindings/constants';
+import { DEFAULT_TEXT_COLORS } from '$lib/color';
+import { DRAFT_ACTIONS_IN_SETTINGS, draftActionLabel, formatKeys, type Platform } from '$lib/keys';
+import { m } from '$lib/paraglide/messages';
+import type { CharWidths } from '$lib/settings.svelte';
+import { snippetLabel } from '$lib/snippets';
+
+/** 別々に変えた1項目を、どちらを使うか選ぶ画面に出す文言。値は、複数行なら改行でつなぐ */
+export type ChoiceText = { label: string; thisDevice: string; otherDevice: string };
+
+type ValueOf<T extends SyncValue['type']> = Extract<SyncValue, { type: T }>;
+type Row = ValueOf<'replacement' | 'snippet' | 'action'>;
+
+const onOff = (on: boolean) => (on ? m.sync_choice_on() : m.sync_choice_off());
+const pair = (label: string, value: string) => m.sync_choice_pair({ label, value });
+const orDefault = (text: string) => (text === '' ? m.sync_choice_default() : text);
+const orEmpty = (text: string) => (text === '' ? m.settings_row_empty() : text);
+const keysText = (key: string, platform: Platform) =>
+	key === '' ? m.settings_key_none() : formatKeys(key, platform);
+
+/** 文字を揃える種類。設定の画面と同じ並び */
+const CHAR_WIDTH_KINDS: { kind: keyof CharWidths; label: () => string }[] = [
+	{ kind: 'alphabet', label: m.settings_char_width_alphabet },
+	{ kind: 'digit', label: m.settings_char_width_digit },
+	{ kind: 'space', label: m.settings_char_width_space },
+	{ kind: 'symbol', label: m.settings_char_width_symbol },
+	{ kind: 'katakana', label: m.settings_char_width_katakana }
+];
+
+const WIDTH_NAMES = {
+	keep: m.settings_char_width_keep,
+	full: m.settings_char_width_full,
+	half: m.settings_char_width_half
+};
+
+/** 2つの値で違う項目だけを残す。値の一部だけが違う設定で、同じ所まで並べると、どこが違うのかを探すことになる */
+function differing<K>(keys: readonly K[], same: (key: K) => boolean): readonly K[] {
+	const changed = keys.filter((key) => !same(key));
+	return changed.length > 0 ? changed : keys;
+}
+
+function rowName(row: Row): string {
+	switch (row.type) {
+		case 'replacement':
+			return orEmpty(row.value.from);
+		case 'snippet':
+			return orEmpty(snippetLabel(row.value));
+		case 'action':
+			return orEmpty(snippetLabel({ name: row.value.name, body: row.value.command }));
+	}
+}
+
+/** 項目の名前。設定の画面でのその項目のラベルと同じ言い方にし、行は種類と行の名前にする */
+function label(value: Exclude<SyncValue, { type: 'deleted' }>): string {
+	switch (value.type) {
+		case 'language':
+			return m.settings_language();
+		case 'theme':
+			return m.settings_theme();
+		case 'text_window_always_on_top':
+			return m.settings_draft_always_on_top();
+		case 'hide_text_window_on_blur':
+			return m.settings_hide_draft_on_blur();
+		case 'show_text_window_buttons':
+			return m.settings_draft_buttons();
+		case 'text_history_size':
+			return m.settings_draft_history_size();
+		case 'trim_trailing_whitespace':
+			return m.settings_trim_trailing();
+		case 'punctuation_style':
+			return m.sync_choice_label_sub({
+				group: m.settings_char_width(),
+				item: m.settings_char_width_punctuation()
+			});
+		case 'char_widths':
+			return m.settings_char_width();
+		case 'exclude_from_clipboard_history':
+			return m.settings_exclude_history();
+		case 'text_font_size':
+			return m.settings_draft_font_size();
+		case 'text_color_light':
+			return m.sync_choice_label_sub({
+				group: m.settings_draft_text_color(),
+				item: m.settings_draft_text_color_light()
+			});
+		case 'text_color_dark':
+			return m.sync_choice_label_sub({
+				group: m.settings_draft_text_color(),
+				item: m.settings_draft_text_color_dark()
+			});
+		case 'input_guidance':
+			return m.settings_draft_guidance();
+		case 'ai_service':
+			return m.settings_ai_service();
+		case 'ai_models':
+			return m.settings_ai_model();
+		case 'hotkey':
+			return m.settings_hotkey();
+		case 'text_window_keys':
+			return m.settings_category_keys();
+		case 'text_font_family':
+			return m.settings_draft_font();
+		case 'replacement':
+			return m.sync_choice_row_replacement({ name: rowName(value) });
+		case 'snippet':
+			return m.sync_choice_row_snippet({ name: rowName(value) });
+		case 'action':
+			return m.sync_choice_row_action({ name: rowName(value) });
+	}
+}
+
+/** `other` と同じ種類の値なら、その値。行は、片方が「削除」のことがある */
+function sameType<T extends SyncValue>(value: T, other: SyncValue): T | null {
+	return other.type === value.type ? (other as T) : null;
+}
+
+/** 値。設定の画面で見えるのと同じ言い方にする。`other` は、違う所だけを出すために見る、もう片方の値 */
+function valueText(value: SyncValue, other: SyncValue, platform: Platform): string {
+	switch (value.type) {
+		case 'deleted':
+			return m.sync_choice_deleted();
+		case 'language':
+			return { system: m.settings_language_system(), ja: '日本語', en: 'English' }[value.value];
+		case 'theme':
+			return {
+				system: m.settings_theme_system,
+				light: m.settings_theme_light,
+				dark: m.settings_theme_dark
+			}[value.value]();
+		case 'text_window_always_on_top':
+		case 'hide_text_window_on_blur':
+		case 'show_text_window_buttons':
+		case 'trim_trailing_whitespace':
+		case 'exclude_from_clipboard_history':
+			return onOff(value.value);
+		case 'text_history_size':
+		case 'text_font_size':
+			return String(value.value);
+		case 'punctuation_style':
+			return { keep: m.settings_char_width_keep(), kutouten: '、。', comma: '，．' }[value.value];
+		case 'char_widths': {
+			const theirs = sameType(value, other)?.value;
+			return differing(CHAR_WIDTH_KINDS, ({ kind }) => theirs?.[kind] === value.value[kind])
+				.map(({ kind, label }) => pair(label(), WIDTH_NAMES[value.value[kind]]()))
+				.join('\n');
+		}
+		case 'text_color_light':
+			return value.value || DEFAULT_TEXT_COLORS.light;
+		case 'text_color_dark':
+			return value.value || DEFAULT_TEXT_COLORS.dark;
+		case 'input_guidance':
+			if (value.value === null) return m.sync_choice_default();
+			return value.value === '' ? m.sync_choice_empty() : value.value;
+		case 'ai_service':
+			return aiServiceInfo(value.value).name();
+		case 'ai_models': {
+			const theirs = sameType(value, other)?.value ?? {};
+			const services = CONSTANTS.AI_SERVICES.filter(
+				(service) => service in value.value || service in theirs
+			);
+			return differing(services, (service) => theirs[service] === value.value[service])
+				.map((service) =>
+					pair(aiServiceInfo(service).name(), orDefault(value.value[service] ?? ''))
+				)
+				.join('\n');
+		}
+		case 'hotkey':
+			return keysText(value.value, platform);
+		case 'text_window_keys': {
+			const theirs = sameType(value, other)?.value;
+			return differing(
+				DRAFT_ACTIONS_IN_SETTINGS,
+				(action) => theirs?.[action] === value.value[action]
+			)
+				.map((action) => pair(draftActionLabel(action), keysText(value.value[action], platform)))
+				.join('\n');
+		}
+		case 'text_font_family':
+			return orDefault(value.value);
+		case 'replacement': {
+			const row = value.value;
+			const theirs = sameType(value, other)?.value;
+			const lines = [`${row.from} → ${row.to}`];
+			if (theirs && theirs.enabled !== row.enabled) {
+				lines.push(pair(m.settings_replacements_enabled(), onOff(row.enabled)));
+			}
+			return lines.join('\n');
+		}
+		case 'snippet':
+			return [value.value.name, value.value.body].filter((line) => line !== '').join('\n');
+		case 'action': {
+			const row = value.value;
+			const theirs = sameType(value, other)?.value;
+			const lines = [row.name, row.command].filter((line) => line !== '');
+			if (theirs && theirs.output !== row.output) {
+				const output = OUTPUTS.find((option) => option.value === row.output);
+				lines.push(pair(m.settings_actions_output(), output?.name() ?? row.output));
+			}
+			if (theirs && theirs.encoding !== row.encoding) {
+				const encoding = ENCODINGS.find((option) => option.value === row.encoding);
+				lines.push(pair(m.settings_actions_encoding(), encoding?.name ?? row.encoding));
+			}
+			if (theirs && theirs.enabled !== row.enabled) {
+				lines.push(pair(m.settings_actions_enabled_unnamed(), onOff(row.enabled)));
+			}
+			return lines.join('\n');
+		}
+	}
+}
+
+/** 1項目の名前と、このデバイスの値・ほかのデバイスの値。名前は、消していない方の値から付ける */
+export function choiceText(conflict: SyncConflict, platform: Platform): ChoiceText {
+	const { thisDevice, otherDevice } = conflict;
+	const named = thisDevice.type !== 'deleted' ? thisDevice : otherDevice;
+	return {
+		label: named.type === 'deleted' ? '' : label(named),
+		thisDevice: valueText(thisDevice, otherDevice, platform),
+		otherDevice: valueText(otherDevice, thisDevice, platform)
+	};
+}
+
+/** 読み上げで、どの項目のどちらの側かを見分ける名前 */
+export function sideName(itemLabel: string, side: 'this_device' | 'other_device'): string {
+	return m.sync_choice_side_of({
+		name: itemLabel,
+		side: side === 'this_device' ? m.sync_choice_this_device() : m.sync_choice_other_device()
+	});
+}

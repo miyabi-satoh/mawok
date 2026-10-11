@@ -19,6 +19,7 @@ export const EVENTS = {
 	DRAFT_HISTORY_SYNCED: "draft-history-synced",
 	SNIPPET_ADDED: "snippet-added",
 	SYNC_APPLIED: "sync-applied",
+	SYNC_CHOICE_REQUESTED: "sync-choice-requested",
 	PAIRING_CODE_ENDED: "pairing-code-ended",
 	PAIRING_CODE_OFFERED: "pairing-code-offered",
 	DRAFT_RECEIVED: "draft-received",

@@ -24,7 +24,7 @@ Copied text is kept in history.
 
 - Press `↑` at the start of the text box or `↓` at its end to show the previous or next text.
 - Change how many are kept under "General" in Settings. Set it to 0 to keep no history.
-- With Pro, history syncs with your other devices on the same account. Selecting "Clear history" in Settings or setting the number to 0 also clears the history on those devices.
+- While history is synced, selecting "Clear history" in Settings or setting the number to 0 also clears the history on your other devices (see "Sync settings and history").
 
 ## Use snippets
 
@@ -84,6 +84,22 @@ Devices you have added appear automatically under "Send to" in "Devices" in Sett
 To send, press {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} in the text window or click "Send".
 If the text box on the other device is empty, the text goes in as it is; if it has unfinished text, you can choose whether to insert it.
 
+## Sync settings and history
+
+With Pro, your settings and history stay the same across the devices on your account.
+
+1. On each device, sign in to Mawok under "Account" in Settings.
+2. Add the devices by following the steps in "Send to other devices".
+
+Syncing starts automatically once a device is added.
+
+- Synced: settings, replacements, snippets, actions, and history.
+- Kept per device: launch at login, API keys for AI services, and the devices you send to. The hotkey, keyboard shortcuts, and text font sync only between {macos:Macs}{windows:Windows devices}.
+- For replacements, snippets, and actions, turn off the cloud mark on a row to stop syncing just that row.
+- To stop syncing, turn off "Sync settings" or "Sync history" under "Sync" in "Account" in Settings.
+
+If you change the same setting on different devices, "Choose Which to Use..." appears under "Account" in Settings. Select it, choose "This device" or "Other device" for each item, then select "Apply Selected Settings". You can also open it from "Choose Which Settings to Use…" in the {macos:menu bar}{windows:system tray} menu.
+
 ## Keyboard shortcuts
 
 | Action | Key |
@@ -123,7 +139,7 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 
 - Mawok does not send usage statistics or error reports.
 - It sends your text outside the app only when you run an AI action (to the AI service you chose), send it to another device (to another device you own on the same account), or sync with Pro.
-- While you sync with Pro, your settings (such as replacements, snippets, and actions) and history are encrypted and stored on Mawok's server. Mawok's server cannot read them.
+- While you sync with Pro, what you sync is encrypted and stored on Mawok's server. Mawok's server cannot read it.
 - Before you choose an AI service and select "Agree", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
 
 ## Settings file
@@ -135,7 +151,8 @@ Changes you make directly take effect after you restart the app. The file contai
 | -------------------------------- | -------------------------------- | ------------------------------------------------------------------------ |
 | `hotkey`                         | `"CommandOrControl+Shift+Space"` | Hotkey that brings up the text window; empty for none                    |
 | `autostart`                      | `true`                           | Launch at login                                                          |
-| `sync_enabled`                   | `true`                           | With Pro, sync settings and history with your other devices              |
+| `sync_settings`                  | `true`                           | With Pro, sync settings with your other devices                          |
+| `sync_history`                   | `true`                           | With Pro, sync history with your other devices                           |
 | `language`                       | `"system"`                       | Language (`"system"`, `"ja"`, `"en"`)                                    |
 | `theme`                          | `"system"`                       | Theme (`"system"`, `"light"`, `"dark"`)                                  |
 | `text_window_always_on_top`      | `true`                           | Keep the text window on top                                              |

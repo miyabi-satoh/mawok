@@ -16,6 +16,7 @@
 	import { isImeKey } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 	import type { ActionsEditor } from '$lib/actions-editor.svelte';
+	import { ENCODINGS, OUTPUTS } from '$lib/action-options';
 	import { aiInstruction, hasDelayedExpansionChars, TEXT_MARK } from '$lib/action-target';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { Switch } from '$lib/components/ui/switch';
@@ -147,22 +148,6 @@
 	 * 打って消している途中にまで既定を出すと、消した端から戻って打ち直せない。離れたら既定を出す
 	 */
 	let modelCleared = $state(false);
-
-	/** 結果の出し方の選択肢 */
-	const OUTPUTS: { value: ActionOutput; name: () => string }[] = [
-		{ value: 'replace', name: m.settings_actions_output_replace },
-		{ value: 'insert', name: m.settings_actions_output_insert },
-		{ value: 'none', name: m.settings_actions_output_none }
-	];
-
-	/** コマンドの文字コードの選択肢（docs/actions.md「コマンド」）。名前は文字コードの名前なので、表示言語で変えない */
-	const ENCODINGS: { value: ActionEncoding; name: string }[] = [
-		{ value: 'utf-8', name: 'UTF-8' },
-		{ value: 'shift_jis', name: 'Shift_JIS' },
-		{ value: 'euc-jp', name: 'EUC-JP' },
-		{ value: 'iso-2022-jp', name: 'JIS (ISO-2022-JP)' },
-		{ value: 'utf-16le', name: 'UTF-16 LE' }
-	];
 
 	async function setService(service: AiService) {
 		consentService = null;

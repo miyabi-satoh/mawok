@@ -203,6 +203,10 @@ struct AppState {
     sync_commit: tokio::sync::Mutex<()>,
     sync_schedule: Mutex<SyncSchedule>,
     sync_debounce: debounce::Debounce,
+    /// 同期の記録にある、利用者が選ぶのを待っている食い違いの数（docs/sync.md「食い違い」）
+    sync_conflicts: AtomicUsize,
+    /// トレイから食い違いを選ぶ画面を頼まれた。設定ウィンドウが、開いたときに受け取る
+    sync_choice_requested: AtomicBool,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -307,6 +311,12 @@ struct SettingsView {
     account_key_status: account_key::Status,
     /// Mawok のアカウントトークンを資格情報管理から読めたか
     mawok_account_signed_in: bool,
+    /// 設定をほかのデバイスと同期するか
+    sync_settings: bool,
+    /// テキストウィンドウの履歴をほかのデバイスと同期するか
+    sync_history: bool,
+    /// ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
+    sync_conflicts: u32,
     punctuation_style: PunctuationStyle,
     char_widths: CharWidths,
     /// コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
@@ -356,6 +366,9 @@ fn settings_view(state: &AppState) -> SettingsView {
         .is_some_and(|pro| pro.available_at(pro::now()));
     SettingsView {
         revision,
+        sync_settings: config.sync_settings,
+        sync_history: config.sync_history,
+        sync_conflicts: shown_sync_conflicts(state, &config, pro_available),
         locale: lang.code(),
         ai_service: config.ai_service,
         ai_consent: config.ai_consent,
@@ -398,6 +411,14 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_color_dark: config.text_color_dark,
         version: state.version.clone(),
     }
+}
+
+/// 画面とトレイに出す食い違いの数。設定を同期していない間は、選んでも進まないので出さない
+fn shown_sync_conflicts(state: &AppState, config: &Config, pro_available: bool) -> u32 {
+    if !pro_available || !config.sync_settings {
+        return 0;
+    }
+    u32::try_from(state.sync_conflicts.load(Ordering::Relaxed)).unwrap_or(u32::MAX)
 }
 
 fn window_state_flags() -> StateFlags {
@@ -1648,62 +1669,119 @@ fn request_sync(app: &AppHandle) {
     });
 }
 
-async fn run_settings_sync(app: &AppHandle) {
-    let (config, generation, record_generation, key, key_id, available) = {
+/// 窓口の同期の入口と話すのに要るもの。
+struct SyncAccess {
+    client: reqwest::Client,
+    token: String,
+    key: [u8; 32],
+    key_id: String,
+}
+
+impl SyncAccess {
+    fn transport(&self) -> sync::HttpTransport<'_> {
+        sync::HttpTransport {
+            client: &self.client,
+            token: &self.token,
+            key: &self.key,
+            key_id: &self.key_id,
+        }
+    }
+}
+
+/// 同期が動く条件（docs/sync.md 冒頭）を満たしていれば、窓口と話すのに要るものを返す。
+async fn sync_access(app: &AppHandle) -> Option<SyncAccess> {
+    let (key, key_id) = {
         let state = app.state::<AppState>();
-        // 設定の保存は、設定の排他の中で世代を進める。同じ排他の中で設定と一緒に読む。
-        // 別々に読むと、間に入った保存を見落として、古い設定で上書きしうる
-        let (config, generation) = {
-            let config = state.config.lock().unwrap();
-            (config.clone(), state.sync_generation.load(Ordering::SeqCst))
-        };
-        let record_generation = state.sync_record_generation.load(Ordering::SeqCst);
-        let key = *state.account_key.lock().unwrap();
-        let key_id = state.account_key_id.lock().unwrap().clone();
         let available = state
             .pro_state
             .lock()
             .unwrap()
             .as_ref()
             .is_some_and(|pro| pro.available_at(pro::now()));
-        (
-            config,
-            generation,
-            record_generation,
-            key,
-            key_id,
-            available,
-        )
-    };
-    if !config.sync_enabled
-        || !available
-        || *app.state::<AppState>().account_key_status.lock().unwrap() != account_key::Status::Ready
-    {
-        return;
-    }
-    let (Some(key), Some(key_id)) = (key, key_id) else {
-        return;
+        if !available || *state.account_key_status.lock().unwrap() != account_key::Status::Ready {
+            return None;
+        }
+        let key = *state.account_key.lock().unwrap();
+        let key_id = state.account_key_id.lock().unwrap().clone();
+        (key?, key_id?)
     };
     let token = match run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await {
         Ok(Ok(token)) => token,
         Ok(Err(error)) => {
             warn!("couldn't read the Mawok account token for sync: {error:?}");
-            return;
+            return None;
         }
         Err(error) => {
             warn!("couldn't read the Mawok account token for sync: {error}");
-            return;
+            return None;
         }
     };
     let client = match http_client(app) {
         Ok(client) => client,
         Err(error) => {
             warn!("couldn't create a sync client: {error}");
-            return;
+            return None;
         }
+    };
+    Some(SyncAccess {
+        client,
+        token,
+        key,
+        key_id,
+    })
+}
+
+/// 設定と、それを読んだときの保存の世代。設定の保存は、設定の排他の中で世代を進めるので、同じ排他の中で読む。
+/// 別々に読むと、間に入った保存を見落として、古い設定で上書きしうる
+fn config_with_generation(state: &AppState) -> (Config, usize) {
+    let config = state.config.lock().unwrap();
+    (config.clone(), state.sync_generation.load(Ordering::SeqCst))
+}
+
+/// 同期の記録を読む。別の鍵の記録は、無いものとして扱う
+async fn load_sync_record(app: &AppHandle, key_id: &str) -> Option<sync::State> {
+    let path = app.state::<AppState>().sync_state_path.clone();
+    run_blocking(move || sync::load(&path))
+        .await
+        .ok()
+        .flatten()
+        .filter(|state| state.key_id == key_id)
+}
+
+/// 選ぶのを待っている食い違いの数を覚え、変わっていたら画面とトレイに反映する
+fn remember_sync_conflicts(app: &AppHandle, count: usize) {
+    let state = app.state::<AppState>();
+    if state.sync_conflicts.swap(count, Ordering::Relaxed) != count {
+        apply_config(app);
+    }
+}
+
+async fn run_settings_sync(app: &AppHandle) {
+    let (config, generation, record_generation) = {
+        let state = app.state::<AppState>();
+        let (config, generation) = config_with_generation(&state);
+        let record_generation = state.sync_record_generation.load(Ordering::SeqCst);
+        (config, generation, record_generation)
+    };
+    let kinds = sync::Kinds {
+        settings: config.sync_settings,
+        history: config.sync_history,
+    };
+    if !kinds.any() {
+        return;
+    }
+    let Some(SyncAccess {
+        client,
+        token,
+        key,
+        key_id,
+    }) = sync_access(app).await
+    else {
+        return;
     };
     // 読めない履歴ファイルは、画面が読み込むときに除けるので、この回は履歴を同期しない
     let local_history = match history_path(app) {
+        _ if !kinds.history => None,
         Ok(path) => run_blocking(move || {
             let _guard = HISTORY_FILE_LOCK.lock().unwrap();
             history_store::load(&path).ok()
@@ -1714,22 +1792,18 @@ async fn run_settings_sync(app: &AppHandle) {
         _ => None,
     };
     let path = app.state::<AppState>().sync_state_path.clone();
-    let before = run_blocking({
-        let path = path.clone();
-        move || sync::load(&path)
-    })
-    .await
-    .ok()
-    .flatten()
-    .filter(|state| state.key_id == key_id);
+    let before = load_sync_record(app, &key_id).await;
     let synced = sync::sync_once(
-        &client,
-        &token,
-        &key,
-        &key_id,
+        sync::HttpTransport {
+            client: &client,
+            token: &token,
+            key: &key,
+            key_id: &key_id,
+        },
         &config,
         before.clone(),
         local_history.as_ref(),
+        kinds,
     )
     .await;
     match synced {
@@ -1787,9 +1861,11 @@ async fn run_settings_sync(app: &AppHandle) {
             } else {
                 result.state
             };
+            let conflicts = record.conflict_count();
             if let Err(error) = run_blocking(move || sync::save(&path, &record)).await {
                 warn!("couldn't save sync state: {error}");
             }
+            remember_sync_conflicts(app, conflicts);
             if retry {
                 request_sync(app);
             }
@@ -1822,6 +1898,191 @@ async fn run_settings_sync(app: &AppHandle) {
             }
         }
     }
+}
+
+/// 同期する種類を変える（docs/sync.md 冒頭）。オンにした種類は、すぐに同期する。
+/// オフにした種類の記録は消さないので、オンに戻すと続きから合わせる
+fn set_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
+    let _ = save_config(app, change)?;
+    apply_config(app);
+    request_sync(app);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_sync_settings(app: AppHandle, enabled: bool) -> Result<(), String> {
+    info!("set sync settings: {enabled}");
+    set_sync_kind(&app, |config| config.sync_settings = enabled)
+}
+
+#[tauri::command]
+fn set_sync_history(app: AppHandle, enabled: bool) -> Result<(), String> {
+    info!("set sync history: {enabled}");
+    set_sync_kind(&app, |config| config.sync_history = enabled)
+}
+
+/// 食い違いを選ぶ画面で、窓口と話せなかった。
+const SYNC_UNREACHABLE: &str = "sync.unreachable";
+
+/// 食い違っている設定と、窓口から読んだほかのデバイスの値（docs/sync.md「食い違い」）。
+#[tauri::command]
+async fn sync_conflicts(app: AppHandle) -> Result<Vec<sync::SyncConflict>, String> {
+    let (config, _) = config_with_generation(&app.state::<AppState>());
+    if !config.sync_settings {
+        return Ok(Vec::new());
+    }
+    let access = sync_access(&app)
+        .await
+        .ok_or_else(|| SYNC_UNREACHABLE.to_string())?;
+    let Some(record) = load_sync_record(&app, &access.key_id).await else {
+        return Ok(Vec::new());
+    };
+    let remote = sync::read_conflicts(access.transport(), &record)
+        .await
+        .map_err(|error| {
+            warn!("couldn't read the settings changed on both devices: {error}");
+            SYNC_UNREACHABLE.to_string()
+        })?;
+    Ok(sync::conflicts(&config, &record, &remote))
+}
+
+/// 食い違いを選んだ結果。
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+struct SyncResolution {
+    /// 選ぶ画面を出した後に、窓口の値か手元の設定が変わっていた。何も変えていないので、選び直してもらう
+    stale: bool,
+    /// 「ほかのデバイス」を選んだが、このデバイスでは使えない値で、入れられなかった項目の id
+    rejected: Vec<String>,
+}
+
+/// 同期が走っていない間を取る。選んだ結果を記録に置く間に同期が走ると、同期が、前の記録から作った結果で
+/// 上書きする。取った後は `release_sync` で返す
+async fn hold_sync(app: &AppHandle) {
+    loop {
+        {
+            let state = app.state::<AppState>();
+            let mut schedule = state.sync_schedule.lock().unwrap();
+            if !schedule.running {
+                schedule.running = true;
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// `hold_sync` で取った間を返し、待たせていた分も含めて同期する。
+fn release_sync(app: &AppHandle) {
+    {
+        let state = app.state::<AppState>();
+        let mut schedule = state.sync_schedule.lock().unwrap();
+        schedule.running = false;
+        schedule.pending = false;
+    }
+    request_sync(app);
+}
+
+/// 食い違っている設定について、利用者が選んだ側を使う（docs/sync.md「食い違い」）。
+#[tauri::command]
+async fn resolve_sync_conflicts(
+    app: AppHandle,
+    choices: Vec<sync::SyncChoice>,
+) -> Result<SyncResolution, String> {
+    info!("resolve sync conflicts: {} chosen", choices.len());
+    hold_sync(&app).await;
+    let result = resolve_sync_conflicts_held(&app, &choices).await;
+    release_sync(&app);
+    result
+}
+
+async fn resolve_sync_conflicts_held(
+    app: &AppHandle,
+    choices: &[sync::SyncChoice],
+) -> Result<SyncResolution, String> {
+    let stale = || SyncResolution {
+        stale: true,
+        rejected: Vec::new(),
+    };
+    let app_state = app.state::<AppState>();
+    let (config, generation) = config_with_generation(&app_state);
+    let record_generation = app_state.sync_record_generation.load(Ordering::SeqCst);
+    let access = sync_access(app)
+        .await
+        .ok_or_else(|| SYNC_UNREACHABLE.to_string())?;
+    let Some(before) = load_sync_record(app, &access.key_id).await else {
+        return Ok(stale());
+    };
+    let remote = sync::read_conflicts(access.transport(), &before)
+        .await
+        .map_err(|error| {
+            warn!("couldn't read the settings changed on both devices: {error}");
+            SYNC_UNREACHABLE.to_string()
+        })?;
+    let Some(sync::Resolution {
+        config: next,
+        state: mut record,
+        mut rejected,
+    }) = sync::resolve(&config, &before, &remote, choices)
+    else {
+        return Ok(stale());
+    };
+    // 排他は、同期が結果を入れるときと同じ順に取る（`run_settings_sync`）
+    let action_state = app.state::<ActionState>();
+    let _settings = if next.ai_service != config.ai_service {
+        Some(action_state.settings.lock().await)
+    } else {
+        None
+    };
+    let _commit = app_state.sync_commit.lock().await;
+    if app_state.sync_record_generation.load(Ordering::SeqCst) != record_generation {
+        return Ok(stale());
+    }
+    if next != config {
+        match save_synced_config(app, generation, next)? {
+            Some(unapplied) => {
+                for item in &unapplied {
+                    sync::hold_again(&mut record, &before, item);
+                    rejected.push(item.id.clone());
+                }
+                apply_config(app);
+                let _ = app.emit(events::SYNC_APPLIED, settings_view(&app_state));
+            }
+            // 読んでいる間に、画面から設定が変わった。選んだ値を、変わる前の設定に重ねて入れない
+            None => return Ok(stale()),
+        }
+    }
+    let conflicts = record.conflict_count();
+    let path = app_state.sync_state_path.clone();
+    run_blocking(move || sync::save(&path, &record))
+        .await?
+        .map_err(|error| {
+            warn!("couldn't save sync state: {error}");
+            error
+        })?;
+    remember_sync_conflicts(app, conflicts);
+    Ok(SyncResolution {
+        stale: false,
+        rejected,
+    })
+}
+
+/// トレイから食い違いを選ぶ画面を頼まれていたかを返し、頼みを受け取ったことにする
+#[tauri::command]
+fn take_sync_choice_request(state: tauri::State<'_, AppState>) -> bool {
+    state.sync_choice_requested.swap(false, Ordering::SeqCst)
+}
+
+/// 設定ウィンドウを「アカウント」で開き、食い違いを選ぶ画面を出させる。
+/// 開いている設定ウィンドウにはイベントで、これから作る設定ウィンドウには目印で伝える
+fn open_sync_choice(app: &AppHandle) {
+    app.state::<AppState>()
+        .sync_choice_requested
+        .store(true, Ordering::SeqCst);
+    open_settings(app);
+    let _ = app.emit_to(SETTINGS_WINDOW, events::SYNC_CHOICE_REQUESTED, ());
 }
 
 /// サインインを待つ長さ。メールのリンクの期限（送ってから15分）より、送るまでの分だけ長く
@@ -2342,6 +2603,7 @@ async fn clear_sync_state(app: &AppHandle) {
         Ok(Ok(())) => {}
         Ok(Err(error)) | Err(error) => warn!("couldn't clear the sync state: {error}"),
     }
+    remember_sync_conflicts(app, 0);
 }
 
 /// 鍵を置く処理（確かめ・作り直し・ペアリングでの受け取り）と同じ排他を取り、消すのを必ず後にする。
@@ -4262,6 +4524,21 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let accelerator = (!hotkey_unavailable).then_some(hotkey.as_str());
     let show_item = MenuItem::with_id(app, "show", lang.toggle_draft(), true, accelerator)?;
     let settings_item = MenuItem::with_id(app, "settings", lang.settings(), true, None::<&str>)?;
+    let pro_available = state
+        .pro_state
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|pro| pro.available_at(pro::now()));
+    let sync_conflicts = {
+        let config = state.config.lock().unwrap();
+        shown_sync_conflicts(&state, &config, pro_available)
+    };
+    // 設定を開かない利用者にも気づけるよう、食い違いがあるあいだだけ出す（docs/sync.md「食い違い」）
+    let sync_choice_item = (sync_conflicts > 0)
+        .then(|| MenuItem::with_id(app, "sync-choice", lang.sync_choice(), true, None::<&str>))
+        .transpose()?;
+    let sync_choice_separator = PredefinedMenuItem::separator(app)?;
     let manual_item = MenuItem::with_id(app, "manual", lang.manual(), true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", lang.quit(), true, None::<&str>)?;
@@ -4272,6 +4549,10 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .collect();
     if !items.is_empty() {
         items.push(&problem_separator);
+    }
+    if let Some(item) = &sync_choice_item {
+        items.push(item);
+        items.push(&sync_choice_separator);
     }
     items.extend([
         &show_item as &dyn IsMenuItem<Wry>,
@@ -4324,6 +4605,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             match event.id.as_ref() {
                 "show" => toggle_draft(app),
                 "settings" => open_settings(app),
+                "sync-choice" => open_sync_choice(app),
                 "manual" => open_manual(app),
                 "quit" => app.exit(0),
                 _ => {}
@@ -4430,6 +4712,11 @@ pub fn run() {
             dismiss,
             page_ready,
             get_settings,
+            set_sync_settings,
+            set_sync_history,
+            sync_conflicts,
+            resolve_sync_conflicts,
+            take_sync_choice_request,
             open_settings_window,
             toggle_settings_window,
             close_settings_window,
@@ -4614,6 +4901,9 @@ pub fn run() {
             let config_path = app.path().app_config_dir()?.join(config::FILE_NAME);
             let pro_state_path = app.path().app_config_dir()?.join(pro::STATE_FILE_NAME);
             let sync_state_path = app.path().app_config_dir()?.join(sync::STATE_FILE_NAME);
+            // つながらないまま起動しても、前に止めた食い違いを知らせる
+            let sync_conflicts =
+                sync::load(&sync_state_path).map_or(0, |record| record.conflict_count());
             let pro_state = match pro::load(&pro_state_path) {
                 Ok(state) => state,
                 Err(error) => {
@@ -4680,6 +4970,8 @@ pub fn run() {
                 sync_commit: tokio::sync::Mutex::new(()),
                 sync_schedule: Mutex::new(SyncSchedule::default()),
                 sync_debounce: debounce::Debounce::default(),
+                sync_conflicts: AtomicUsize::new(sync_conflicts),
+                sync_choice_requested: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]

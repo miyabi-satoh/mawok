@@ -71,7 +71,19 @@ proAvailable: boolean, accountKeyStatus: Status,
 /**
  * Mawok のアカウントトークンを資格情報管理から読めたか
  */
-mawokAccountSignedIn: boolean, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
+mawokAccountSignedIn: boolean, 
+/**
+ * 設定をほかのデバイスと同期するか
+ */
+syncSettings: boolean, 
+/**
+ * テキストウィンドウの履歴をほかのデバイスと同期するか
+ */
+syncHistory: boolean, 
+/**
+ * ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
+ */
+syncConflicts: number, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
 /**
  * コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
  */

@@ -22,6 +22,7 @@
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
+	import SettingsSync from '$lib/components/settings-sync.svelte';
 	import SettingsUpdate from '$lib/components/settings-update.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -127,6 +128,24 @@
 	function openAccount() {
 		category = 'account';
 	}
+
+	/** ほかのデバイスと別々に変えた設定の、どちらを使うか選ぶ画面を出しているか */
+	let syncChoiceOpen = $state(false);
+
+	// トレイから頼まれたら、「アカウント」に移って選ぶ画面を出す。設定ウィンドウを作る前の頼みは、
+	// イベントでは届かないので、載せたときに Rust 側に尋ねる
+	$effect(() => {
+		const show = async () => {
+			if (!(await invoke<boolean>('take_sync_choice_request').catch(() => false))) return;
+			category = 'account';
+			syncChoiceOpen = true;
+		};
+		void show();
+		const unlisten = listen(EVENTS.SYNC_CHOICE_REQUESTED, show);
+		return () => {
+			unlisten.then((fn) => fn());
+		};
+	});
 
 	/** 設定を変えるコマンドを呼び、できたかを返す。変わった設定は settings-changed で届き、画面に反映される */
 	async function run(command: string, args?: Record<string, unknown>) {
@@ -1432,17 +1451,22 @@
 				</Tabs.Content>
 				<Tabs.Content value="account">
 					{#if category === 'account'}
-						<SettingsSection>
-							<SettingsRow>
-								<SettingsMawokAccount
-									call={callActions}
-									signedIn={view.mawokAccountSignedIn}
-									status={mawokAccountStatus}
-									proAvailable={view.proAvailable}
-									onchanged={() => refreshMawokAccountStatus(true)}
-								/>
-							</SettingsRow>
-						</SettingsSection>
+						<div class="flex flex-col gap-5">
+							<SettingsSection>
+								<SettingsRow>
+									<SettingsMawokAccount
+										call={callActions}
+										signedIn={view.mawokAccountSignedIn}
+										status={mawokAccountStatus}
+										proAvailable={view.proAvailable}
+										onchanged={() => refreshMawokAccountStatus(true)}
+									/>
+								</SettingsRow>
+							</SettingsSection>
+							{#if view.proAvailable}
+								<SettingsSync {view} call={callSettings} bind:choiceOpen={syncChoiceOpen} />
+							{/if}
+						</div>
 					{/if}
 				</Tabs.Content>
 				<Tabs.Content value="about">
