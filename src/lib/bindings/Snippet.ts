@@ -5,10 +5,18 @@
  */
 export type Snippet = { 
 /**
+ * 同期でこの1件を見分けるランダムな値
+ */
+id: string, 
+/**
  * 一覧で選ぶときの見出し。空なら、画面側で本文の最初の空でない行を代わりに出す
  */
 name: string, 
 /**
  * 差し込む文。複数行にできる
  */
-body: string, };
+body: string, 
+/**
+ * ほかのデバイスと同期するか
+ */
+sync: boolean, };

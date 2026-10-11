@@ -5,6 +5,10 @@
  */
 export type Replacement = { 
 /**
+ * 同期でこの1件を見分けるランダムな値
+ */
+id: string, 
+/**
  * 置き換える前の文字列
  */
 from: string, 
@@ -15,4 +19,8 @@ to: string,
 /**
  * 誤って巻き込む語を辞書から消さずに止められるようにするため、1件ずつ切れる
  */
-enabled: boolean, };
+enabled: boolean, 
+/**
+ * ほかのデバイスと同期するか
+ */
+sync: boolean, };

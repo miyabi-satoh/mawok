@@ -9,20 +9,26 @@ use unicode_segmentation::UnicodeSegmentation;
 #[cfg_attr(test, ts(export))]
 #[serde(default)]
 pub struct Replacement {
+    /// 同期でこの1件を見分けるランダムな値
+    pub id: String,
     /// 置き換える前の文字列
     pub from: String,
     /// 置き換えた後の文字列
     pub to: String,
     /// 誤って巻き込む語を辞書から消さずに止められるようにするため、1件ずつ切れる
     pub enabled: bool,
+    /// ほかのデバイスと同期するか
+    pub sync: bool,
 }
 
 impl Default for Replacement {
     fn default() -> Self {
         Self {
+            id: String::new(),
             from: String::new(),
             to: String::new(),
             enabled: true,
+            sync: true,
         }
     }
 }

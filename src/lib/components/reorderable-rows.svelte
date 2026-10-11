@@ -1,6 +1,14 @@
+<script module lang="ts">
+	import { overrideItemIdKeyNameBeforeInitialisingDndZones } from 'svelte-dnd-action';
+
+	// 設定の ID は保存前に空になりうるので、ドラッグの識別子には画面だけの key を使う。
+	// 一覧が1つでも描かれた後に呼ぶと例外になるので、部品を作るたびでなく、読み込んだときに一度だけ呼ぶ
+	overrideItemIdKeyNameBeforeInitialisingDndZones('key');
+</script>
+
 <script
 	lang="ts"
-	generics="T extends { name: string } & Record<K, string>, K extends string = never"
+	generics="T extends { id: string; name: string } & Record<K, string>, K extends string = never"
 >
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
@@ -92,7 +100,7 @@
 	 */
 	async function remove(row: Row<T>) {
 		const position = shown.indexOf(row);
-		expanded.delete(row.id);
+		expanded.delete(row.key);
 		list.remove(list.rows.indexOf(row));
 		await tick();
 		const menus = rowsEl?.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-trigger"]');
@@ -121,9 +129,9 @@
 		onconsider={consider}
 		onfinalize={finalize}
 	>
-		{#each shown as row (row.id)}
+		{#each shown as row (row.key)}
 			{@const index = list.rows.indexOf(row)}
-			{@const open = expanded.has(row.id)}
+			{@const open = expanded.has(row.key)}
 			{@const head = preview(row)}
 			<div class="flex flex-col gap-2" animate:flip={{ duration: flipDurationMs }}>
 				<div class="flex items-center gap-1">
@@ -148,8 +156,8 @@
 						type="button"
 						class="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
 						aria-expanded={open}
-						aria-controls="row-{row.id}"
-						onclick={() => toggle(row.id)}
+						aria-controls="row-{row.key}"
+						onclick={() => toggle(row.key)}
 					>
 						<ChevronRightIcon
 							class="size-4 shrink-0 text-muted-foreground transition-transform {open
@@ -182,7 +190,7 @@
 					/>
 				</div>
 				{#if open}
-					<div id="row-{row.id}" class="mb-2 flex flex-col gap-2 pl-8">
+					<div id="row-{row.key}" class="mb-2 flex flex-col gap-2 pl-8">
 						<Input
 							class="min-w-0 text-sm"
 							aria-label={nameLabel}

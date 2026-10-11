@@ -24,11 +24,11 @@ export function matchesFilter(query: string, ...texts: string[]): boolean {
 }
 
 /**
- * 設定の一覧で、絞り込みに当たった行の id。語が空（空白だけ）なら null（絞り込まない）。
+ * 設定の一覧で、絞り込みに当たった行の key。語が空（空白だけ）なら null（絞り込まない）。
  * 行は追わずに読むので、$derived の中で呼ぶと語を変えたときにだけ求め直す。
  * 行を書き換えるたびに求め直すと、当たらなくなった行が打っている途中で消えてしまうため
  */
-export function matchedIds<T extends { id: string }>(
+export function matchedIds<T extends { key: string }>(
 	rows: () => T[],
 	query: string,
 	texts: (row: T) => string[]
@@ -39,12 +39,12 @@ export function matchedIds<T extends { id: string }>(
 			new Set(
 				rows()
 					.filter((row) => matchesFilter(query, ...texts(row)))
-					.map((row) => row.id)
+					.map((row) => row.key)
 			)
 	);
 }
 
 /** 当たった行だけを、並びのまま返す。ids が null（絞り込んでいない）ならすべて */
-export function shownRows<T extends { id: string }>(rows: T[], ids: Set<string> | null): T[] {
-	return ids ? rows.filter((row) => ids.has(row.id)) : rows;
+export function shownRows<T extends { key: string }>(rows: T[], ids: Set<string> | null): T[] {
+	return ids ? rows.filter((row) => ids.has(row.key)) : rows;
 }

@@ -51,15 +51,30 @@ pub enum Theme {
 }
 
 /// 定型文の1件。下書きで定型文のキー（既定は Cmd+J、Windows は Ctrl+J）で出す一覧から選び、カーソルの位置に差し込む
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
 #[serde(default)]
 pub struct Snippet {
+    /// 同期でこの1件を見分けるランダムな値
+    pub id: String,
     /// 一覧で選ぶときの見出し。空なら、画面側で本文の最初の空でない行を代わりに出す
     pub name: String,
     /// 差し込む文。複数行にできる
     pub body: String,
+    /// ほかのデバイスと同期するか
+    pub sync: bool,
+}
+
+impl Default for Snippet {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            body: String::new(),
+            sync: true,
+        }
+    }
 }
 
 /// アクションの結果の出し方。
@@ -147,6 +162,8 @@ impl ActionEncoding {
 #[cfg_attr(test, ts(export))]
 #[serde(default)]
 pub struct Action {
+    /// 同期でこの1件を見分けるランダムな値
+    pub id: String,
     /// 一覧で選ぶときの見出し。空なら、画面側でコマンドの行を代わりに出す
     pub name: String,
     /// 1行のコマンド。行頭が `@ai` なら AI のアクション（actions.rs の ai_instruction）。空なら一覧に出さない
@@ -156,16 +173,20 @@ pub struct Action {
     pub encoding: ActionEncoding,
     /// 消さずに一覧から外せるようにするため、1件ずつ切れる（置き換え辞書と同じ）
     pub enabled: bool,
+    /// ほかのデバイスと同期するか
+    pub sync: bool,
 }
 
 impl Default for Action {
     fn default() -> Self {
         Self {
+            id: String::new(),
             name: String::new(),
             command: String::new(),
             output: ActionOutput::default(),
             encoding: ActionEncoding::default(),
             enabled: true,
+            sync: true,
         }
     }
 }
@@ -504,6 +525,17 @@ fn text_field(table: &dyn TableLike, name: &str, default: String) -> Option<Stri
     }
 }
 
+/// 同期の行の ID は、文字列でなければ空と同じく新しく振り直す。
+///
+/// ほかの列まで正しければ、その行を丸ごと捨てずに同期へ移れるようにする。
+fn item_id_field(table: &dyn TableLike) -> String {
+    table
+        .get("id")
+        .and_then(Item::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
 /// 行の真偽値の項目。省いていれば既定値
 fn bool_field(table: &dyn TableLike, name: &str, default: bool) -> Option<bool> {
     match table.get(name) {
@@ -512,21 +544,82 @@ fn bool_field(table: &dyn TableLike, name: &str, default: bool) -> Option<bool> 
     }
 }
 
+fn valid_item_id(id: &str) -> bool {
+    id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn new_item_id() -> Result<String, String> {
+    let mut bytes = [0; 16];
+    getrandom::fill(&mut bytes).map_err(|error| format!("random item id: {error}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn repair_item_ids<T>(
+    items: &mut [T],
+    id: impl Fn(&T) -> &str,
+    set_id: impl Fn(&mut T, String),
+) -> Result<bool, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut changed = false;
+    for item in items {
+        let item_id = id(item);
+        if !valid_item_id(item_id) || !seen.insert(item_id.to_string()) {
+            let next = loop {
+                let next = new_item_id()?;
+                if seen.insert(next.clone()) {
+                    break next;
+                }
+            };
+            set_id(item, next);
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+/// 空・不正・重複の ID を、種類ごとに新しいランダムな値へ替える。
+///
+/// 画面から足した行もこの入口を通るので、ID は Rust 側だけで作る。
+pub fn repair_item_ids_in_config(config: &mut Config) -> Result<bool, String> {
+    let replacements = repair_item_ids(
+        &mut config.replacements,
+        |item| &item.id,
+        |item, id| item.id = id,
+    )?;
+    let snippets = repair_item_ids(
+        &mut config.snippets,
+        |item| &item.id,
+        |item, id| item.id = id,
+    )?;
+    let actions = match &mut config.actions {
+        Some(actions) => repair_item_ids(actions, |item| &item.id, |item, id| item.id = id)?,
+        None => false,
+    };
+    Ok(replacements || snippets || actions)
+}
+
 impl Row for Replacement {
     fn read(table: &dyn TableLike) -> Option<Self> {
         let default = Replacement::default();
         Some(Self {
+            id: item_id_field(table),
             from: text_field(table, "from", default.from)?,
             to: text_field(table, "to", default.to)?,
             enabled: bool_field(table, "enabled", default.enabled)?,
+            sync: bool_field(table, "sync", default.sync)?,
         })
     }
 
     fn fields(&self) -> Vec<(&'static str, Value)> {
         vec![
+            ("id", Value::from(self.id.clone())),
             ("from", Value::from(self.from.clone())),
             ("to", Value::from(self.to.clone())),
             ("enabled", Value::from(self.enabled)),
+            ("sync", Value::from(self.sync)),
         ]
     }
 }
@@ -534,15 +627,19 @@ impl Row for Replacement {
 impl Row for Snippet {
     fn read(table: &dyn TableLike) -> Option<Self> {
         Some(Self {
+            id: item_id_field(table),
             name: text_field(table, "name", String::new())?,
             body: text_field(table, "body", String::new())?,
+            sync: bool_field(table, "sync", true)?,
         })
     }
 
     fn fields(&self) -> Vec<(&'static str, Value)> {
         vec![
+            ("id", Value::from(self.id.clone())),
             ("name", Value::from(self.name.clone())),
             ("body", Value::from(self.body.clone())),
+            ("sync", Value::from(self.sync)),
         ]
     }
 }
@@ -559,21 +656,25 @@ impl Row for Action {
             Some(item) => ActionEncoding::from_name(item.as_str()?)?,
         };
         Some(Self {
+            id: item_id_field(table),
             name: text_field(table, "name", String::new())?,
             command: text_field(table, "command", String::new())?,
             output,
             encoding,
             enabled: bool_field(table, "enabled", true)?,
+            sync: bool_field(table, "sync", true)?,
         })
     }
 
     fn fields(&self) -> Vec<(&'static str, Value)> {
         vec![
+            ("id", Value::from(self.id.clone())),
             ("name", Value::from(self.name.clone())),
             ("command", Value::from(self.command.clone())),
             ("output", Value::from(self.output.name().to_string())),
             ("encoding", Value::from(self.encoding.name().to_string())),
             ("enabled", Value::from(self.enabled)),
+            ("sync", Value::from(self.sync)),
         ]
     }
 }
@@ -636,7 +737,7 @@ fn describe_parse_error(text: &str, error: &TomlError) -> String {
 
 /// 設定ファイルの中身を読む。型の合わない項目は既定値のまま読み進め、その項目名を返す。
 /// TOML として読めなければ Err。知らない項目は読み飛ばし、ログにだけ出す
-fn parse(text: &str) -> Result<(Config, Vec<String>), String> {
+fn parse(text: &str) -> Result<(Config, Vec<String>, bool), String> {
     let document: DocumentMut = text
         .parse()
         .map_err(|error| describe_parse_error(text, &error))?;
@@ -736,7 +837,8 @@ fn parse(text: &str) -> Result<(Config, Vec<String>), String> {
     if !unknown.is_empty() {
         log::info!("ignored unknown settings: {}", unknown.join(", "));
     }
-    Ok((config, reader.repaired))
+    let repaired_item_ids = repair_item_ids_in_config(&mut config)?;
+    Ok((config, reader.repaired, repaired_item_ids))
 }
 
 /// 選択肢の名前。serde の `rename_all` で決めた書き方で、設定ファイルと画面とのやり取りで同じ名前を使う（`read_choice` の逆）
@@ -1244,16 +1346,82 @@ pub fn save(path: &Path, config: &Config) -> io::Result<()> {
     atomic_file::write(path, document.to_string().as_bytes())
 }
 
+/// 読めた行ごとに、振り直した ID だけを書く。ほかの項目の既定値まで足すと、手書きの書式を読み込みだけで変えてしまう。
+fn write_repaired_item_ids<T: Row>(
+    root: &mut Table,
+    key: &str,
+    rows: &[T],
+    id: impl Fn(&T) -> &str,
+) {
+    let mut next = rows.iter();
+    let Some(item) = root.get_mut(key) else {
+        return;
+    };
+    let mut write = |table: &mut dyn TableLike| {
+        if T::read(table).is_none() {
+            return;
+        }
+        let row = next.next().expect("every read row is in the config");
+        let id = id(row);
+        if item_id_field(table) != id {
+            set_value(table, "id", Value::from(id.to_string()));
+        }
+    };
+    match item {
+        Item::ArrayOfTables(tables) => {
+            for table in tables.iter_mut() {
+                write(table);
+            }
+        }
+        Item::Value(Value::Array(array)) => {
+            for value in array.iter_mut() {
+                if let Some(table) = value.as_inline_table_mut() {
+                    write(table);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 既存の設定ファイルを読んだ直後に、同期する行へ足した ID だけを書き戻す。
+fn save_repaired_item_ids(path: &Path, text: &str, config: &Config) -> io::Result<()> {
+    let mut document: DocumentMut = text.parse().map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            describe_parse_error(text, &error),
+        )
+    })?;
+    let root = document.as_table_mut();
+    write_repaired_item_ids(root, key::REPLACEMENTS, &config.replacements, |row| &row.id);
+    write_repaired_item_ids(root, key::SNIPPETS, &config.snippets, |row| &row.id);
+    if let Some(actions) = &config.actions {
+        write_repaired_item_ids(root, key::ACTIONS, actions, |row| &row.id);
+    }
+    atomic_file::write(path, document.to_string().as_bytes())
+}
+
 /// 設定ファイルを読む。ファイルがなければ既定値で作る。
-/// そのまま読めなかった場合は、読めた分（読めなければ既定値）とその理由を返す。設定ファイルは書き換えない
+/// そのまま読めなかった場合は、読めた分（読めなければ既定値）とその理由を返す。
+/// 同期する行に足した ID だけは、次の起動でも同じ行を見分けられるよう書き戻す。
 pub fn load_or_create(path: &Path) -> (Config, Option<LoadProblem>) {
     let unreadable = |error: &dyn std::fmt::Display| {
         LoadProblem::Unreadable(format!("{}: {error}", path.display()))
     };
     match fs::read_to_string(path) {
         Ok(text) => match parse(&text) {
-            Ok((config, repaired)) if repaired.is_empty() => (config, None),
-            Ok((config, repaired)) => (config, Some(LoadProblem::Repaired(repaired))),
+            Ok((config, repaired, repaired_item_ids)) => {
+                if repaired_item_ids {
+                    if let Err(error) = save_repaired_item_ids(path, &text, &config) {
+                        log::warn!("couldn't save repaired item IDs: {error}");
+                    }
+                }
+                if repaired.is_empty() {
+                    (config, None)
+                } else {
+                    (config, Some(LoadProblem::Repaired(repaired)))
+                }
+            }
             Err(error) => {
                 log::warn!("couldn't parse {}: {error}", path.display());
                 (Config::default(), Some(unreadable(&error)))
@@ -1446,6 +1614,16 @@ fn utc_stamp(time: SystemTime) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    fn has_valid_ids(ids: impl IntoIterator<Item = String>) -> bool {
+        let ids: Vec<_> = ids.into_iter().collect();
+        ids.iter().all(|id| valid_item_id(id))
+            && ids.iter().collect::<std::collections::HashSet<_>>().len() == ids.len()
+    }
+
+    fn item_id(character: char) -> String {
+        character.to_string().repeat(32)
+    }
 
     /// テスト用の設定ファイルの場所。落ちたテストでも一時フォルダーに残さないよう、手放すときにフォルダーごと消す
     struct TempPath(PathBuf);
@@ -1738,8 +1916,10 @@ punctuation_style = true
 exclude_from_clipboard_history = false
 
 [[replacements]]
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 from = "濃度"
 to = "Node.js"
+sync = true
 "#;
         write(&path, toml);
         let (config, error) = load_or_create(&path);
@@ -1749,9 +1929,11 @@ to = "Node.js"
                 language: Language::Ja,
                 trim_trailing_whitespace: false,
                 replacements: vec![Replacement {
+                    id: item_id('a'),
                     from: "濃度".to_string(),
                     to: "Node.js".to_string(),
                     enabled: true,
+                    sync: true,
                 }],
                 exclude_from_clipboard_history: false,
                 ..Config::default()
@@ -1770,23 +1952,27 @@ to = "Node.js"
         write(
             &path,
             r#"replacements = [
-    { from = "濃度", to = "Node.js" },
+    { id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", from = "濃度", to = "Node.js" },
     { from = 1, to = "x" },
     "滑ると",
-    { from = "滑ると", to = "svelte", enabled = false },
+    { id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", from = "滑ると", to = "svelte", enabled = false },
 ]
 "#,
         );
         let expected = vec![
             Replacement {
+                id: item_id('a'),
                 from: "濃度".to_string(),
                 to: "Node.js".to_string(),
                 enabled: true,
+                sync: true,
             },
             Replacement {
+                id: item_id('b'),
                 from: "滑ると".to_string(),
                 to: "svelte".to_string(),
                 enabled: false,
+                sync: true,
             },
         ];
         let (config, error) = load_or_create(&path);
@@ -1797,6 +1983,7 @@ to = "Node.js"
         write(
             &path,
             r#"[[replacements]]
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 from = "濃度"
 to = "Node.js"
 
@@ -1805,6 +1992,7 @@ from = 1
 to = "x"
 
 [[replacements]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 from = "滑ると"
 to = "svelte"
 enabled = false
@@ -1827,6 +2015,7 @@ enabled = false
         write(
             &path,
             r#"[[snippets]]
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 name = "確認"
 body = "一つずつ質問してください。"
 
@@ -1835,6 +2024,7 @@ name = 1
 body = "x"
 
 [[snippets]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 body = "git status"
 "#,
         );
@@ -1843,12 +2033,16 @@ body = "git status"
             config.snippets,
             vec![
                 Snippet {
+                    id: item_id('a'),
                     name: "確認".to_string(),
                     body: "一つずつ質問してください。".to_string(),
+                    sync: true,
                 },
                 Snippet {
+                    id: item_id('b'),
                     name: String::new(),
                     body: "git status".to_string(),
+                    sync: true,
                 },
             ]
         );
@@ -1944,13 +2138,17 @@ body = "git status"
             text_history_size: 10,
             trim_trailing_whitespace: false,
             replacements: vec![Replacement {
+                id: "1".repeat(32),
                 from: "濃度".to_string(),
                 to: "Node.js".to_string(),
                 enabled: false,
+                sync: false,
             }],
             snippets: vec![Snippet {
+                id: "2".repeat(32),
                 name: "確認".to_string(),
                 body: "一つずつ質問してください。\n以上です。".to_string(),
+                sync: false,
             }],
             punctuation_style: PunctuationStyle::Comma,
             char_widths: CharWidths {
@@ -1977,19 +2175,23 @@ body = "git status"
             ai_models: BTreeMap::from([(AiService::Gemini, "gemini-3.8-flash".to_string())]),
             actions: Some(vec![
                 Action {
+                    id: "3".repeat(32),
                     name: "敬語".to_string(),
                     command: "@ai 丁寧に書き直してください。\n書き直した文だけを返してください。"
                         .to_string(),
                     output: ActionOutput::Insert,
                     encoding: ActionEncoding::Utf8,
                     enabled: true,
+                    sync: false,
                 },
                 Action {
+                    id: "4".repeat(32),
                     name: "並べ替え".to_string(),
                     command: "sort | uniq".to_string(),
                     output: ActionOutput::None,
                     encoding: ActionEncoding::ShiftJis,
                     enabled: true,
+                    sync: false,
                 },
             ]),
         }
@@ -2038,12 +2240,16 @@ hotkey = "CommandOrControl+Alt+KeyK"
 # 辞書
 [[replacements]]
 # よく間違える
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 from = "濃度"
 to = "Node.js"
+sync = true
 
 [[replacements]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 from = "滑ると"
 to = "svelte"
+sync = true
 "#;
         write(&path, original);
 
@@ -2051,9 +2257,8 @@ to = "svelte"
             config.hotkey = "CommandOrControl+Alt+KeyL".to_string()
         });
 
-        let text = fs::read_to_string(&path).unwrap();
         assert_eq!(
-            text,
+            fs::read_to_string(&path).unwrap(),
             original.replace("KeyK", "KeyL"),
             "only the hotkey changes"
         );
@@ -2076,26 +2281,39 @@ to = "svelte"
         write(
             &path,
             r#"[[snippets]]
+id = "cccccccccccccccccccccccccccccccc"
 name = "1"
 body = "a"
 
 [[replacements]]
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 from = "A"
 to = "a"
 
 [[snippets]]
+id = "dddddddddddddddddddddddddddddddd"
 name = "2"
 body = "b"
 
 [[replacements]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 from = "B"
 to = "b"
 "#,
         );
         let row = |from: &str| Replacement {
+            id: match from {
+                "A" => item_id('a'),
+                "B" => item_id('b'),
+                "X" => item_id('c'),
+                "Y" => item_id('d'),
+                "Z" => item_id('e'),
+                _ => unreachable!(),
+            },
             from: from.to_string(),
             to: from.to_lowercase(),
             enabled: true,
+            sync: true,
         };
         // 先頭に足す（変えていない後ろの行はそのまま残り、新しい表を先頭に差し込む）
         save_change(&path, |config| config.replacements.insert(0, row("X")));
@@ -2170,18 +2388,27 @@ to = "b"
             &path,
             r#"[[replacements]]
 # 1件目
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 from = "濃度"
 to = "Node.js"
+enabled = true
+sync = true
 
 [[replacements]]
 # 2件目
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 from = "滑ると"
 to = "svelte"
+enabled = true
+sync = true
 
 [[replacements]]
 # 3件目
+id = "cccccccccccccccccccccccccccccccc"
 from = "異臭"
 to = "issue"
+enabled = true
+sync = true
 "#,
         );
 
@@ -2189,41 +2416,114 @@ to = "issue"
         save_change(&path, |config| {
             config.replacements.remove(1);
         });
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("# 1件目"), "{text}");
-        assert!(!text.contains("# 2件目"), "{text}");
-        assert!(text.contains("# 3件目"), "{text}");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            r#"[[replacements]]
+# 1件目
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+from = "濃度"
+to = "Node.js"
+enabled = true
+sync = true
+
+[[replacements]]
+# 3件目
+id = "cccccccccccccccccccccccccccccccc"
+from = "異臭"
+to = "issue"
+enabled = true
+sync = true
+"#
+        );
 
         // 行を編集しても、その行のコメントは残す
         save_change(&path, |config| {
             config.replacements[1].to = "イシュー".to_string();
         });
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(
-            text.contains("# 3件目\nfrom = \"異臭\"\nto = \"イシュー\""),
-            "{text}"
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            r#"[[replacements]]
+# 1件目
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+from = "濃度"
+to = "Node.js"
+enabled = true
+sync = true
+
+[[replacements]]
+# 3件目
+id = "cccccccccccccccccccccccccccccccc"
+from = "異臭"
+to = "イシュー"
+enabled = true
+sync = true
+"#
         );
 
         // 行を足すと、表の並びの続きに足す
         save_change(&path, |config| {
             config.replacements.push(Replacement {
+                id: item_id('d'),
                 from: "ドット円部".to_string(),
                 to: ".env".to_string(),
                 enabled: true,
+                sync: true,
             });
         });
         let (config, error) = load_or_create(&path);
         assert_eq!(error, None);
         assert_eq!(
-            config
-                .replacements
-                .iter()
-                .map(|row| row.from.as_str())
-                .collect::<Vec<_>>(),
-            ["濃度", "異臭", "ドット円部"]
+            config.replacements,
+            vec![
+                Replacement {
+                    id: item_id('a'),
+                    from: "濃度".to_string(),
+                    to: "Node.js".to_string(),
+                    enabled: true,
+                    sync: true,
+                },
+                Replacement {
+                    id: item_id('c'),
+                    from: "異臭".to_string(),
+                    to: "イシュー".to_string(),
+                    enabled: true,
+                    sync: true,
+                },
+                Replacement {
+                    id: item_id('d'),
+                    from: "ドット円部".to_string(),
+                    to: ".env".to_string(),
+                    enabled: true,
+                    sync: true,
+                },
+            ]
         );
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("# 1件目"), "{text}");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            r#"[[replacements]]
+# 1件目
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+from = "濃度"
+to = "Node.js"
+enabled = true
+sync = true
+
+[[replacements]]
+# 3件目
+id = "cccccccccccccccccccccccccccccccc"
+from = "異臭"
+to = "イシュー"
+enabled = true
+sync = true
+
+[[replacements]]
+id = "dddddddddddddddddddddddddddddddd"
+from = "ドット円部"
+to = ".env"
+enabled = true
+sync = true
+"#
+        );
 
         // すべて消すと、項目ごと消える
         save_change(&path, |config| config.replacements.clear());
@@ -2234,9 +2534,17 @@ to = "issue"
     fn indents_rows_added_to_inline_arrays() {
         let path = temp_path("inline-add");
         let row = |from: &str| Replacement {
+            id: match from {
+                "a" => item_id('a'),
+                "b" => item_id('b'),
+                "c" => item_id('c'),
+                "z" => item_id('d'),
+                _ => unreachable!(),
+            },
             from: from.to_string(),
             to: "x".to_string(),
             enabled: true,
+            sync: true,
         };
         let add = |path: &Path, from: &str| {
             save_change(path, |config| config.replacements.push(row(from)));
@@ -2244,41 +2552,47 @@ to = "issue"
         };
 
         // 1行の配列
-        write(&path, "replacements = [{ from = \"a\", to = \"x\" }]\n");
+        write(
+            &path,
+            "replacements = [{ id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"a\", to = \"x\" }]\n",
+        );
         assert_eq!(
             add(&path, "b"),
-            "replacements = [{ from = \"a\", to = \"x\" }, { from = \"b\", to = \"x\", enabled = true }]\n"
+            "replacements = [{ id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"a\", to = \"x\" }, { id = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", from = \"b\", to = \"x\", enabled = true, sync = true }]\n"
         );
 
         // 末尾のカンマのない、行を分けた配列
         write(
             &path,
-            "replacements = [\n    { from = \"a\", to = \"x\" }\n]\n",
+            "replacements = [\n    { id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"a\", to = \"x\" }\n]\n",
         );
         assert_eq!(
             add(&path, "b"),
-            "replacements = [\n    { from = \"a\", to = \"x\" },\n    { from = \"b\", to = \"x\", enabled = true }\n]\n"
+            "replacements = [\n    { id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"a\", to = \"x\" },\n    { id = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", from = \"b\", to = \"x\", enabled = true, sync = true }\n]\n"
         );
 
         // コメントの付いた行の後ろに足しても、コメントは増えない
         write(
             &path,
-            "replacements = [\n    # 1件目\n    { from = \"a\", to = \"x\" },\n]\n",
+            "replacements = [\n    # 1件目\n    { id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"a\", to = \"x\" },\n]\n",
         );
         add(&path, "b");
         let text = add(&path, "c");
         assert_eq!(text.matches("# 1件目").count(), 1, "{text}");
         assert_eq!(
             text,
-            "replacements = [\n    # 1件目\n    { from = \"a\", to = \"x\" },\n    { from = \"b\", to = \"x\", enabled = true },\n    { from = \"c\", to = \"x\", enabled = true },\n]\n"
+            "replacements = [\n    # 1件目\n    { id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"a\", to = \"x\" },\n    { id = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", from = \"b\", to = \"x\", enabled = true, sync = true },\n    { id = \"cccccccccccccccccccccccccccccccc\", from = \"c\", to = \"x\", enabled = true, sync = true },\n]\n"
         );
 
         // 1行の配列の先頭に足す
-        write(&path, "replacements = [{ from = \"a\", to = \"x\" }]\n");
+        write(
+            &path,
+            "replacements = [{ id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"a\", to = \"x\" }]\n",
+        );
         save_change(&path, |config| config.replacements.insert(0, row("z")));
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
-            "replacements = [{ from = \"z\", to = \"x\", enabled = true }, { from = \"a\", to = \"x\" }]\n"
+            "replacements = [{ id = \"dddddddddddddddddddddddddddddddd\", from = \"z\", to = \"x\", enabled = true, sync = true }, { id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"a\", to = \"x\" }]\n"
         );
     }
 
@@ -2289,8 +2603,8 @@ to = "issue"
         let original = r#"# 辞書（インラインで書く）
 replacements = [
     # 1件目
-    { from = "濃度", to = "Node.js" },
-    { from = "滑ると", to = "svelte" },  # 2件目
+    { id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", from = "濃度", to = "Node.js" },
+    { id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", from = "滑ると", to = "svelte" },  # 2件目
 ]
 "#;
         write(&path, original);
@@ -2300,40 +2614,53 @@ replacements = [
         let (config, error) = load_or_create(&path);
         assert_eq!(error, None);
         assert!(!config.replacements[0].enabled);
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("[[replacements]]"), "{text}");
-        assert!(
-            text.starts_with("# 辞書（インラインで書く）\nreplacements = ["),
-            "{text}"
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "# 辞書（インラインで書く）\nreplacements = [\n    # 1件目\n    { id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"濃度\", to = \"Node.js\" , enabled = false, sync = true },\n    { id = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", from = \"滑ると\", to = \"svelte\" },  # 2件目\n]\n"
         );
-        assert!(text.contains("# 1件目"), "{text}");
-        assert!(text.contains("# 2件目"), "{text}");
 
         // 足した行は、隣の行と同じく行を分けて書く。読めない行は、書き換えると表の行に替わる
         save_change(&path, |config| {
             config.replacements.push(Replacement {
+                id: item_id('c'),
                 from: "異臭".to_string(),
                 to: "issue".to_string(),
                 enabled: true,
+                sync: true,
             });
         });
         let (config, error) = load_or_create(&path);
         assert_eq!(error, None);
         assert_eq!(
-            config
-                .replacements
-                .iter()
-                .map(|row| row.from.as_str())
-                .collect::<Vec<_>>(),
-            ["濃度", "滑ると", "異臭"]
+            config.replacements,
+            vec![
+                Replacement {
+                    id: item_id('a'),
+                    from: "濃度".to_string(),
+                    to: "Node.js".to_string(),
+                    enabled: false,
+                    sync: true,
+                },
+                Replacement {
+                    id: item_id('b'),
+                    from: "滑ると".to_string(),
+                    to: "svelte".to_string(),
+                    enabled: true,
+                    sync: true,
+                },
+                Replacement {
+                    id: item_id('c'),
+                    from: "異臭".to_string(),
+                    to: "issue".to_string(),
+                    enabled: true,
+                    sync: true,
+                },
+            ]
         );
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("# 1件目"), "{text}");
-        assert!(text.contains("\n    { from = \"異臭\""), "{text}");
         // 最後の行のカンマの後ろのコメントは配列の後ろに付いているので、末尾に足した行に付いて見える（仕様に書いてある）
-        assert!(
-            text.contains("{ from = \"異臭\", to = \"issue\", enabled = true },  # 2件目"),
-            "{text}"
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "# 辞書（インラインで書く）\nreplacements = [\n    # 1件目\n    { id = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", from = \"濃度\", to = \"Node.js\" , enabled = false, sync = true },\n    { id = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", from = \"滑ると\", to = \"svelte\" },\n    { id = \"cccccccccccccccccccccccccccccccc\", from = \"異臭\", to = \"issue\", enabled = true, sync = true },  # 2件目\n]\n"
         );
 
         write(&path, "replacements = [\"滑ると\"]\n");
@@ -2341,9 +2668,11 @@ replacements = [
         assert_eq!(problem, repaired(&["replacements[0]"]));
         let next = Config {
             replacements: vec![Replacement {
+                id: item_id('a'),
                 from: "滑ると".to_string(),
                 to: "svelte".to_string(),
                 enabled: true,
+                sync: true,
             }],
             ..old.clone()
         };
@@ -2477,16 +2806,19 @@ gemini = "gemini-3.8-flash"
 mistral = "mistral-large"
 
 [[actions]]
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 name = "敬語"
 command = "@ai 丁寧に: {{t}}"
 output = "insert"
 
 [[actions]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 command = "date"
 encoding = "euc-jp"
 enabled = false
 
 [[actions]]
+id = "cccccccccccccccccccccccccccccccc"
 name = "コマンドがない"
 output = "none"
 
@@ -2513,27 +2845,33 @@ encoding = "cp932"
             config.actions,
             Some(vec![
                 Action {
+                    id: item_id('a'),
                     name: "敬語".to_string(),
                     command: "@ai 丁寧に: {{t}}".to_string(),
                     output: ActionOutput::Insert,
                     encoding: ActionEncoding::Utf8,
                     enabled: true,
+                    sync: true,
                 },
                 // 出し方を省いたら置き換える。切った行も読む
                 Action {
+                    id: item_id('b'),
                     name: String::new(),
                     command: "date".to_string(),
                     output: ActionOutput::Replace,
                     encoding: ActionEncoding::EucJp,
                     enabled: false,
+                    sync: true,
                 },
                 // コマンドの行を省いた行は、空の行として読む（一覧には出さない）。文字コードを省いたら UTF-8
                 Action {
+                    id: item_id('c'),
                     name: "コマンドがない".to_string(),
                     command: String::new(),
                     output: ActionOutput::None,
                     encoding: ActionEncoding::Utf8,
                     enabled: true,
+                    sync: true,
                 },
             ])
         );
@@ -2708,15 +3046,217 @@ gemini = 3
             "[[replacements]]\nfrom = \"濃度\"\nto = \"Node.js\"\n",
         );
         let (config, error) = load_or_create(&path);
-        assert_eq!(
-            config.replacements,
-            vec![Replacement {
-                from: "濃度".to_string(),
-                to: "Node.js".to_string(),
-                enabled: true,
-            }]
-        );
+        assert_eq!(config.replacements[0].from, "濃度");
+        assert_eq!(config.replacements[0].to, "Node.js");
+        assert!(config.replacements[0].enabled);
+        assert!(config.replacements[0].sync);
+        assert!(valid_item_id(&config.replacements[0].id));
         assert_eq!(error, None);
+    }
+
+    #[test]
+    fn repairs_item_ids_and_keeps_sync_values_for_every_synced_list() {
+        let path = temp_path("item-ids");
+        let valid_replacement = "a".repeat(32);
+        let valid_snippet = "b".repeat(32);
+        let valid_action = "c".repeat(32);
+        let invalid_id = "A".repeat(32);
+        write(
+            &path,
+            &format!(
+                r#"[[replacements]]
+id = "{valid_replacement}"
+from = "keep"
+to = "kept"
+sync = false
+
+[[replacements]]
+id = "{valid_replacement}"
+from = "duplicate"
+to = "new"
+
+[[replacements]]
+id = "{invalid_id}"
+from = "invalid"
+to = "new"
+
+[[replacements]]
+id = ""
+from = "empty"
+to = "new"
+
+[[replacements]]
+from = "missing"
+to = "new"
+
+[[snippets]]
+id = "{valid_snippet}"
+name = "keep"
+body = "kept"
+sync = false
+
+[[snippets]]
+name = "missing"
+body = "new"
+
+[[snippets]]
+id = ""
+name = "empty"
+body = "new"
+
+[[snippets]]
+id = "{valid_snippet}"
+name = "duplicate"
+body = "new"
+
+[[snippets]]
+id = "{invalid_id}"
+name = "invalid"
+body = "new"
+
+[[actions]]
+id = "{valid_action}"
+name = "keep"
+command = "echo kept"
+sync = false
+
+[[actions]]
+id = "{valid_action}"
+name = "duplicate"
+command = "echo new"
+
+[[actions]]
+id = 123
+name = "invalid"
+command = "echo new"
+
+[[actions]]
+id = ""
+name = "empty"
+command = "echo new"
+
+[[actions]]
+name = "missing"
+command = "echo new"
+"#
+            ),
+        );
+
+        let (config, problem) = load_or_create(&path);
+        assert_eq!(problem, None);
+        assert_eq!(config.replacements[0].id, valid_replacement);
+        assert_eq!(config.snippets[0].id, valid_snippet);
+        assert_eq!(config.actions.as_ref().unwrap()[0].id, valid_action);
+        assert!(has_valid_ids(
+            config.replacements.iter().map(|row| row.id.clone())
+        ));
+        assert!(has_valid_ids(
+            config.snippets.iter().map(|row| row.id.clone())
+        ));
+        assert!(has_valid_ids(
+            config
+                .actions
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|row| row.id.clone())
+        ));
+        assert!(!config.replacements[0].sync);
+        assert!(config.replacements.iter().skip(1).all(|row| row.sync));
+        assert!(!config.snippets[0].sync);
+        assert!(config.snippets.iter().skip(1).all(|row| row.sync));
+        assert!(!config.actions.as_ref().unwrap()[0].sync);
+        assert!(config
+            .actions
+            .as_ref()
+            .unwrap()
+            .iter()
+            .skip(1)
+            .all(|row| row.sync));
+
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("sync = false"), "{text}");
+        assert_eq!(load_or_create(&path), (config, None));
+    }
+
+    #[test]
+    fn leaves_valid_item_ids_and_their_file_layout_unchanged() {
+        let path = temp_path("valid-item-ids");
+        let text = r#"# ここは残す
+replacements = [{ id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", from = "濃度", to = "Node.js" }]
+
+[[snippets]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+name = "確認"
+body = "以上です。"
+
+[[actions]]
+id = "cccccccccccccccccccccccccccccccc"
+name = "大文字"
+command = "tr a-z A-Z"
+"#;
+        write(&path, text);
+
+        let (config, problem) = load_or_create(&path);
+
+        assert_eq!(problem, None);
+        assert_eq!(config.replacements[0].id, item_id('a'));
+        assert_eq!(config.snippets[0].id, item_id('b'));
+        assert_eq!(config.actions.as_ref().unwrap()[0].id, item_id('c'));
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn writes_only_item_ids_when_reading_old_synced_rows() {
+        let path = temp_path("repair-item-ids");
+        let text = r#"# ここは残す
+[[replacements]]
+# 辞書のコメント
+from = "濃度"
+to = "Node.js"
+
+[[snippets]]
+name = "確認"
+body = "以上です。"
+
+[[actions]]
+name = "大文字"
+command = "tr a-z A-Z"
+"#;
+        write(&path, text);
+
+        let (config, problem) = load_or_create(&path);
+
+        assert_eq!(problem, None);
+        let mut written = fs::read_to_string(&path).unwrap();
+        for id in [
+            &config.replacements[0].id,
+            &config.snippets[0].id,
+            &config.actions.as_ref().unwrap()[0].id,
+        ] {
+            written = written.replace(id, "<generated>");
+        }
+        assert_eq!(
+            written,
+            r#"# ここは残す
+[[replacements]]
+# 辞書のコメント
+from = "濃度"
+to = "Node.js"
+id = "<generated>"
+
+[[snippets]]
+name = "確認"
+body = "以上です。"
+id = "<generated>"
+
+[[actions]]
+name = "大文字"
+command = "tr a-z A-Z"
+id = "<generated>"
+"#
+        );
+        assert!(!written.contains("sync"), "{written}");
     }
 
     #[test]

@@ -54,11 +54,13 @@ pub fn default_actions(lang: Lang) -> Vec<Action> {
     ]
     .into_iter()
     .map(|(name, command, encoding)| Action {
+        id: String::new(),
         name: name.to_string(),
         command,
         output: ActionOutput::Replace,
         encoding,
         enabled: true,
+        sync: true,
     })
     .collect()
 }

@@ -1170,21 +1170,37 @@ fn close_settings_window(app: AppHandle) {
 }
 
 #[tauri::command]
-fn set_replacements(app: AppHandle, replacements: Vec<Replacement>) -> Result<(), String> {
+fn set_replacements(
+    app: AppHandle,
+    replacements: Vec<Replacement>,
+) -> Result<Vec<Replacement>, String> {
     info!("set replacements: {} entries", replacements.len());
     // 打つたびに呼ばれる。辞書はトレイにも下書きウィンドウにも関わらず、設定画面は自分で表の行を持っているので、
     // 保存するだけにして、開いているウィンドウとトレイへの反映はしない
-    save_as_typed(&app, |config| config.replacements = replacements)
+    let mut candidate = Config {
+        replacements,
+        ..Config::default()
+    };
+    config::repair_item_ids_in_config(&mut candidate)?;
+    let replacements = candidate.replacements;
+    save_as_typed(&app, |config| config.replacements = replacements.clone())?;
+    Ok(replacements)
 }
 
 #[tauri::command]
-fn set_snippets(app: AppHandle, snippets: Vec<Snippet>) -> Result<(), String> {
+fn set_snippets(app: AppHandle, snippets: Vec<Snippet>) -> Result<Vec<Snippet>, String> {
     info!("set snippets: {} entries", snippets.len());
     // 打つたびに呼ばれる。設定画面は自分で欄を持っているが、下書きウィンドウの一覧が使うので、辞書と違い画面へは反映する。
     // トレイには関わらないので、打つたびに作り直さない
-    save_as_typed(&app, |config| config.snippets = snippets)?;
+    let mut candidate = Config {
+        snippets,
+        ..Config::default()
+    };
+    config::repair_item_ids_in_config(&mut candidate)?;
+    let snippets = candidate.snippets;
+    save_as_typed(&app, |config| config.snippets = snippets.clone())?;
     emit_settings(&app);
-    Ok(())
+    Ok(snippets)
 }
 
 /// 下書きウィンドウの定型文の一覧から、下書き（選んだ範囲）を定型文の末尾に足す。
@@ -1206,6 +1222,10 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
         info!("add snippet: already registered");
         return Ok(false);
     }
+    let mut candidate = Config::default();
+    candidate.snippets.push(snippet);
+    config::repair_item_ids_in_config(&mut candidate)?;
+    let snippet = candidate.snippets.pop().expect("added one snippet");
     info!("add snippet");
     save_as_typed(&app, |config| config.snippets.push(snippet.clone()))?;
     emit_settings(&app);
@@ -1278,12 +1298,18 @@ fn set_ai_model(app: AppHandle, service: AiService, model: String) -> Result<(),
 }
 
 #[tauri::command]
-fn set_actions(app: AppHandle, actions: Vec<Action>) -> Result<(), String> {
+fn set_actions(app: AppHandle, actions: Vec<Action>) -> Result<Vec<Action>, String> {
     info!("set actions: {} entries", actions.len());
     // 打つたびに呼ばれる。定型文と同じく、下書きウィンドウの一覧が使うので画面へは反映し、トレイは作り直さない
-    save_as_typed(&app, |config| config.actions = Some(actions))?;
+    let mut candidate = Config {
+        actions: Some(actions),
+        ..Config::default()
+    };
+    config::repair_item_ids_in_config(&mut candidate)?;
+    let actions = candidate.actions.expect("set above");
+    save_as_typed(&app, |config| config.actions = Some(actions.clone()))?;
     emit_settings(&app);
-    Ok(())
+    Ok(actions)
 }
 
 /// 今の表示言語の既定のアクション。設定画面は、打っている途中のアクションを消さないよう、並びを自分で持ち、
