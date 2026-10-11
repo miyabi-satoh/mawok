@@ -5,7 +5,9 @@ type Item = { id: string; name: string };
 const isBlank = (item: Item) => item.name === '';
 
 function list(items: Item[]) {
-	const save = vi.fn(() => Promise.resolve(undefined));
+	const save = vi.fn<(rows: Item[]) => Promise<Item[] | undefined>>(() =>
+		Promise.resolve(undefined)
+	);
 	return { rows: new RowList(items, save, isBlank), save };
 }
 
@@ -64,5 +66,76 @@ describe('RowList の空の行', () => {
 			{ id: 'second', sync: true }
 		]);
 		await vi.waitFor(() => expect(save).toHaveBeenLastCalledWith(rows.rows));
+	});
+
+	it('途中に行が差し込まれても、key が重ならず、前からある行の key を保つ', () => {
+		const { rows } = list([
+			{ id: 'a', name: 'A' },
+			{ id: 'b', name: 'B' }
+		]);
+		const keys = new Map(rows.rows.map((row) => [row.id, row.key]));
+		rows.recopy(
+			[
+				{ id: 'a', name: 'A' },
+				{ id: 'inserted', name: '届いた行' },
+				{ id: 'b', name: 'B' }
+			],
+			true
+		);
+		expect(rows.rows.map((row) => row.name)).toEqual(['A', '届いた行', 'B']);
+		expect(new Set(rows.rows.map((row) => row.key)).size).toBe(3);
+		expect(rows.rows.find((row) => row.id === 'a')?.key).toBe(keys.get('a'));
+		expect(rows.rows.find((row) => row.id === 'b')?.key).toBe(keys.get('b'));
+	});
+
+	it('画面で変えた後は、force を付けたときだけ写し直す。書きかけの空の行は残す', async () => {
+		const { rows, save } = list([{ id: 'a', name: 'A' }]);
+		save.mockImplementation((submitted: Item[]) =>
+			Promise.resolve(submitted.map((row) => ({ ...row, id: row.id || 'blank' })))
+		);
+		const blank = rows.addBlank({ id: '', name: '' });
+		await vi.waitFor(() => expect(rows.rows[1].id).toBe('blank'));
+		const received = [
+			{ id: 'a', name: 'A' },
+			{ id: 'blank', name: '' },
+			{ id: 'b', name: '届いた行' }
+		];
+		rows.recopy(received);
+		expect(rows.rows).toHaveLength(2);
+		rows.recopy(received, true);
+		expect(rows.rows.map((row) => row.id)).toEqual(['a', 'blank', 'b']);
+		expect(rows.rows[1].key).toBe(blank.key);
+	});
+
+	it('保存の答えを待つ間に写し直したら、写した並びを保存し直す', async () => {
+		const { rows, save } = list([{ id: 'a', name: 'A' }]);
+		let answer: (value: undefined) => void = () => {};
+		save.mockImplementationOnce(() => new Promise<undefined>((resolve) => (answer = resolve)));
+		rows.rows[0].name = 'A2';
+		rows.save();
+		const received = [
+			{ id: 'a', name: 'A' },
+			{ id: 'b', name: '届いた行' }
+		];
+		rows.recopy(received, true);
+		answer(undefined);
+		await vi.waitFor(() =>
+			expect(save).toHaveBeenLastCalledWith(received.map((row) => expect.objectContaining(row)))
+		);
+	});
+
+	it('足した直後で設定 ID の無い行の key を、届いた行に渡さない', () => {
+		const { rows, save } = list([{ id: 'a', name: 'A' }]);
+		// 保存の答えがまだで、足した行に設定 ID が無い
+		save.mockImplementation(() => new Promise<undefined>(() => {}));
+		const [added] = rows.add({ id: '', name: '書きかけ' });
+		rows.recopy(
+			[
+				{ id: 'a', name: 'A' },
+				{ id: 'b', name: '届いた行' }
+			],
+			true
+		);
+		expect(rows.rows[1].key).not.toBe(added.key);
 	});
 });

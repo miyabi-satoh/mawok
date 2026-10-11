@@ -23,6 +23,9 @@ export class RowList<T extends { id: string }> {
 	readonly #isBlank: (item: T) => boolean;
 	/** 写してから画面で変えたか。変えていなければ、写し直しても打った内容を消さない */
 	#edited = false;
+	/** 保存を Rust 側へ送って、答えを待っているか */
+	#saving = false;
+	readonly #save: () => Promise<void>;
 
 	constructor(
 		items: T[],
@@ -34,13 +37,15 @@ export class RowList<T extends { id: string }> {
 		this.rows = items.filter((item) => !isBlank(item)).map(withId);
 		const saver = coalescedSaver(async () => {
 			const submitted = this.rows.map((row) => ({ ...row }));
-			const saved = await save(submitted);
+			this.#saving = true;
+			const saved = await save(submitted).finally(() => (this.#saving = false));
 			if (!saved) return;
 			for (const [index, item] of saved.entries()) {
 				const row = this.rows.find((current) => current.key === submitted[index]?.key);
 				if (row) row.id = item.id;
 			}
 		});
+		this.#save = saver;
 		this.save = () => {
 			this.#edited = true;
 			return saver();
@@ -49,19 +54,31 @@ export class RowList<T extends { id: string }> {
 
 	/**
 	 * まだ画面で変えていなければ、Rust 側の今の中身を写し直す。保存はしない。
-	 * 同じ設定 ID の行は key を引き継ぐ。開いている行は key で覚えているので、作り直すと閉じてしまう
+	 * 同じ設定 ID の行は key を引き継ぐ。開いている行は key で覚えているので、作り直すと閉じてしまう。
+	 * force は、画面で変えていても写し直す（同期で届いた行を入れるとき。入れないと、次の保存が届いた行を画面の古い並びで消す）
 	 */
-	recopy(items: T[]) {
-		if (this.#edited) return;
+	recopy(items: T[], force = false) {
+		if (this.#edited && !force) return;
 		// 呼び出し元の effect が、行の並びの変化で走り直さないよう、今の行は追わずに読む
 		const previous = untrack(() => this.rows);
+		const keyOf = (item: T) => previous.find((row) => row.id !== '' && row.id === item.id)?.key;
+		// 設定 ID で引き継ぐ key を先に押さえる。途中に行が差し込まれると、位置で引き継ぐ行が同じ key を取ろうとする
+		const used = items.map(keyOf).filter((key) => key !== undefined);
 		this.rows = items
-			.filter((item) => !this.#isBlank(item))
+			// 画面に出ている書きかけの空の行は、足した直後に写し直しても残す
+			.filter((item) => !this.#isBlank(item) || (force && keyOf(item) !== undefined))
 			.map((item, index) => {
+				// 届いた行を入れるときは、足した直後でまだ設定 ID の無い行の key を別の行に渡さない
+				// （開いた状態やフォーカスが、届いた行へ移る）
+				const byPosition = force && previous[index]?.id === '' ? undefined : previous[index]?.key;
 				const key =
-					previous.find((row) => row.id !== '' && row.id === item.id)?.key ?? previous[index]?.key;
-				return key ? { ...item, key } : withId(item);
+					keyOf(item) ?? (byPosition && !used.includes(byPosition) ? byPosition : undefined);
+				if (!key) return withId(item);
+				used.push(key);
+				return { ...item, key };
 			});
+		// 答えを待っている保存は、写し直す前の並びを送っている。それが後から届いて届いた行を消さないよう、写した並びを保存し直す
+		if (force && this.#saving) void this.#save();
 	}
 
 	/** 行を末尾に足し、足した行を返す */

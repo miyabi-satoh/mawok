@@ -25,6 +25,7 @@ mod package;
 mod placement;
 mod pro;
 mod secrets;
+mod sync;
 mod text;
 // 境目の型は、Windows でもテストで書き出す。Windows では書き出すだけで使わない
 #[cfg(any(target_os = "macos", test))]
@@ -169,6 +170,7 @@ type AbortAction = Box<dyn Fn() + Send>;
 struct AppState {
     config_path: PathBuf,
     pro_state_path: PathBuf,
+    sync_state_path: PathBuf,
     /// アプリのバージョン。ログの先頭に出しているものと同じ出どころにして、突き合わせられるようにする
     version: String,
     /// OS の言語設定から決めた言語。表示言語が「システム」のときに使う
@@ -193,6 +195,14 @@ struct AppState {
     account_key_status: Mutex<account_key::Status>,
     /// 鍵の生成・窓口への登録・資格情報管理への保存を、同じ鍵について一続きにする。
     account_key_refresh: tokio::sync::Mutex<()>,
+    /// 設定を保存するたびに進める。同期の通信の間に利用者が変えた設定を、通信の前の設定から作った結果で戻さない。
+    sync_generation: AtomicUsize,
+    /// 同期の記録を消すたびに進める。サインアウトや鍵の替わりの後に、通信中だった同期が古い記録を書き戻さない。
+    sync_record_generation: AtomicUsize,
+    /// 同期の記録を保存する処理と消す処理を直列にする。消した直後に通信中の古い記録が戻らないようにする。
+    sync_commit: tokio::sync::Mutex<()>,
+    sync_schedule: Mutex<SyncSchedule>,
+    sync_debounce: debounce::Debounce,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -200,6 +210,12 @@ struct AppState {
     /// いちばん外のメニューを開いたときに外し、閉じたときに戻す
     #[cfg(target_os = "macos")]
     menu_depth: std::sync::atomic::AtomicUsize,
+}
+
+#[derive(Default)]
+struct SyncSchedule {
+    running: bool,
+    pending: bool,
 }
 
 impl AppState {
@@ -822,11 +838,25 @@ fn get_settings(state: tauri::State<'_, AppState>) -> SettingsView {
 /// 起動時に設定ファイルをそのまま読めなかった場合と、起動した後に壊されていた場合は、上書きする前に元のファイルを写す。
 /// トレイに出す設定ファイルの問題が、この保存で変わったかどうかを返す
 fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<bool, String> {
+    Ok(save_config_if_current(app, None, change)?.expect("unconditional save"))
+}
+
+/// `expected_generation` を指定した同期だけ、利用者の保存と競合していない設定を保存する。
+fn save_config_if_current(
+    app: &AppHandle,
+    expected_generation: Option<usize>,
+    change: impl FnOnce(&mut Config),
+) -> Result<Option<bool>, String> {
     let state = app.state::<AppState>();
     // 起動時の問題を見るのも直すのも、設定のロックの中で行う。ロックの外で見ると、別のスレッドの保存と重なったときに
     // 両方が「起動時に読めなかった」と見て、先の保存が直したファイルを後の保存がもう一度写してしまう。
     // ロックは設定、問題の順に取る
     let mut config = state.config.lock().unwrap();
+    if expected_generation
+        .is_some_and(|generation| state.sync_generation.load(Ordering::SeqCst) != generation)
+    {
+        return Ok(None);
+    }
     // 起動時に読めなかったか、型を直した項目があるか
     let load_problem = match &state.problems.lock().unwrap().config {
         Some(ConfigProblem::Load(problem)) => Some(problem.clone()),
@@ -851,16 +881,17 @@ fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<bool
         info!("backed up the settings file to {}", path.display());
     }
     *config = next;
+    state.sync_generation.fetch_add(1, Ordering::SeqCst);
     // 起動した後に壊されていたファイルを写したときも、写した先を知らせる
     if load_problem.is_none() && backed_up.is_none() {
-        return Ok(false);
+        return Ok(Some(false));
     }
     // 保存できたので、読めなかった問題は解消した。写したなら、写した先を知らせる
     state.problems.lock().unwrap().config = backed_up.and_then(|path| {
         path.file_name()
             .map(|name| ConfigProblem::BackedUp(name.to_string_lossy().into_owned()))
     });
-    Ok(true)
+    Ok(Some(true))
 }
 
 /// 今の設定と問題を、開いているウィンドウとトレイに反映する
@@ -883,6 +914,7 @@ fn save_as_typed(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<()
     if save_config(app, change)? {
         refresh_tray(app);
     }
+    schedule_sync_after_settings_change(app);
     Ok(())
 }
 
@@ -890,7 +922,110 @@ fn save_as_typed(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<()
 fn update_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
     let _ = save_config(app, change)?;
     apply_config(app);
+    schedule_sync_after_settings_change(app);
     Ok(())
+}
+
+/// 同期で届いた設定を保存し、画面から変えるコマンドと同じ反映を通す（docs/sync.md「1回の同期」）。
+/// OS に断られて反映できなかった項目は、手元の値のままにして返す。呼び出し元が読み捨ての記録に置く。
+/// 通信の間に設定が変わっていたら、何も変えずに None を返す
+fn save_synced_config(
+    app: &AppHandle,
+    generation: usize,
+    mut next: Config,
+) -> Result<Option<Vec<sync::ItemKey>>, String> {
+    let state = app.state::<AppState>();
+    let current = state.config.lock().unwrap().clone();
+    let mut rejected = Vec::new();
+    // ウィンドウとホットキーは、コマンドと同じく保存の前に当てる。当てられない値を保存すると、設定と実際が食い違う
+    if next.text_window_always_on_top != current.text_window_always_on_top
+        && set_draft_window_always_on_top(app, next.text_window_always_on_top).is_err()
+    {
+        next.text_window_always_on_top = current.text_window_always_on_top;
+        rejected.push(sync::setting_item("text_window_always_on_top"));
+    }
+    if next.hotkey != current.hotkey {
+        if let Err(error) =
+            hotkey::replace(&mut PluginRegistrar(app), &current.hotkey, &next.hotkey)
+        {
+            warn!("couldn't register the hotkey received by sync: {error}");
+            next.hotkey.clone_from(&current.hotkey);
+            rejected.push(sync::hotkey_item());
+            // 届いたキーは届いたホットキーと重ならないことしか確かめていない。元のホットキーと重なるなら、キーも入れない
+            if draft_keys::check_hotkey(&next.text_window_keys, &next.hotkey, Platform::current())
+                .is_err()
+            {
+                next.text_window_keys = current.text_window_keys.clone();
+                next.yielded_draft_keys = current.yielded_draft_keys.clone();
+                rejected.push(sync::text_window_keys_item());
+            }
+        }
+    }
+    let saved = save_config_if_current(app, Some(generation), |config| *config = next.clone());
+    if !matches!(saved, Ok(Some(_))) {
+        // 保存しなかったので、先に当てたものを設定に残る値へ戻す
+        if next.hotkey != current.hotkey {
+            if let Err(error) =
+                hotkey::replace(&mut PluginRegistrar(app), &next.hotkey, &current.hotkey)
+            {
+                warn!("couldn't restore the hotkey: {error}");
+            }
+        }
+        if next.text_window_always_on_top != current.text_window_always_on_top {
+            let _ = set_draft_window_always_on_top(app, current.text_window_always_on_top);
+        }
+        return saved.map(|_| None);
+    }
+    if next.hotkey != current.hotkey {
+        show_hotkey_registered(app, true);
+    }
+    if next.theme != current.theme {
+        apply_theme_to_windows(app, next.theme);
+    }
+    if next.language != current.language {
+        retitle_windows(app);
+    }
+    if next.text_history_size == 0 && current.text_history_size != 0 {
+        if let Err(error) = clear_draft_history_file(app) {
+            warn!("couldn't clear draft history after sync: {error}");
+        }
+    }
+    if next.ai_service != current.ai_service {
+        state.forget_ai_key();
+    }
+    Ok(Some(rejected))
+}
+
+/// テキストウィンドウの最前面の表示を変える。ウィンドウがまだ無ければ、作るときに設定から当たる
+fn set_draft_window_always_on_top(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let Some(window) = main_window(app) else {
+        return Ok(());
+    };
+    window.set_always_on_top(enabled).map_err(|error| {
+        error!("couldn't change always on top of the draft window: {error}");
+        error.to_string()
+    })
+}
+
+/// タイトルバーの明暗を、テーマに合わせる
+fn apply_theme_to_windows(app: &AppHandle, theme: Theme) {
+    for window in app.webview_windows().values() {
+        let _ = window.set_theme(window_theme(theme));
+    }
+}
+
+/// 開いているウィンドウのタイトルを、今の表示言語にする
+fn retitle_windows(app: &AppHandle) {
+    let lang = app.state::<AppState>().lang();
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
+        let _ = window.set_title(lang.settings_title());
+    }
+    if let Some(window) = app.get_webview_window(LICENSES_WINDOW) {
+        let _ = window.set_title(lang.licenses_title());
+    }
+    if let Some(window) = app.get_webview_window(MANUAL_WINDOW) {
+        let _ = window.set_title(lang.manual());
+    }
 }
 
 #[tauri::command]
@@ -913,16 +1048,7 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 fn set_language(app: AppHandle, language: Language) -> Result<(), String> {
     info!("set language: {language:?}");
     update_config(&app, |config| config.language = language)?;
-    let lang = app.state::<AppState>().lang();
-    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
-        let _ = window.set_title(lang.settings_title());
-    }
-    if let Some(window) = app.get_webview_window(LICENSES_WINDOW) {
-        let _ = window.set_title(lang.licenses_title());
-    }
-    if let Some(window) = app.get_webview_window(MANUAL_WINDOW) {
-        let _ = window.set_title(lang.manual());
-    }
+    retitle_windows(&app);
     Ok(())
 }
 
@@ -930,10 +1056,7 @@ fn set_language(app: AppHandle, language: Language) -> Result<(), String> {
 fn set_theme(app: AppHandle, theme: Theme) -> Result<(), String> {
     info!("set theme: {theme:?}");
     update_config(&app, |config| config.theme = theme)?;
-    // タイトルバーの明暗も合わせる
-    for window in app.webview_windows().values() {
-        let _ = window.set_theme(window_theme(theme));
-    }
+    apply_theme_to_windows(&app, theme);
     Ok(())
 }
 
@@ -946,21 +1069,11 @@ fn set_draft_always_on_top(app: AppHandle, enabled: bool) -> Result<(), String> 
         .lock()
         .unwrap()
         .text_window_always_on_top;
-    let window = main_window(&app);
     // 画面・設定ファイルと実際のウィンドウが食い違わないよう、先にウィンドウへ当て、当てられなければ保存しない
-    if let Some(window) = &window {
-        window.set_always_on_top(enabled).map_err(|error| {
-            error!("couldn't change always on top of the draft window: {error}");
-            error.to_string()
-        })?;
-    }
+    set_draft_window_always_on_top(&app, enabled)?;
     update_config(&app, |config| config.text_window_always_on_top = enabled).inspect_err(|_| {
         // 保存できなければ、ウィンドウも元の値に戻す
-        if let Some(window) = &window {
-            if let Err(error) = window.set_always_on_top(previous) {
-                error!("couldn't restore always on top of the draft window: {error}");
-            }
-        }
+        let _ = set_draft_window_always_on_top(&app, previous);
     })
 }
 
@@ -1433,6 +1546,194 @@ fn http_client(app: &AppHandle) -> Result<reqwest::Client, String> {
     Ok(state.client.get_or_init(|| client).clone())
 }
 
+/// 設定を続けて変えたときは最後から3秒だけ待ち、1回の同期へまとめる。
+fn schedule_sync_after_settings_change(app: &AppHandle) {
+    let debounce = &app.state::<AppState>().sync_debounce;
+    let app = app.clone();
+    debounce.trigger(Duration::from_secs(3), move || request_sync(&app));
+}
+
+/// 同期は1つだけ走らせ、実行中に届いたきっかけは終わった後の1回へまとめる。
+fn request_sync(app: &AppHandle) {
+    {
+        let state = app.state::<AppState>();
+        let mut schedule = state.sync_schedule.lock().unwrap();
+        if schedule.running {
+            schedule.pending = true;
+            return;
+        }
+        schedule.running = true;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            run_settings_sync(&app).await;
+            let again = {
+                let state = app.state::<AppState>();
+                let mut schedule = state.sync_schedule.lock().unwrap();
+                if schedule.pending {
+                    schedule.pending = false;
+                    true
+                } else {
+                    schedule.running = false;
+                    false
+                }
+            };
+            if !again {
+                break;
+            }
+        }
+    });
+}
+
+async fn run_settings_sync(app: &AppHandle) {
+    let (config, generation, record_generation, key, key_id, available) = {
+        let state = app.state::<AppState>();
+        // 設定の保存は、設定の排他の中で世代を進める。同じ排他の中で設定と一緒に読む。
+        // 別々に読むと、間に入った保存を見落として、古い設定で上書きしうる
+        let (config, generation) = {
+            let config = state.config.lock().unwrap();
+            (config.clone(), state.sync_generation.load(Ordering::SeqCst))
+        };
+        let record_generation = state.sync_record_generation.load(Ordering::SeqCst);
+        let key = *state.account_key.lock().unwrap();
+        let key_id = state.account_key_id.lock().unwrap().clone();
+        let available = state
+            .pro_state
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|pro| pro.available_at(pro::now()));
+        (
+            config,
+            generation,
+            record_generation,
+            key,
+            key_id,
+            available,
+        )
+    };
+    if !config.sync_enabled
+        || !available
+        || *app.state::<AppState>().account_key_status.lock().unwrap() != account_key::Status::Ready
+    {
+        return;
+    }
+    let (Some(key), Some(key_id)) = (key, key_id) else {
+        return;
+    };
+    let token = match run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await {
+        Ok(Ok(token)) => token,
+        Ok(Err(error)) => {
+            warn!("couldn't read the Mawok account token for sync: {error:?}");
+            return;
+        }
+        Err(error) => {
+            warn!("couldn't read the Mawok account token for sync: {error}");
+            return;
+        }
+    };
+    let client = match http_client(app) {
+        Ok(client) => client,
+        Err(error) => {
+            warn!("couldn't create a sync client: {error}");
+            return;
+        }
+    };
+    let path = app.state::<AppState>().sync_state_path.clone();
+    let before = run_blocking({
+        let path = path.clone();
+        move || sync::load(&path)
+    })
+    .await
+    .ok()
+    .flatten()
+    .filter(|state| state.key_id == key_id);
+    match sync::sync_once(&client, &token, &key, &key_id, &config, before.clone()).await {
+        Ok(mut result) => {
+            if result.reset {
+                info!("sync server reset the local record");
+            }
+            let app_state = app.state::<AppState>();
+            // AI サービスを替えるコマンドと同じ排他を取る。サインアウトは、この排他の中で同期の記録を消すので、
+            // 記録の排他より先に取る
+            let action_state = app.state::<ActionState>();
+            let _settings = if result.changed && result.config.ai_service != config.ai_service {
+                Some(action_state.settings.lock().await)
+            } else {
+                None
+            };
+            let _commit = app_state.sync_commit.lock().await;
+            if app_state.sync_record_generation.load(Ordering::SeqCst) != record_generation {
+                // サインアウトや鍵の替わりで記録を消した後。この結果は、前の鍵・前のアカウントのもの
+                return;
+            }
+            // 通信の間に設定が変わっていたら、読んだ値は手元に入れずに捨てて、もう一度同期する
+            let mut discard = app_state.sync_generation.load(Ordering::SeqCst) != generation;
+            let mut retry = discard;
+            if !discard && result.changed {
+                match save_synced_config(app, generation, result.config.clone()) {
+                    Ok(Some(rejected)) => {
+                        let previous = before.as_ref().filter(|_| !result.reset);
+                        for item in &rejected {
+                            sync::ignore_applied(&mut result.state, previous, item);
+                        }
+                        apply_config(app);
+                        // 設定の窓は、一覧と打っている欄を自分で持っていて settings-changed では写し直さない
+                        let _ = app.emit(events::SYNC_APPLIED, settings_view(&app_state));
+                    }
+                    Ok(None) => {
+                        discard = true;
+                        retry = true;
+                    }
+                    Err(error) => {
+                        warn!("couldn't save settings received by sync: {error}");
+                        discard = true;
+                    }
+                }
+            }
+            let record = if discard {
+                sync::merge_written(before, &result.written, result.reset, &key_id)
+            } else {
+                result.state
+            };
+            if let Err(error) = run_blocking(move || sync::save(&path, &record)).await {
+                warn!("couldn't save sync state: {error}");
+            }
+            if retry {
+                request_sync(app);
+            }
+        }
+        Err(failure) => {
+            // 途中まで書けていたら、その項目の記録だけは置く。忘れると、次の回に自分の書き込みを他人の変更と取り違える
+            if !failure.written.items.is_empty() || !failure.written.retired.is_empty() {
+                let app_state = app.state::<AppState>();
+                let _commit = app_state.sync_commit.lock().await;
+                if app_state.sync_record_generation.load(Ordering::SeqCst) == record_generation {
+                    let record =
+                        sync::merge_written(before, &failure.written, failure.reset, &key_id);
+                    if let Err(error) = run_blocking(move || sync::save(&path, &record)).await {
+                        warn!("couldn't save sync state: {error}");
+                    }
+                }
+            }
+            match failure.error {
+                sync::Error::KeyMismatch => {
+                    info!("sync key mismatch; refreshing the account key");
+                    let _ = refresh_mawok_account_status(app).await;
+                }
+                sync::Error::SignedOut => {
+                    info!("sync account token was rejected");
+                    if let Err(error) = forget_mawok_token(app).await {
+                        warn!("couldn't clear a rejected Mawok token: {error}");
+                    }
+                }
+                error => warn!("settings sync failed: {error}"),
+            }
+        }
+    }
+}
+
 /// サインインを待つ長さ。メールのリンクの期限（送ってから15分）より、送るまでの分だけ長く
 const MAWOK_SIGN_IN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
@@ -1885,6 +2186,7 @@ async fn refresh_account_key(
         *app.state::<AppState>().account_key.lock().unwrap() = None;
         *app.state::<AppState>().account_key_status.lock().unwrap() =
             account_key::Status::NeedsPairing;
+        clear_sync_state(app).await;
         forget_devices(app);
         app.state::<Arc<lan::Lan>>().refresh();
         apply_config(app);
@@ -1930,6 +2232,7 @@ async fn refresh_account_key(
         if !account_key_generation_is_current(app, generation) {
             return;
         }
+        clear_sync_state(app).await;
     }
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
     *app.state::<AppState>().account_key_id.lock().unwrap() =
@@ -1937,6 +2240,18 @@ async fn refresh_account_key(
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(app);
+    request_sync(app);
+}
+
+async fn clear_sync_state(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let _commit = state.sync_commit.lock().await;
+    state.sync_record_generation.fetch_add(1, Ordering::SeqCst);
+    let path = state.sync_state_path.clone();
+    match run_blocking(move || sync::clear(&path)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) | Err(error) => warn!("couldn't clear the sync state: {error}"),
+    }
 }
 
 /// 鍵を置く処理（確かめ・作り直し・ペアリングでの受け取り）と同じ排他を取り、消すのを必ず後にする。
@@ -1947,6 +2262,7 @@ async fn clear_account_key(app: &AppHandle) {
     *app.state::<AppState>().account_key.lock().unwrap() = None;
     *app.state::<AppState>().account_key_id.lock().unwrap() = None;
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::None;
+    clear_sync_state(app).await;
     if let Err(error) = run_blocking(account_key::clear).await {
         warn!("couldn't clear the account key: {error:?}");
     }
@@ -1956,6 +2272,8 @@ async fn clear_account_key(app: &AppHandle) {
 }
 
 const PRO_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+/// 定期同期の間隔（docs/sync.md「いつ同期するか」）。
+const SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 /// 起動直後と6時間ごとに窓口へ確かめる。トークンが無いときは、問い合わせずに状態を片付ける。
 fn start_periodic_pro_checks(app: AppHandle) {
@@ -1966,6 +2284,16 @@ fn start_periodic_pro_checks(app: AppHandle) {
             if let Err(error) = refresh_mawok_account_status(&app).await {
                 info!("couldn't refresh the Pro state: {error}");
             }
+        }
+    });
+}
+
+fn start_periodic_sync(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(SYNC_INTERVAL);
+        loop {
+            interval.tick().await;
+            request_sync(&app);
         }
     });
 }
@@ -2073,9 +2401,11 @@ async fn reset_account_key(app: AppHandle) -> Result<(), String> {
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
     *app.state::<AppState>().account_key_id.lock().unwrap() = Some(account_key::key_id(&key));
     *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
+    clear_sync_state(&app).await;
     forget_devices(&app);
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(&app);
+    request_sync(&app);
     Ok(())
 }
 
@@ -3741,6 +4071,7 @@ impl Drop for OpeningGuard {
 
 fn open_settings(app: &AppHandle) {
     info!("open settings");
+    request_sync(app);
     hide_draft_for_settings(app);
     focus::before_show(app);
     #[cfg(target_os = "macos")]
@@ -4192,6 +4523,7 @@ pub fn run() {
 
             let config_path = app.path().app_config_dir()?.join(config::FILE_NAME);
             let pro_state_path = app.path().app_config_dir()?.join(pro::STATE_FILE_NAME);
+            let sync_state_path = app.path().app_config_dir()?.join(sync::STATE_FILE_NAME);
             let pro_state = match pro::load(&pro_state_path) {
                 Ok(state) => state,
                 Err(error) => {
@@ -4238,6 +4570,7 @@ pub fn run() {
             app.manage(AppState {
                 config_path,
                 pro_state_path,
+                sync_state_path,
                 version: app.package_info().version.to_string(),
                 system_lang: Lang::system(),
                 device_name: device_name.clone(),
@@ -4252,6 +4585,11 @@ pub fn run() {
                 account_key_id: Mutex::new(None),
                 account_key_status: Mutex::new(account_key::Status::None),
                 account_key_refresh: tokio::sync::Mutex::new(()),
+                sync_generation: AtomicUsize::new(0),
+                sync_record_generation: AtomicUsize::new(0),
+                sync_commit: tokio::sync::Mutex::new(()),
+                sync_schedule: Mutex::new(SyncSchedule::default()),
+                sync_debounce: debounce::Debounce::default(),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]
@@ -4271,6 +4609,7 @@ pub fn run() {
             app.manage(Arc::clone(&lan));
             lan.refresh();
             start_periodic_pro_checks(app.handle().clone());
+            start_periodic_sync(app.handle().clone());
             #[cfg(target_os = "macos")]
             updater::start_periodic_checks(app.handle());
             // 初めての起動では下書きを一度出す。常駐するだけで何も出ないと、入ったのか分からず、

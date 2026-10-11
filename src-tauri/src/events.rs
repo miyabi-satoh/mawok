@@ -3,6 +3,8 @@
 pub const SETTINGS_CHANGED: &str = "settings-changed";
 pub const DRAFT_HISTORY_CLEARED: &str = "draft-history-cleared";
 pub const SNIPPET_ADDED: &str = "snippet-added";
+/// 同期で設定の行一覧が替わった。設定画面は行を新しい設定から写し直す。
+pub const SYNC_APPLIED: &str = "sync-applied";
 pub const PAIRING_CODE_ENDED: &str = "pairing-code-ended";
 pub const PAIRING_CODE_OFFERED: &str = "pairing-code-offered";
 pub const DRAFT_RECEIVED: &str = "draft-received";

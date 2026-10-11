@@ -63,6 +63,13 @@ export class ActionsEditor {
 		this.actions.recopy(view.actions);
 	}
 
+	/** 同期が設定を変えたら、アクションとモデルを写し直す。画面で変えていても写す（RowList.recopy の force） */
+	recopy(view: SettingsView) {
+		this.#actionsLocale = view.locale;
+		this.actions.recopy(view.actions, true);
+		this.switchService(view.aiModels, view.aiService);
+	}
+
 	saveModel = coalescedSaver(() =>
 		this.call('set_ai_model', { service: this.modelService, model: this.model })
 	);
