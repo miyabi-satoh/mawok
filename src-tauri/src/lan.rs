@@ -183,10 +183,10 @@ pub struct Peer {
 
 /// 動いているアプリの側に任せること（設定ファイルと画面）
 pub trait Host: Send + Sync + 'static {
-    /// 出していたコードが使われて、もう使えなくなった（組み合わせの成否は問わない）
+    /// 出していたコードを表示し続けない（組み合わせの成功、取り消し、設定の「デバイス」を閉じたとき）
     fn on_pairing_code_ended(&self);
-    /// 自動でコードを出した。設定画面は、取り逃がしたときだけ pairing_offer を読み直す。
-    fn on_pairing_code_offered(&self, code: String, remaining_seconds: u64, automatic: bool);
+    /// 新しいコードを出した。設定画面は、取り逃がしたときだけ pairing_offer を読み直す。
+    fn on_pairing_code_offered(&self, offer: PairingOffer);
     /// 同じアカウントのデバイスから下書きが届いた。受け入れたら true。
     fn on_received(&self, from: &[u8], text: String) -> bool;
     /// このデバイスで使える Pro のアカウントの印。無ければ、相手の下書きは受け取らない。
@@ -718,6 +718,7 @@ struct Offer {
     code: String,
     expires: Instant,
     automatic: bool,
+    previous_code_was_wrong: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -725,6 +726,7 @@ pub struct PairingOffer {
     pub code: String,
     pub remaining_seconds: u64,
     pub automatic: bool,
+    pub previous_code_was_wrong: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -822,6 +824,18 @@ impl Lan {
             .unwrap()
             .as_ref()
             .is_some_and(|offer| offer.expires > Instant::now())
+    }
+
+    /// 画面にコードが出ている間だけ、次のコードも出す。自動のコードは相手の want が止まったら終える。
+    fn continues_offering(&self, automatic: bool) -> bool {
+        self.devices_open.load(Ordering::Relaxed)
+            && (!automatic
+                || self
+                    .wanted
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|at| at.elapsed() < OFFER_TTL))
     }
 
     pub fn set_devices_open(self: &Arc<Self>, open: bool) {
@@ -998,28 +1012,52 @@ impl Lan {
     }
 
     /// コードを出した側の組み合わせ。コードは1回で使い捨て、違うコードで何度も試させない
-    fn accept_pairing(&self, stream: &mut TcpStream, ip: IpAddr, key: &DeviceKey) -> Result<()> {
+    fn accept_pairing(
+        self: &Arc<Self>,
+        stream: &mut TcpStream,
+        ip: IpAddr,
+        key: &DeviceKey,
+    ) -> Result<()> {
         let offer = self
             .offer
             .lock()
             .unwrap()
             .take()
-            .filter(|offer| offer.expires > Instant::now())
             .ok_or("no pairing code is shown")?;
-        self.host.on_pairing_code_ended();
+        if offer.expires <= Instant::now() {
+            if self.continues_offering(offer.automatic) {
+                if let Err(error) = self.replace_pairing_offer(offer.automatic, false) {
+                    warn!("lan: couldn't replace expired pairing code: {error}");
+                    self.host.on_pairing_code_ended();
+                }
+            } else {
+                self.host.on_pairing_code_ended();
+            }
+            return Err("pairing code expired".to_string());
+        }
         let account_tag = self
             .host
             .pro_account_tag()
             .ok_or("this device is not Pro")?;
         let account_key = self.host.account_key().ok_or("no account key")?;
-        let peer = pair_as_offerer(
+        let result = pair_as_offerer(
             stream,
             &offer.code,
             key,
             &self.name,
             &account_tag,
             &account_key,
-        )?;
+        );
+        let peer = match result {
+            Ok(peer) => {
+                self.host.on_pairing_code_ended();
+                peer
+            }
+            Err(error) => {
+                self.replace_after_failed_pairing(offer, &error);
+                return Err(error);
+            }
+        };
         info!("lan: paired");
         if !self.host.on_device_found(peer, ip) {
             return Err("couldn't remember the device".into());
@@ -1037,23 +1075,8 @@ impl Lan {
                 self.refresh();
                 continue;
             }
+            self.replace_expired_pairing_offer();
             let offering = self.offering();
-            if !offering {
-                let expired = self.offer.lock().unwrap().take().is_some();
-                if expired {
-                    self.host.on_pairing_code_ended();
-                    if self.devices_open.load(Ordering::Relaxed)
-                        && self
-                            .wanted
-                            .lock()
-                            .unwrap()
-                            .as_ref()
-                            .is_some_and(|at| at.elapsed() < OFFER_TTL)
-                    {
-                        let _ = self.start_pairing(true);
-                    }
-                }
-            }
             let interval = hello_interval(offering, self.wants_pairing());
             let due = last.is_none_or(|at| at.elapsed() >= interval);
             if due
@@ -1230,6 +1253,77 @@ impl Lan {
         self.discovering.lock().unwrap().remove(&remote_public);
     }
 
+    /// 期限が切れたコードを次へ替える。待ち受けはすでに続いているので、ここでは作り直さない。
+    fn replace_expired_pairing_offer(self: &Arc<Self>) {
+        let expired = {
+            let mut offer = self.offer.lock().unwrap();
+            if offer
+                .as_ref()
+                .is_some_and(|offer| offer.expires <= Instant::now())
+            {
+                offer.take()
+            } else {
+                None
+            }
+        };
+        let Some(expired) = expired else {
+            return;
+        };
+        if self.continues_offering(expired.automatic) {
+            if let Err(error) = self.replace_pairing_offer(expired.automatic, false) {
+                warn!("lan: couldn't replace expired pairing code: {error}");
+                self.host.on_pairing_code_ended();
+            }
+        } else {
+            self.host.on_pairing_code_ended();
+        }
+    }
+
+    fn make_pairing_offer(
+        &self,
+        automatic: bool,
+        previous_code_was_wrong: bool,
+    ) -> Result<PairingOffer> {
+        let code = new_code()?;
+        let expires = Instant::now() + OFFER_TTL;
+        *self.offer.lock().unwrap() = Some(Offer {
+            code: code.clone(),
+            expires,
+            automatic,
+            previous_code_was_wrong,
+        });
+        Ok(PairingOffer {
+            code,
+            remaining_seconds: offer_remaining_seconds(expires),
+            automatic,
+            previous_code_was_wrong,
+        })
+    }
+
+    fn replace_pairing_offer(
+        self: &Arc<Self>,
+        automatic: bool,
+        previous_code_was_wrong: bool,
+    ) -> Result<()> {
+        let offer = self.make_pairing_offer(automatic, previous_code_was_wrong)?;
+        self.host.on_pairing_code_offered(offer);
+        Ok(())
+    }
+
+    fn replace_after_failed_pairing(self: &Arc<Self>, offer: Offer, error: &str) {
+        // 確認コードが合う相手は、握手の後に拒否の符号を返せる。返らずに握手が途切れた
+        // 試行は、違う確認コードとして次のコードの案内を出す。
+        let wrong_code = !error.starts_with("the joining device");
+        if self.continues_offering(offer.automatic) {
+            if let Err(refresh_error) = self.replace_pairing_offer(offer.automatic, wrong_code) {
+                warn!("lan: couldn't replace pairing code: {refresh_error}");
+                self.host.on_pairing_code_ended();
+            }
+        } else {
+            self.host.on_pairing_code_ended();
+        }
+    }
+
     /// コードを出して、相手が入れるのを待つ。コードと画面表示用の残り秒を返す
     pub fn start_pairing(
         self: &Arc<Self>,
@@ -1247,29 +1341,16 @@ impl Lan {
                 "this device does not have an account key",
             ));
         }
-        let code = new_code().fail_as(Failure::Internal)?;
-        let expires = Instant::now() + OFFER_TTL;
-        *self.offer.lock().unwrap() = Some(Offer {
-            code: code.clone(),
-            expires,
-            automatic,
-        });
+        let offer = self
+            .make_pairing_offer(automatic, false)
+            .fail_as(Failure::Internal)?;
         // 待ち受けを始められなければ、相手はつなげないので、コードを出さない
         if !self.refresh() {
             *self.offer.lock().unwrap() = None;
             return Err(LanError::new(Failure::Internal, "couldn't start listening"));
         }
-        let offer = PairingOffer {
-            code,
-            remaining_seconds: offer_remaining_seconds(expires),
-            automatic,
-        };
         if automatic {
-            self.host.on_pairing_code_offered(
-                offer.code.clone(),
-                offer.remaining_seconds,
-                offer.automatic,
-            );
+            self.host.on_pairing_code_offered(offer.clone());
         }
         Ok(offer)
     }
@@ -1284,6 +1365,7 @@ impl Lan {
             code: offer.code.clone(),
             remaining_seconds: offer_remaining_seconds(offer.expires),
             automatic: offer.automatic,
+            previous_code_was_wrong: offer.previous_code_was_wrong,
         })
     }
 
@@ -1490,7 +1572,7 @@ mod tests {
     impl Host for TestHost {
         fn on_pairing_code_ended(&self) {}
 
-        fn on_pairing_code_offered(&self, _: String, _: u64, _: bool) {}
+        fn on_pairing_code_offered(&self, _: PairingOffer) {}
 
         fn on_received(&self, _: &[u8], _: String) -> bool {
             true
@@ -1517,6 +1599,60 @@ mod tests {
         }
 
         fn on_device_address_seen(&self, _: &[u8], _: IpAddr) {}
+    }
+
+    #[derive(Default)]
+    struct RecordingHost {
+        ended: std::sync::atomic::AtomicUsize,
+        offered: Mutex<Vec<PairingOffer>>,
+    }
+
+    impl Host for RecordingHost {
+        fn on_pairing_code_ended(&self) {
+            self.ended.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn on_pairing_code_offered(&self, offer: PairingOffer) {
+            self.offered.lock().unwrap().push(offer);
+        }
+
+        fn on_received(&self, _: &[u8], _: String) -> bool {
+            true
+        }
+
+        fn pro_account_tag(&self) -> Option<[u8; ACCOUNT_TAG_LEN]> {
+            Some(ACCOUNT_TAG)
+        }
+
+        fn account_key(&self) -> Option<[u8; 32]> {
+            Some(ACCOUNT_KEY)
+        }
+
+        fn account_key_id(&self) -> Option<String> {
+            Some(crate::account_key::key_id(&ACCOUNT_KEY))
+        }
+
+        fn receive_account_key(&self, _: [u8; 32]) -> bool {
+            true
+        }
+
+        fn on_device_found(&self, _: Peer, _: IpAddr) -> bool {
+            true
+        }
+
+        fn on_device_address_seen(&self, _: &[u8], _: IpAddr) {}
+    }
+
+    fn lan_with_recording_host() -> (Arc<Lan>, Arc<RecordingHost>) {
+        let host = Arc::new(RecordingHost::default());
+        let lan = Lan::new(
+            PathBuf::from("unused-device-key"),
+            "test".to_string(),
+            Arc::clone(&host) as Arc<dyn Host>,
+        );
+        // cancel_pairing と set_devices_open がテストで待ち受けを始めないようにする。
+        *lan.running.lock().unwrap() = Some(Arc::new(AtomicBool::new(false)));
+        (lan, host)
     }
 
     /// つながった TCP の両端
@@ -1881,12 +2017,78 @@ mod tests {
             code: "123456".to_string(),
             expires: Instant::now() + OFFER_TTL,
             automatic: true,
+            previous_code_was_wrong: false,
         });
 
         let offer = lan.pairing_offer().unwrap();
         assert_eq!(offer.code, "123456");
         assert!(offer.automatic);
         assert!(offer.remaining_seconds <= OFFER_TTL.as_secs());
+    }
+
+    #[test]
+    fn replaces_an_expired_code_while_the_devices_page_is_open() {
+        let (lan, host) = lan_with_recording_host();
+        lan.devices_open.store(true, Ordering::Relaxed);
+        *lan.offer.lock().unwrap() = Some(Offer {
+            code: "expired".to_string(),
+            expires: Instant::now() - Duration::from_secs(1),
+            automatic: false,
+            previous_code_was_wrong: false,
+        });
+
+        lan.replace_expired_pairing_offer();
+
+        let offer = lan.pairing_offer().unwrap();
+        assert_ne!(offer.code, "expired");
+        assert!(!offer.previous_code_was_wrong);
+        assert_eq!(host.offered.lock().unwrap().as_slice(), &[offer]);
+        assert_eq!(host.ended.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn replaces_the_code_after_a_wrong_code_attempt() {
+        let (lan, host) = lan_with_recording_host();
+        lan.devices_open.store(true, Ordering::Relaxed);
+        *lan.offer.lock().unwrap() = Some(Offer {
+            code: "111111".to_string(),
+            expires: Instant::now() + OFFER_TTL,
+            automatic: false,
+            previous_code_was_wrong: false,
+        });
+        let failed = lan.offer.lock().unwrap().take().unwrap();
+
+        lan.replace_after_failed_pairing(failed, "read: connection closed");
+
+        let offer = lan.pairing_offer().unwrap();
+        assert!(offer.previous_code_was_wrong);
+        assert_eq!(host.offered.lock().unwrap().as_slice(), &[offer]);
+        assert_eq!(host.ended.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn canceling_or_leaving_the_devices_page_does_not_replace_a_code() {
+        for cancel in [true, false] {
+            let (lan, host) = lan_with_recording_host();
+            lan.devices_open.store(true, Ordering::Relaxed);
+            *lan.offer.lock().unwrap() = Some(Offer {
+                code: "123456".to_string(),
+                expires: Instant::now() + OFFER_TTL,
+                automatic: false,
+                previous_code_was_wrong: false,
+            });
+
+            if cancel {
+                lan.cancel_pairing();
+            } else {
+                lan.set_devices_open(false);
+            }
+            lan.replace_expired_pairing_offer();
+
+            assert!(lan.pairing_offer().is_none());
+            assert!(host.offered.lock().unwrap().is_empty());
+            assert_eq!(host.ended.load(Ordering::Relaxed), 1);
+        }
     }
 
     #[test]

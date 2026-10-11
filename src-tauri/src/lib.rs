@@ -3624,17 +3624,17 @@ impl lan::Host for AppHandle {
     }
 
     fn on_pairing_code_ended(&self) {
-        // 設定画面は、出していたコードを消す
         let _ = self.emit(events::PAIRING_CODE_ENDED, ());
     }
 
-    fn on_pairing_code_offered(&self, code: String, remaining_seconds: u64, automatic: bool) {
+    fn on_pairing_code_offered(&self, offer: lan::PairingOffer) {
         let _ = self.emit(
             events::PAIRING_CODE_OFFERED,
             PairingOffer {
-                code,
-                remaining_seconds,
-                automatic,
+                code: offer.code,
+                remaining_seconds: offer.remaining_seconds,
+                automatic: offer.automatic,
+                previous_code_was_wrong: offer.previous_code_was_wrong,
             },
         );
     }
@@ -3748,6 +3748,7 @@ struct PairingOffer {
     code: String,
     remaining_seconds: u64,
     automatic: bool,
+    previous_code_was_wrong: bool,
 }
 
 /// コードを出して、組み合わせる相手が入れるのを待つ。コードと画面表示用の残り秒を返す
@@ -3770,6 +3771,7 @@ fn start_pairing(
         code: offer.code,
         remaining_seconds: offer.remaining_seconds,
         automatic: offer.automatic,
+        previous_code_was_wrong: offer.previous_code_was_wrong,
     })
 }
 
@@ -3780,6 +3782,7 @@ fn pairing_offer(lan: tauri::State<'_, Arc<lan::Lan>>) -> Option<PairingOffer> {
         code: offer.code,
         remaining_seconds: offer.remaining_seconds,
         automatic: offer.automatic,
+        previous_code_was_wrong: offer.previous_code_was_wrong,
     })
 }
 
