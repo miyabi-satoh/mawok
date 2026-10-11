@@ -1243,7 +1243,8 @@ fn apply_synced_history(
         screen.replaced_by_sync(current);
         let _ = app.emit(events::DRAFT_HISTORY_SYNCED, ());
     }
-    Ok(merged != next)
+    // 届いた履歴を今の件数に切り詰めた分は、手元を変えたことにしない。もう一度同期しても同じ値が届く
+    Ok(merged != next.truncated(size))
 }
 
 #[tauri::command]

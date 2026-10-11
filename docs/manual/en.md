@@ -135,6 +135,7 @@ Changes you make directly take effect after you restart the app. The file contai
 | -------------------------------- | -------------------------------- | ------------------------------------------------------------------------ |
 | `hotkey`                         | `"CommandOrControl+Shift+Space"` | Hotkey that brings up the text window; empty for none                    |
 | `autostart`                      | `true`                           | Launch at login                                                          |
+| `sync_enabled`                   | `true`                           | With Pro, sync settings and history with your other devices              |
 | `language`                       | `"system"`                       | Language (`"system"`, `"ja"`, `"en"`)                                    |
 | `theme`                          | `"system"`                       | Theme (`"system"`, `"light"`, `"dark"`)                                  |
 | `text_window_always_on_top`      | `true`                           | Keep the text window on top                                              |
