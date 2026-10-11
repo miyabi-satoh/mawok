@@ -27,6 +27,9 @@ bun.lockb
 # Claude Code の個人の設定 (git からは各自のグローバルの ignore で外すが、prettier はそれを読まない。書式は Claude Code に任せる)
 /.claude/settings.local.json
 
+# Claude Code が作る worktree (別のブランチの作業フォルダで、そちらの検査が見る)
+/.claude/worktrees/
+
 # CodeGraph の索引 (作っては消す一時ファイルを読みにいき、消えた瞬間に当たると落ちる)
 /.codegraph/
 
