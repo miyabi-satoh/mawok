@@ -1343,8 +1343,14 @@ impl Lan {
                 Ok(Some(_)) => return,
                 // 取り出している間に新しいコードが出ていれば、画面はそちらに合っている。「キャンセル」や
                 // 「デバイス」を離れる操作だったなら、そのときコードが無くて知らせていないので、ここで知らせる
-                Ok(None) if self.offer.lock().unwrap().is_some() => return,
-                Ok(None) => {}
+                // ロックを持ったまま知らせて、後から出たコードを消さない
+                Ok(None) => {
+                    let offer = self.offer.lock().unwrap();
+                    if offer.is_none() {
+                        self.host.on_pairing_code_ended();
+                    }
+                    return;
+                }
                 Err(error) => warn!("lan: couldn't replace pairing code: {error}"),
             }
         }
