@@ -452,16 +452,6 @@ pub fn setting_item(name: &str) -> ItemKey {
     ItemKey::new(SETTINGS, setting_id(name))
 }
 
-/// 設定ファイルの項目名に対応する窓口の項目。OS ごとに分ける書体だけは、ここで接尾辞を付ける。
-fn syncable_setting_item(name: &str) -> ItemKey {
-    let wire_name = if name == "text_font_family" {
-        format!("{name}_{}", platform_suffix())
-    } else {
-        name.to_string()
-    };
-    setting_item(&wire_name)
-}
-
 /// 設定ファイルと同じ項目名で書く。黙って外した操作は、設定ファイルと同じく書かない
 /// （書くと、ほかのデバイスで、重なりが解けても既定のキーに戻らなくなる）。
 fn draft_keys_value(config: &Config) -> Value {
@@ -573,15 +563,6 @@ fn is_key_setting(name: &str) -> bool {
         .any(|setting| name == format!("{setting}_{}", platform_suffix()))
 }
 
-/// 窓口の項目名に対応する設定ファイルの項目名（`syncable_setting_item` の逆）。
-fn setting_config_name(name: &str) -> &str {
-    if name == format!("text_font_family_{}", platform_suffix()) {
-        "text_font_family"
-    } else {
-        name
-    }
-}
-
 fn sync_enabled(config: &Config, key: &ItemKey) -> bool {
     let Some(kind) = kind(key) else {
         return false;
@@ -589,7 +570,7 @@ fn sync_enabled(config: &Config, key: &ItemKey) -> bool {
     if !kinds(config).enabled(kind.sync_kind()) {
         return false;
     }
-    !matches!(kind, Kind::Setting(name) if !is_key_setting(name) && config.sync_excluded_settings.iter().any(|excluded| excluded == setting_config_name(name)))
+    !matches!(kind, Kind::Setting(name) if !is_key_setting(name) && config.sync_excluded_settings.iter().any(|excluded| excluded == name))
 }
 
 fn paused_groups(config: &Config) -> Vec<String> {
@@ -603,7 +584,7 @@ fn paused_groups(config: &Config) -> Vec<String> {
             .sync_excluded_settings
             .iter()
             .filter(|name| known_syncable_setting(name))
-            .map(|name| syncable_setting_item(name).name()),
+            .map(|name| setting_item(name).name()),
     );
     groups
 }
@@ -614,7 +595,7 @@ fn paused_group(config: &Config, group: &str) -> bool {
             .sync_excluded_settings
             .iter()
             .filter(|name| known_syncable_setting(name))
-            .any(|name| syncable_setting_item(name).name() == group)
+            .any(|name| setting_item(name).name() == group)
         // 種類「設定」がオフの間に除外をやめた項目は、まだ読んでいない。種類をオンに戻して読む回まで位置を残す
         || (!config.sync_settings
             && key_of(group).is_some_and(
@@ -664,11 +645,7 @@ fn handled(key: &ItemKey) -> bool {
 }
 
 fn known_setting(name: &str) -> bool {
-    let config_name = setting_config_name(name);
-    // 窓口の id として正しい名前だけ（OS ごとに分ける書体は、接尾辞の付いた名前だけ）
-    (known_syncable_setting(config_name)
-        && syncable_setting_item(config_name).id == setting_id(name))
-        || is_key_setting(name)
+    known_syncable_setting(name) || is_key_setting(name)
 }
 
 /// 設定を、窓口に置く粒度の平文値へ変換する。同期しない項目はここに現れない。
@@ -695,7 +672,7 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
             "ai_models" => json(config.ai_models.clone()),
             _ => unreachable!("all syncable setting names have a value"),
         };
-        items.insert(syncable_setting_item(name), value);
+        items.insert(setting_item(name), value);
     }
     let suffix = platform_suffix();
     set(
@@ -868,7 +845,7 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
         Some(Kind::Setting(name)) if name == format!("text_window_keys_{}", platform_suffix()) => {
             apply_draft_keys(config, value)
         }
-        Some(Kind::Setting(name)) if name == format!("text_font_family_{}", platform_suffix()) => {
+        Some(Kind::Setting("text_font_family")) => {
             set_if(&mut config.text_font_family, parse(value))
         }
         Some(Kind::Replacement(id)) => apply_row(&mut config.replacements, id, value),
@@ -2927,7 +2904,7 @@ mod tests {
         };
         let mut state = recorded(&Config::default());
         state.since = 0;
-        state.items.remove(&syncable_setting_item("theme").name());
+        state.items.remove(&setting_item("theme").name());
         let result = reconcile(
             &local,
             Some(state),
@@ -6220,29 +6197,6 @@ mod tests {
     }
 
     #[test]
-    fn text_font_family_exclusion_uses_its_wire_item_for_the_paused_position() {
-        let base = Config::default();
-        let mut stopped = base.clone();
-        stopped.sync_excluded_settings = vec!["text_font_family".to_string()];
-        let mut transport = FakeTransport::reading([read(5, [])]).after_seq(5);
-        let off = run_sync(&mut transport, &stopped, Some(recorded(&base)), None);
-        let name = syncable_setting_item("text_font_family").name();
-        assert_eq!(off.state.paused.get(&name), Some(&1));
-
-        let remote = remote(
-            SETTINGS,
-            &syncable_setting_item("text_font_family").id,
-            5,
-            json!("Fira Code"),
-        );
-        let mut transport = FakeTransport::reading([read(6, [remote])]).after_seq(6);
-        let on = run_sync(&mut transport, &base, Some(off.state), None);
-        assert_eq!(transport.read_since, [1]);
-        assert_eq!(on.config.text_font_family, "Fira Code");
-        assert_eq!(on.state.paused.get(&name), None);
-    }
-
-    #[test]
     fn an_excluded_setting_keeps_its_position_while_settings_are_off() {
         let base = Config::default();
         let mut stopped = base.clone();
@@ -6250,7 +6204,7 @@ mod tests {
         stopped.sync_excluded_settings = vec!["theme".to_string()];
         let mut transport = FakeTransport::reading([read(5, [])]).after_seq(5);
         let off = run_sync(&mut transport, &stopped, Some(recorded(&base)), None);
-        let theme = syncable_setting_item("theme").name();
+        let theme = setting_item("theme").name();
         assert_eq!(off.state.paused.get("settings"), Some(&1));
         assert_eq!(off.state.paused.get(&theme), Some(&1));
 
@@ -6276,7 +6230,7 @@ mod tests {
         excluded.sync_excluded_settings = vec!["theme".to_string()];
         let mut transport = FakeTransport::reading([read(5, [])]).after_seq(5);
         let off = run_sync(&mut transport, &excluded, Some(recorded(&base)), None);
-        let theme = syncable_setting_item("theme").name();
+        let theme = setting_item("theme").name();
         assert_eq!(off.state.paused.get(&theme), Some(&1));
 
         // 設定をオフにしてから除外をやめる。この回は設定を読まないので、項目の位置は残る
@@ -6309,7 +6263,7 @@ mod tests {
         excluded.sync_excluded_settings = vec!["theme".to_string()];
         let mut state = off.state;
         assert!(state.pause(&excluded));
-        let theme = syncable_setting_item("theme").name();
+        let theme = setting_item("theme").name();
         assert_eq!(state.paused.get(&theme), Some(&1));
 
         // 別の種類を止めた位置は、設定を止めた位置に引きずられない
@@ -6338,7 +6292,7 @@ mod tests {
         assert!(resumed
             .state
             .conflicts
-            .contains(&syncable_setting_item("theme").name()));
+            .contains(&setting_item("theme").name()));
     }
 
     /// 設定の項目1つと、片方で消した行2つが食い違っている状態。

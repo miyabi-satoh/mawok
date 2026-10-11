@@ -94,7 +94,7 @@ With Pro, your settings and history stay the same across the devices on your acc
 The device you added receives the same settings and history.
 
 - Synced: settings, keyboard shortcuts, replacements, snippets, actions, and history. Turn each kind on or off under "Account" in Settings.
-- Kept per device: launch at login, API keys for AI services, and the devices you send to. The hotkey, keyboard shortcuts, and text font sync only between {macos:Macs}{windows:Windows devices}.
+- Kept per device: launch at login, API keys for AI services, and the devices you send to. The hotkey and keyboard shortcuts sync only between {macos:Macs}{windows:Windows devices}.
 - For settings, replacements, snippets, and actions, turn off the cloud mark to stop syncing just that item or row. To stop syncing a whole kind, turn it off.
 
 If you change the same setting on different devices, "Choose Which to Use..." appears under "Account" in Settings. Select it, choose "This device" or "Other device" for each item, then select "Apply Selected Settings". You can also open it from "Choose Which Settings to Use…" in the {macos:menu bar}{windows:system tray} menu.
