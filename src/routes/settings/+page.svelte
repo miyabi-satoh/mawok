@@ -679,7 +679,6 @@
 
 {#if settings.current}
 	{@const view = settings.current}
-	<!-- 見出しが折れる行では、見出しを inline にして印を同じ流れに置く。箱の右に並べると、印が最後の語でなくスイッチの隣に付くため -->
 	{#snippet syncSetting(name: string, label: string)}
 		{#if view.proAvailable && view.syncKinds.settings}
 			<SyncToggle
@@ -789,7 +788,7 @@
 						<SettingsSection title={m.settings_section_draft_window()}>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+									<div class="flex-auto">
 										<Field.Label class="inline" for="draft-always-on-top"
 											>{m.settings_draft_always_on_top()}</Field.Label
 										>
@@ -809,7 +808,7 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+									<div class="flex-auto">
 										<Field.Label class="inline" for="hide-draft-on-blur"
 											>{m.settings_hide_draft_on_blur()}</Field.Label
 										>
@@ -832,7 +831,7 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+									<div class="flex-auto">
 										<Field.Label class="inline" for="show-draft-buttons"
 											>{m.settings_draft_buttons()}</Field.Label
 										>
@@ -849,7 +848,7 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+									<div class="flex-auto">
 										<Field.Label class="inline" for="draft-history-size"
 											>{m.settings_draft_history_size()}</Field.Label
 										>
@@ -1098,7 +1097,7 @@
 								{#each textColorRows as row (row.theme)}
 									<div class="flex flex-col gap-0.5">
 										<Field.Field orientation="horizontal" class="flex-wrap">
-											<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+											<div class="flex-auto">
 												<Field.Label
 													for="draft-text-color-{row.theme}"
 													class="inline whitespace-nowrap"
@@ -1139,7 +1138,7 @@
 						<SettingsRow>
 							<!-- ほかの行のボタンと同じ高さにして、説明文までの間隔を揃える -->
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+								<div class="flex-auto">
 									<Field.Label class="inline" for="draft-guidance"
 										>{m.settings_draft_guidance()}</Field.Label
 									>
@@ -1174,7 +1173,7 @@
 					<SettingsSection>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+								<div class="flex-auto">
 									<Field.Label class="inline" for="trim-trailing"
 										>{m.settings_trim_trailing()}</Field.Label
 									>
@@ -1194,7 +1193,7 @@
 						</SettingsRow>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<div class="flex-auto [&>button]:ml-1 [&>button]:align-middle">
+								<div class="flex-auto">
 									<Field.Label class="inline" for="exclude-history"
 										>{m.settings_exclude_history()}</Field.Label
 									>

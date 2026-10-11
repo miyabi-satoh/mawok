@@ -7,6 +7,7 @@
 	/**
 	 * 一覧の1行や設定を同期するかの印。意味の説明は一覧や区分の上に一度だけ出すので、ここには置かない。
 	 * name は読み上げで項目を見分けるためのもの。設定の見出しに置くときは compact にする
+	 * compact は、inline にした見出しの後ろに続けて置ける（align-middle）。見出しが折れる行で、印を箱の右でなく最後の語の直後に付けるため
 	 */
 	let {
 		pressed,
@@ -26,7 +27,7 @@
 <Button
 	variant="ghost"
 	size="icon"
-	class={compact ? 'size-6' : 'size-8'}
+	class={compact ? 'size-6 align-middle' : 'size-8'}
 	data-sync-setting={settingName}
 	title={m.settings_sync()}
 	aria-label={name ? m.settings_sync_item({ name }) : m.settings_sync()}
