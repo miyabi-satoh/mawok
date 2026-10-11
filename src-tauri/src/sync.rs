@@ -1708,17 +1708,46 @@ pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
     let current_items = config_items(current);
     let backup_items = config_items(backup);
     let mut rejected = Vec::new();
-    // 行を先に入れてから並びを入れる。届いた同期の項目を手元へ入れるのと同じ順にする。
-    for (key, value) in backup_items
+    // 届いた同期の項目を手元へ入れるのと同じ順にする。設定（言語）を先に入れてから、None のアクションを
+    // 既定から実体化する。並びは最後にしないと、同じ回の行を並べ替えられない
+    let mut sorted: Vec<(&ItemKey, &Value)> = backup_items
         .iter()
-        .filter(|(key, _)| !is_order(key))
-        .chain(backup_items.iter().filter(|(key, _)| is_order(key)))
-    {
         // 現在同期していない行は、以前の同期前の値で上書きしない。今は無い行は、控えで同期していたものだけを戻せる。
-        if sync_enabled(current, key)
-            && !detached(current, key)
-            && !apply_value(&mut restored, key, value)
+        .filter(|(key, _)| sync_enabled(current, key) && !detached(current, key))
+        .collect();
+    sorted.sort_by_key(|(key, _)| match kind(key) {
+        Some(Kind::Setting(_)) => 0,
+        Some(Kind::Order(_)) => 2,
+        _ => 1,
+    });
+    // ホットキーとキー操作は互いに重なりを見るので、同期と同じく組にして入れる
+    let (hotkey, keys) = (hotkey_item(), text_window_keys_item());
+    if let (Some(hotkey_value), Some(keys_value)) = (
+        sorted
+            .iter()
+            .find(|(key, _)| **key == hotkey)
+            .map(|(_, v)| *v),
+        sorted
+            .iter()
+            .find(|(key, _)| **key == keys)
+            .map(|(_, v)| *v),
+    ) {
+        let before = restored.clone();
+        // キー操作は、これから替わるホットキーとは照らさずに入れ、ホットキーを入れた後で照らし直す
+        let local_hotkey = std::mem::take(&mut restored.hotkey);
+        let keys_applied = apply_value(&mut restored, &keys, keys_value);
+        restored.hotkey = local_hotkey;
+        if !(keys_applied
+            && apply_value(&mut restored, &hotkey, hotkey_value)
+            && apply_value(&mut restored, &keys, keys_value))
         {
+            restored = before;
+            rejected.extend([hotkey.clone(), keys.clone()]);
+        }
+        sorted.retain(|(key, _)| **key != hotkey && **key != keys);
+    }
+    for (key, value) in sorted {
+        if !apply_value(&mut restored, key, value) {
             rejected.push(key.clone());
         }
     }
@@ -6913,6 +6942,40 @@ mod tests {
         let restored = restore_config(&current, &backup);
         assert_eq!(restored.config.text_font_size, current.text_font_size);
         assert_eq!(restored.rejected, [setting_item("text_font_size")]);
+    }
+
+    #[test]
+    fn restoring_a_swapped_hotkey_and_key_takes_both() {
+        let backup = Config::default();
+        let mut current = Config::default();
+        let copy = backup.text_window_keys.get(DraftAction::Copy).to_string();
+        *current.text_window_keys.get_mut(DraftAction::Copy) = backup.hotkey.clone();
+        current.hotkey = copy;
+        let restored = restore_config(&current, &backup);
+        assert!(restored.rejected.is_empty());
+        assert_eq!(restored.config.hotkey, backup.hotkey);
+        assert_eq!(restored.config.text_window_keys, backup.text_window_keys);
+    }
+
+    #[test]
+    fn restoring_the_language_comes_before_the_default_actions() {
+        let current = Config {
+            language: Language::En,
+            ..Config::default()
+        };
+        // 控えは日本語で、既定のアクションの1つを同期する行として持つ
+        let mut backup = Config {
+            language: Language::Ja,
+            ..Config::default()
+        };
+        backup.actions = Some(actions::default_actions(crate::i18n::Lang::Ja));
+        let restored = restore_config(&current, &backup);
+        assert!(restored.rejected.is_empty());
+        assert_eq!(restored.config.language, Language::Ja);
+        assert_eq!(
+            restored.config.actions,
+            Some(actions::default_actions(crate::i18n::Lang::Ja))
+        );
     }
 
     #[test]
