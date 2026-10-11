@@ -28,7 +28,7 @@
 
 <SettingsSection title={m.settings_section_sync()}>
 	{#each kinds as { kind, label } (kind)}
-		<SettingsRow>
+		<SettingsRow modified={view.modifiedSettings.includes(`sync_${kind}`)}>
 			<Field.Field orientation="horizontal" class="min-h-8">
 				<Field.Label for="sync-{kind}">{label()}</Field.Label>
 				<Switch

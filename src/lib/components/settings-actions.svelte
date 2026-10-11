@@ -4,6 +4,7 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { untrack } from 'svelte';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
+	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -318,7 +319,7 @@
 		</SettingsSection>
 	</div>
 	<SettingsSection>
-		<SettingsRow>
+		<SettingsRow modified={view.modifiedSettings.includes('ai_service')}>
 			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 				<div class="flex flex-auto items-center gap-1">
 					<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
@@ -371,6 +372,7 @@
 					</Field.Content>
 				</div>
 			{:else if view.aiService !== 'none'}
+				{@const modified = view.modifiedSettings.includes('ai_models')}
 				<div class="mt-2 flex flex-col gap-5 pl-4">
 					<Field.Content>
 						<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
@@ -423,7 +425,14 @@
 							{/if}
 						</Field.Field>
 					</Field.Content>
-					<Field.Content>
+					<Field.Content
+						class="relative"
+						data-modified={modified || undefined}
+						title={modified ? m.settings_modified() : undefined}
+					>
+						{#if modified}
+							<SettingsModifiedMark class="inset-y-0 -left-8" />
+						{/if}
 						<!-- 題名は縮めない。Field の horizontal が題名に flex-auto を当てるので、! で上書きする -->
 						<Field.Field
 							orientation="horizontal"

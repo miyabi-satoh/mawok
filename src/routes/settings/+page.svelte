@@ -20,6 +20,7 @@
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
 	import SettingsActions from '$lib/components/settings-actions.svelte';
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
+	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SettingsSync from '$lib/components/settings-sync.svelte';
@@ -773,7 +774,7 @@
 							</p>
 						{/if}
 						<SettingsSection title={m.settings_section_startup()}>
-							<SettingsRow>
+							<SettingsRow modified={view.modifiedSettings.includes('autostart')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<Field.Label for="autostart">{m.settings_autostart()}</Field.Label>
 									<Switch
@@ -786,7 +787,7 @@
 							</SettingsRow>
 						</SettingsSection>
 						<SettingsSection title={m.settings_section_draft_window()}>
-							<SettingsRow>
+							<SettingsRow modified={view.modifiedSettings.includes('text_window_always_on_top')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="draft-always-on-top"
@@ -806,7 +807,7 @@
 									/>
 								</Field.Field>
 							</SettingsRow>
-							<SettingsRow>
+							<SettingsRow modified={view.modifiedSettings.includes('hide_text_window_on_blur')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="hide-draft-on-blur"
@@ -829,7 +830,7 @@
 									>{m.settings_hide_draft_on_blur_description()}</Field.Description
 								>
 							</SettingsRow>
-							<SettingsRow>
+							<SettingsRow modified={view.modifiedSettings.includes('show_text_window_buttons')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="show-draft-buttons"
@@ -846,7 +847,7 @@
 									/>
 								</Field.Field>
 							</SettingsRow>
-							<SettingsRow>
+							<SettingsRow modified={view.modifiedSettings.includes('text_history_size')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="draft-history-size"
@@ -870,7 +871,7 @@
 							</SettingsRow>
 						</SettingsSection>
 						<SettingsSection title={m.settings_section_appearance()}>
-							<SettingsRow>
+							<SettingsRow modified={view.modifiedSettings.includes('language')}>
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<div class="flex flex-auto items-center gap-1">
 										<Field.Title id="language">{m.settings_language()}</Field.Title>
@@ -896,7 +897,7 @@
 									</ToggleGroup.Root>
 								</Field.Field>
 							</SettingsRow>
-							<SettingsRow>
+							<SettingsRow modified={view.modifiedSettings.includes('theme')}>
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<div class="flex flex-auto items-center gap-1">
 										<Field.Title id="theme">{m.settings_theme()}</Field.Title>
@@ -925,7 +926,7 @@
 				<Tabs.Content value="keys">
 					<SettingsSection>
 						<!-- 説明文は、題名と操作の行の下に全幅で置く -->
-						<SettingsRow>
+						<SettingsRow modified={view.modifiedSettings.includes('hotkey')}>
 							<Field.Field orientation="horizontal" class="flex-wrap">
 								<Field.Title class="shrink-0">{m.settings_hotkey()}</Field.Title>
 								{#if recording === 'hotkey'}
@@ -976,7 +977,15 @@
 								{#each DRAFT_ACTIONS_IN_SETTINGS as action (action)}
 									{@const key = view.textWindowKeys[action]}
 									{@const label = draftActionLabel(action)}
-									<div class="flex flex-col gap-0.5">
+									{@const modified = view.modifiedSettings.includes(`text_window_keys.${action}`)}
+									<div
+										class="relative flex flex-col gap-0.5"
+										data-modified={modified || undefined}
+										title={modified ? m.settings_modified() : undefined}
+									>
+										{#if modified}
+											<SettingsModifiedMark class="inset-y-0 -left-4" />
+										{/if}
 										<!--
 											狭い窓では、操作の名前を細かく折り返さず、キーとボタンを次の行の右端へ送る。
 											キーの表示（Ctrl Shift Backspace など）が長く、横に並べると名前が1文字ずつ折れたり、はみ出したりするため
@@ -1035,7 +1044,7 @@
 						</p>
 					{/if}
 					<SettingsSection>
-						<SettingsRow>
+						<SettingsRow modified={view.modifiedSettings.includes('text_font')}>
 							<div class="flex items-center gap-1">
 								<Field.Label for="draft-font-family">{m.settings_draft_font()}</Field.Label>
 								{@render syncSetting('text_font_family', m.settings_draft_font())}
@@ -1090,7 +1099,7 @@
 								{m.settings_draft_font_description()}
 							</Field.Description>
 						</SettingsRow>
-						<SettingsRow>
+						<SettingsRow modified={view.modifiedSettings.includes('text_color')}>
 							<Field.Title>{m.settings_draft_text_color()}</Field.Title>
 							<!-- 行の間は置き換え辞書と揃える。読めない値の知らせは、その行から離れないよう行と一緒に包む -->
 							<div class="flex flex-col gap-2">
@@ -1135,7 +1144,7 @@
 								{/each}
 							</div>
 						</SettingsRow>
-						<SettingsRow>
+						<SettingsRow modified={view.modifiedSettings.includes('input_guidance')}>
 							<!-- ほかの行のボタンと同じ高さにして、説明文までの間隔を揃える -->
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<div class="flex-auto">
@@ -1171,7 +1180,7 @@
 						</p>
 					{/if}
 					<SettingsSection>
-						<SettingsRow>
+						<SettingsRow modified={view.modifiedSettings.includes('trim_trailing_whitespace')}>
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<div class="flex-auto">
 									<Field.Label class="inline" for="trim-trailing"
@@ -1191,7 +1200,9 @@
 								{m.settings_trim_trailing_description()}
 							</Field.Description>
 						</SettingsRow>
-						<SettingsRow>
+						<SettingsRow
+							modified={view.modifiedSettings.includes('exclude_from_clipboard_history')}
+						>
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<div class="flex-auto">
 									<Field.Label class="inline" for="exclude-history"
@@ -1214,7 +1225,7 @@
 								{m.settings_exclude_history_description()}
 							</Field.Description>
 						</SettingsRow>
-						<SettingsRow>
+						<SettingsRow modified={view.modifiedSettings.includes('char_width')}>
 							<div class="flex items-center gap-1">
 								<Field.Title>{m.settings_char_width()}</Field.Title>
 								{@render syncSetting('char_widths', m.settings_char_width())}

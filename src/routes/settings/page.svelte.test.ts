@@ -132,6 +132,74 @@ beforeEach(() => {
 	settings.current = view();
 });
 
+describe('既定の値から変えた設定の印', () => {
+	it('変更した行にだけ印と読み上げる文言を出す', async () => {
+		settings.current = settingsView({ modifiedSettings: ['autostart'] });
+		const screen = await render(Page);
+
+		const changed = screen
+			.getByLabelText(m.settings_autostart())
+			.element()
+			.closest<HTMLElement>('[data-settings-row]');
+		const unchanged = screen
+			.getByLabelText(m.settings_draft_always_on_top())
+			.element()
+			.closest<HTMLElement>('[data-settings-row]');
+		expect(changed).not.toBeNull();
+		expect(unchanged).not.toBeNull();
+		expect(changed).toHaveAttribute('data-modified');
+		expect(changed).toHaveAttribute('title', m.settings_modified());
+		expect(changed?.textContent).toContain(m.settings_modified());
+		expect(unchanged).not.toHaveAttribute('data-modified');
+	});
+
+	it('すべての印の名前に対応する行を出す', async () => {
+		const modifiedSettings = [
+			'hotkey',
+			...Object.keys(DEFAULT_DRAFT_KEYS).map((action) => `text_window_keys.${action}`),
+			'autostart',
+			'text_window_always_on_top',
+			'hide_text_window_on_blur',
+			'show_text_window_buttons',
+			'text_history_size',
+			'language',
+			'theme',
+			'text_font',
+			'text_color',
+			'input_guidance',
+			'trim_trailing_whitespace',
+			'exclude_from_clipboard_history',
+			'char_width',
+			'ai_service',
+			'ai_models',
+			'sync_settings',
+			'sync_keys',
+			'sync_replacements',
+			'sync_snippets',
+			'sync_actions',
+			'sync_history'
+		];
+		settings.current = settingsView({
+			modifiedSettings,
+			aiService: 'gemini',
+			aiModels: { gemini: 'gemini-3.8-flash' },
+			mawokAccountSignedIn: true,
+			proAvailable: true
+		});
+		const screen = await render(Page);
+		const marks = () => screen.container.querySelectorAll('[data-modified]').length;
+		// 「アカウント」と「アクション」は開いている間だけ描くので、開くたびに増えた分を足す
+		const always = marks();
+		let total = always;
+		for (const category of [m.settings_category_account, m.settings_category_actions]) {
+			await screen.getByRole('tab', { name: category() }).click();
+			total += marks() - always;
+		}
+
+		expect(total).toBe(modifiedSettings.length);
+	});
+});
+
 describe('設定画面の置き換え辞書', () => {
 	it('Pro では同期の印を出し、押すとその行の値を保存する', async () => {
 		settings.current = {

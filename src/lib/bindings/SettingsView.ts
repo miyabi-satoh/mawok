@@ -24,7 +24,11 @@ revision: number,
 /**
  * 下書きウィンドウを出すグローバルホットキー
  */
-hotkey: string, textWindowKeys: DraftKeys, 
+hotkey: string, 
+/**
+ * 設定画面で既定から変えた印を付ける項目名
+ */
+modifiedSettings: Array<string>, textWindowKeys: DraftKeys, 
 /**
  * 「既定に戻す」を押せるかを見るための既定のキー。既定は Rust 側だけで決める
  */
