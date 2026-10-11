@@ -166,9 +166,10 @@
 		<p id="actions-description" class="settings-lead">
 			{m.settings_actions_description({ mark: TEXT_MARK })}
 		</p>
-		{#if view.proAvailable && view.syncKinds.actions}
+		{#if view.proAvailable && (view.syncKinds.actions || view.syncKinds.settings)}
 			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
-		{:else if view.proAvailable}
+		{/if}
+		{#if view.proAvailable && !view.syncKinds.actions}
 			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_actions_off()}</p>
 		{/if}
 		<SettingsSection>
@@ -316,22 +317,21 @@
 			</SettingsRow>
 		</SettingsSection>
 	</div>
-	{#if syncSettingsAvailable}
-		<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
-	{/if}
 	<SettingsSection>
 		<SettingsRow>
 			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-				<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
-				{#if syncSettingsAvailable}
-					<SyncToggle
-						compact
-						settingName="ai_service"
-						pressed={!view.syncExcludedSettings.includes('ai_service')}
-						name={m.settings_ai_service()}
-						onchange={(sync) => setSyncSetting('ai_service', sync)}
-					/>
-				{/if}
+				<div class="flex flex-auto items-center gap-1">
+					<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
+					{#if syncSettingsAvailable}
+						<SyncToggle
+							compact
+							settingName="ai_service"
+							pressed={!view.syncExcludedSettings.includes('ai_service')}
+							name={m.settings_ai_service()}
+							onchange={(sync) => setSyncSetting('ai_service', sync)}
+						/>
+					{/if}
+				</div>
 				<!-- 5つ並べると最小の幅に収まらないので、ボタンの並びではなく一覧から選ぶ -->
 				<NativeSelect.Root
 					aria-labelledby="ai-service"

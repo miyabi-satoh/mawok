@@ -788,13 +788,15 @@
 						<SettingsSection title={m.settings_section_draft_window()}>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Label for="draft-always-on-top"
-										>{m.settings_draft_always_on_top()}</Field.Label
-									>
-									{@render syncSetting(
-										'text_window_always_on_top',
-										m.settings_draft_always_on_top()
-									)}
+									<div class="flex flex-auto items-center gap-1">
+										<Field.Label for="draft-always-on-top"
+											>{m.settings_draft_always_on_top()}</Field.Label
+										>
+										{@render syncSetting(
+											'text_window_always_on_top',
+											m.settings_draft_always_on_top()
+										)}
+									</div>
 									<Switch
 										id="draft-always-on-top"
 										bind:checked={
@@ -806,10 +808,15 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Label for="hide-draft-on-blur"
-										>{m.settings_hide_draft_on_blur()}</Field.Label
-									>
-									{@render syncSetting('hide_text_window_on_blur', m.settings_hide_draft_on_blur())}
+									<div class="flex flex-auto items-center gap-1">
+										<Field.Label for="hide-draft-on-blur"
+											>{m.settings_hide_draft_on_blur()}</Field.Label
+										>
+										{@render syncSetting(
+											'hide_text_window_on_blur',
+											m.settings_hide_draft_on_blur()
+										)}
+									</div>
 									<Switch
 										id="hide-draft-on-blur"
 										bind:checked={
@@ -824,8 +831,10 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Label for="show-draft-buttons">{m.settings_draft_buttons()}</Field.Label>
-									{@render syncSetting('show_text_window_buttons', m.settings_draft_buttons())}
+									<div class="flex flex-auto items-center gap-1">
+										<Field.Label for="show-draft-buttons">{m.settings_draft_buttons()}</Field.Label>
+										{@render syncSetting('show_text_window_buttons', m.settings_draft_buttons())}
+									</div>
 									<Switch
 										id="show-draft-buttons"
 										bind:checked={
@@ -837,10 +846,12 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Label for="draft-history-size"
-										>{m.settings_draft_history_size()}</Field.Label
-									>
-									{@render syncSetting('text_history_size', m.settings_draft_history_size())}
+									<div class="flex flex-auto items-center gap-1">
+										<Field.Label for="draft-history-size"
+											>{m.settings_draft_history_size()}</Field.Label
+										>
+										{@render syncSetting('text_history_size', m.settings_draft_history_size())}
+									</div>
 									<Input
 										id="draft-history-size"
 										type="number"
@@ -859,8 +870,10 @@
 						<SettingsSection title={m.settings_section_appearance()}>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="flex-wrap">
-									<Field.Title id="language">{m.settings_language()}</Field.Title>
-									{@render syncSetting('language', m.settings_language())}
+									<div class="flex flex-auto items-center gap-1">
+										<Field.Title id="language">{m.settings_language()}</Field.Title>
+										{@render syncSetting('language', m.settings_language())}
+									</div>
 									<!-- 選択中の項目を押すと空になるので、空は無視して今の設定のまま表示する -->
 									<ToggleGroup.Root
 										type="single"
@@ -883,8 +896,10 @@
 							</SettingsRow>
 							<SettingsRow>
 								<Field.Field orientation="horizontal" class="flex-wrap">
-									<Field.Title id="theme">{m.settings_theme()}</Field.Title>
-									{@render syncSetting('theme', m.settings_theme())}
+									<div class="flex flex-auto items-center gap-1">
+										<Field.Title id="theme">{m.settings_theme()}</Field.Title>
+										{@render syncSetting('theme', m.settings_theme())}
+									</div>
 									<ToggleGroup.Root
 										type="single"
 										variant="outline"
@@ -1080,13 +1095,15 @@
 								{#each textColorRows as row (row.theme)}
 									<div class="flex flex-col gap-0.5">
 										<Field.Field orientation="horizontal" class="flex-wrap">
-											<Field.Label
-												for="draft-text-color-{row.theme}"
-												class="w-16 flex-none whitespace-nowrap"
-											>
-												{row.label()}
-											</Field.Label>
-											{@render syncSetting(`text_color_${row.theme}`, row.label())}
+											<div class="flex flex-auto items-center gap-1">
+												<Field.Label
+													for="draft-text-color-{row.theme}"
+													class="w-16 flex-none whitespace-nowrap"
+												>
+													{row.label()}
+												</Field.Label>
+												{@render syncSetting(`text_color_${row.theme}`, row.label())}
+											</div>
 											<!-- 色見本は #rrggbb しか扱えないので、既定のときは標準の色を見せる -->
 											<input
 												type="color"
@@ -1119,8 +1136,10 @@
 						<SettingsRow>
 							<!-- ほかの行のボタンと同じ高さにして、説明文までの間隔を揃える -->
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<Field.Label for="draft-guidance">{m.settings_draft_guidance()}</Field.Label>
-								{@render syncSetting('input_guidance', m.settings_draft_guidance())}
+								<div class="flex flex-auto items-center gap-1">
+									<Field.Label for="draft-guidance">{m.settings_draft_guidance()}</Field.Label>
+									{@render syncSetting('input_guidance', m.settings_draft_guidance())}
+								</div>
 								<!-- 既定のままなら戻すものがないので押せなくする -->
 								<Button variant="outline" disabled={guidance === null} onclick={resetGuidance}>
 									{m.settings_draft_guidance_reset()}
@@ -1142,7 +1161,7 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="copy">
-					{#if view.proAvailable && view.syncKinds.settings}
+					{#if view.proAvailable && (view.syncKinds.settings || view.syncKinds.replacements)}
 						<p class="text-xs leading-snug text-muted-foreground">
 							{m.settings_sync_description()}
 						</p>
@@ -1150,8 +1169,10 @@
 					<SettingsSection>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<Field.Label for="trim-trailing">{m.settings_trim_trailing()}</Field.Label>
-								{@render syncSetting('trim_trailing_whitespace', m.settings_trim_trailing())}
+								<div class="flex flex-auto items-center gap-1">
+									<Field.Label for="trim-trailing">{m.settings_trim_trailing()}</Field.Label>
+									{@render syncSetting('trim_trailing_whitespace', m.settings_trim_trailing())}
+								</div>
 								<Switch
 									id="trim-trailing"
 									bind:checked={
@@ -1166,11 +1187,13 @@
 						</SettingsRow>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8">
-								<Field.Label for="exclude-history">{m.settings_exclude_history()}</Field.Label>
-								{@render syncSetting(
-									'exclude_from_clipboard_history',
-									m.settings_exclude_history()
-								)}
+								<div class="flex flex-auto items-center gap-1">
+									<Field.Label for="exclude-history">{m.settings_exclude_history()}</Field.Label>
+									{@render syncSetting(
+										'exclude_from_clipboard_history',
+										m.settings_exclude_history()
+									)}
+								</div>
 								<Switch
 									id="exclude-history"
 									bind:checked={
@@ -1248,11 +1271,7 @@
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<Field.Title>{m.settings_replacements()}</Field.Title>
 							</Field.Field>
-							{#if view.proAvailable && view.syncKinds.replacements}
-								<p class="text-xs leading-snug text-muted-foreground">
-									{m.settings_sync_description()}
-								</p>
-							{:else if view.proAvailable}
+							{#if view.proAvailable && !view.syncKinds.replacements}
 								<p class="text-xs leading-snug text-muted-foreground">
 									{m.settings_sync_replacements_off()}
 								</p>
