@@ -65,8 +65,8 @@ impl AiService {
     pub fn credential_user(self) -> &'static str {
         match self {
             Self::None => "",
-            // キーの代わりに、アカウントと結んで受け取ったトークンを置く
-            Self::Mawok => "mawok-account-token",
+            // キーの代わりに、アカウントと結んで受け取ったトークンを置く。読み書きは account_credentials を通す
+            Self::Mawok => crate::account_credentials::CREDENTIAL_USER,
             Self::Gemini => "gemini-api-key",
             Self::Anthropic => "anthropic-api-key",
             Self::OpenAi => "openai-api-key",

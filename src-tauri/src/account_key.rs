@@ -3,9 +3,7 @@
 use hkdf::Hkdf;
 use sha2::Sha256;
 
-use crate::{lan::to_hex, secrets};
-
-pub const CREDENTIAL_USER: &str = "mawok-account-key";
+use crate::{account_credentials, lan::to_hex};
 const KEY_ID_INFO: &[u8] = b"mawok key id v1";
 const LAN_INFO: &[u8] = b"mawok lan v1";
 
@@ -68,19 +66,19 @@ pub fn decode(text: &str) -> Result<[u8; 32], String> {
 }
 
 pub fn load() -> Result<Option<[u8; 32]>, String> {
-    match secrets::read(CREDENTIAL_USER) {
-        Ok(value) => decode(&value).map(Some),
-        Err(secrets::ReadError::NotFound) => Ok(None),
-        Err(secrets::ReadError::Unreadable(error)) => Err(error),
+    match account_credentials::read_key() {
+        Ok(value) => value.map(|value| decode(&value)).transpose(),
+        Err(crate::secrets::ReadError::NotFound) => Ok(None),
+        Err(crate::secrets::ReadError::Unreadable(error)) => Err(error),
     }
 }
 
 pub fn store(key: &[u8; 32]) -> Result<(), String> {
-    secrets::write(CREDENTIAL_USER, &to_hex(key))
+    account_credentials::write_key(&to_hex(key))
 }
 
 pub fn clear() -> Result<(), String> {
-    secrets::delete(CREDENTIAL_USER)
+    account_credentials::clear_key()
 }
 
 #[cfg(test)]

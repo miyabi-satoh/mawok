@@ -1,4 +1,5 @@
 mod account;
+mod account_credentials;
 mod account_key;
 mod actions;
 mod ai;
@@ -1456,9 +1457,12 @@ async fn run_blocking<T: Send + 'static>(
 
 /// AI サービスのキーがあるかを、キーチェーンを待つ間メインスレッドを止めずに確かめる
 async fn ai_key_exists(service: AiService) -> Result<bool, String> {
-    run_blocking(move || secrets::exists(service.credential_user()))
-        .await?
-        .inspect_err(|error| warn!("couldn't check the AI key: {error}"))
+    run_blocking(move || match service {
+        AiService::Mawok => account_credentials::exists(),
+        _ => secrets::exists(service.credential_user()),
+    })
+    .await?
+    .inspect_err(|error| warn!("couldn't check the AI key: {error}"))
 }
 
 /// 送る内容と扱いを了解する。画面が出した AI サービスが、今の AI サービスと違えば断る。
@@ -1590,9 +1594,12 @@ async fn delete_ai_key(app: AppHandle) -> Result<(), String> {
         return Err(actions::Failure::Disabled.code().to_string());
     }
     info!("delete the AI key for {}", service.name());
-    run_blocking(move || secrets::delete(service.credential_user()))
-        .await?
-        .inspect_err(|error| error!("couldn't delete the AI key: {error}"))?;
+    run_blocking(move || match service {
+        AiService::Mawok => account_credentials::delete(),
+        _ => secrets::delete(service.credential_user()),
+    })
+    .await?
+    .inspect_err(|error| error!("couldn't delete the AI key: {error}"))?;
     app.state::<AppState>().remember_ai_key(service, false);
     apply_config(&app);
     Ok(())
@@ -1718,7 +1725,7 @@ async fn sync_access(app: &AppHandle) -> Option<SyncAccess> {
         let key_id = state.account_key_id.lock().unwrap().clone();
         (key?, key_id?)
     };
-    let token = match run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await {
+    let token = match run_blocking(account_credentials::read_token).await {
         Ok(Ok(token)) => token,
         Ok(Err(error)) => {
             warn!("couldn't read the Mawok account token for sync: {error:?}");
@@ -2509,7 +2516,7 @@ async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
     clear_pro_state(app).await;
-    let saved = run_blocking(move || secrets::write(AiService::Mawok.credential_user(), &token))
+    let saved = run_blocking(move || account_credentials::write_token(&token))
         .await
         .and_then(|result| result)
         .inspect_err(|error| error!("couldn't save the Mawok account token: {error}"))
@@ -2590,7 +2597,7 @@ async fn refresh_mawok_account_status(
             .load(Ordering::SeqCst)
             != generation
     };
-    let exists = run_blocking(|| secrets::exists(AiService::Mawok.credential_user()))
+    let exists = run_blocking(account_credentials::exists)
         .await?
         .inspect_err(|error| warn!("couldn't check the Mawok account token: {error}"))?;
     if stale() {
@@ -2610,7 +2617,7 @@ async fn refresh_mawok_account_status(
         return Ok(None);
     }
     let reading = ReadingAiKey::start(app);
-    let read = run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await?;
+    let read = run_blocking(account_credentials::read_token).await?;
     drop(reading);
     if stale() {
         // 読んでいる間にサインインかサインアウトがあった。前のトークンの結果では、今の状態に触らない。
@@ -2935,7 +2942,7 @@ async fn clear_pro_state(app: &AppHandle) {
 async fn forget_mawok_token(app: &AppHandle) -> Result<(), String> {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    run_blocking(|| secrets::delete(AiService::Mawok.credential_user()))
+    run_blocking(account_credentials::delete)
         .await?
         .inspect_err(|error| error!("couldn't delete the Mawok account token: {error}"))?;
     app.state::<AppState>()
@@ -2949,8 +2956,7 @@ async fn forget_mawok_token(app: &AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn sign_out_mawok(app: AppHandle) -> Result<(), String> {
     info!("sign out of the Mawok account");
-    if let Ok(Ok(token)) = run_blocking(|| secrets::read(AiService::Mawok.credential_user())).await
-    {
+    if let Ok(Ok(token)) = run_blocking(account_credentials::read_token).await {
         let client = http_client(&app)?;
         if let Err(error) = account::sign_out(&client, &token).await {
             warn!("couldn't remove the token on the account server: {error:?}");
@@ -2966,7 +2972,7 @@ async fn reset_account_key(app: AppHandle) -> Result<(), String> {
         .state::<AppState>()
         .pro_generation
         .load(Ordering::SeqCst);
-    let token = run_blocking(|| secrets::read(AiService::Mawok.credential_user()))
+    let token = run_blocking(account_credentials::read_token)
         .await?
         .map_err(|_| "account.sign_in_required".to_string())?;
     let state = app.state::<AppState>();
@@ -3186,7 +3192,11 @@ fn start_ai_action(
     let task_app = app.clone();
     Ok(tauri::async_runtime::spawn(async move {
         let reading = ReadingAiKey::start(&task_app);
-        let read = run_blocking(move || secrets::read(service.credential_user())).await;
+        let read = run_blocking(move || match service {
+            AiService::Mawok => account_credentials::read_token(),
+            _ => secrets::read(service.credential_user()),
+        })
+        .await;
         drop(reading);
         let key = match read {
             Ok(Ok(key)) => key,

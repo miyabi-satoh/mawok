@@ -421,10 +421,9 @@ ConvertTo-Json -Compress -InputObject @{ counted = $width * $rows; accent = $acc
 // 仮のトークンと鍵を資格情報マネージャーに、期限が先の Pro の状態を pro-state.json に置いたうえで、
 // 窓口へつながらないようにして起動する (`OFFLINE_ENV`)。つながらない間は、覚えている Pro の状態と手元の鍵で待ち受ける
 const PRO_STATE_PATH = path.join(APP_DATA_DIRS.roaming, 'pro-state.json');
-/** ai.rs の credential_user (Mawok)・account_key.rs の CREDENTIAL_USER と、secrets.rs のサービス名 */
+/** ai.rs の credential_user (Mawok)・account_credentials.rs の項目名と、secrets.rs のサービス名 */
 const PRO_CREDENTIALS = Object.freeze([
-	{ user: 'mawok-account-token', value: 'msix-check' },
-	{ user: 'mawok-account-key', value: 'ab'.repeat(32) }
+	{ user: 'mawok-account', value: JSON.stringify({ token: 'msix-check', key: 'ab'.repeat(32) }) }
 ]);
 const credentialTarget = (user) => `${user}.${APP_IDENTIFIER}`;
 /** 仮の Pro の状態の account_id。pro-state.json がこの値のままなら、資格情報も仮のまま */
