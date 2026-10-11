@@ -47,6 +47,11 @@ export default defineConfig({
 			}
 		}))
 	],
-	// 差し替えた fetch や console は、テストごとに戻す。
-	test: { setupFiles: ['./test/apply-migrations.ts'], restoreMocks: true }
+	test: {
+		setupFiles: ['./test/apply-migrations.ts'],
+		// 差し替えた fetch や console は、テストごとに戻す。
+		restoreMocks: true,
+		// 既定の 5 秒では、Windows の CI で、ファイルの最初のテスト (ワーカーと D1 の立ち上げを含む) が時間切れになることがある。
+		testTimeout: 15_000
+	}
 });
