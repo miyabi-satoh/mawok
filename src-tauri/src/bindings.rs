@@ -32,7 +32,8 @@ export const CONSTANTS = {{\n\
 \tAI_PREFIX: {:?},\n\
 \tTEXT_MARK: {:?},\n\
 \tNEW_ACTION: {},\n\
-\tSYNCABLE_SETTINGS: {:?}\n\
+\tSYNCABLE_SETTINGS: {:?},\n\
+\tMODIFIED_SETTINGS: {:?}\n\
 }} as const;\n\n\
 export const EVENTS = {{\n\
 \tSETTINGS_CHANGED: {:?},\n\
@@ -62,6 +63,7 @@ export const EVENTS = {{\n\
         actions::TEXT_MARK,
         new_action,
         sync::SYNCABLE_SETTING_NAMES,
+        config::modified_setting_names(),
         events::SETTINGS_CHANGED,
         events::DRAFT_HISTORY_CLEARED,
         events::DRAFT_HISTORY_SYNCED,

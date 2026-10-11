@@ -518,19 +518,40 @@ fn draft_key_view_name(action: DraftAction) -> String {
         .unwrap_or_default()
 }
 
+fn modified_setting_name(setting: ModifiedSetting) -> String {
+    match setting {
+        ModifiedSetting::Value { name, .. } => name.into(),
+        ModifiedSetting::DraftKey(action) => {
+            format!("text_window_keys.{}", draft_key_view_name(action))
+        }
+    }
+}
+
+/// 設定画面で既定から変えた印を付ける項目名の並び。画面側の印とテストで同じ名前を使う。
+#[cfg(test)]
+pub fn modified_setting_names() -> Vec<String> {
+    MODIFIED_SETTINGS
+        .iter()
+        .copied()
+        .map(modified_setting_name)
+        .collect()
+}
+
 /// 設定画面で既定から変えた印を付ける項目名。設定ファイルに書かない、競合で黙って外した既定のキーは変えた扱いにしない。
 pub fn modified_settings(config: &Config) -> Vec<String> {
     let defaults = Config::default();
     MODIFIED_SETTINGS
         .iter()
-        .filter_map(|setting| match setting {
-            ModifiedSetting::Value { name, differs } => {
-                differs(config, &defaults).then(|| (*name).into())
+        .filter(|setting| match setting {
+            ModifiedSetting::Value { differs, .. } => differs(config, &defaults),
+            ModifiedSetting::DraftKey(action) => {
+                !config.yielded_draft_keys.contains(action)
+                    && config.text_window_keys.get(*action)
+                        != defaults.text_window_keys.get(*action)
             }
-            ModifiedSetting::DraftKey(action) => (!config.yielded_draft_keys.contains(action)
-                && config.text_window_keys.get(*action) != defaults.text_window_keys.get(*action))
-            .then(|| format!("text_window_keys.{}", draft_key_view_name(*action))),
         })
+        .copied()
+        .map(modified_setting_name)
         .collect()
 }
 
@@ -1835,9 +1856,9 @@ fn utc_stamp(time: SystemTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     type ConfigChange = fn(&mut Config);
-    use std::time::Duration;
 
     fn has_valid_ids(ids: impl IntoIterator<Item = String>) -> bool {
         let ids: Vec<_> = ids.into_iter().collect();
@@ -2410,6 +2431,15 @@ body = "git status"
             ("char_width", |config| {
                 config.char_widths.alphabet = WidthStyle::Full;
             }),
+            (key::AI_SERVICE, |config| {
+                config.ai_service = AiService::Gemini
+            }),
+            (key::AI_MODELS, |config| {
+                config.ai_service = AiService::Gemini;
+                config
+                    .ai_models
+                    .insert(AiService::Gemini, "gemini-3.8-flash".to_string());
+            }),
             (key::SYNC_SETTINGS, |config| config.sync_settings = false),
             (key::SYNC_KEYS, |config| config.sync_keys = false),
             (key::SYNC_REPLACEMENTS, |config| {
@@ -2419,10 +2449,25 @@ body = "git status"
             (key::SYNC_ACTIONS, |config| config.sync_actions = false),
             (key::SYNC_HISTORY, |config| config.sync_history = false),
         ];
+        assert_eq!(
+            modified_setting_names()
+                .into_iter()
+                .filter(|name| !name.starts_with("text_window_keys."))
+                .collect::<Vec<_>>(),
+            cases
+                .iter()
+                .map(|(name, _)| (*name).to_string())
+                .collect::<Vec<String>>()
+        );
         for &(name, change) in cases {
             let mut config = Config::default();
             change(&mut config);
-            assert_eq!(modified_settings(&config), [name], "{name}");
+            let expected: Vec<String> = if name == key::AI_MODELS {
+                vec![key::AI_SERVICE.into(), key::AI_MODELS.into()]
+            } else {
+                vec![name.into()]
+            };
+            assert_eq!(modified_settings(&config), expected, "{name}");
         }
 
         let alternatives: &[(&str, ConfigChange)] = &[

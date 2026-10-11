@@ -91,6 +91,9 @@
 	const callActions = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
 	/** ペアリングのコマンドを呼ぶ。Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする */
 	const callLan = commandCaller(lanErrorMessage, showError);
+	function modifiedName(name: string) {
+		return settings.current?.modifiedSettings.includes(name) ? name : undefined;
+	}
 	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
 	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
 	let refreshingMawokAccountStatus = false;
@@ -774,7 +777,7 @@
 							</p>
 						{/if}
 						<SettingsSection title={m.settings_section_startup()}>
-							<SettingsRow modified={view.modifiedSettings.includes('autostart')}>
+							<SettingsRow modified={modifiedName('autostart')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<Field.Label for="autostart">{m.settings_autostart()}</Field.Label>
 									<Switch
@@ -787,7 +790,7 @@
 							</SettingsRow>
 						</SettingsSection>
 						<SettingsSection title={m.settings_section_draft_window()}>
-							<SettingsRow modified={view.modifiedSettings.includes('text_window_always_on_top')}>
+							<SettingsRow modified={modifiedName('text_window_always_on_top')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="draft-always-on-top"
@@ -807,7 +810,7 @@
 									/>
 								</Field.Field>
 							</SettingsRow>
-							<SettingsRow modified={view.modifiedSettings.includes('hide_text_window_on_blur')}>
+							<SettingsRow modified={modifiedName('hide_text_window_on_blur')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="hide-draft-on-blur"
@@ -830,7 +833,7 @@
 									>{m.settings_hide_draft_on_blur_description()}</Field.Description
 								>
 							</SettingsRow>
-							<SettingsRow modified={view.modifiedSettings.includes('show_text_window_buttons')}>
+							<SettingsRow modified={modifiedName('show_text_window_buttons')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="show-draft-buttons"
@@ -847,7 +850,7 @@
 									/>
 								</Field.Field>
 							</SettingsRow>
-							<SettingsRow modified={view.modifiedSettings.includes('text_history_size')}>
+							<SettingsRow modified={modifiedName('text_history_size')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="draft-history-size"
@@ -871,7 +874,7 @@
 							</SettingsRow>
 						</SettingsSection>
 						<SettingsSection title={m.settings_section_appearance()}>
-							<SettingsRow modified={view.modifiedSettings.includes('language')}>
+							<SettingsRow modified={modifiedName('language')}>
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<div class="flex flex-auto items-center gap-1">
 										<Field.Title id="language">{m.settings_language()}</Field.Title>
@@ -897,7 +900,7 @@
 									</ToggleGroup.Root>
 								</Field.Field>
 							</SettingsRow>
-							<SettingsRow modified={view.modifiedSettings.includes('theme')}>
+							<SettingsRow modified={modifiedName('theme')}>
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<div class="flex flex-auto items-center gap-1">
 										<Field.Title id="theme">{m.settings_theme()}</Field.Title>
@@ -926,7 +929,7 @@
 				<Tabs.Content value="keys">
 					<SettingsSection>
 						<!-- 説明文は、題名と操作の行の下に全幅で置く -->
-						<SettingsRow modified={view.modifiedSettings.includes('hotkey')}>
+						<SettingsRow modified={modifiedName('hotkey')}>
 							<Field.Field orientation="horizontal" class="flex-wrap">
 								<Field.Title class="shrink-0">{m.settings_hotkey()}</Field.Title>
 								{#if recording === 'hotkey'}
@@ -977,12 +980,8 @@
 								{#each DRAFT_ACTIONS_IN_SETTINGS as action (action)}
 									{@const key = view.textWindowKeys[action]}
 									{@const label = draftActionLabel(action)}
-									{@const modified = view.modifiedSettings.includes(`text_window_keys.${action}`)}
-									<div
-										class="relative flex flex-col gap-0.5"
-										data-modified={modified || undefined}
-										title={modified ? m.settings_modified() : undefined}
-									>
+									{@const modified = modifiedName(`text_window_keys.${action}`)}
+									<div class="relative flex flex-col gap-0.5" data-modified={modified}>
 										{#if modified}
 											<SettingsModifiedMark class="inset-y-0 -left-4" />
 										{/if}
@@ -1044,7 +1043,7 @@
 						</p>
 					{/if}
 					<SettingsSection>
-						<SettingsRow modified={view.modifiedSettings.includes('text_font')}>
+						<SettingsRow modified={modifiedName('text_font')}>
 							<div class="flex items-center gap-1">
 								<Field.Label for="draft-font-family">{m.settings_draft_font()}</Field.Label>
 								{@render syncSetting('text_font_family', m.settings_draft_font())}
@@ -1099,7 +1098,7 @@
 								{m.settings_draft_font_description()}
 							</Field.Description>
 						</SettingsRow>
-						<SettingsRow modified={view.modifiedSettings.includes('text_color')}>
+						<SettingsRow modified={modifiedName('text_color')}>
 							<Field.Title>{m.settings_draft_text_color()}</Field.Title>
 							<!-- 行の間は置き換え辞書と揃える。読めない値の知らせは、その行から離れないよう行と一緒に包む -->
 							<div class="flex flex-col gap-2">
@@ -1144,7 +1143,7 @@
 								{/each}
 							</div>
 						</SettingsRow>
-						<SettingsRow modified={view.modifiedSettings.includes('input_guidance')}>
+						<SettingsRow modified={modifiedName('input_guidance')}>
 							<!-- ほかの行のボタンと同じ高さにして、説明文までの間隔を揃える -->
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<div class="flex-auto">
@@ -1180,7 +1179,7 @@
 						</p>
 					{/if}
 					<SettingsSection>
-						<SettingsRow modified={view.modifiedSettings.includes('trim_trailing_whitespace')}>
+						<SettingsRow modified={modifiedName('trim_trailing_whitespace')}>
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<div class="flex-auto">
 									<Field.Label class="inline" for="trim-trailing"
@@ -1200,9 +1199,7 @@
 								{m.settings_trim_trailing_description()}
 							</Field.Description>
 						</SettingsRow>
-						<SettingsRow
-							modified={view.modifiedSettings.includes('exclude_from_clipboard_history')}
-						>
+						<SettingsRow modified={modifiedName('exclude_from_clipboard_history')}>
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<div class="flex-auto">
 									<Field.Label class="inline" for="exclude-history"
@@ -1225,7 +1222,7 @@
 								{m.settings_exclude_history_description()}
 							</Field.Description>
 						</SettingsRow>
-						<SettingsRow modified={view.modifiedSettings.includes('char_width')}>
+						<SettingsRow modified={modifiedName('char_width')}>
 							<div class="flex items-center gap-1">
 								<Field.Title>{m.settings_char_width()}</Field.Title>
 								{@render syncSetting('char_widths', m.settings_char_width())}

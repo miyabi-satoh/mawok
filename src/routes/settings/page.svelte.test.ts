@@ -5,7 +5,7 @@ import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { formatKeys } from '$lib/keys';
-import { EVENTS } from '$lib/bindings/constants';
+import { CONSTANTS, EVENTS } from '$lib/bindings/constants';
 import type { PairingOffer } from '$lib/bindings/PairingOffer';
 import type { UpdateView } from '$lib/bindings/UpdateView';
 import { draftGuidance } from '$lib/guidance';
@@ -147,56 +147,43 @@ describe('既定の値から変えた設定の印', () => {
 			.closest<HTMLElement>('[data-settings-row]');
 		expect(changed).not.toBeNull();
 		expect(unchanged).not.toBeNull();
-		expect(changed).toHaveAttribute('data-modified');
-		expect(changed).toHaveAttribute('title', m.settings_modified());
+		expect(changed).toHaveAttribute('data-modified', 'autostart');
+		expect(changed).not.toHaveAttribute('title');
+		expect(changed?.querySelector('[title]')).toHaveAttribute('title', m.settings_modified());
 		expect(changed?.textContent).toContain(m.settings_modified());
 		expect(unchanged).not.toHaveAttribute('data-modified');
 	});
 
 	it('すべての印の名前に対応する行を出す', async () => {
-		const modifiedSettings = [
-			'hotkey',
-			...Object.keys(DEFAULT_DRAFT_KEYS).map((action) => `text_window_keys.${action}`),
-			'autostart',
-			'text_window_always_on_top',
-			'hide_text_window_on_blur',
-			'show_text_window_buttons',
-			'text_history_size',
-			'language',
-			'theme',
-			'text_font',
-			'text_color',
-			'input_guidance',
-			'trim_trailing_whitespace',
-			'exclude_from_clipboard_history',
-			'char_width',
-			'ai_service',
-			'ai_models',
-			'sync_settings',
-			'sync_keys',
-			'sync_replacements',
-			'sync_snippets',
-			'sync_actions',
-			'sync_history'
-		];
 		settings.current = settingsView({
-			modifiedSettings,
+			modifiedSettings: [...CONSTANTS.MODIFIED_SETTINGS],
 			aiService: 'gemini',
 			aiModels: { gemini: 'gemini-3.8-flash' },
 			mawokAccountSignedIn: true,
 			proAvailable: true
 		});
 		const screen = await render(Page);
-		const marks = () => screen.container.querySelectorAll('[data-modified]').length;
-		// 「アカウント」と「アクション」は開いている間だけ描くので、開くたびに増えた分を足す
-		const always = marks();
-		let total = always;
-		for (const category of [m.settings_category_account, m.settings_category_actions]) {
+		const found = new Set<string>();
+		const collect = () => {
+			for (const mark of screen.container.querySelectorAll<HTMLElement>('[data-modified]')) {
+				if (mark.dataset.modified) found.add(mark.dataset.modified);
+			}
+		};
+
+		collect();
+		for (const category of [
+			m.settings_category_keys,
+			m.settings_category_draft,
+			m.settings_category_copy,
+			m.settings_category_actions,
+			m.settings_category_account
+		]) {
 			await screen.getByRole('tab', { name: category() }).click();
-			total += marks() - always;
+			collect();
 		}
 
-		expect(total).toBe(modifiedSettings.length);
+		expect(found.size).toBe(CONSTANTS.MODIFIED_SETTINGS.length);
+		expect([...found].sort()).toEqual([...CONSTANTS.MODIFIED_SETTINGS].sort());
 	});
 });
 

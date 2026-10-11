@@ -24,11 +24,13 @@
 		{ kind: 'actions', label: m.settings_sync_actions },
 		{ kind: 'history', label: m.settings_sync_history }
 	] as const;
+
+	const modifiedName = (name: string) => (view.modifiedSettings.includes(name) ? name : undefined);
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
 	{#each kinds as { kind, label } (kind)}
-		<SettingsRow modified={view.modifiedSettings.includes(`sync_${kind}`)}>
+		<SettingsRow modified={modifiedName(`sync_${kind}`)}>
 			<Field.Field orientation="horizontal" class="min-h-8">
 				<Field.Label for="sync-{kind}">{label()}</Field.Label>
 				<Switch

@@ -52,6 +52,7 @@
 	/** 今の AI サービスのキーがあるか。まだ確かめていなければ undefined、確かめられなかったときは null */
 	const hasKey = $derived(keyState?.service === view.aiService ? keyState.hasKey : undefined);
 	const syncSettingsAvailable = $derived(view.proAvailable && view.syncKinds.settings);
+	const modifiedName = (name: string) => (view.modifiedSettings.includes(name) ? name : undefined);
 
 	function setSyncSetting(name: string, sync: boolean) {
 		void editor.call('set_sync_excluded_setting', { name, sync });
@@ -319,7 +320,7 @@
 		</SettingsSection>
 	</div>
 	<SettingsSection>
-		<SettingsRow modified={view.modifiedSettings.includes('ai_service')}>
+		<SettingsRow modified={modifiedName('ai_service')}>
 			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 				<div class="flex flex-auto items-center gap-1">
 					<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
@@ -372,7 +373,7 @@
 					</Field.Content>
 				</div>
 			{:else if view.aiService !== 'none'}
-				{@const modified = view.modifiedSettings.includes('ai_models')}
+				{@const modified = modifiedName('ai_models')}
 				<div class="mt-2 flex flex-col gap-5 pl-4">
 					<Field.Content>
 						<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
@@ -425,13 +426,9 @@
 							{/if}
 						</Field.Field>
 					</Field.Content>
-					<Field.Content
-						class="relative"
-						data-modified={modified || undefined}
-						title={modified ? m.settings_modified() : undefined}
-					>
+					<Field.Content class="relative" data-modified={modified}>
 						{#if modified}
-							<SettingsModifiedMark class="inset-y-0 -left-8" />
+							<SettingsModifiedMark class="inset-y-0 -left-4" />
 						{/if}
 						<!-- 題名は縮めない。Field の horizontal が題名に flex-auto を当てるので、! で上書きする -->
 						<Field.Field
