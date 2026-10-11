@@ -66,16 +66,12 @@ fn migrate_locked() -> Result<Credentials, ReadError> {
     let credentials = Credentials { token, key };
     secrets::write(CREDENTIAL_USER, &to_json(&credentials)).map_err(ReadError::Unreadable)?;
     // 新しい項目に書けていれば、値は読める。前の項目を消せなくても、読み取りは失敗にしない
-    delete_legacy();
-    Ok(credentials)
-}
-
-fn delete_legacy() {
     for user in [LEGACY_TOKEN_USER, LEGACY_KEY_USER] {
         if let Err(error) = secrets::delete(user) {
             warn!("couldn't delete the previous credential {user}: {error}");
         }
     }
+    Ok(credentials)
 }
 
 pub fn read_token() -> Result<String, ReadError> {
@@ -122,9 +118,10 @@ pub fn clear_key() -> Result<(), String> {
 
 pub fn delete() -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    secrets::delete(CREDENTIAL_USER)?;
-    delete_legacy();
-    Ok(())
+    // 前の項目を先に消す。残ったまま新しい項目だけを消すと、次に読むときに前のトークンが移されて、サインインした状態に戻る
+    secrets::delete(LEGACY_TOKEN_USER)?;
+    secrets::delete(LEGACY_KEY_USER)?;
+    secrets::delete(CREDENTIAL_USER)
 }
 
 #[cfg(test)]
