@@ -9,11 +9,16 @@ use sha2::{Digest, Sha256};
 use crate::actions::{ActionError, Failure};
 use crate::ai::Prompt;
 
-/// 窓口の URL。開発版は手元で動かす窓口（`just dev-account-server`）を使う
+/// 窓口の URL。開発版は手元で動かす窓口（`just dev-account-server`）を使う。
+/// 開発版は、ビルドのときの環境変数 `MAWOK_ACCOUNT_URL` で向き先を替えられる。
+/// 2台のデバイスの間の動き（送受信・同期）は、両方が同じ窓口を向かないと確かめられないため
 #[cfg(not(debug_assertions))]
 pub const ACCOUNT_URL: &str = "https://mawok.amiiby.com";
 #[cfg(debug_assertions)]
-pub const ACCOUNT_URL: &str = "http://127.0.0.1:8787";
+pub const ACCOUNT_URL: &str = match option_env!("MAWOK_ACCOUNT_URL") {
+    Some(url) => url,
+    None => "http://127.0.0.1:8787",
+};
 
 /// 結ぶ申し込みの値（docs/account-server.md「Mawok とアカウントを結ぶ」）。
 /// `verifier` は Mawok だけが持ち、窓口には SHA-256 の `challenge` を渡す。`state` は戻ってきた要求が自分の申し込みかを見る
