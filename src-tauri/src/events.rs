@@ -2,6 +2,8 @@
 
 pub const SETTINGS_CHANGED: &str = "settings-changed";
 pub const DRAFT_HISTORY_CLEARED: &str = "draft-history-cleared";
+/// 同期で履歴が替わった。テキストウィンドウは履歴を読み直す。
+pub const DRAFT_HISTORY_SYNCED: &str = "draft-history-synced";
 pub const SNIPPET_ADDED: &str = "snippet-added";
 /// 同期で設定の行一覧が替わった。設定画面は行を新しい設定から写し直す。
 pub const SYNC_APPLIED: &str = "sync-applied";

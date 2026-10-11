@@ -19,6 +19,10 @@ export class DraftHistory {
 	/** 履歴を出す前に打っていた内容。下キーで最後まで戻ったときに入力欄へ戻す */
 	#draft = '';
 	#size: number;
+	/** 読み直している間に覚えた履歴。読み直していなければ null */
+	#recordedWhileReloading: string[] | null = null;
+	/** たどり終えたら入れ替える、読み直した履歴。無ければ null */
+	#reloaded: string[] | null = null;
 
 	constructor(size = DEFAULT_DRAFT_HISTORY_SIZE) {
 		this.#size = size;
@@ -62,31 +66,75 @@ export class DraftHistory {
 		if (this.#size === 0 || this.#entries.at(-1) === text) return false;
 		this.#entries.push(text);
 		if (this.#entries.length > this.#size) this.#entries.shift();
+		this.#recordedWhileReloading?.push(text);
 		return true;
+	}
+
+	/** 同期で替わった履歴を読み直している途中か。途中の一覧は古いので、保存しない */
+	get isReloading(): boolean {
+		return this.#recordedWhileReloading !== null;
+	}
+
+	/** 同期で替わった履歴の読み直しを始める */
+	beginReload() {
+		this.#recordedWhileReloading ??= [];
+	}
+
+	/** 読み直せなかった。今の一覧のまま続ける */
+	cancelReload() {
+		this.#recordedWhileReloading = null;
+	}
+
+	/**
+	 * 読み直した履歴に入れ替える。読み直している間に覚えたものは、新しい方として後ろに残す。
+	 * たどっている途中なら、出している履歴の位置がずれないよう、たどり終えてから入れ替える。
+	 * 読み直している間に覚えたものがあって、保存が要るかを返す
+	 */
+	finishReload(entries: string[]): boolean {
+		const recorded = this.#recordedWhileReloading ?? [];
+		this.#recordedWhileReloading = null;
+		this.#reloaded = [...entries, ...recorded];
+		if (this.#index === null) this.#applyReloaded();
+		return recorded.length > 0;
+	}
+
+	#applyReloaded() {
+		if (this.#reloaded === null) return;
+		this.#entries = this.#fit(this.#reloaded);
+		this.#reloaded = null;
+	}
+
+	/** 続けて同じ内容が並ばないようにし、件数を超えた分を古いものから除く */
+	#fit(entries: string[]): string[] {
+		const fitted: string[] = [];
+		for (const entry of entries) {
+			if (fitted.at(-1) !== entry) fitted.push(entry);
+		}
+		if (fitted.length > this.#size) fitted.splice(0, fitted.length - this.#size);
+		return fitted;
 	}
 
 	/** ディスクから読んだ履歴を入れる。読み込み前に record されたものは新しい方として後ろに残す */
 	load(entries: string[]) {
-		const current = this.#entries;
-		this.#entries = [];
-		for (const entry of [...entries, ...current]) {
-			if (this.#entries.at(-1) !== entry) this.#entries.push(entry);
-		}
-		if (this.#entries.length > this.#size) {
-			this.#entries.splice(0, this.#entries.length - this.#size);
-		}
+		this.#entries = this.#fit([...entries, ...this.#entries]);
 		this.stopBrowsing();
 	}
 
 	/** 履歴をすべて消す */
 	clear() {
 		this.#entries = [];
+		// 消す前に読み直した履歴と、消す前に覚えた履歴は、戻さない
+		this.#reloaded = null;
+		if (this.#recordedWhileReloading !== null) this.#recordedWhileReloading = [];
 		this.stopBrowsing();
 	}
 
-	/** 保存する履歴。古いものから順に返す */
+	/**
+	 * 保存する履歴。古いものから順に返す。たどり終えるのを待っている読み直した履歴があれば、そちらを返す。
+	 * たどっている間の一覧は読み直す前のもので、保存すると、同期で届いた履歴を古い一覧で上書きする
+	 */
 	get entries(): string[] {
-		return [...this.#entries];
+		return this.#fit(this.#reloaded ?? this.#entries);
 	}
 
 	/** 1つ古い履歴を返す。それより古いものがなければ null。たどり始めるときは、今の入力欄の中身を覚えておく */
@@ -119,6 +167,7 @@ export class DraftHistory {
 	stopBrowsing() {
 		this.#index = null;
 		this.#draft = '';
+		this.#applyReloaded();
 	}
 }
 

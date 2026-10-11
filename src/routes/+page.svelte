@@ -213,18 +213,65 @@
 	let historySavePending = false;
 	// 「履歴を消す」の回数。読み込みの最中に消されたら、その読み込みの結果は捨てる
 	let historyClearedCount = 0;
+	// 読み込み・読み直しの最中に、同期で履歴が替わった知らせが届いた。終わってから読み直す
+	let historyReloadPending = false;
 
 	// 保存を待つ間に履歴が変わる（消される）ことがあるので、送る直前の中身を読む
-	const saveHistory = coalescedSaver(() =>
-		invoke('save_draft_history', { entries: draftHistory.entries }).catch(() => {})
-	);
+	const saveHistory = coalescedSaver(async () => {
+		// 順番を待つ間に読み直しが始まった。読み直す前の一覧は送らず、読み直した後に保存する
+		if (draftHistory.isReloading) {
+			historySavePending = true;
+			return;
+		}
+		await invoke('save_draft_history', { entries: draftHistory.entries }).catch(() => {});
+	});
 
 	function saveDraftHistory() {
-		if (!historyReady) {
+		if (!historyReady || draftHistory.isReloading) {
 			historySavePending = true;
 			return;
 		}
 		saveHistory();
+	}
+
+	function savePendingDraftHistory() {
+		if (!historySavePending) return;
+		historySavePending = false;
+		saveDraftHistory();
+	}
+
+	/**
+	 * 同期で履歴が替わったので、読み直す。読み直す前の一覧を保存すると、届いた履歴を古い一覧で上書きするので、
+	 * 読み直している間は保存を待たせ、その間に覚えた履歴を、読み直した履歴の後ろに足してから保存する
+	 */
+	function reloadDraftHistory() {
+		if (!historyReady || draftHistory.isReloading) {
+			historyReloadPending = true;
+			return;
+		}
+		draftHistory.beginReload();
+		const clearedCountAtStart = historyClearedCount;
+		invoke<string[]>('load_draft_history')
+			.then((loaded) => {
+				const entries = clearedCountAtStart === historyClearedCount ? (loaded ?? []) : [];
+				if (draftHistory.finishReload(entries)) historySavePending = true;
+			})
+			.catch(() => draftHistory.cancelReload())
+			.finally(() => {
+				savePendingDraftHistory();
+				if (!historyReloadPending) return;
+				historyReloadPending = false;
+				reloadDraftHistory();
+			});
+	}
+
+	/** 初めの読み込みが済んだ。待たせていた保存と読み直しを流す */
+	function onDraftHistoryReady() {
+		historyReady = true;
+		savePendingDraftHistory();
+		if (!historyReloadPending) return;
+		historyReloadPending = false;
+		reloadDraftHistory();
 	}
 
 	$effect(() => {
@@ -244,20 +291,11 @@
 			.then((loaded) => {
 				const entries = clearedCountAtStart === historyClearedCount ? loaded : [];
 				draftHistory.load(entries ?? []);
-				historyReady = true;
 				// 読み込み前に record された履歴を、読み込んだ履歴と合わせて保存し直す
-				if (historySavePending || (entries?.length ?? 0) > 0) {
-					historySavePending = false;
-					saveDraftHistory();
-				}
+				if ((entries?.length ?? 0) > 0) historySavePending = true;
+				onDraftHistoryReady();
 			})
-			.catch(() => {
-				historyReady = true;
-				if (historySavePending) {
-					historySavePending = false;
-					saveDraftHistory();
-				}
-			});
+			.catch(onDraftHistoryReady);
 	});
 
 	// 一覧（定型文・アクション）を出したときの入力欄のカーソルと選択範囲。差し込む先・書き直す範囲で、閉じたときにも戻す。
@@ -936,7 +974,8 @@
 				historyClearedCount += 1;
 				draftHistory.clear();
 				historySavePending = false;
-			})
+			}),
+			listen(EVENTS.DRAFT_HISTORY_SYNCED, reloadDraftHistory)
 		]).then((fns) => {
 			// 読み込みが終わる前に届いた下書きは、知らせを取り逃がしているので、ここで取りに行く
 			takeReceived();

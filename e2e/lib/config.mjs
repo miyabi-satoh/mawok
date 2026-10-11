@@ -471,9 +471,19 @@ export async function configExists() {
 	return fileExists(CONFIG_PATH);
 }
 
-/** 下書きの履歴のファイル (history.json) があるか */
-export async function historyExists() {
-	return fileExists(HISTORY_PATH);
+/**
+ * 下書きの履歴のファイル (history.json) にある履歴の件数。ファイルが無ければ 0。
+ * 履歴を消した後も、消した時刻を置いたファイルが残るので、ファイルのあるなしでは履歴があるかを見分けられない
+ */
+export async function historyEntryCount() {
+	const { existed, text } = await readOptionalText(HISTORY_PATH);
+	if (!existed) return 0;
+	try {
+		return JSON.parse(text).entries.length;
+	} catch {
+		// 書き換えの途中で読んだ。待つ側が読み直す
+		return 0;
+	}
 }
 
 /**

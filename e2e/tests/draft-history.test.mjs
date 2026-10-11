@@ -13,7 +13,7 @@ import {
 } from '../lib/app.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
 import { startComposingInDraft, turnImeOff } from '../lib/ime.mjs';
-import { beginTestConfig, clearHistory, historyExists } from '../lib/config.mjs';
+import { beginTestConfig, clearHistory, historyEntryCount } from '../lib/config.mjs';
 import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { expectStays, waitFor } from '../lib/wait.mjs';
 
@@ -277,7 +277,7 @@ test.describe('下書きの履歴', () => {
 	test('起動し直しても、履歴が残る', async () => {
 		await copyDraft(client, 'git status');
 		// 保存は画面側の非同期なので、終了する前に、ファイルが出来るのを待つ
-		await waitFor(historyExists, (exists) => exists, { label: '履歴のファイルが出来る' });
+		await waitFor(historyEntryCount, (count) => count > 0, { label: '履歴がファイルに入る' });
 		await suite.closeClient(client);
 		client = await suite.newClient();
 		await pasteTarget.activate();
@@ -290,9 +290,11 @@ test.describe('下書きの履歴', () => {
 
 	test('履歴を消すと、起動し直しても履歴が出ない', async () => {
 		await copyDraft(client, 'git status');
-		await waitFor(historyExists, (exists) => exists, { label: '履歴のファイルが出来る' });
+		await waitFor(historyEntryCount, (count) => count > 0, { label: '履歴がファイルに入る' });
 		await invokeApp(client, 'clear_draft_history');
-		await waitFor(historyExists, (exists) => !exists, { label: '履歴のファイルが消える' });
+		await waitFor(historyEntryCount, (count) => count === 0, {
+			label: '履歴がファイルから消える'
+		});
 		await suite.closeClient(client);
 		client = await suite.newClient();
 		await pasteTarget.activate();
