@@ -374,7 +374,7 @@ fn settings_view(state: &AppState) -> SettingsView {
             .iter()
             .map(|name| (*name).to_string())
             .collect(),
-        sync_conflicts: shown_sync_conflicts(state, &config, pro_available),
+        sync_conflicts: shown_sync_conflicts(state, pro_available),
         locale: lang.code(),
         ai_service: config.ai_service,
         ai_consent: config.ai_consent,
@@ -419,9 +419,9 @@ fn settings_view(state: &AppState) -> SettingsView {
     }
 }
 
-/// 画面とトレイに出す食い違いの数。設定を同期していない間は、選んでも進まないので出さない
-fn shown_sync_conflicts(state: &AppState, config: &Config, pro_available: bool) -> u32 {
-    if !pro_available || !config.sync_settings {
+/// 画面とトレイに出す食い違いの数。止めた種類・項目の分は、数えるときに除いてある
+fn shown_sync_conflicts(state: &AppState, pro_available: bool) -> u32 {
+    if !pro_available {
         return 0;
     }
     u32::try_from(state.sync_conflicts.load(Ordering::Relaxed)).unwrap_or(u32::MAX)
@@ -1925,17 +1925,20 @@ async fn mark_paused_sync_kinds(app: &AppHandle) {
     let config = state.config.lock().unwrap().clone();
     let saved = run_blocking(move || {
         let Some(mut record) = sync::load(&path) else {
-            return Ok(());
+            return Ok(None);
         };
         if record.pause(&config) {
-            sync::save(&path, &record)
-        } else {
-            Ok(())
+            sync::save(&path, &record)?;
         }
+        Ok(Some(record.active_conflict_count(&config)))
     })
     .await;
-    if let Ok(Err(error)) | Err(error) = saved {
-        warn!("couldn't save sync state: {error}");
+    match saved {
+        // 止めた・戻した種類と項目の食い違いを、次の同期を待たずに知らせへ反映する
+        // （全部オフの間と、つながらない間は、同期の回が来ない）
+        Ok(Ok(Some(conflicts))) => remember_sync_conflicts(app, conflicts),
+        Ok(Ok(None)) => {}
+        Ok(Err(error)) | Err(error) => warn!("couldn't save sync state: {error}"),
     }
 }
 
@@ -4664,10 +4667,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .unwrap()
         .as_ref()
         .is_some_and(|pro| pro.available_at(pro::now()));
-    let sync_conflicts = {
-        let config = state.config.lock().unwrap();
-        shown_sync_conflicts(&state, &config, pro_available)
-    };
+    let sync_conflicts = shown_sync_conflicts(&state, pro_available);
     // 設定を開かない利用者にも気づけるよう、食い違いがあるあいだだけ出す（docs/sync.md「食い違い」）
     let sync_choice_item = (sync_conflicts > 0)
         .then(|| MenuItem::with_id(app, "sync-choice", lang.sync_choice(), true, None::<&str>))
