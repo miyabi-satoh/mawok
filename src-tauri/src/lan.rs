@@ -1300,7 +1300,7 @@ impl Lan {
         &self,
         automatic: bool,
         previous_code_was_wrong: bool,
-        // 取り出したコードの次を置くときの、取り出した時点の `offer_stops`
+        // 取り出したコードの次を置くときの、取り出した時点の `offer_stops`。置けたら画面にも知らせる
         replacing: Option<u64>,
     ) -> Result<Option<PairingOffer>> {
         let code = new_code()?;
@@ -1317,12 +1317,18 @@ impl Lan {
             automatic,
             previous_code_was_wrong,
         });
-        Ok(Some(PairingOffer {
+        let shown = PairingOffer {
             code,
             remaining_seconds: offer_remaining_seconds(expires),
             automatic,
             previous_code_was_wrong,
-        }))
+        };
+        if replacing.is_some() {
+            // ロックを持ったまま知らせる。放してからだと、間に入った「キャンセル」の終わりの知らせの後に届き、
+            // 消したコードが画面に戻る
+            self.host.on_pairing_code_offered(shown.clone());
+        }
+        Ok(Some(shown))
     }
 
     /// 取り出したコード（期限切れ・試された後）の次を出す。画面がコードを出し続けていなければ、出さずに終える
@@ -1334,9 +1340,8 @@ impl Lan {
     ) {
         if self.continues_offering(automatic) {
             match self.make_pairing_offer(automatic, previous_code_was_wrong, Some(stops)) {
-                Ok(Some(offer)) => return self.host.on_pairing_code_offered(offer),
-                // 取り出している間に「キャンセル」されたか、新しいコードが出ている。画面はそちらに合っている
-                Ok(None) => return,
+                // 取り出している間に「キャンセル」されたか、新しいコードが出ていれば、画面はそちらに合っている
+                Ok(_) => return,
                 Err(error) => warn!("lan: couldn't replace pairing code: {error}"),
             }
         }
