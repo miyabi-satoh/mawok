@@ -460,7 +460,6 @@ type Purchase = {
 	cardCountry: string | null;
 	/** 買ったときのアクセス元の国。 */
 	buyerCountry: string | null;
-	/**
 	/** 国内の取引か (`isDomestic`)。消費税の課税売上を数えるのに使い、アカウントを消しても残す。 */
 	domestic: boolean;
 };

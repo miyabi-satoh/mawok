@@ -2250,7 +2250,8 @@ mod tests {
     #[test]
     fn keeps_the_device_key() {
         let dir = crate::test_support::TempDir::new("lan-key");
-        let path = dir.join(KEY_FILE_NAME);
+        // 初めて起動したときと同じく、置き場のフォルダーがまだ無い所から始める
+        let path = dir.join("data").join(KEY_FILE_NAME);
 
         let created = load_or_create_key(&path).unwrap();
         let loaded = load_or_create_key(&path).unwrap();
