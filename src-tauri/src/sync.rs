@@ -4,7 +4,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     future::Future,
-    io,
     path::Path,
     pin::Pin,
 };
@@ -22,9 +21,10 @@ use crate::{
     account, account_key, actions,
     ai::AiService,
     atomic_file,
-    config::{self, Action, Config, Language, Snippet, Theme},
+    config::{self, valid_item_id, Action, Config, Language, Snippet, SyncRow, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     history_store::{self, History},
+    i18n::Lang,
     text::{CharWidths, PunctuationStyle, Replacement},
 };
 
@@ -165,6 +165,12 @@ impl State {
         self.retired.remove(&name);
         self.ignored.remove(&name);
         self.items.insert(name, seen);
+    }
+
+    /// 窓口に無い項目として、見た記録を外す。
+    fn forget(&mut self, name: &str) {
+        self.items.remove(name);
+        self.retired.remove(name);
     }
 
     /// 窓口で消えた・同期から外れた。
@@ -329,11 +335,7 @@ pub fn save(path: &Path, state: &State) -> Result<(), String> {
 }
 
 pub fn clear(path: &Path) -> Result<(), String> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.to_string()),
-    }
+    atomic_file::remove(path).map_err(|error| error.to_string())
 }
 
 fn derived_key(key: &[u8; 32]) -> [u8; 32] {
@@ -438,14 +440,23 @@ fn order_id(name: &str) -> String {
     format!("o_{name}")
 }
 
+/// キーは OS ごとに別の項目にする。OS で使えるキーが違い、同じ値を両方の OS に入れられないため
+fn hotkey_name() -> String {
+    format!("hotkey_{}", platform_suffix())
+}
+
+fn text_window_keys_name() -> String {
+    format!("text_window_keys_{}", platform_suffix())
+}
+
 /// このデバイスの OS のホットキーの項目。
 pub fn hotkey_item() -> ItemKey {
-    setting_item(&format!("hotkey_{}", platform_suffix()))
+    setting_item(&hotkey_name())
 }
 
 /// このデバイスの OS の、テキストウィンドウのキーの項目。
 pub fn text_window_keys_item() -> ItemKey {
-    setting_item(&format!("text_window_keys_{}", platform_suffix()))
+    setting_item(&text_window_keys_name())
 }
 
 pub fn setting_item(name: &str) -> ItemKey {
@@ -507,13 +518,13 @@ fn kind(key: &ItemKey) -> Option<Kind<'_>> {
         return known_setting(name).then_some(Kind::Setting(name));
     }
     if let Some(id) = key.id.strip_prefix("r_") {
-        return valid_id(id).then_some(Kind::Replacement(id));
+        return valid_item_id(id).then_some(Kind::Replacement(id));
     }
     if let Some(id) = key.id.strip_prefix("n_") {
-        return valid_id(id).then_some(Kind::Snippet(id));
+        return valid_item_id(id).then_some(Kind::Snippet(id));
     }
     if let Some(id) = key.id.strip_prefix("a_") {
-        return valid_id(id).then_some(Kind::Action(id));
+        return valid_item_id(id).then_some(Kind::Action(id));
     }
     match key.id.as_str() {
         "o_replacements" => Some(Kind::Order("replacements")),
@@ -558,9 +569,7 @@ pub fn known_syncable_setting(name: &str) -> bool {
 }
 
 fn is_key_setting(name: &str) -> bool {
-    ["hotkey", "text_window_keys"]
-        .into_iter()
-        .any(|setting| name == format!("{setting}_{}", platform_suffix()))
+    name == hotkey_name() || name == text_window_keys_name()
 }
 
 fn sync_enabled(config: &Config, key: &ItemKey) -> bool {
@@ -674,70 +683,29 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
         };
         items.insert(setting_item(name), value);
     }
-    let suffix = platform_suffix();
-    set(
-        &mut items,
-        setting_id(&format!("hotkey_{suffix}")),
-        json(config.hotkey.clone()),
-    );
-    set(
-        &mut items,
-        setting_id(&format!("text_window_keys_{suffix}")),
-        draft_keys_value(config),
-    );
-    for row in &config.replacements {
-        if row.sync {
-            set(&mut items, row_id('r', &row.id), row_value(row));
-        }
-    }
-    for row in &config.snippets {
-        if row.sync {
-            set(&mut items, row_id('n', &row.id), row_value(row));
-        }
-    }
+    items.insert(hotkey_item(), json(config.hotkey.clone()));
+    items.insert(text_window_keys_item(), draft_keys_value(config));
+    put_rows(&mut items, 'r', "replacements", &config.replacements);
+    put_rows(&mut items, 'n', "snippets", &config.snippets);
     if let Some(actions) = &config.actions {
-        for row in actions {
-            if row.sync {
-                set(&mut items, row_id('a', &row.id), row_value(row));
-            }
-        }
-    }
-    for (name, order) in [
-        (
-            "replacements",
-            config
-                .replacements
-                .iter()
-                .filter(|row| row.sync)
-                .map(|row| row.id.clone())
-                .collect::<Vec<_>>(),
-        ),
-        (
-            "snippets",
-            config
-                .snippets
-                .iter()
-                .filter(|row| row.sync)
-                .map(|row| row.id.clone())
-                .collect::<Vec<_>>(),
-        ),
-    ] {
-        set(&mut items, order_id(name), json(order));
-    }
-    if let Some(actions) = &config.actions {
-        set(
-            &mut items,
-            order_id("actions"),
-            json(
-                actions
-                    .iter()
-                    .filter(|row| row.sync)
-                    .map(|row| row.id.clone())
-                    .collect::<Vec<_>>(),
-            ),
-        );
+        put_rows(&mut items, 'a', "actions", actions);
     }
     items
+}
+
+/// 同期する行と、その並びを書き出す。
+fn put_rows<T: SyncRow>(
+    items: &mut BTreeMap<ItemKey, Value>,
+    prefix: char,
+    name: &str,
+    rows: &[T],
+) {
+    let synced = || rows.iter().filter(|row| row.sync());
+    for row in synced() {
+        set(items, row_id(prefix, row.id()), row_value(row));
+    }
+    let order: Vec<&str> = synced().map(|row| row.id()).collect();
+    set(items, order_id(name), json(order));
 }
 
 /// 今のデバイスで同期を許可している項目だけ。`config_items` は食い違いと受信時の比較にも使うため、全項目を返す。
@@ -758,13 +726,6 @@ fn row_value<T: Serialize>(row: &T) -> Value {
 
 fn parse<T: for<'a> Deserialize<'a>>(value: &Value) -> Option<T> {
     serde_json::from_value(value.clone()).ok()
-}
-
-fn valid_id(id: &str) -> bool {
-    id.len() == 32
-        && id
-            .bytes()
-            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
 fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
@@ -826,7 +787,7 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
                     .all(|model| !model.is_empty() && model.trim() == model)
             }),
         ),
-        Some(Kind::Setting(name)) if name == format!("hotkey_{}", platform_suffix()) => {
+        Some(Kind::Setting(name)) if name == hotkey_name() => {
             let Some(hotkey) = parse::<String>(value) else {
                 return false;
             };
@@ -842,7 +803,7 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
             config.hotkey = hotkey;
             true
         }
-        Some(Kind::Setting(name)) if name == format!("text_window_keys_{}", platform_suffix()) => {
+        Some(Kind::Setting(name)) if name == text_window_keys_name() => {
             apply_draft_keys(config, value)
         }
         Some(Kind::Setting("text_font_family")) => {
@@ -871,12 +832,7 @@ fn synced_actions(config: &mut Config) -> &mut Vec<Action> {
 }
 
 fn default_actions_for(language: Language) -> Vec<Action> {
-    let lang = match language {
-        Language::Ja => crate::i18n::Lang::Ja,
-        Language::En => crate::i18n::Lang::En,
-        Language::System => crate::i18n::Lang::system(),
-    };
-    actions::default_actions(lang)
+    actions::default_actions(Lang::resolve(language, Lang::system()))
 }
 
 /// 設定に書き出す既定のアクション。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
@@ -978,55 +934,6 @@ fn apply_draft_keys(config: &mut Config, value: &Value) -> bool {
     true
 }
 
-trait SyncRow: Serialize + for<'a> Deserialize<'a> + Clone {
-    fn id(&self) -> &str;
-    fn set_id(&mut self, id: String);
-    fn sync(&self) -> bool;
-    fn set_sync(&mut self, sync: bool);
-}
-impl SyncRow for Replacement {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn set_id(&mut self, id: String) {
-        self.id = id
-    }
-    fn sync(&self) -> bool {
-        self.sync
-    }
-    fn set_sync(&mut self, sync: bool) {
-        self.sync = sync
-    }
-}
-impl SyncRow for Snippet {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn set_id(&mut self, id: String) {
-        self.id = id
-    }
-    fn sync(&self) -> bool {
-        self.sync
-    }
-    fn set_sync(&mut self, sync: bool) {
-        self.sync = sync
-    }
-}
-impl SyncRow for Action {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn set_id(&mut self, id: String) {
-        self.id = id
-    }
-    fn sync(&self) -> bool {
-        self.sync
-    }
-    fn set_sync(&mut self, sync: bool) {
-        self.sync = sync
-    }
-}
-
 fn apply_row<T: SyncRow>(rows: &mut Vec<T>, id: &str, value: &Value) -> bool {
     let mut row: T = match parse(value) {
         Some(row) => row,
@@ -1043,7 +950,7 @@ fn apply_row<T: SyncRow>(rows: &mut Vec<T>, id: &str, value: &Value) -> bool {
 }
 
 fn order_ids(value: &Value) -> Option<Vec<String>> {
-    parse::<Vec<String>>(value).filter(|ids| ids.iter().all(|id| valid_id(id)))
+    parse::<Vec<String>>(value).filter(|ids| ids.iter().all(|id| valid_item_id(id)))
 }
 
 fn apply_order<T: SyncRow>(rows: &mut Vec<T>, value: &Value) -> bool {
@@ -1902,7 +1809,6 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
             .cloned()
             .map_or(SyncValue::Deleted, wrap)
     }
-    let suffix = format!("_{}", platform_suffix());
     Some(match kind(key)? {
         Kind::Replacement(id) => row(&config.replacements, id, SyncValue::Replacement),
         Kind::Snippet(id) => row(&config.snippets, id, SyncValue::Snippet),
@@ -1912,7 +1818,11 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
             SyncValue::Action,
         ),
         Kind::Order(_) => return None,
-        Kind::Setting(name) => match name.strip_suffix(&suffix).unwrap_or(name) {
+        Kind::Setting(name) if name == hotkey_name() => SyncValue::Hotkey(config.hotkey.clone()),
+        Kind::Setting(name) if name == text_window_keys_name() => {
+            SyncValue::TextWindowKeys(config.text_window_keys.clone())
+        }
+        Kind::Setting(name) => match name {
             "language" => SyncValue::Language(config.language),
             "theme" => SyncValue::Theme(config.theme),
             "text_window_always_on_top" => {
@@ -1939,8 +1849,6 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
             "input_guidance" => SyncValue::InputGuidance(config.input_guidance.clone()),
             "ai_service" => SyncValue::AiService(config.ai_service),
             "ai_models" => SyncValue::AiModels(config.ai_models.clone()),
-            "hotkey" => SyncValue::Hotkey(config.hotkey.clone()),
-            "text_window_keys" => SyncValue::TextWindowKeys(config.text_window_keys.clone()),
             "text_font_family" => SyncValue::TextFontFamily(config.text_font_family.clone()),
             _ => return None,
         },
@@ -2093,10 +2001,7 @@ pub fn resolve(
                 Incoming::Value(value) => state.settle(name, item.seq, value),
                 _ => state.retire(name, item.seq),
             },
-            (SyncSide::ThisDevice, None) => {
-                state.items.remove(&name);
-                state.retired.remove(&name);
-            }
+            (SyncSide::ThisDevice, None) => state.forget(&name),
             // 記録を手元の今の値に揃えて「手元は変えていない」ことにし、届いた値と同じ検査を通して入れる
             (SyncSide::OtherDevice, Some(item)) => {
                 match local_items.get(&key) {
@@ -2125,8 +2030,7 @@ pub fn resolve(
     for key in absent {
         let name = key.name();
         remove_local(&mut result.config, &key);
-        result.state.items.remove(&name);
-        result.state.retired.remove(&name);
+        result.state.forget(&name);
     }
     let mut rejected = Vec::new();
     for item in &incoming {
@@ -2236,6 +2140,7 @@ pub async fn sync_once_with<T: SyncTransport>(
     key_id: &str,
     history: Option<&History>,
 ) -> Result<SyncResult, Box<Failure>> {
+    let enabled = kinds(config);
     let read = match transport
         .read(state.as_ref().map_or(0, |state| state.read_since(config)))
         .await
@@ -2256,11 +2161,11 @@ pub async fn sync_once_with<T: SyncTransport>(
     let history_resumed_from = state
         .as_ref()
         .and_then(|state| state.paused.get(SyncKind::History.group()).copied())
-        .filter(|_| kinds(config).history);
+        .filter(|_| enabled.history);
     let mut recorded = state.unwrap_or_default();
     recorded.pause(config);
     let initial = Initial::new(no_record, &recorded);
-    let mut result = if kinds(config).any_settings() {
+    let mut result = if enabled.any_settings() {
         reconcile_as(config, recorded, &initial, &read.items, key_id, read.next)
     } else {
         recorded.key_id = key_id.to_string();
@@ -2306,11 +2211,7 @@ pub async fn sync_once_with<T: SyncTransport>(
                     plain: conflict.plain,
                 }),
                 // 窓口に無い。記録を外して、初めての項目として書き直す
-                None => {
-                    let name = conflict.key.name();
-                    result.state.items.remove(&name);
-                    result.state.retired.remove(&name);
-                }
+                None => result.state.forget(&conflict.key.name()),
             }
         }
         result = reconcile_as(
@@ -2324,7 +2225,7 @@ pub async fn sync_once_with<T: SyncTransport>(
         changed |= result.changed;
     }
     // 同じ回に履歴の件数が届いたら、届いた後の件数で合わせる
-    let synced_history = if kinds(config).history {
+    let synced_history = if enabled.history {
         sync_history(
             transport,
             &mut result.state,
@@ -2348,7 +2249,7 @@ pub async fn sync_once_with<T: SyncTransport>(
             .get(&history_item().name())
             .is_some_and(|seen| seen.hash == history_hash(local, size))
     });
-    if settled && kinds(config).history {
+    if settled && enabled.history {
         result.state.paused.remove(SyncKind::History.group());
     }
     // 成功した回だけ、再び読んだ設定の種類と個別項目の位置を外す。履歴は揃った回だけ上で外す。
@@ -2620,8 +2521,8 @@ async fn write_all<T: SyncTransport>(
                     // 届いた並びに手元の行を足した並びは、結果を捨てると手元に入らないので置かず、次の回に読み直して
                     // 合わせる。手元の並びをそのまま書いたものは置く。忘れると、次の回に自分の書き込みを
                     // 他人の変更と取り違える
-                    let unapplied_order = matches!(kind(&write.key), Some(Kind::Order(_)))
-                        && local_items.get(&write.key) != Some(value);
+                    let unapplied_order =
+                        is_order(&write.key) && local_items.get(&write.key) != Some(value);
                     if !unapplied_order {
                         written.settle(name, reply.seq, value);
                     }
@@ -2680,10 +2581,19 @@ pub fn ignore_applied(state: &mut State, before: Option<&State>, key: &ItemKey) 
 }
 
 fn auth(token: &str) -> Result<reqwest::header::HeaderValue, Error> {
-    let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
-        .map_err(|_| Error::Other("invalid account token".to_string()))?;
-    value.set_sensitive(true);
-    Ok(value)
+    account::bearer(token).map_err(Error::Other)
+}
+
+/// 窓口の項目の中身。消した項目は、data があっても読まない
+fn remote_plain(
+    key: &[u8; 32],
+    key_id: &str,
+    item_key: &ItemKey,
+    deleted: bool,
+    data: Option<&str>,
+) -> Option<Plain> {
+    data.filter(|_| !deleted)
+        .and_then(|data| decrypt(key, key_id, item_key, data))
 }
 
 #[derive(Deserialize)]
@@ -2735,11 +2645,7 @@ where
             if !handled(&item_key) {
                 continue;
             }
-            let plain = item
-                .data
-                .as_deref()
-                .filter(|_| !item.deleted)
-                .and_then(|data| decrypt(key, key_id, &item_key, data));
+            let plain = remote_plain(key, key_id, &item_key, item.deleted, item.data.as_deref());
             items.push(RemoteItem {
                 key: item_key,
                 seq: item.seq,
@@ -2850,11 +2756,7 @@ fn conflict_items(key: &[u8; 32], key_id: &str, body: Value) -> Result<Vec<Confl
         .filter_map(|item| {
             let item_key = ItemKey::new(&item.collection, item.id);
             handled(&item_key).then_some(())?;
-            let plain = item
-                .data
-                .as_deref()
-                .filter(|_| !item.deleted)
-                .and_then(|data| decrypt(key, key_id, &item_key, data));
+            let plain = remote_plain(key, key_id, &item_key, item.deleted, item.data.as_deref());
             Some(ConflictItem {
                 key: item_key,
                 seq: item.seq,
@@ -2978,11 +2880,7 @@ fn item_at(
     if item.collection != item_key.collection || item.id != item_key.id || item.seq != seq {
         return None;
     }
-    let plain = item
-        .data
-        .as_deref()
-        .filter(|_| !item.deleted)
-        .and_then(|data| decrypt(key, key_id, item_key, data));
+    let plain = remote_plain(key, key_id, item_key, item.deleted, item.data.as_deref());
     Some(RemoteItem {
         key: item_key.clone(),
         seq,
@@ -3024,10 +2922,10 @@ mod tests {
 
     #[test]
     fn corrupt_state_is_treated_as_missing() {
-        let path = std::env::temp_dir().join(format!("mawok-sync-corrupt-{}", std::process::id()));
+        let dir = crate::test_support::TempDir::new("sync-corrupt");
+        let path = dir.join(STATE_FILE_NAME);
         fs::write(&path, b"not json").unwrap();
         assert!(load(&path).is_none());
-        let _ = fs::remove_file(path);
     }
 
     fn remote(collection: &str, id: &str, seq: u64, value: Value) -> RemoteItem {
@@ -3590,16 +3488,10 @@ mod tests {
         config.actions = Some(actions);
         let items = config_items(&config);
         let mut restored = Config::default();
-        for (key, value) in items
-            .iter()
-            .filter(|(key, _)| !matches!(kind(key), Some(Kind::Order(_))))
-        {
+        for (key, value) in items.iter().filter(|(key, _)| !is_order(key)) {
             assert!(apply_value(&mut restored, key, value), "{}", key.id);
         }
-        for (key, value) in items
-            .iter()
-            .filter(|(key, _)| matches!(kind(key), Some(Kind::Order(_))))
-        {
+        for (key, value) in items.iter().filter(|(key, _)| is_order(key)) {
             assert!(apply_value(&mut restored, key, value), "{}", key.id);
         }
         assert_eq!(config_items(&restored), items);
@@ -3843,7 +3735,8 @@ mod tests {
 
     #[test]
     fn state_round_trips_and_clear_removes_it() {
-        let path = std::env::temp_dir().join(format!("mawok-sync-state-{}", std::process::id()));
+        let dir = crate::test_support::TempDir::new("sync-state");
+        let path = dir.join(STATE_FILE_NAME);
         let state = recorded(&Config::default());
         save(&path, &state).unwrap();
         assert_eq!(load(&path).unwrap().items, state.items);

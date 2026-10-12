@@ -5,7 +5,17 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import { app as server } from '../../src/index';
-import { accountId, app, linkApp, linkPath, newLink, postForm, request, signIn } from '../helpers';
+import {
+	accountId,
+	addSubscription,
+	app,
+	linkApp,
+	linkPath,
+	newLink,
+	postForm,
+	request,
+	signIn
+} from '../helpers';
 
 type Guard =
 	/** `Authorization: Bearer` のアプリ用のトークン。無い・知らない・外したものは 401。 */
@@ -322,12 +332,7 @@ describe('guards', () => {
 			const first = await linkApp(email);
 			const other = await linkApp(`guard-limit-other-${index}@example.com`);
 			for (const accountEmail of [email, `guard-limit-other-${index}@example.com`]) {
-				await env.DB.prepare(
-					`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
-					 VALUES (?, ?, 'monthly', 4102444800, 'trialing', 0)`
-				)
-					.bind(`guard_${accountEmail}`, await accountId(accountEmail))
-					.run();
+				await addSubscription(await accountId(accountEmail), { id: `guard_${accountEmail}` });
 			}
 			// 送り主 (IP) は毎回変わる。
 			const statuses = await sendUntilLimited(() =>

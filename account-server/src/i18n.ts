@@ -5,6 +5,7 @@
 import type { Context } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { SaleRegion } from './pages';
+import type { ProPlan } from './pricing';
 import { isHttps } from './util';
 
 export type Lang = 'ja' | 'en';
@@ -128,12 +129,12 @@ const ja = {
 	proTitle: 'Mawok Pro',
 	proUnavailable: 'いまは Pro を申し込めません。',
 	proSubscribe: 'Pro の料金を見る',
-	proItem: (plan: 'monthly' | 'yearly') =>
+	proItem: (plan: ProPlan) =>
 		`Mawok Pro（${plan === 'yearly' ? '年額' : '月額'}）。解約するまで、${plan === 'yearly' ? '1 年' : '1 か月'}ごとに自動で更新します。`,
-	proPrice: (plan: 'monthly' | 'yearly'): string =>
+	proPrice: (plan: ProPlan): string =>
 		plan === 'yearly' ? '4,800 円/年（税込み）' : '480 円/月（税込み）',
 	proPayment: (
-		plan: 'monthly' | 'yearly',
+		plan: ProPlan,
 		trial: boolean,
 		region: SaleRegion,
 		firstPaymentDate: string,
@@ -162,9 +163,9 @@ const ja = {
 	} as Record<SaleRegion, (tokushoho: string) => string>,
 	proCheckoutNote:
 		'解約するまで自動で更新します。解約は Mawok のアカウントのページからでき、支払い済みの期間の終わりまで使えます。支払い済みの期間は、こちらの誤りによる請求などを除き、返金できません。',
-	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
+	proUntil: (plan: ProPlan, date: string) =>
 		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} に自動で更新されます。`,
-	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
+	proCanceledUntil: (plan: ProPlan, date: string) =>
 		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} まで使えます（更新されません）。`,
 	proTrialCanceledUntil: (date: string) => `試用は ${date} までです。課金はされません。`,
 	proTrialUntil: (date: string) =>
@@ -275,12 +276,12 @@ const en: typeof ja = {
 	proTitle: 'Mawok Pro',
 	proUnavailable: 'Pro is not available right now.',
 	proSubscribe: 'See Pro pricing',
-	proItem: (plan: 'monthly' | 'yearly') =>
+	proItem: (plan: ProPlan) =>
 		`Mawok Pro (${plan}). It renews automatically every ${plan === 'yearly' ? 'year' : 'month'} until you cancel.`,
-	proPrice: (plan: 'monthly' | 'yearly') =>
+	proPrice: (plan: ProPlan) =>
 		plan === 'yearly' ? '4,800 yen/year (tax included)' : '480 yen/month (tax included)',
 	proPayment: (
-		plan: 'monthly' | 'yearly',
+		plan: ProPlan,
 		trial: boolean,
 		region: SaleRegion,
 		firstPaymentDate: string,
@@ -309,9 +310,8 @@ const en: typeof ja = {
 	},
 	proCheckoutNote:
 		'It renews automatically until you cancel. You can cancel from your Mawok account page and continue using it until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side.',
-	proUntil: (plan: 'monthly' | 'yearly', date: string) =>
-		`Pro (${plan}): renews automatically on ${date}.`,
-	proCanceledUntil: (plan: 'monthly' | 'yearly', date: string) =>
+	proUntil: (plan: ProPlan, date: string) => `Pro (${plan}): renews automatically on ${date}.`,
+	proCanceledUntil: (plan: ProPlan, date: string) =>
 		`Pro (${plan}): available until ${date}; it will not renew.`,
 	proTrialCanceledUntil: (date: string) =>
 		`Your trial lasts until ${date}. You will not be charged.`,

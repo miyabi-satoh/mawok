@@ -2,7 +2,7 @@
 import { proOf, proUntilSql } from './credits';
 import { now } from './util';
 
-export const SYNC_ITEM_LIMIT = 100;
+const SYNC_ITEM_LIMIT = 100;
 export const SYNC_ITEM_BYTES = 256 * 1024;
 export const SYNC_TOTAL_BYTES = 16 * 1024 * 1024;
 /** 全体の上限 (16 MiB) を base64 にし、JSON の分を足しても収まる本文の上限。これより大きい要求は書けないので読まずに断る。 */
@@ -35,8 +35,9 @@ type Conflict = {
 };
 type PutResult =
 	| { ok: true; seq: number; items: Array<{ collection: Collection; id: string; seq: number }> }
-	| { ok: false; error: 'invalid_request' | 'key_mismatch' }
-	| { ok: false; error: 'too_large'; limit: 'item' | 'total' | 'request' }
+	| { ok: false; error: 'invalid_request' }
+	| { ok: false; error: 'key_mismatch' }
+	| { ok: false; error: 'too_large'; limit: 'item' | 'total' }
 	| { ok: false; error: 'conflict'; conflicts: Conflict[] };
 
 const itemId = /^[A-Za-z0-9_-]{1,64}$/;
@@ -116,13 +117,16 @@ export async function hasSyncPro(env: Env, accountId: string): Promise<boolean> 
 function emptyAccount(): SyncAccount {
 	return { key_id: null, seq: 0, purged_seq: 0, bytes: 0 };
 }
+function accountStatement(env: Env, accountId: string) {
+	return env.DB.prepare(
+		'SELECT key_id, seq, purged_seq, bytes FROM sync_accounts WHERE account_id = ?'
+	).bind(accountId);
+}
 
 async function currentSync(env: Env, accountId: string, items: SyncItem[]) {
 	const requested = JSON.stringify(items.map(({ collection, id }) => ({ collection, id })));
 	const [account, rows] = await env.DB.batch<SyncAccount | StoredItem>([
-		env.DB.prepare(
-			'SELECT key_id, seq, purged_seq, bytes FROM sync_accounts WHERE account_id = ?'
-		).bind(accountId),
+		accountStatement(env, accountId),
 		env.DB.prepare(
 			`SELECT collection, id, seq, deleted, data, length(data) AS size FROM sync_items
 			WHERE account_id = ? AND EXISTS (SELECT 1 FROM json_each(?) wanted
@@ -144,9 +148,7 @@ export async function getSync(
 	query: { since: number; limit: number; rebuild: boolean }
 ) {
 	const [accountResult, itemResult] = await env.DB.batch<SyncAccount | StoredItem>([
-		env.DB.prepare(
-			'SELECT key_id, seq, purged_seq, bytes FROM sync_accounts WHERE account_id = ?'
-		).bind(accountId),
+		accountStatement(env, accountId),
 		// CASE は shouldReset と同じ決まり。掃除が間に入っても、アカウントの行と同じ時点で決めるため SQL に置く。
 		env.DB.prepare(
 			`WITH sync_account AS (
@@ -211,10 +213,12 @@ function conflictsFor(items: SyncItem[], current: Map<string, StoredItem>): Conf
 }
 
 // purge が消す予定の消した記録と同じ要求にほかの項目があっても、一部だけを書かないよう purged_seq も照らす。
-const accountMatches = `EXISTS (SELECT 1 FROM sync_accounts WHERE account_id = ? AND seq = ? AND bytes = ? AND purged_seq = ? AND (key_id IS NULL OR key_id = ?))`;
+const accountUnchanged =
+	'account_id = ? AND seq = ? AND bytes = ? AND purged_seq = ? AND (key_id IS NULL OR key_id = ?)';
+const accountMatches = `EXISTS (SELECT 1 FROM sync_accounts WHERE ${accountUnchanged})`;
 /** `json_each` に渡す1個の JSON で全項目を照らし、D1 の束縛100個の上限を超えない。 */
 export const SYNC_ACCOUNT_UPDATE_SQL = `UPDATE sync_accounts SET key_id = coalesce(key_id, ?), seq = seq + ?, bytes = bytes + ?
-	WHERE account_id = ? AND seq = ? AND bytes = ? AND purged_seq = ? AND (key_id IS NULL OR key_id = ?)
+	WHERE ${accountUnchanged}
 	AND NOT EXISTS (SELECT 1 FROM json_each(?) wanted WHERE NOT EXISTS (
 		SELECT 1 FROM sync_items WHERE account_id = ?
 		AND collection = json_extract(wanted.value, '$.collection')
@@ -287,9 +291,11 @@ async function writeSync(
 			);
 		}
 	}
-	const written = JSON.stringify(
-		items.map((item, index) => ({ collection: item.collection, id: item.id, seq: seq + index + 1 }))
-	);
+	const written = items.map((item, index) => ({
+		collection: item.collection,
+		id: item.id,
+		seq: seq + index + 1
+	}));
 	statements.push(
 		env.DB.prepare(SYNC_ACCOUNT_UPDATE_SQL).bind(
 			key,
@@ -300,21 +306,13 @@ async function writeSync(
 			bytes,
 			purged_seq,
 			key,
-			written,
+			JSON.stringify(written),
 			accountId
 		)
 	);
 	const results = await env.DB.batch(statements);
 	if (results.at(-1)?.meta.changes !== 1) return undefined;
-	return {
-		ok: true,
-		seq: seq + items.length,
-		items: items.map((item, index) => ({
-			collection: item.collection,
-			id: item.id,
-			seq: seq + index + 1
-		}))
-	};
+	return { ok: true, seq: seq + items.length, items: written };
 }
 
 /** 一まとまりの更新を全て書くか、競合として何も書かないかにする。 */

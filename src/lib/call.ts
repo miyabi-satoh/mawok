@@ -3,6 +3,11 @@ import { invoke } from '@tauri-apps/api/core';
 /** コマンドを呼んだ結果。返り値を持たないコマンドもあるので、成功したかは ok で見る */
 type CallResult<T> = { ok: true; value: T } | { ok: false };
 
+/** 成功していれば返り値、失敗していれば undefined */
+export function okValue<T>(result: CallResult<T>): T | undefined {
+	return result.ok ? result.value : undefined;
+}
+
 /**
  * コマンドを呼び、失敗したら画面に出す。成功したら出ていた失敗を消すが、keepError なら消さない
  * （失敗した操作の後の確かめ直しで、その失敗の知らせを消さないため）

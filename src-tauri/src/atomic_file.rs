@@ -19,6 +19,14 @@ pub fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     write_with(path, contents, true)
 }
 
+/// ファイルを消す。もう無ければ、消えているので成功にする
+pub fn remove(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 /// 一時ファイルの場所。`config.toml` なら `config.toml.tmp`
 fn temp_path(path: &Path) -> PathBuf {
     match path.extension() {
@@ -68,28 +76,9 @@ fn write_with(path: &Path, contents: &[u8], private: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TempDir;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt as _;
-
-    /// 落ちたテストでも一時フォルダーに残さないよう、手放すときにフォルダーごと消す
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "mawok-atomic-file-test-{}-{name}",
-                std::process::id()
-            ));
-            let _ = fs::remove_dir_all(&dir);
-            Self(dir)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     #[test]
     fn names_the_temporary_file_after_the_extension() {
@@ -109,8 +98,8 @@ mod tests {
 
     #[test]
     fn creates_the_folder_and_replaces_an_existing_file() {
-        let dir = TempDir::new("replace");
-        let path = dir.0.join("inside").join("file.txt");
+        let dir = TempDir::new("atomic-file-replace");
+        let path = dir.join("inside").join("file.txt");
         write(&path, b"first").unwrap();
         write(&path, b"second").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"second");
@@ -119,9 +108,9 @@ mod tests {
 
     #[test]
     fn leaves_the_file_and_no_temporary_file_when_it_cannot_replace() {
-        let dir = TempDir::new("blocked");
+        let dir = TempDir::new("atomic-file-blocked");
         // 差し替える先がフォルダーなので、差し替えだけが失敗する
-        let path = dir.0.join("file.txt");
+        let path = dir.join("file.txt");
         fs::create_dir_all(path.join("inside")).unwrap();
         assert!(write(&path, b"text").is_err());
         assert!(path.join("inside").is_dir());
@@ -131,12 +120,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn private_files_are_readable_only_by_the_owner() {
-        let dir = TempDir::new("private");
-        let path = dir.0.join("key");
+        let dir = TempDir::new("atomic-file-private");
+        let path = dir.join("key");
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
 
         // 誰でも読める元のファイルの権限を引き継がない
-        fs::create_dir_all(&dir.0).unwrap();
         fs::write(&path, b"old").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
         // 前の失敗で残った、誰でも読める一時ファイルの権限も引き継がない

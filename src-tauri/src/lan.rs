@@ -19,10 +19,15 @@ use std::{
 };
 
 use log::{info, warn};
+use serde::Serialize;
 use snow::{Builder, HandshakeState, TransportState};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
-use crate::{atomic_file, APP_NAME};
+use crate::{
+    atomic_file,
+    hex::{from_hex, to_hex},
+    APP_NAME,
+};
 
 /// このデバイスの鍵を置くファイルの名前（設定ファイルと同じフォルダー）。設定ファイルは人に見せることがあるので分ける
 pub const KEY_FILE_NAME: &str = "device-key";
@@ -201,20 +206,6 @@ pub trait Host: Send + Sync + 'static {
     fn on_device_found(&self, peer: Peer, address: IpAddr) -> bool;
     /// 握手が通ったデバイスの場所。名前が分からない場合も、既存の一覧の場所は直せる。
     fn on_device_address_seen(&self, public_key: &[u8], address: IpAddr);
-}
-
-pub fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-pub fn from_hex(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return None;
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|index| u8::from_str_radix(text.get(index..index + 2)?, 16).ok())
-        .collect()
 }
 
 /// 組み合わせるときに相手へ名乗り、Mawok のアカウントと結ぶときに窓口へ送る、このデバイスの名前。コンピューター名を使い、取れなければ Mawok。
@@ -428,6 +419,13 @@ fn hello_message(kind: &Hello) -> String {
     }
 }
 
+/// 握手を終えて、暗号化したやり取りに移る
+fn into_transport(noise: HandshakeState) -> Result<TransportState> {
+    noise
+        .into_transport_mode()
+        .map_err(|error| format!("handshake: {error}"))
+}
+
 /// コードを出した側の組み合わせの失敗
 #[derive(Debug)]
 struct OfferFailure {
@@ -457,9 +455,7 @@ fn pair_as_offerer(
         handshake_write(&mut noise, name.as_bytes(), stream)?;
         let remote_name = handshake_read(&mut noise, stream)?;
         let peer = remote_peer(&noise, &remote_name)?;
-        let transport = noise
-            .into_transport_mode()
-            .map_err(|error| format!("handshake: {error}"))?;
+        let transport = into_transport(noise)?;
         Ok((peer, transport))
     })();
     let (peer, mut transport) = handshake.map_err(|message| OfferFailure {
@@ -487,6 +483,42 @@ fn pair_as_offerer(
     Ok(peer)
 }
 
+/// コードを入れた側の組み合わせの失敗
+#[derive(Debug)]
+enum JoinFailure {
+    /// 相手が別のアカウントのデバイスだった
+    AccountMismatch,
+    /// 受け取ったアカウントの鍵が、窓口の鍵の印と合わない
+    KeyMismatch,
+    /// コードが違う（鍵が合わずに握手が通らない）か、相手でコードが使えなくなっている。中身はログに残す
+    Other(String),
+}
+
+impl From<String> for JoinFailure {
+    fn from(detail: String) -> Self {
+        Self::Other(detail)
+    }
+}
+
+impl From<JoinFailure> for LanError {
+    fn from(failure: JoinFailure) -> Self {
+        match failure {
+            JoinFailure::AccountMismatch => Self::new(
+                Failure::AccountMismatch,
+                "the devices use different accounts",
+            ),
+            JoinFailure::KeyMismatch => Self::new(
+                Failure::KeyMismatch,
+                "the account key does not match the account server",
+            ),
+            JoinFailure::Other(detail) => Self {
+                failure: Failure::WrongCode,
+                detail,
+            },
+        }
+    }
+}
+
 /// コードを入れた側の組み合わせ
 fn pair_as_joiner(
     stream: &mut (impl Read + Write),
@@ -496,7 +528,7 @@ fn pair_as_joiner(
     account_tag: &[u8; ACCOUNT_TAG_LEN],
     expected_key_id: Option<&str>,
     accept_key: impl FnOnce([u8; 32]) -> bool,
-) -> Result<Peer> {
+) -> std::result::Result<Peer, JoinFailure> {
     let psk = spake2_key(stream, code)?;
     let mut noise = builder(PAIR_PATTERN)?
         .local_private_key(&key.private)
@@ -507,13 +539,11 @@ fn pair_as_joiner(
     let remote_name = handshake_read(&mut noise, stream)?;
     handshake_write(&mut noise, name.as_bytes(), stream)?;
     let peer = remote_peer(&noise, &remote_name)?;
-    let mut transport = noise
-        .into_transport_mode()
-        .map_err(|error| format!("handshake: {error}"))?;
+    let mut transport = into_transport(noise)?;
     let remote_tag = transport_read(&mut transport, stream)?;
     if remote_tag.as_slice() != account_tag {
         transport_write(&mut transport, REJECT_ACCOUNT_MISMATCH, stream)?;
-        return Err("the devices use different accounts".to_string());
+        return Err(JoinFailure::AccountMismatch);
     }
     transport_write(&mut transport, READY, stream)?;
     let received = transport_read(&mut transport, stream)?;
@@ -522,10 +552,10 @@ fn pair_as_joiner(
         .map_err(|_| "the account key has the wrong length".to_string())?;
     if expected_key_id.is_some_and(|id| crate::account_key::key_id(&key) != id) {
         transport_write(&mut transport, REJECT_KEY_MISMATCH, stream)?;
-        return Err("the account key does not match the account server".to_string());
+        return Err(JoinFailure::KeyMismatch);
     }
     if !accept_key(key) {
-        return Err("couldn't store the account key".to_string());
+        return Err("couldn't store the account key".to_string().into());
     }
     transport_write(&mut transport, ACK, stream)?;
     Ok(peer)
@@ -546,9 +576,7 @@ fn handshake_as_sender(
         .map_err(|error| format!("handshake: {error}"))?;
     handshake_write(&mut noise, &[], stream)?;
     handshake_read(&mut noise, stream)?;
-    noise
-        .into_transport_mode()
-        .map_err(|error| format!("handshake: {error}"))
+    into_transport(noise)
 }
 
 /// 受ける側の握手。公開鍵をまだ覚えていなくても、共通の鍵を持つ相手なら通す。
@@ -568,9 +596,7 @@ fn handshake_as_receiver(
         .ok_or("handshake: no remote key")?
         .to_vec();
     handshake_write(&mut noise, &[], stream)?;
-    let transport = noise
-        .into_transport_mode()
-        .map_err(|error| format!("handshake: {error}"))?;
+    let transport = into_transport(noise)?;
     Ok((transport, remote))
 }
 
@@ -744,7 +770,22 @@ struct Offer {
     previous_code_was_wrong: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Offer {
+    /// 画面に出す形。残り秒は、呼んだ時点のもの
+    fn shown(&self) -> PairingOffer {
+        PairingOffer {
+            code: self.code.clone(),
+            remaining_seconds: offer_remaining_seconds(self.expires),
+            automatic: self.automatic,
+            previous_code_was_wrong: self.previous_code_was_wrong,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
 pub struct PairingOffer {
     pub code: String,
     pub remaining_seconds: u64,
@@ -1311,18 +1352,14 @@ impl Lan {
         }) {
             return Ok(None);
         }
-        *offer = Some(Offer {
-            code: code.clone(),
+        let stored = Offer {
+            code,
             expires,
             automatic,
             previous_code_was_wrong,
-        });
-        let shown = PairingOffer {
-            code,
-            remaining_seconds: offer_remaining_seconds(expires),
-            automatic,
-            previous_code_was_wrong,
         };
+        let shown = stored.shown();
+        *offer = Some(stored);
         if replacing.is_some() {
             // ロックを持ったまま知らせる。放してからだと、間に入った「キャンセル」の終わりの知らせの後に届き、
             // 消したコードが画面に戻る
@@ -1392,15 +1429,10 @@ impl Lan {
     /// 今出しているコード。設定画面を開いた後に `want` を受けて自動で出したコードを画面に表示するために読む。
     pub fn pairing_offer(&self) -> Option<PairingOffer> {
         let offer = self.offer.lock().unwrap();
-        let offer = offer
+        offer
             .as_ref()
-            .filter(|offer| offer.expires > Instant::now())?;
-        Some(PairingOffer {
-            code: offer.code.clone(),
-            remaining_seconds: offer_remaining_seconds(offer.expires),
-            automatic: offer.automatic,
-            previous_code_was_wrong: offer.previous_code_was_wrong,
-        })
+            .filter(|offer| offer.expires > Instant::now())
+            .map(Offer::shown)
     }
 
     pub fn cancel_pairing(self: &Arc<Self>) {
@@ -1449,7 +1481,6 @@ impl Lan {
                 .fail_as(Failure::Unreachable)
                 .and_then(|ip| {
                     let mut stream = connect_for(ip, KIND_PAIR)?;
-                    // つながった後の失敗は、コードが違う（鍵が合わずに握手が通らない）か、相手でコードが使えなくなっている
                     let account_tag = self.host.pro_account_tag().ok_or_else(|| {
                         LanError::new(Failure::ProRequired, "this device is not Pro")
                     })?;
@@ -1462,16 +1493,7 @@ impl Lan {
                         self.host.account_key_id().as_deref(),
                         |account_key| self.host.receive_account_key(account_key),
                     )
-                    .map_err(|detail| {
-                        let failure = if detail.contains("different accounts") {
-                            Failure::AccountMismatch
-                        } else if detail.contains("does not match") {
-                            Failure::KeyMismatch
-                        } else {
-                            Failure::WrongCode
-                        };
-                        LanError::new(failure, &detail)
-                    })
+                    .map_err(LanError::from)
                     .map(|peer| (peer, ip))
                 });
         match result {
@@ -1797,7 +1819,7 @@ mod tests {
             None,
             |_| panic!("a different account must not receive a key"),
         );
-        assert!(joined.unwrap_err().contains("different accounts"));
+        assert!(matches!(joined.unwrap_err(), JoinFailure::AccountMismatch));
         let failure = offered.join().unwrap().unwrap_err();
         assert!(failure.message.contains("different accounts"));
         assert!(!failure.wrong_code);
@@ -1826,7 +1848,7 @@ mod tests {
             Some("00"),
             |_| panic!("a mismatched key must not be stored"),
         );
-        assert!(joined.unwrap_err().contains("does not match"));
+        assert!(matches!(joined.unwrap_err(), JoinFailure::KeyMismatch));
         let failure = offered.join().unwrap().unwrap_err();
         assert!(failure.message.contains("did not store"));
         assert!(!failure.wrong_code);
@@ -1975,15 +1997,6 @@ mod tests {
             failures.iter().map(|failure| failure.code()).collect();
         assert_eq!(codes.len(), failures.len());
         assert!(codes.iter().all(|code| code.starts_with("lan.")));
-    }
-
-    #[test]
-    fn converts_hex() {
-        assert_eq!(to_hex(&[0x00, 0xab, 0xff]), "00abff");
-        assert_eq!(from_hex("00abFF"), Some(vec![0x00, 0xab, 0xff]));
-        assert_eq!(from_hex("abc"), None);
-        assert_eq!(from_hex("zz"), None);
-        assert_eq!(from_hex("あ"), None);
     }
 
     #[test]
@@ -2236,19 +2249,9 @@ mod tests {
 
     #[test]
     fn keeps_the_device_key() {
-        /// 落ちたテストでも一時フォルダーに残さないよう、手放すときにフォルダーごと消す
-        struct TempDir(PathBuf);
-
-        impl Drop for TempDir {
-            fn drop(&mut self) {
-                let _ = fs::remove_dir_all(&self.0);
-            }
-        }
-
-        let dir =
-            TempDir(std::env::temp_dir().join(format!("mawok-lan-test-{}", std::process::id())));
-        let _ = fs::remove_dir_all(&dir.0);
-        let path = dir.0.join(KEY_FILE_NAME);
+        let dir = crate::test_support::TempDir::new("lan-key");
+        // 初めて起動したときと同じく、置き場のフォルダーがまだ無い所から始める
+        let path = dir.join("data").join(KEY_FILE_NAME);
 
         let created = load_or_create_key(&path).unwrap();
         let loaded = load_or_create_key(&path).unwrap();

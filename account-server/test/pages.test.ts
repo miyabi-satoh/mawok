@@ -18,8 +18,7 @@ describe('homePage', () => {
 					until: 2_000_000_000,
 					plan: 'monthly',
 					trial: true,
-					renews: false,
-					displayUntil: 2_000_000_000
+					renews: false
 				}
 			})
 		);

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { balance, charge, grantFreeStatement, grantProStatement, proOf } from '../src/credits';
 import { pricing } from '../src/pricing';
 import { randomHex } from '../src/util';
-import { grantsOf, newAccount } from './helpers';
+import { addSubscription, FAR_FUTURE, grantsOf, newAccount } from './helpers';
 
 const { purchaseGrant: PURCHASE_GRANT, freeGrant: FREE_GRANT } = pricing(env);
 
@@ -206,12 +206,7 @@ describe('proOf', () => {
 	it('treats a subscription without an unrevoked Pro payment as a trial even after it is canceled', async () => {
 		const account = await newAccount();
 		const subscription = randomHex(16);
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
-			 VALUES (?, ?, 'monthly', ?, 'canceled', 0)`
-		)
-			.bind(subscription, account, 4_102_444_800)
-			.run();
+		await addSubscription(account, { id: subscription, status: 'canceled' });
 		expect(await proOf(env, account, 1)).toMatchObject({
 			active: true,
 			trial: true,
@@ -234,32 +229,20 @@ describe('proOf', () => {
 	it('uses Stripe cancel_at as the displayed last usable date and marks the subscription nonrenewing', async () => {
 		const account = await newAccount();
 		const cancelAt = 4_102_444_000;
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, cancel_at, created_at)
-			 VALUES (?, ?, 'monthly', 4_102_444_800, 'active', ?, 0)`
-		)
-			.bind(randomHex(16), account, cancelAt)
-			.run();
+		await addSubscription(account, { status: 'active', cancelAt });
 		expect(await proOf(env, account, 1)).toMatchObject({
 			active: true,
 			until: cancelAt,
-			displayUntil: cancelAt,
 			renews: false
 		});
 	});
 
 	it('keeps renewing when Stripe cancel_at is after the paid-through time', async () => {
 		const account = await newAccount();
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, cancel_at, created_at)
-			 VALUES (?, ?, 'monthly', 4_102_444_800, 'trialing', 4_102_444_801, 0)`
-		)
-			.bind(randomHex(16), account)
-			.run();
+		await addSubscription(account, { cancelAt: FAR_FUTURE + 1 });
 		expect(await proOf(env, account, 1)).toMatchObject({
 			active: true,
 			until: 4_102_444_800,
-			displayUntil: 4_102_444_800,
 			trial: true,
 			renews: true
 		});

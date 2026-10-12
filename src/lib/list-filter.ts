@@ -28,7 +28,7 @@ export function matchesFilter(query: string, ...texts: string[]): boolean {
  * 行は追わずに読むので、$derived の中で呼ぶと語を変えたときにだけ求め直す。
  * 行を書き換えるたびに求め直すと、当たらなくなった行が打っている途中で消えてしまうため
  */
-export function matchedIds<T extends { key: string }>(
+export function matchedKeys<T extends { key: string }>(
 	rows: () => T[],
 	query: string,
 	texts: (row: T) => string[]
@@ -44,7 +44,7 @@ export function matchedIds<T extends { key: string }>(
 	);
 }
 
-/** 当たった行だけを、並びのまま返す。ids が null（絞り込んでいない）ならすべて */
-export function shownRows<T extends { key: string }>(rows: T[], ids: Set<string> | null): T[] {
-	return ids ? rows.filter((row) => ids.has(row.key)) : rows;
+/** 当たった行だけを、並びのまま返す。keys が null（絞り込んでいない）ならすべて */
+export function shownRows<T extends { key: string }>(rows: T[], keys: Set<string> | null): T[] {
+	return keys ? rows.filter((row) => keys.has(row.key)) : rows;
 }

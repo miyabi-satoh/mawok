@@ -2,6 +2,7 @@ import { html } from 'hono/html';
 import type { HtmlEscapedString } from 'hono/utils/html';
 import { messages, type Lang } from './i18n';
 import type { AccountPro, Balance } from './credits';
+import type { ProPlan } from './pricing';
 import { PRO_TRIAL_DAYS } from './stripe';
 import { ACCOUNT, ACCOUNT_HOME, PRICING_PATH, PURCHASE_CONDITIONS } from './util';
 
@@ -427,7 +428,7 @@ export function confirmPage(lang: Lang, email: string, region: SaleRegion) {
 export function proConfirmPage(
 	lang: Lang,
 	email: string,
-	plan: 'monthly' | 'yearly',
+	plan: ProPlan,
 	region: SaleRegion,
 	{ trial, now }: { trial: boolean; now: number }
 ) {
@@ -504,8 +505,8 @@ export function homePage(
 								${
 									!pro.renews
 										? pro.trial
-											? t.proTrialCanceledUntil(proDate(pro.displayUntil!))
-											: t.proCanceledUntil(pro.plan!, proDate(pro.displayUntil!))
+											? t.proTrialCanceledUntil(proDate(pro.until!))
+											: t.proCanceledUntil(pro.plan!, proDate(pro.until!))
 										: pro.trial
 											? t.proTrialUntil(proDate(pro.until!))
 											: t.proUntil(pro.plan!, proDate(pro.until!))

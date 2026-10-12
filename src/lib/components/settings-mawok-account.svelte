@@ -1,6 +1,5 @@
 <script lang="ts">
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
-	import { listen } from '@tauri-apps/api/event';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
 	import { EVENTS } from '$lib/bindings/constants';
@@ -8,6 +7,8 @@
 	import type { MawokSignIn } from '$lib/bindings/MawokSignIn';
 	import type { MawokSignInEnded } from '$lib/bindings/MawokSignInEnded';
 	import type { Call } from '$lib/call';
+	import { mawokRemainingText } from '$lib/mawok-account';
+	import { onEvent } from '$lib/on-event';
 	import { m } from '$lib/paraglide/messages';
 
 	/**
@@ -36,17 +37,14 @@
 	/** 申し込みを頼んで、答えを待っている。続けて押して申し込みを重ねないよう、その間はボタンを止める */
 	let starting = $state(false);
 	// 出している申し込みの終わりだけを受ける。やり直す前の申し込みの終わりで、表示を戻さないように
-	$effect(() => {
-		const unlisten = listen<MawokSignInEnded>(EVENTS.MAWOK_SIGN_IN_ENDED, (event) => {
-			if (event.payload.id !== signingIn?.id) return;
+	$effect(() =>
+		onEvent<MawokSignInEnded>(EVENTS.MAWOK_SIGN_IN_ENDED, (ended) => {
+			if (ended.id !== signingIn?.id) return;
 			signingIn = null;
-			signInFailed = !event.payload.signedIn;
+			signInFailed = !ended.signedIn;
 			onchanged();
-		});
-		return () => {
-			unlisten.then((fn) => fn());
-		};
-	});
+		})
+	);
 
 	// 画面を閉じても、申し込みは時間切れまで Rust 側が待ち続ける。開き直したら、サインインの途中であることを出し直す
 	$effect(() => {
@@ -83,7 +81,7 @@
 				<Button variant="ghost" onclick={() => call('reopen_mawok_sign_in_page')}>
 					{m.settings_mawok_open_again()}
 				</Button>
-				<Button variant="ghost" onclick={cancelSignIn}>{m.settings_mawok_sign_in_cancel()}</Button>
+				<Button variant="ghost" onclick={cancelSignIn}>{m.common_cancel()}</Button>
 			</div>
 		{:else if signedIn === true}
 			<div class="flex items-center gap-2">
@@ -118,18 +116,14 @@
 		<!-- 答えが来るまでは出さない。Pro の人がサインインした直後に、料金の案内が一瞬出るのを避ける -->
 		<Field.Content>
 			<Button variant="outline" class="w-fit" onclick={() => call('open_mawok_pro_page')}>
-				{m.settings_devices_pro_buy()}
+				{m.settings_mawok_pro_pricing()}
 			</Button>
 		</Field.Content>
 	{/if}
 	<Field.Content>
 		<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 			<Field.Title>
-				{status
-					? m.settings_mawok_remaining({ percent: status.remainingPercent })
-					: status === null
-						? m.settings_mawok_status_unknown()
-						: ''}
+				{mawokRemainingText(status)}
 			</Field.Title>
 			<Button variant="outline" onclick={() => call('open_mawok_buy_page')}>
 				{m.settings_mawok_buy()}

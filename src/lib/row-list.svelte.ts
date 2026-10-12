@@ -5,8 +5,14 @@ import { coalescedSaver } from '$lib/saver';
 /** 一覧の1行。key は画面の要素を保つためだけに使い、設定の id は Rust 側へ渡す。 */
 export type Row<T> = T & { key: string };
 
-function withId<T extends object>(item: T): Row<T> {
+function withKey<T extends object>(item: T): Row<T> {
 	return { ...item, key: crypto.randomUUID() };
+}
+
+function withoutKey<T extends object>(row: Row<T>): T {
+	const item: Partial<Row<T>> = { ...row };
+	delete item.key;
+	return item as T;
 }
 
 /**
@@ -29,16 +35,16 @@ export class RowList<T extends { id: string }> {
 
 	constructor(
 		items: T[],
-		save: (rows: Row<T>[]) => Promise<T[] | undefined>,
+		save: (items: T[]) => Promise<T[] | undefined>,
 		isBlank: (item: T) => boolean
 	) {
 		this.#isBlank = isBlank;
 		// 前に開いたときに足したまま閉じた空の行は、写さない。次に保存したときに設定からも消える
-		this.rows = items.filter((item) => !isBlank(item)).map(withId);
+		this.rows = items.filter((item) => !isBlank(item)).map(withKey);
 		const saver = coalescedSaver(async () => {
 			const submitted = this.rows.map((row) => ({ ...row }));
 			this.#saving = true;
-			const saved = await save(submitted).finally(() => (this.#saving = false));
+			const saved = await save(submitted.map(withoutKey)).finally(() => (this.#saving = false));
 			if (!saved) return;
 			for (const [index, item] of saved.entries()) {
 				const row = this.rows.find((current) => current.key === submitted[index]?.key);
@@ -73,7 +79,7 @@ export class RowList<T extends { id: string }> {
 				const byPosition = force && previous[index]?.id === '' ? undefined : previous[index]?.key;
 				const key =
 					keyOf(item) ?? (byPosition && !used.includes(byPosition) ? byPosition : undefined);
-				if (!key) return withId(item);
+				if (!key) return withKey(item);
 				used.push(key);
 				return { ...item, key };
 			});
@@ -83,7 +89,7 @@ export class RowList<T extends { id: string }> {
 
 	/** 行を末尾に足し、足した行を返す */
 	add(...items: T[]): Row<T>[] {
-		const rows = items.map(withId);
+		const rows = items.map(withKey);
 		this.rows.push(...rows);
 		this.save();
 		return this.rows.slice(-rows.length);

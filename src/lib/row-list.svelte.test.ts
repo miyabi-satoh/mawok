@@ -44,7 +44,7 @@ describe('RowList の空の行', () => {
 
 	it('追加と並べ替えで設定の ID と同期の値を保つ', async () => {
 		type SyncedItem = { id: string; name: string; sync: boolean };
-		const save = vi.fn((items: Array<SyncedItem & { key: string }>) =>
+		const save = vi.fn((items: SyncedItem[]) =>
 			Promise.resolve(items.map((item) => ({ ...item, id: item.id || 'created-by-rust' })))
 		);
 		const rows = new RowList<SyncedItem>(
@@ -65,7 +65,12 @@ describe('RowList の空の行', () => {
 			{ id: 'first', sync: false },
 			{ id: 'second', sync: true }
 		]);
-		await vi.waitFor(() => expect(save).toHaveBeenLastCalledWith(rows.rows));
+		// 画面用の key は落として渡す
+		await vi.waitFor(() =>
+			expect(save).toHaveBeenLastCalledWith(
+				rows.rows.map(({ id, name, sync }) => ({ id, name, sync }))
+			)
+		);
 	});
 
 	it('途中に行が差し込まれても、key が重ならず、前からある行の key を保つ', () => {

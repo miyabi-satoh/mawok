@@ -19,14 +19,17 @@ import {
 	type Snippet
 } from '$lib/settings.svelte';
 import { callsOf } from '$lib/test-support/calls';
+import { emit } from '$lib/test-support/events';
 import { aiAction as ai, DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
 import Page from './+page.svelte';
+import { renderAt } from './render-at';
 
 // 設定を変えるコマンドは Rust 側にあるので、呼ばれた内容だけを見る
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(undefined)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 
 const invoked = vi.mocked(invoke);
+const listened = vi.mocked(listen);
 
 function view(
 	replacements: Replacement[] = [],
@@ -102,13 +105,6 @@ async function chooseFromRowMenu(
 	await screen.getByRole('menuitem', { name: item }).click();
 }
 
-/** 設定画面を描き、サイドバーで分類を選ぶ。開いたときは「一般」なので、ほかの分類の項目は選ぶまで隠れている */
-async function renderAt(category: () => string) {
-	const screen = await render(Page);
-	await screen.getByRole('tab', { name: category() }).click();
-	return screen;
-}
-
 /** 保存コマンドは、Rust が空の ID を補った行を返す。 */
 function savedRows(command: string, args: unknown) {
 	const key =
@@ -127,8 +123,8 @@ function savedRows(command: string, args: unknown) {
 beforeEach(() => {
 	invoked.mockClear();
 	invoked.mockImplementation((command, args) => Promise.resolve(savedRows(command, args)));
-	vi.mocked(listen).mockReset();
-	vi.mocked(listen).mockImplementation(() => Promise.resolve(() => {}));
+	listened.mockReset();
+	listened.mockImplementation(() => Promise.resolve(() => {}));
 	settings.current = view();
 });
 
@@ -474,15 +470,10 @@ describe('設定画面の定型文', () => {
 
 	it('下書きウィンドウから足した定型文を、開いている画面の並びにも足し、並び全体を保存し直す', async () => {
 		settings.current = { ...view(), snippets: snippetRows([confirm]) };
-		// 前のテストで描いた画面の受け口を呼ばないよう、この画面の分だけにする
-		vi.mocked(listen).mockClear();
 		const screen = await renderAt(m.settings_category_snippets);
 
 		const added = { name: '', body: 'よろしくお願いします' };
-		for (const [name, handler] of vi.mocked(listen).mock.calls) {
-			if (name === EVENTS.SNIPPET_ADDED)
-				handler({ event: name, id: 0, payload: snippetRows([added])[0] });
-		}
+		emit(listened, EVENTS.SNIPPET_ADDED, snippetRows([added])[0]);
 		await openRows(screen);
 
 		await expect
@@ -493,15 +484,11 @@ describe('設定画面の定型文', () => {
 
 	it('同期の知らせで届いた定型文が一覧に出て、その後の編集の保存に含まれる', async () => {
 		settings.current = { ...view(), snippets: snippetRows([confirm]) };
-		// 前のテストで描いた画面の受け口を呼ばないよう、この画面の分だけにする
-		vi.mocked(listen).mockClear();
 		const screen = await renderAt(m.settings_category_snippets);
 
 		const received = { name: '同期した行', body: '同期した本文' };
 		const synced = { ...view(), snippets: snippetRows([received, confirm]) };
-		for (const [name, handler] of vi.mocked(listen).mock.calls) {
-			if (name === EVENTS.SYNC_APPLIED) handler({ event: name, id: 0, payload: synced });
-		}
+		emit(listened, EVENTS.SYNC_APPLIED, synced);
 		await openRows(screen);
 		await expect
 			.element(screen.getByLabelText(m.settings_snippets_name()).nth(0))
@@ -741,13 +728,10 @@ describe('設定画面の下書きのフォント', () => {
 
 	it('同期の知らせで届いたフォント名を、その後の大きさの保存に使う', async () => {
 		settings.current = view([], 'keep', { family: 'Menlo', size: 16 });
-		vi.mocked(listen).mockClear();
 		const screen = await renderAt(m.settings_category_draft);
 
 		const synced = view([], 'keep', { family: 'HackGen', size: 16 });
-		for (const [name, handler] of vi.mocked(listen).mock.calls) {
-			if (name === EVENTS.SYNC_APPLIED) handler({ event: name, id: 0, payload: synced });
-		}
+		emit(listened, EVENTS.SYNC_APPLIED, synced);
 		await expect.element(screen.getByLabelText(m.settings_draft_font())).toHaveValue('HackGen');
 		await screen.getByLabelText(m.settings_draft_font_size()).fill('22');
 
@@ -1227,7 +1211,7 @@ describe('設定画面のホットキー', () => {
 	it('キャンセルを押すと、記録をやめてホットキーを戻す', async () => {
 		const screen = await startRecording();
 
-		await screen.getByRole('button', { name: m.settings_hotkey_cancel() }).click();
+		await screen.getByRole('button', { name: m.common_cancel() }).click();
 
 		await vi.waitFor(() => expect(commands()).toContain('resume_hotkey'));
 		await expect.element(screen.getByRole('button', { name: hotkeyButtonName })).toBeVisible();
@@ -1622,7 +1606,7 @@ describe('設定画面のデバイス', () => {
 		const screen = await renderAt(m.settings_category_devices);
 
 		await expect.element(screen.getByText(m.settings_devices_pro_description())).toBeVisible();
-		await screen.getByRole('button', { name: m.settings_devices_pro_buy() }).click();
+		await screen.getByRole('button', { name: m.settings_mawok_pro_pricing() }).click();
 		await vi.waitFor(() => expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1));
 	});
 
@@ -1704,29 +1688,18 @@ describe('設定画面のデバイス', () => {
 			.element(screen.getByText(m.settings_devices_offer_automatic({ seconds: 120 })))
 			.toBeVisible();
 		await expect.element(screen.getByRole('timer')).toBeVisible();
-		expect(
-			screen.getByRole('button', { name: m.settings_devices_offer_cancel() }).query()
-		).toBeNull();
+		expect(screen.getByRole('button', { name: m.common_cancel() }).query()).toBeNull();
 	});
 
 	it('自動でコードを出したイベントを受け取り、ポーリングせずに表示する', async () => {
-		let offered: ((event: { payload: PairingOffer }) => void) | undefined;
-		vi.mocked(listen).mockImplementation((event, handler) => {
-			if (event === EVENTS.PAIRING_CODE_OFFERED) {
-				offered = handler as unknown as (event: { payload: PairingOffer }) => void;
-			}
-			return Promise.resolve(() => {});
-		});
 		const screen = await renderAt(m.settings_category_devices);
 
-		offered?.({
-			payload: {
-				code: '654321',
-				remainingSeconds: 120,
-				automatic: true,
-				previousCodeWasWrong: false
-			}
-		});
+		emit(listened, EVENTS.PAIRING_CODE_OFFERED, {
+			code: '654321',
+			remainingSeconds: 120,
+			automatic: true,
+			previousCodeWasWrong: false
+		} satisfies PairingOffer);
 		await tick();
 
 		await expect.element(screen.getByText('654321')).toBeVisible();
@@ -1758,7 +1731,7 @@ describe('設定画面のデバイス', () => {
 		await expect
 			.element(screen.getByText(m.settings_devices_offer_waiting({ seconds: 119 })))
 			.toBeInTheDocument();
-		await screen.getByRole('button', { name: m.settings_devices_offer_cancel() }).click();
+		await screen.getByRole('button', { name: m.common_cancel() }).click();
 		await tick();
 		expect(vi.getTimerCount()).toBe(timersBeforeOffer);
 		vi.advanceTimersByTime(2_000);
@@ -1767,23 +1740,14 @@ describe('設定画面のデバイス', () => {
 	});
 
 	it('違う確認コードの後に出したコードでは、その案内を出す', async () => {
-		let offered: ((event: { payload: PairingOffer }) => void) | undefined;
-		vi.mocked(listen).mockImplementation((event, handler) => {
-			if (event === EVENTS.PAIRING_CODE_OFFERED) {
-				offered = handler as unknown as (event: { payload: PairingOffer }) => void;
-			}
-			return Promise.resolve(() => {});
-		});
 		const screen = await renderAt(m.settings_category_devices);
 
-		offered?.({
-			payload: {
-				code: '654321',
-				remainingSeconds: 120,
-				automatic: false,
-				previousCodeWasWrong: true
-			}
-		});
+		emit(listened, EVENTS.PAIRING_CODE_OFFERED, {
+			code: '654321',
+			remainingSeconds: 120,
+			automatic: false,
+			previousCodeWasWrong: true
+		} satisfies PairingOffer);
 		await tick();
 
 		await expect
@@ -2311,14 +2275,7 @@ describe('設定画面の更新（Mac）', () => {
 			.element(screen.getByText(m.settings_update_available({ version: '1.0.1' })))
 			.toBeVisible();
 
-		const handler = vi
-			.mocked(listen)
-			.mock.calls.findLast(([event]) => event === EVENTS.UPDATE_CHANGED)?.[1];
-		handler?.({
-			event: EVENTS.UPDATE_CHANGED,
-			id: 0,
-			payload: { status: { state: 'upToDate' }, draftHasText: false }
-		});
+		emit(listened, EVENTS.UPDATE_CHANGED, { status: { state: 'upToDate' }, draftHasText: false });
 
 		await expect.element(screen.getByText(m.settings_update_up_to_date())).toBeVisible();
 		await screen.getByRole('button', { name: m.settings_update_check() }).click();

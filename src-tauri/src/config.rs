@@ -749,7 +749,7 @@ fn bool_field(table: &dyn TableLike, name: &str, default: bool) -> Option<bool> 
     }
 }
 
-fn valid_item_id(id: &str) -> bool {
+pub(crate) fn valid_item_id(id: &str) -> bool {
     id.len() == 32
         && id
             .bytes()
@@ -759,18 +759,17 @@ fn valid_item_id(id: &str) -> bool {
 fn new_item_id() -> Result<String, String> {
     let mut bytes = [0; 16];
     getrandom::fill(&mut bytes).map_err(|error| format!("random item id: {error}"))?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(crate::hex::to_hex(&bytes))
 }
 
-fn repair_item_ids<T>(
-    items: &mut [T],
-    id: impl Fn(&T) -> &str,
-    set_id: impl Fn(&mut T, String),
-) -> Result<bool, String> {
+/// 空・不正・重複の ID を、新しいランダムな値へ替える。
+///
+/// 画面から足した行もこの入口を通るので、ID は Rust 側だけで作る。
+pub(crate) fn repair_item_ids<T: SyncRow>(items: &mut [T]) -> Result<bool, String> {
     let mut seen = std::collections::HashSet::new();
     let mut changed = false;
     for item in items {
-        let item_id = id(item);
+        let item_id = item.id();
         if !valid_item_id(item_id) || !seen.insert(item_id.to_string()) {
             let next = loop {
                 let next = new_item_id()?;
@@ -778,32 +777,72 @@ fn repair_item_ids<T>(
                     break next;
                 }
             };
-            set_id(item, next);
+            item.set_id(next);
             changed = true;
         }
     }
     Ok(changed)
 }
 
-/// 空・不正・重複の ID を、種類ごとに新しいランダムな値へ替える。
-///
-/// 画面から足した行もこの入口を通るので、ID は Rust 側だけで作る。
-pub fn repair_item_ids_in_config(config: &mut Config) -> Result<bool, String> {
-    let replacements = repair_item_ids(
-        &mut config.replacements,
-        |item| &item.id,
-        |item, id| item.id = id,
-    )?;
-    let snippets = repair_item_ids(
-        &mut config.snippets,
-        |item| &item.id,
-        |item, id| item.id = id,
-    )?;
+/// 設定の行の ID を、種類ごとに直す。
+fn repair_item_ids_in_config(config: &mut Config) -> Result<bool, String> {
+    let replacements = repair_item_ids(&mut config.replacements)?;
+    let snippets = repair_item_ids(&mut config.snippets)?;
     let actions = match &mut config.actions {
-        Some(actions) => repair_item_ids(actions, |item| &item.id, |item, id| item.id = id)?,
+        Some(actions) => repair_item_ids(actions)?,
         None => false,
     };
     Ok(replacements || snippets || actions)
+}
+
+/// 同期する行（置き換え辞書・定型文・アクション）。ID で同じ行を見分け、行ごとに同期するかを持つ
+pub(crate) trait SyncRow: Serialize + for<'a> Deserialize<'a> + Clone {
+    fn id(&self) -> &str;
+    fn set_id(&mut self, id: String);
+    fn sync(&self) -> bool;
+    fn set_sync(&mut self, sync: bool);
+}
+impl SyncRow for Replacement {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn set_id(&mut self, id: String) {
+        self.id = id
+    }
+    fn sync(&self) -> bool {
+        self.sync
+    }
+    fn set_sync(&mut self, sync: bool) {
+        self.sync = sync
+    }
+}
+impl SyncRow for Snippet {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn set_id(&mut self, id: String) {
+        self.id = id
+    }
+    fn sync(&self) -> bool {
+        self.sync
+    }
+    fn set_sync(&mut self, sync: bool) {
+        self.sync = sync
+    }
+}
+impl SyncRow for Action {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn set_id(&mut self, id: String) {
+        self.id = id
+    }
+    fn sync(&self) -> bool {
+        self.sync
+    }
+    fn set_sync(&mut self, sync: bool) {
+        self.sync = sync
+    }
 }
 
 impl Row for Replacement {
@@ -1588,12 +1627,7 @@ pub fn save(path: &Path, config: &Config) -> io::Result<()> {
 }
 
 /// 読めた行ごとに、振り直した ID だけを書く。ほかの項目の既定値まで足すと、手書きの書式を読み込みだけで変えてしまう。
-fn write_repaired_item_ids<T: Row>(
-    root: &mut Table,
-    key: &str,
-    rows: &[T],
-    id: impl Fn(&T) -> &str,
-) {
+fn write_repaired_item_ids<T: Row + SyncRow>(root: &mut Table, key: &str, rows: &[T]) {
     let mut next = rows.iter();
     let Some(item) = root.get_mut(key) else {
         return;
@@ -1603,7 +1637,7 @@ fn write_repaired_item_ids<T: Row>(
             return;
         }
         let row = next.next().expect("every read row is in the config");
-        let id = id(row);
+        let id = row.id();
         if item_id_field(table) != id {
             set_value(table, "id", Value::from(id.to_string()));
         }
@@ -1634,10 +1668,10 @@ fn save_repaired_item_ids(path: &Path, text: &str, config: &Config) -> io::Resul
         )
     })?;
     let root = document.as_table_mut();
-    write_repaired_item_ids(root, key::REPLACEMENTS, &config.replacements, |row| &row.id);
-    write_repaired_item_ids(root, key::SNIPPETS, &config.snippets, |row| &row.id);
+    write_repaired_item_ids(root, key::REPLACEMENTS, &config.replacements);
+    write_repaired_item_ids(root, key::SNIPPETS, &config.snippets);
     if let Some(actions) = &config.actions {
-        write_repaired_item_ids(root, key::ACTIONS, actions, |row| &row.id);
+        write_repaired_item_ids(root, key::ACTIONS, actions);
     }
     atomic_file::write(path, document.to_string().as_bytes())
 }
@@ -1692,10 +1726,7 @@ pub fn save_sync_backup(path: &Path, now: SystemTime) -> io::Result<Option<PathB
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let directory = path
-        .parent()
-        .expect("the settings file has a parent")
-        .join(SYNC_BACKUPS_DIR);
+    let directory = sync_backups_dir(path);
     fs::create_dir_all(&directory)?;
     let name = sync_backup_name(now);
     let target = directory.join(&name);
@@ -1724,11 +1755,15 @@ pub fn valid_sync_backup_name(name: &str) -> bool {
             .all(u8::is_ascii_digit)
 }
 
-pub fn sync_backup_paths(path: &Path) -> io::Result<Vec<PathBuf>> {
-    let directory = path
-        .parent()
+/// 控えの置き場。設定ファイルと同じフォルダーの下
+fn sync_backups_dir(path: &Path) -> PathBuf {
+    path.parent()
         .expect("the settings file has a parent")
-        .join(SYNC_BACKUPS_DIR);
+        .join(SYNC_BACKUPS_DIR)
+}
+
+pub fn sync_backup_paths(path: &Path) -> io::Result<Vec<PathBuf>> {
+    let directory = sync_backups_dir(path);
     let mut paths = match fs::read_dir(directory) {
         Ok(entries) => entries
             .filter_map(Result::ok)
@@ -1755,11 +1790,7 @@ pub fn load_sync_backup(path: &Path, name: &str) -> io::Result<Config> {
             "invalid sync backup name",
         ));
     }
-    let target = path
-        .parent()
-        .expect("the settings file has a parent")
-        .join(SYNC_BACKUPS_DIR)
-        .join(name);
+    let target = sync_backups_dir(path).join(name);
     let text = fs::read_to_string(target)?;
     parse(&text)
         .map(|(config, _, _)| config)
@@ -1962,6 +1993,7 @@ fn utc_stamp(time: SystemTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TempDir;
     use std::time::Duration;
 
     type ConfigChange = fn(&mut Config);
@@ -1976,34 +2008,33 @@ mod tests {
         character.to_string().repeat(32)
     }
 
-    /// テスト用の設定ファイルの場所。落ちたテストでも一時フォルダーに残さないよう、手放すときにフォルダーごと消す
-    struct TempPath(PathBuf);
+    /// テスト用の設定ファイルの場所。手放すと、置いたフォルダーごと消える
+    struct TempPath {
+        path: PathBuf,
+        _dir: TempDir,
+    }
 
     impl std::ops::Deref for TempPath {
         type Target = PathBuf;
 
         fn deref(&self) -> &PathBuf {
-            &self.0
+            &self.path
         }
     }
 
     impl AsRef<Path> for TempPath {
         fn as_ref(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempPath {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(self.0.parent().unwrap());
+            &self.path
         }
     }
 
     fn temp_path(name: &str) -> TempPath {
-        let dir =
-            std::env::temp_dir().join(format!("mawok-config-test-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        TempPath(dir.join(FILE_NAME))
+        let dir = TempDir::new(&format!("config-{name}"));
+        TempPath {
+            // 設定のフォルダーがまだ無い所から始める
+            path: dir.join("settings").join(FILE_NAME),
+            _dir: dir,
+        }
     }
 
     /// 設定ファイルを置く
@@ -2031,7 +2062,7 @@ mod tests {
         assert!(valid_sync_backup_name("20260913T063005Z.toml"));
         assert!(!valid_sync_backup_name("../config.toml"));
 
-        let directory = path.parent().unwrap().join(SYNC_BACKUPS_DIR);
+        let directory = sync_backups_dir(&path);
         for day in 1..=11 {
             fs::write(
                 directory.join(sync_backup_name(

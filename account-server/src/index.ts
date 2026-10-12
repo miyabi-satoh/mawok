@@ -3,23 +3,17 @@
  *
  * - `/v1/links/token`: Mawok を結ぶときに届けたコードを、アプリ用のトークンに替える。
  * - `/v1/ai`・`/v1/balance`・`/v1/token`: アプリ用のトークンで呼ぶ、中継・残高・サインアウト。
- * - `/v1/stripe/webhook`: Stripe からの支払いの知らせ。
+ * - `/v1/sync`: アプリ用のトークンで呼ぶ、Pro の設定と履歴の同期。
+ * - `/v1/stripe/webhook`: Stripe からの支払いの知らせ (処理は src/webhook.ts)。
  * - `/account/`: 人が開く画面 (サインイン・Mawok を結ぶ・買う)。
  * - それ以外: 紹介と規約類の静的なページ (wrangler.jsonc の assets)。
  */
 import { Hono, type Context } from 'hono';
 import { csrf } from 'hono/csrf';
 import { parsePrompt, relay } from './ai';
-import {
-	balance,
-	charge,
-	grantFreeStatement,
-	grantProStatement,
-	proOf,
-	proUntilSql
-} from './credits';
+import { balance, charge, grantFreeStatement, proOf, topUp } from './credits';
 import { messages, resolveLang, type Lang } from './i18n';
-import { pricing } from './pricing';
+import { isProPlan, pricing, type ProPlan } from './pricing';
 import { sendMail } from './mail';
 import {
 	approvePage,
@@ -39,17 +33,10 @@ import {
 import { appleConfig, finishAppleSignIn, startAppleSignIn } from './apple';
 import { finishGoogleSignIn, googleConfig, startGoogleSignIn } from './google';
 import {
-	confirmPurchase,
-	confirmProInvoice,
 	createProCheckoutSession,
 	billingPortalUrl,
-	cancelSubscription,
 	expireCheckoutSession,
-	getSubscription,
-	isPaidProInvoice,
 	createCheckoutSession,
-	PRODUCT,
-	ProInvoiceError,
 	proForSale,
 	StripeError,
 	stripeConfig,
@@ -58,6 +45,7 @@ import {
 	verifyWebhook
 } from './stripe';
 import { currentAccount, endSession, startSession } from './session';
+import { forgetOldRecords, handleStripeEvent, markStripeEvent } from './webhook';
 import {
 	getSync,
 	hasSyncPro,
@@ -94,11 +82,6 @@ const PURCHASE_CHECKS = 10;
  * (Stripe は頼むたびに期限が30分以上先かを確かめる)。
  */
 const CHECKOUT_TTL = 35 * 60;
-/**
- * アカウントを消したあと、購入の記録を残す期間。適格請求書の写しと帳簿の保存期間 (7年) に、うるう年の分を足す
- * (3つのアプリで揃える決まり)。使った分の記録も同じ期間残す。
- */
-const PURCHASE_RETENTION = 7 * 366 * 24 * 60 * 60;
 /**
  * 中継の最中とみなす長さ。Gemini を待つ上限 (src/ai.ts) より長くする。
  * Worker が途中で止まって印が残っても、これを過ぎれば次の中継を受ける。
@@ -191,12 +174,9 @@ app.get('/v1/balance', async (c) => {
 	const account = await c.env.DB.prepare('SELECT id, email FROM accounts WHERE id = ?')
 		.bind(accountId)
 		.first<{ id: string; email: string }>();
-	// 無料の分を取りこぼしていれば、ここで付け直す (→ src/credits.ts)。
-	await grantFreeStatement(c.env, accountId).run();
-	const pro = await proOf(c.env, accountId);
-	if (pro.active && !pro.trial) await grantProStatement(c.env, accountId, pro).run();
+	const pro = await topUp(c.env, accountId);
 	const { remaining, percent } = await balance(c.env, accountId);
-	const { renews: _renews, displayUntil: _displayUntil, ...proResponse } = pro;
+	const { renews: _renews, ...proResponse } = pro;
 	return c.json({
 		account_id: account?.id,
 		email: account?.email,
@@ -252,9 +232,7 @@ app.put('/v1/sync', async (c) => {
 	if (result.error === 'key_mismatch') return c.json({ error: result.error }, 409);
 	if (result.error === 'too_large')
 		return c.json({ error: result.error, limit: result.limit }, 413);
-	if (result.error === 'conflict')
-		return c.json({ error: result.error, conflicts: result.conflicts }, 409);
-	return c.json({ error: 'invalid_request' }, 400);
+	return c.json({ error: result.error, conflicts: result.conflicts }, 409);
 });
 
 app.post('/v1/sync/reset', async (c) => {
@@ -276,10 +254,7 @@ app.post('/v1/ai', async (c) => {
 	if (prompt === undefined) return c.json({ error: 'bad_request' }, 400);
 	if (prompt === 'too_long') return c.json({ error: 'too_long' }, 413);
 	const { rates } = pricing(c.env);
-	// 無料の分を取りこぼしていれば、ここで付け直す (→ src/credits.ts)。
-	await grantFreeStatement(c.env, accountId).run();
-	const pro = await proOf(c.env, accountId);
-	if (pro.active && !pro.trial) await grantProStatement(c.env, accountId, pro).run();
+	await topUp(c.env, accountId);
 	const t = now();
 	// 同じアカウントは同時に1件だけ。印を取ってから残りを確かめるので、並べて送って残りを超えて使わせないように。
 	const owner = randomHex(16);
@@ -356,275 +331,6 @@ app.post('/v1/stripe/webhook', async (c) => {
 	await forgetOldRecords(c.env).catch((e) => console.error('failed to forget old records', e));
 	return c.json({ received: true });
 });
-
-/**
- * 保存の期間を過ぎた記録を消す。購入の台帳は、アカウントから外れて期間を過ぎたもの (期間は外した日時から数える。
- * アカウントが無いまま届いた購入は、購入の日時から)。使った分の記録は、購入の分は台帳と一緒に消え、無料の分は日時で消す。
- * 知らせは少ないので、受けるたびに片付ける。
- */
-function forgetOldRecords(env: Env) {
-	const before = now() - PURCHASE_RETENTION;
-	return env.DB.batch([
-		env.DB.prepare(
-			`DELETE FROM purchases
-			 WHERE account_id IS NULL AND coalesce(detached_at, created_at) <= ?
-			   AND NOT EXISTS (SELECT 1 FROM grants WHERE purchase_id = purchases.id)`
-		).bind(before),
-		env.DB.prepare('DELETE FROM consumptions WHERE purchase_id IS NULL AND created_at <= ?').bind(
-			before
-		),
-		env.DB.prepare('DELETE FROM stripe_revoked_payments WHERE created_at <= ?').bind(before)
-	]);
-}
-
-function markStripeEvent(env: Env, id: string, status: 'done' | 'failed') {
-	return env.DB.prepare('UPDATE stripe_events SET status = ?, updated_at = ? WHERE id = ?')
-		.bind(status, now(), id)
-		.run();
-}
-
-/** 同じ Stripe のアカウントのほかの製品の知らせも届くので、metadata の印で見分け、ほかは何もしない。 */
-async function handleStripeEvent(
-	env: Env,
-	config: StripeConfig,
-	type: string,
-	object: Record<string, unknown>
-): Promise<'failed' | void> {
-	switch (type) {
-		case 'invoice.paid': {
-			if (!proForSale(config)) {
-				if (await isPaidProInvoice(config, String(object.id))) {
-					await reportProInvoiceProblem(
-						env,
-						String(object.id),
-						'Pro の Price がそろっていません。'
-					);
-					return 'failed';
-				}
-				return;
-			}
-			let paid;
-			try {
-				paid = await confirmProInvoice(config, String(object.id));
-			} catch (e) {
-				if (!(e instanceof ProInvoiceError)) throw e;
-				await reportProInvoiceProblem(env, String(object.id), e.message);
-				return 'failed';
-			}
-			if (!paid) return;
-			const accountId = paid.subscription.metadata?.account_id;
-			const t = now();
-			const account = accountId
-				? await env.DB.prepare('SELECT id FROM accounts WHERE id = ?')
-						.bind(accountId)
-						.first<{ id: string }>()
-				: null;
-			const knownSubscription = account
-				? await env.DB.prepare('SELECT 1 FROM subscriptions WHERE id = ? AND account_id = ?')
-						.bind(paid.subscription.id, account.id)
-						.first()
-				: null;
-			const revokedPayment =
-				'(SELECT created_at FROM stripe_revoked_payments WHERE payment_intent_id = ?)';
-			await env.DB.batch([
-				env.DB.prepare(
-					`INSERT INTO subscriptions (id, account_id, plan, stripe_customer_id, paid_through, status, created_at)
-					 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
-					 WHERE ?2 IS NOT NULL AND ?6 != 'canceled' AND ${revokedPayment.replace('?', '?8')} IS NULL
-					   AND (?10 = 1 OR NOT EXISTS (
-					     SELECT 1 FROM subscriptions
-					     WHERE account_id = ?2 AND id != ?1 AND revoked_at IS NULL AND ${proUntilSql} > ?7
-					   ))
-					 ON CONFLICT (id) DO UPDATE SET plan = excluded.plan, stripe_customer_id = excluded.stripe_customer_id,
-					 paid_through = max(subscriptions.paid_through, excluded.paid_through), status = excluded.status
-					 WHERE subscriptions.account_id IS NOT NULL AND subscriptions.revoked_at IS NULL
-					 AND subscriptions.status != 'canceled'
-					 AND ${revokedPayment.replace('?', '?9')} IS NULL`
-				).bind(
-					paid.subscription.id,
-					account?.id ?? null,
-					paid.plan,
-					paid.subscription.customer,
-					paid.periodEnd,
-					paid.subscription.status,
-					t,
-					paid.paymentIntentId,
-					paid.paymentIntentId,
-					knownSubscription ? 1 : 0
-				),
-				env.DB.prepare(
-					`UPDATE subscriptions SET cancel_at_period_end = ?, cancel_at = ?
-					 WHERE id = ? AND account_id IS NOT NULL AND revoked_at IS NULL AND status != 'canceled'`
-				).bind(
-					paid.subscription.cancel_at_period_end === true ? 1 : 0,
-					paid.subscription.cancel_at ?? null,
-					paid.subscription.id
-				),
-				// 試用の 0 円請求書は、売上の台帳に残さない。
-				...(paid.amount === 0 || !paid.paymentIntentId
-					? []
-					: [
-							env.DB.prepare(
-								`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
-						 amount, currency, managed_payments, card_country, buyer_country, domestic, stripe_subscription_id, created_at, revoked_at)
-							 VALUES (?, ?, 'mawok-pro', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-						 ${revokedPayment.replace('?', '?13')})
-								 ON CONFLICT DO NOTHING`
-							).bind(
-								randomHex(16),
-								account?.id ?? null,
-								`invoice:${paid.invoiceId}`,
-								paid.paymentIntentId,
-								paid.amount,
-								paid.currency,
-								paid.managedPayments ? 1 : 0,
-								paid.cardCountry,
-								paid.buyerCountry,
-								paid.domestic ? 1 : 0,
-								paid.subscription.id,
-								t,
-								paid.paymentIntentId
-							)
-						])
-			]);
-			const revoked =
-				paid.paymentIntentId &&
-				(await env.DB.prepare('SELECT 1 FROM stripe_revoked_payments WHERE payment_intent_id = ?')
-					.bind(paid.paymentIntentId)
-					.first());
-			const duplicate =
-				!knownSubscription && account && paid.subscription.status !== 'canceled' && !revoked
-					? await env.DB.prepare(
-							`SELECT 1 FROM subscriptions
-							 WHERE account_id = ? AND id != ? AND revoked_at IS NULL AND ${proUntilSql} > ?`
-						)
-							.bind(account.id, paid.subscription.id, t)
-							.first()
-					: null;
-			// 返金・不審請求が先に届いていたときは、期間を延ばさず Stripe 側も打ち切る。
-			if (!account || duplicate || revoked) await cancelSubscription(config, paid.subscription.id);
-			if (duplicate) {
-				await reportProInvoiceProblem(
-					env,
-					String(object.id),
-					'同じアカウントに、まだ有効な別の Pro のサブスクがあります。返金は運営で判断します。'
-				);
-				return 'failed';
-			}
-			return;
-		}
-		case 'customer.subscription.updated':
-		case 'customer.subscription.deleted': {
-			const row = await env.DB.prepare('SELECT id, status FROM subscriptions WHERE id = ?')
-				.bind(String(object.id))
-				.first<{ id: string; status: string }>();
-			if (!row || row.status === 'canceled') return;
-			const sub = await getSubscription(config, row.id);
-			await env.DB.prepare(
-				"UPDATE subscriptions SET status = ?, cancel_at_period_end = ?, cancel_at = ? WHERE id = ? AND status != 'canceled'"
-			)
-				.bind(sub.status, sub.cancel_at_period_end === true ? 1 : 0, sub.cancel_at ?? null, row.id)
-				.run();
-			return;
-		}
-		// カードは completed の時点で払われている。MP の Session では後から払う方法も選べ、払われると async_payment_succeeded が届く。
-		case 'checkout.session.completed':
-		case 'checkout.session.async_payment_succeeded': {
-			const metadata = object.metadata as Record<string, string> | null;
-			if (metadata?.product !== PRODUCT || object.payment_status !== 'paid') return;
-			const purchase = await confirmPurchase(config, String(object.id));
-			if (!purchase) return;
-			// 台帳に残してから、残高を付ける。1つのトランザクションにし、確かめる処理と付ける処理を分けない。
-			// アカウントが無ければ、台帳には結び付き無しで残し、残高は付けない。
-			// 返金・不審請求の知らせが先に届いていれば、取り消し済みとして残し、残高は付けない。
-			const t = now();
-			await env.DB.batch([
-				env.DB.prepare(
-					`INSERT INTO purchases
-					   (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
-					    amount, currency, managed_payments, card_country, buyer_country, domestic, created_at,
-					    revoked_at)
-					 VALUES (?1, (SELECT id FROM accounts WHERE id = ?2), ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12, ?11,
-					   (SELECT created_at FROM stripe_revoked_payments WHERE payment_intent_id = ?5))
-					 ON CONFLICT DO NOTHING`
-				).bind(
-					randomHex(16),
-					purchase.accountId,
-					PRODUCT,
-					purchase.sessionId,
-					purchase.paymentIntentId,
-					purchase.amount,
-					purchase.currency,
-					purchase.managedPayments ? 1 : 0,
-					purchase.cardCountry,
-					purchase.buyerCountry,
-					t,
-					purchase.domestic ? 1 : 0
-				),
-				env.DB.prepare(
-					`INSERT INTO grants (id, account_id, purchase_id, granted, remaining, created_at)
-					 SELECT ?1, account_id, id, ?2, ?2, ?3 FROM purchases
-					 WHERE stripe_checkout_session_id = ?4 AND account_id IS NOT NULL AND revoked_at IS NULL
-					 ON CONFLICT DO NOTHING`
-				).bind(randomHex(16), pricing(env).purchaseGrant, t, purchase.sessionId),
-				// 支払いの画面の予約を外す。次の買い足しで、払い終えた画面へ送らないように。
-				env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(purchase.accountId)
-			]);
-			return;
-		}
-		// 全額を返金したとき・不審請求を申し立てられたときは、その購入の残りを取り消す。使った分は取り戻さない。
-		case 'charge.refunded':
-		case 'charge.dispute.created': {
-			if (type === 'charge.refunded' && object.refunded !== true) return;
-			if (typeof object.payment_intent !== 'string') return;
-			// 付ける知らせが後から届いても付けないよう、取り消した支払いを覚えておく。台帳の行は消さない。
-			const t = now();
-			await env.DB.batch([
-				env.DB.prepare(
-					`INSERT INTO stripe_revoked_payments (payment_intent_id, created_at) VALUES (?, ?)
-					 ON CONFLICT DO NOTHING`
-				).bind(object.payment_intent, t),
-				env.DB.prepare(
-					`UPDATE purchases SET revoked_at = ?
-					 WHERE stripe_payment_intent_id = ? AND revoked_at IS NULL`
-				).bind(t, object.payment_intent),
-				env.DB.prepare(
-					`UPDATE grants SET revoked = revoked + remaining, remaining = 0 WHERE purchase_id IN
-					   (SELECT id FROM purchases WHERE stripe_payment_intent_id = ?)`
-				).bind(object.payment_intent),
-				env.DB.prepare(
-					`UPDATE grants SET revoked = revoked + remaining, remaining = 0
-					 WHERE account_id = (SELECT account_id FROM purchases WHERE stripe_payment_intent_id = ?1)
-					   AND (SELECT product FROM purchases WHERE stripe_payment_intent_id = ?1) = 'mawok-pro'
-					   AND kind = 'pro' AND expires_at > ?2
-					   -- 二重に払われた片方を返金しても、残るサブスクの Pro で付けた分は取り消さない
-					   AND NOT EXISTS (
-					     SELECT 1 FROM subscriptions
-					     WHERE account_id = grants.account_id AND revoked_at IS NULL AND ${proUntilSql} > ?2
-					       AND id != (SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?1))`
-				).bind(object.payment_intent, t),
-				env.DB.prepare(
-					`UPDATE subscriptions SET revoked_at = coalesce(revoked_at, ?)
-					 WHERE id = (SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?)`
-				).bind(t, object.payment_intent)
-			]);
-			const sub = await env.DB.prepare(
-				'SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?'
-			)
-				.bind(object.payment_intent)
-				.first<{ stripe_subscription_id: string | null }>();
-			if (sub?.stripe_subscription_id) await cancelSubscription(config, sub.stripe_subscription_id);
-			return;
-		}
-	}
-}
-
-async function reportProInvoiceProblem(env: Env, invoiceId: string, reason: string) {
-	const subject = '[Mawok] 請求書で Pro を付けられませんでした';
-	const text = `請求書 ${invoiceId} は払われましたが、Pro を付けていません。\n\nわけ: ${reason}`;
-	if (env.OPERATOR_EMAIL) return sendMail(env, env.OPERATOR_EMAIL, subject, text);
-	console.error(`${subject}\n${text}`);
-}
 
 // ---- 人が開く画面 ----
 
@@ -967,16 +673,26 @@ function saleRegion(c: Context<App>): SaleRegion | undefined {
 	return usesManagedPayments(buyerCountry(c)) ? 'overseas' : 'domestic';
 }
 
+function notForSalePage(lang: Lang) {
+	return messagePage(lang, messages[lang].buyTitle, messages[lang].notForSale);
+}
+function proUnavailablePage(lang: Lang) {
+	return messagePage(lang, messages[lang].proTitle, messages[lang].proUnavailable);
+}
+
 /** 料金ページから来る、支払いの直前の最終確認画面。 */
 accountApp.get('/buy', async (c) => {
 	const lang = resolveLang(c);
 	const account = await currentAccount(c);
-	if (!account) return c.html(signIn(c, lang, `${ACCOUNT}/buy`));
 	const plan = c.req.query('plan');
-	if (plan === 'monthly' || plan === 'yearly') {
+	// サインインの後に同じ最終確認へ戻れるよう、選んだプランを戻り先に残す。
+	if (!account)
+		return c.html(
+			signIn(c, lang, isProPlan(plan) ? `${ACCOUNT}/buy?plan=${plan}` : `${ACCOUNT}/buy`)
+		);
+	if (isProPlan(plan)) {
 		const config = stripeConfig(c.env);
-		if (!config || !proForSale(config))
-			return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proUnavailable), 404);
+		if (!config || !proForSale(config)) return c.html(proUnavailablePage(lang), 404);
 		const pro = await proOf(c.env, account.id);
 		if (pro.active) return c.redirect(ACCOUNT_HOME, 303);
 		const trial = !(await hadSubscription(c.env, account.id));
@@ -988,8 +704,7 @@ accountApp.get('/buy', async (c) => {
 		);
 	}
 	const region = saleRegion(c);
-	if (!region)
-		return c.html(messagePage(lang, messages[lang].buyTitle, messages[lang].notForSale), 404);
+	if (!region) return c.html(notForSalePage(lang), 404);
 	return c.html(confirmPage(lang, account.email, region));
 });
 
@@ -1002,27 +717,72 @@ accountApp.post('/buy', async (c) => {
 	const account = await currentAccount(c);
 	if (!account) return c.html(signIn(c, lang, next), 401);
 	const config = stripeConfig(c.env);
-	if (!config)
-		return c.html(messagePage(lang, messages[lang].buyTitle, messages[lang].notForSale), 404);
-	if (proPlan === 'monthly' || proPlan === 'yearly')
-		return startProCheckout(c, account, config, proPlan, lang, next);
-	// 支払いの画面の予約を取る。開いている画面があれば同じ画面へ送り、2つのタブや、確かめを待つ間の買い直しで
-	// 二重に払わせないように。払い終えた画面を開き直すと、Stripe が払い終えたことを示す。
+	if (!config) return c.html(notForSalePage(lang), 404);
+	if (isProPlan(proPlan)) return startProCheckout(c, account, config, proPlan, lang, next);
+	return openCheckout(c, account, config, lang, next, '', messages[lang].buyTitle, (checkout) => {
+		const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang });
+		return createCheckoutSession(config, {
+			...checkout.session,
+			// `{CHECKOUT_SESSION_ID}` は Stripe が置き換える (URLSearchParams に通すと括弧が符号化されるので、後ろに足す)。
+			successUrl: `${checkout.origin}${ACCOUNT}/buy/done?${done}&session_id={CHECKOUT_SESSION_ID}`,
+			// Stripe の画面で戻ったら、買い直せる最終確認の画面へ戻す。
+			cancelUrl: `${checkout.origin}${ACCOUNT}/buy?lang=${checkout.lang}`,
+			submitMessage: checkout.session.managedPayments
+				? undefined
+				: messages[checkout.lang].checkoutNote(LEGAL_PAGES.tokushoho),
+			idempotencyKey: `mawok-checkout-${checkout.id}`
+		});
+	});
+});
+
+/** 支払いの画面の予約。`session` は Checkout Session を作るときにそのまま渡す分。 */
+type Checkout<P> = {
+	id: string;
+	/** 予約に残っている売りもの。ほかのタブが先に取った予約なら、押したものと違うことがある。 */
+	price: P;
+	next: string;
+	lang: Lang;
+	origin: string;
+	session: {
+		accountId: string;
+		email: string;
+		lang: Lang;
+		expiresAt: number;
+		managedPayments: boolean;
+		buyerCountry?: string;
+	};
+};
+
+/**
+ * 支払いの画面の予約を取り、画面を作って送る。開いている画面があれば同じ画面へ送り、2つのタブや、確かめを待つ間の買い直しで
+ * 二重に払わせないように。払い終えた画面を開き直すと、Stripe が払い終えたことを示す。
+ * `price` は残高なら空、Pro ならプラン。違うものを押し直すと、古い支払い画面は閉じる。
+ */
+async function openCheckout<P extends '' | ProPlan>(
+	c: Context<App>,
+	account: { id: string; email: string },
+	config: StripeConfig,
+	lang: Lang,
+	next: string,
+	price: P,
+	title: string,
+	create: (checkout: Checkout<P>) => Promise<{ id: string; url: string }>
+) {
 	const t = now();
 	const old = await c.env.DB.prepare(
 		'SELECT id, price, session_id FROM checkouts WHERE account_id = ? AND expires_at > ?'
 	)
 		.bind(account.id, t)
 		.first<{ id: string; price: string; session_id: string | null }>();
-	if (old && old.price !== '') {
+	if (old && old.price !== price) {
 		if (old.session_id) await expireCheckoutSession(config, old.session_id);
 		await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ?').bind(old.id).run();
 	}
 	await c.env.DB.batch([
 		c.env.DB.prepare('DELETE FROM checkouts WHERE expires_at <= ?').bind(t),
 		c.env.DB.prepare(
-			`INSERT INTO checkouts (id, account_id, next, lang, expires_at, managed_payments, buyer_country)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO checkouts (id, account_id, next, lang, expires_at, managed_payments, buyer_country, price)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (account_id) DO NOTHING`
 		).bind(
 			randomHex(16),
@@ -1031,11 +791,12 @@ accountApp.post('/buy', async (c) => {
 			lang,
 			t + CHECKOUT_TTL,
 			usesManagedPayments(buyerCountry(c)) ? 1 : 0,
-			buyerCountry(c) ?? null
+			buyerCountry(c) ?? null,
+			price
 		)
 	]);
-	const checkout = (await c.env.DB.prepare(
-		`SELECT id, next, lang, url, expires_at, managed_payments, buyer_country
+	const row = (await c.env.DB.prepare(
+		`SELECT id, next, lang, url, expires_at, managed_payments, buyer_country, price
 		 FROM checkouts WHERE account_id = ?`
 	)
 		.bind(account.id)
@@ -1047,49 +808,44 @@ accountApp.post('/buy', async (c) => {
 			expires_at: number;
 			managed_payments: number;
 			buyer_country: string | null;
+			price: P;
 		}>())!;
-	const managedPayments = checkout.managed_payments === 1;
-	if (checkout.url) return c.redirect(checkout.url, 303);
+	if (row.url) return c.redirect(row.url, 303);
 	// 画面がまだ無い予約 (ほかのタブが頼んでいる最中か、頼んだあとに失敗した) は、同じキーで頼み直す。
 	// Stripe は作り終えた Session をそのまま返すので、画面は1つのまま。
-	const origin = new URL(c.req.url).origin;
-	const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang });
 	let session: { id: string; url: string };
 	try {
-		session = await createCheckoutSession(config, {
-			accountId: account.id,
-			email: account.email,
-			lang: checkout.lang,
-			// `{CHECKOUT_SESSION_ID}` は Stripe が置き換える (URLSearchParams に通すと括弧が符号化されるので、後ろに足す)。
-			successUrl: `${origin}${ACCOUNT}/buy/done?${done}&session_id={CHECKOUT_SESSION_ID}`,
-			// Stripe の画面で戻ったら、買い直せる最終確認の画面へ戻す。
-			cancelUrl: `${origin}${ACCOUNT}/buy?lang=${checkout.lang}`,
-			expiresAt: checkout.expires_at,
-			submitMessage: managedPayments
-				? undefined
-				: messages[checkout.lang].checkoutNote(LEGAL_PAGES.tokushoho),
-			managedPayments,
-			buyerCountry: checkout.buyer_country ?? undefined,
-			idempotencyKey: `mawok-checkout-${checkout.id}`
+		session = await create({
+			id: row.id,
+			price: row.price,
+			next: row.next,
+			lang: row.lang,
+			origin: new URL(c.req.url).origin,
+			session: {
+				accountId: account.id,
+				email: account.email,
+				lang: row.lang,
+				expiresAt: row.expires_at,
+				managedPayments: row.managed_payments === 1,
+				buyerCountry: row.buyer_country ?? undefined
+			}
 		});
 	} catch (e) {
 		// 同じ予約をほかのタブが頼んでいる最中。予約は残し、押し直してもらう。
 		if (e instanceof StripeError && e.status === 409) {
-			return c.html(messagePage(lang, messages[lang].buyTitle, messages[lang].buyBusy), 409);
+			return c.html(messagePage(lang, title, messages[lang].buyBusy), 409);
 		}
 		// 応答が届かなかったときは、Stripe が作ったかどうか分からない。予約を残し、押し直したら同じキーで頼み直す。
 		if (!(e instanceof StripeError)) throw e;
 		// Stripe が断ったときは予約を外し、押し直したら新しく頼めるように (同じキーでは、Stripe は同じ失敗を返し続ける)。
-		await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ? AND url IS NULL')
-			.bind(checkout.id)
-			.run();
+		await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ? AND url IS NULL').bind(row.id).run();
 		throw e;
 	}
 	await c.env.DB.prepare('UPDATE checkouts SET url = ?, session_id = ? WHERE id = ?')
-		.bind(session.url, session.id, checkout.id)
+		.bind(session.url, session.id, row.id)
 		.run();
 	return c.redirect(session.url, 303);
-});
+}
 
 /**
  * 支払いから戻った先。webhook が届いて残高が付く (Pro なら有効になる) のを待ち、付いたら予約を外して `next` へ進む。
@@ -1100,35 +856,31 @@ accountApp.get('/buy/done', async (c) => {
 	const next = safeNext(c.req.query('next'));
 	const account = await currentAccount(c);
 	if (!account) return c.html(signIn(c, lang, next));
-	if (c.req.query('pro') === '1') {
-		if ((await proOf(c.env, account.id)).active) {
-			await c.env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(account.id).run();
-			return c.redirect(next, 303);
-		}
-		const tries = Number(c.req.query('tries') ?? '0') || 0;
-		const retry = new URL(c.req.url);
-		retry.searchParams.set('tries', String(tries + 1));
-		return c.html(
-			checkingPurchasePage(lang, true, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
-		);
-	}
-	const bought = await c.env.DB.prepare(
-		`SELECT 1 FROM grants JOIN purchases ON purchases.id = grants.purchase_id
-		 WHERE purchases.stripe_checkout_session_id = ? AND grants.account_id = ?`
-	)
-		.bind(c.req.query('session_id') ?? '', account.id)
-		.first();
-	if (bought) {
+	const pro = c.req.query('pro') === '1';
+	const forward = async (url: string) => {
 		await c.env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(account.id).run();
-		const url = new URL(next, c.req.url);
-		url.searchParams.set('bought', '1');
-		return c.redirect(`${url.pathname}${url.search}`, 303);
+		return c.redirect(url, 303);
+	};
+	if (pro) {
+		if ((await proOf(c.env, account.id)).active) return forward(next);
+	} else {
+		const bought = await c.env.DB.prepare(
+			`SELECT 1 FROM grants JOIN purchases ON purchases.id = grants.purchase_id
+			 WHERE purchases.stripe_checkout_session_id = ? AND grants.account_id = ?`
+		)
+			.bind(c.req.query('session_id') ?? '', account.id)
+			.first();
+		if (bought) {
+			const url = new URL(next, c.req.url);
+			url.searchParams.set('bought', '1');
+			return forward(`${url.pathname}${url.search}`);
+		}
 	}
 	const tries = Number(c.req.query('tries') ?? '0') || 0;
 	const retry = new URL(c.req.url);
 	retry.searchParams.set('tries', String(tries + 1));
 	return c.html(
-		checkingPurchasePage(lang, false, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
+		checkingPurchasePage(lang, pro, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
 	);
 });
 
@@ -1145,87 +897,35 @@ async function startProCheckout(
 	c: Context<App>,
 	account: { id: string; email: string },
 	config: StripeConfig,
-	plan: 'monthly' | 'yearly',
+	plan: ProPlan,
 	lang: Lang,
 	next: string
 ) {
-	if (!proForSale(config))
-		return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].proUnavailable), 404);
+	if (!proForSale(config)) return c.html(proUnavailablePage(lang), 404);
 	if ((await proOf(c.env, account.id)).active) return c.redirect(next, 303);
-	const t = now();
-	const old = await c.env.DB.prepare(
-		'SELECT id, price, session_id FROM checkouts WHERE account_id = ? AND expires_at > ?'
-	)
-		.bind(account.id, t)
-		.first<{ id: string; price: string; session_id: string | null }>();
-	if (old && old.price !== plan) {
-		if (old.session_id) await expireCheckoutSession(config, old.session_id);
-		await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ?').bind(old.id).run();
-	}
-	await c.env.DB.batch([
-		c.env.DB.prepare('DELETE FROM checkouts WHERE expires_at <= ?').bind(t),
-		c.env.DB.prepare(
-			`INSERT INTO checkouts (id, account_id, next, lang, expires_at, managed_payments, buyer_country, price)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (account_id) DO NOTHING`
-		).bind(
-			randomHex(16),
-			account.id,
-			next,
-			lang,
-			t + CHECKOUT_TTL,
-			usesManagedPayments(buyerCountry(c)) ? 1 : 0,
-			buyerCountry(c) ?? null,
-			plan
-		)
-	]);
-	const checkout = (await c.env.DB.prepare(
-		'SELECT id, next, lang, url, expires_at, managed_payments, buyer_country, price FROM checkouts WHERE account_id = ?'
-	)
-		.bind(account.id)
-		.first<{
-			id: string;
-			next: string;
-			lang: Lang;
-			url: string | null;
-			expires_at: number;
-			managed_payments: number;
-			buyer_country: string | null;
-			price: 'monthly' | 'yearly';
-		}>())!;
-	if (checkout.url) return c.redirect(checkout.url, 303);
-	const origin = new URL(c.req.url).origin;
-	const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang, pro: '1' });
-	let session: { id: string; url: string };
-	try {
-		session = await createProCheckoutSession(config, {
-			accountId: account.id,
-			email: account.email,
-			plan: checkout.price,
-			lang: checkout.lang,
-			successUrl: `${origin}${ACCOUNT}/buy/done?${done}`,
-			cancelUrl: `${origin}${ACCOUNT}/buy?plan=${checkout.price}&lang=${checkout.lang}`,
-			expiresAt: checkout.expires_at,
-			submitMessage: checkout.managed_payments
-				? undefined
-				: messages[checkout.lang].proCheckoutNote,
-			managedPayments: checkout.managed_payments === 1,
-			buyerCountry: checkout.buyer_country ?? undefined,
-			trial: !(await hadSubscription(c.env, account.id)),
-			idempotencyKey: `mawok-pro-checkout-${checkout.id}`
-		});
-	} catch (e) {
-		if (e instanceof StripeError && e.status === 409)
-			return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].buyBusy), 409);
-		if (e instanceof StripeError)
-			await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ? AND url IS NULL')
-				.bind(checkout.id)
-				.run();
-		throw e;
-	}
-	await c.env.DB.prepare('UPDATE checkouts SET url = ?, session_id = ? WHERE id = ?')
-		.bind(session.url, session.id, checkout.id)
-		.run();
-	return c.redirect(session.url, 303);
+	return openCheckout(
+		c,
+		account,
+		config,
+		lang,
+		next,
+		plan,
+		messages[lang].proTitle,
+		async (checkout) => {
+			const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang, pro: '1' });
+			return createProCheckoutSession(config, {
+				...checkout.session,
+				plan: checkout.price,
+				successUrl: `${checkout.origin}${ACCOUNT}/buy/done?${done}`,
+				cancelUrl: `${checkout.origin}${ACCOUNT}/buy?plan=${checkout.price}&lang=${checkout.lang}`,
+				submitMessage: checkout.session.managedPayments
+					? undefined
+					: messages[checkout.lang].proCheckoutNote,
+				trial: !(await hadSubscription(c.env, account.id)),
+				idempotencyKey: `mawok-pro-checkout-${checkout.id}`
+			});
+		}
+	);
 }
 
 /** Stripe のカスタマーポータル (解約・支払い方法・領収書)。 */

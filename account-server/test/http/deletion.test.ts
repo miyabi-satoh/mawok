@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DELETE_ACCOUNT_STATEMENTS } from '../../src/account-deletion';
 import {
 	accountId,
+	addSubscription,
 	app,
 	buy,
 	geminiAnswers,
@@ -23,12 +24,11 @@ describe('deleting an account', () => {
 		const { cookie, token } = await linkApp(email);
 		const account = await accountId(email);
 		await buy(account, 'cs_leaving');
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, stripe_customer_id, paid_through, status, created_at)
-			 VALUES ('sub_leaving', ?, 'monthly', 'cus_leaving', 4_102_444_800, 'active', 0)`
-		)
-			.bind(account)
-			.run();
+		await addSubscription(account, {
+			id: 'sub_leaving',
+			customer: 'cus_leaving',
+			status: 'active'
+		});
 		await env.DB.batch([
 			env.DB.prepare(
 				`INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes)

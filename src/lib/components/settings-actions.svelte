@@ -7,6 +7,8 @@
 	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
+	import SettingsSyncNote from '$lib/components/settings-sync-note.svelte';
+	import SettingSyncToggle from '$lib/components/setting-sync-toggle.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
@@ -15,6 +17,8 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import * as ToggleGroup from '$lib/components/ui/toggle-group';
 	import { isImeKey } from '$lib/keys';
+	import { mawokRemainingText } from '$lib/mawok-account';
+	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
 	import type { ActionsEditor } from '$lib/actions-editor.svelte';
 	import { ENCODINGS, OUTPUTS } from '$lib/action-options';
@@ -51,12 +55,7 @@
 	let keyState = $state<{ service: AiService; hasKey: boolean | null } | null>(null);
 	/** 今の AI サービスのキーがあるか。まだ確かめていなければ undefined、確かめられなかったときは null */
 	const hasKey = $derived(keyState?.service === view.aiService ? keyState.hasKey : undefined);
-	const syncSettingsAvailable = $derived(view.proAvailable && view.syncKinds.settings);
-	const modifiedName = (name: string) => (view.modifiedSettings.includes(name) ? name : undefined);
 
-	function setSyncSetting(name: string, sync: boolean) {
-		void editor.call('set_sync_excluded_setting', { name, sync });
-	}
 	/**
 	 * キーを確かめるたびに振る番号。後から確かめ始めていれば、先の確かめの返事は古いので捨てる
 	 * （遅れて返った前のサービスの確かめが、替えた後の表示を上書きしないため）
@@ -169,10 +168,10 @@
 			{m.settings_actions_description({ mark: TEXT_MARK })}
 		</p>
 		{#if view.proAvailable && (view.syncKinds.actions || view.syncKinds.settings)}
-			<p class="px-1 text-xs leading-snug text-muted-foreground">{m.settings_sync_description()}</p>
+			<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />
 		{/if}
 		{#if view.proAvailable && !view.syncKinds.actions}
-			<p class="text-xs leading-snug text-muted-foreground">{m.settings_sync_actions_off()}</p>
+			<SettingsSyncNote text={m.settings_sync_actions_off()} />
 		{/if}
 		<SettingsSection>
 			<SettingsRow>
@@ -320,19 +319,16 @@
 		</SettingsSection>
 	</div>
 	<SettingsSection>
-		<SettingsRow modified={modifiedName('ai_service')}>
+		<SettingsRow modified={modifiedName(view, 'ai_service')}>
 			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 				<div class="flex flex-auto items-center gap-1">
 					<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
-					{#if syncSettingsAvailable}
-						<SyncToggle
-							compact
-							settingName="ai_service"
-							pressed={!view.syncExcludedSettings.includes('ai_service')}
-							name={m.settings_ai_service()}
-							onchange={(sync) => setSyncSetting('ai_service', sync)}
-						/>
-					{/if}
+					<SettingSyncToggle
+						{view}
+						name="ai_service"
+						label={m.settings_ai_service()}
+						call={editor.call}
+					/>
 				</div>
 				<!-- 5つ並べると最小の幅に収まらないので、ボタンの並びではなく一覧から選ぶ -->
 				<NativeSelect.Root
@@ -359,11 +355,7 @@
 						<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 							<Field.Title>
 								{view.mawokAccountSignedIn
-									? mawokAccountStatus
-										? m.settings_mawok_remaining({ percent: mawokAccountStatus.remainingPercent })
-										: mawokAccountStatus === null
-											? m.settings_mawok_status_unknown()
-											: ''
+									? mawokRemainingText(mawokAccountStatus)
 									: m.settings_actions_mawok_sign_in()}
 							</Field.Title>
 							<Button variant="outline" onclick={onopenaccount}>
@@ -373,7 +365,7 @@
 					</Field.Content>
 				</div>
 			{:else if view.aiService !== 'none'}
-				{@const modified = modifiedName('ai_models')}
+				{@const modified = modifiedName(view, 'ai_models')}
 				<div class="mt-2 flex flex-col gap-5 pl-4">
 					<Field.Content>
 						<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
@@ -396,7 +388,7 @@
 										{m.settings_ai_key_save()}
 									</Button>
 									<Button variant="ghost" onclick={cancelEditingKey}>
-										{m.settings_ai_key_cancel()}
+										{m.common_cancel()}
 									</Button>
 								</div>
 							{:else if hasKey !== undefined}
@@ -436,15 +428,12 @@
 							class="min-h-8 *:data-[slot=field-label]:flex-none!"
 						>
 							<Field.Label for="ai-model">{m.settings_ai_model()}</Field.Label>
-							{#if syncSettingsAvailable}
-								<SyncToggle
-									compact
-									settingName="ai_models"
-									pressed={!view.syncExcludedSettings.includes('ai_models')}
-									name={m.settings_ai_model()}
-									onchange={(sync) => setSyncSetting('ai_models', sync)}
-								/>
-							{/if}
+							<SettingSyncToggle
+								{view}
+								name="ai_models"
+								label={m.settings_ai_model()}
+								call={editor.call}
+							/>
 							<Input
 								id="ai-model"
 								class="w-56 min-w-0 font-mono text-sm"

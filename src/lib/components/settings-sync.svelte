@@ -7,6 +7,7 @@
 	import * as Field from '$lib/components/ui/field';
 	import { Switch } from '$lib/components/ui/switch';
 	import type { Call } from '$lib/call';
+	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
 	import type { SettingsView } from '$lib/settings.svelte';
 
@@ -32,8 +33,6 @@
 		{ kind: 'actions', label: m.settings_sync_actions },
 		{ kind: 'history', label: m.settings_sync_history }
 	] as const;
-
-	const modifiedName = (name: string) => (view.modifiedSettings.includes(name) ? name : undefined);
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
@@ -46,7 +45,7 @@
 		</SettingsRow>
 	{/if}
 	{#each kinds as { kind, label } (kind)}
-		<SettingsRow modified={modifiedName(`sync_${kind}`)}>
+		<SettingsRow modified={modifiedName(view, `sync_${kind}`)}>
 			<Field.Field orientation="horizontal" class="min-h-8">
 				<Field.Label for="sync-{kind}">{label()}</Field.Label>
 				<Switch

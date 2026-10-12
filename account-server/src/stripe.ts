@@ -1,13 +1,16 @@
 /**
- * Stripe での AI の残高の販売 (→ docs/account-server.md「購入」)。
- * SDK は使わず、要る3つ (Checkout Session を作る・取り直す・webhook の署名を確かめる) だけを fetch と Web Crypto で書く。
+ * Stripe での AI の残高と Pro の販売 (→ docs/account-server.md「購入」)。
+ * SDK は使わず、要る呼び出しだけを fetch と Web Crypto で書く。
  */
+import type { ProPlan } from './pricing';
 
 /** 送られてから受け付けるまでの猶予。古い webhook を送り直されても通さないように (Stripe の SDK の既定と同じ)。 */
 const WEBHOOK_TOLERANCE = 300;
 
 /** 同じ Stripe のアカウントで売るほかの製品の webhook と見分ける印。Checkout Session の metadata に付ける。 */
 export const PRODUCT = 'mawok-ai';
+/** Pro のサブスクの印。Checkout Session とサブスクの metadata に付け、台帳の `product` にも残す。 */
+export const PRO_PRODUCT = 'mawok-pro';
 
 /** Pro の無料試用の日数。最終確認と Stripe Checkout で同じ日数を出す。 */
 export const PRO_TRIAL_DAYS = 14;
@@ -30,7 +33,7 @@ export type StripeConfig = {
 	webhookSecret: string;
 	creditsPriceId: string;
 	taxRateId: string;
-	proPrices?: Record<'monthly' | 'yearly', string>;
+	proPrices?: Record<ProPlan, string>;
 };
 
 /** 秘密の値が3つと税率がそろったときだけ売る。手元で動かすときは無くてよい。 */
@@ -62,9 +65,9 @@ export function stripeConfig(env: Env): StripeConfig | undefined {
 }
 
 /** 月額と年額の Price が両方あるときだけ Pro を売る。 */
-export function proForSale(
-	config: StripeConfig
-): config is StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> } {
+export type ProStripeConfig = StripeConfig & { proPrices: Record<ProPlan, string> };
+
+export function proForSale(config: StripeConfig): config is ProStripeConfig {
 	return config.proPrices !== undefined;
 }
 
@@ -145,6 +148,17 @@ export async function createCheckoutSession(
 		}
 	}
 	if (buyerCountry) params.set('metadata[buyer_country]', buyerCountry);
+	return postCheckoutSession(config, params, email, submitMessage, idempotencyKey);
+}
+
+/** 買い手のメールと支払いの画面の文言を足して、Checkout Session を作る。残高と Pro で同じ。 */
+function postCheckoutSession(
+	config: StripeConfig,
+	params: URLSearchParams,
+	email: string,
+	submitMessage: string | undefined,
+	idempotencyKey: string
+): Promise<{ id: string; url: string }> {
 	// Checkout は渡したメールを直させない。Apple の転送用アドレスには、登録していない Stripe からの領収書が届かないので、
 	// 渡さずに支払いの画面で入れてもらう。
 	if (!APPLE_RELAY_DOMAINS.some((domain) => email.endsWith(`@${domain}`))) {
@@ -153,21 +167,12 @@ export async function createCheckoutSession(
 	// 特定商取引法 12条の6 の最終確認画面に要る、引き渡しと返金の扱い。Markdown のリンクを書ける。
 	// MP の分は、同じ事項を買う画面 (→ src/pages.ts の confirmPage) にだけ出す。
 	if (submitMessage) params.set('custom_text[submit][message]', submitMessage);
-	const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-		method: 'POST',
-		headers: {
-			authorization: `Bearer ${config.secretKey}`,
-			'idempotency-key': idempotencyKey
-		},
-		body: params
-	});
-	if (!res.ok) throw new StripeError(res.status, await res.text());
-	return res.json<{ id: string; url: string }>();
+	return stripePost(config, 'checkout/sessions', params, idempotencyKey);
 }
 
 /** Pro の Checkout Session。試用を受けたことがあるアカウントには試用を渡さない。 */
 export async function createProCheckoutSession(
-	config: StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> },
+	config: ProStripeConfig,
 	{
 		accountId,
 		email,
@@ -184,7 +189,7 @@ export async function createProCheckoutSession(
 	}: {
 		accountId: string;
 		email: string;
-		plan: 'monthly' | 'yearly';
+		plan: ProPlan;
 		lang: string;
 		successUrl: string;
 		cancelUrl: string;
@@ -202,8 +207,8 @@ export async function createProCheckoutSession(
 		'line_items[0][price]': config.proPrices[plan],
 		'line_items[0][quantity]': '1',
 		client_reference_id: accountId,
-		'metadata[product]': 'mawok-pro',
-		'subscription_data[metadata][product]': 'mawok-pro',
+		'metadata[product]': PRO_PRODUCT,
+		'subscription_data[metadata][product]': PRO_PRODUCT,
 		'subscription_data[metadata][account_id]': accountId,
 		'subscription_data[metadata][managed_payments]': managedPayments ? '1' : '0',
 		locale: lang,
@@ -218,16 +223,7 @@ export async function createProCheckoutSession(
 		params.set('payment_method_types[0]', 'card');
 		params.set('line_items[0][tax_rates][0]', config.taxRateId);
 	}
-	if (!APPLE_RELAY_DOMAINS.some((domain) => email.endsWith(`@${domain}`)))
-		params.set('customer_email', email);
-	if (submitMessage) params.set('custom_text[submit][message]', submitMessage);
-	const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-		method: 'POST',
-		headers: { authorization: `Bearer ${config.secretKey}`, 'idempotency-key': idempotencyKey },
-		body: params
-	});
-	if (!res.ok) throw new StripeError(res.status, await res.text());
-	return res.json<{ id: string; url: string }>();
+	return postCheckoutSession(config, params, email, submitMessage, idempotencyKey);
 }
 
 /** 開いている支払い画面を閉じる。別の払い方で押し直して二重に払わせないため。 */
@@ -269,6 +265,33 @@ async function stripeGet<T>(
 	return res.json<T>();
 }
 
+async function stripePost<T>(
+	config: StripeConfig,
+	path: string,
+	body: URLSearchParams,
+	idempotencyKey?: string
+): Promise<T> {
+	const res = await fetch(`https://api.stripe.com/v1/${path}`, {
+		method: 'POST',
+		headers: {
+			authorization: `Bearer ${config.secretKey}`,
+			...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {})
+		},
+		body
+	});
+	if (!res.ok) throw new StripeError(res.status, await res.text());
+	return res.json<T>();
+}
+
+/** 国内の取引か。国は、買い手の住所の国、無ければカードの発行国、どちらも無ければアクセス元の国で見る。 */
+function isDomestic(
+	address: string | null | undefined,
+	cardCountry: string | null,
+	buyerCountry: string | null
+): boolean {
+	return (address || cardCountry || buyerCountry) === 'JP';
+}
+
 /** Pro の目印を持つ、払われた請求書かだけを調べる。Price が未設定でも知らせるために使う。 */
 export async function isPaidProInvoice(config: StripeConfig, invoiceId: string): Promise<boolean> {
 	const invoice = await stripeGet<{
@@ -281,7 +304,7 @@ export async function isPaidProInvoice(config: StripeConfig, invoiceId: string):
 	);
 	const subscriptionId = invoice.parent?.subscription_details?.subscription;
 	if (invoice.status !== 'paid' || !subscriptionId) return false;
-	return (await getSubscription(config, subscriptionId)).metadata?.product === 'mawok-pro';
+	return (await getSubscription(config, subscriptionId)).metadata?.product === PRO_PRODUCT;
 }
 
 export function getSubscription(config: StripeConfig, id: string) {
@@ -289,10 +312,7 @@ export function getSubscription(config: StripeConfig, id: string) {
 }
 
 /** 0 円の試用開始請求書も含め、Pro の請求書を取り直して確かめる。 */
-export async function confirmProInvoice(
-	config: StripeConfig & { proPrices: Record<'monthly' | 'yearly', string> },
-	invoiceId: string
-) {
+export async function confirmProInvoice(config: ProStripeConfig, invoiceId: string) {
 	const invoice = await stripeGet<{
 		id: string;
 		status: string;
@@ -334,7 +354,7 @@ export async function confirmProInvoice(
 	const subscriptionId = invoice.parent?.subscription_details?.subscription;
 	if (invoice.status !== 'paid' || !subscriptionId) return undefined;
 	const sub = await getSubscription(config, subscriptionId);
-	if (sub.metadata?.product !== 'mawok-pro') return undefined;
+	if (sub.metadata?.product !== PRO_PRODUCT) return undefined;
 	const lines = invoice.lines.data;
 	// 試用開始の 0 円請求書も、通常の請求書と同じ Price の1項目として確かめる。
 	const charged = invoice.total === 0 ? lines : lines.filter((line) => line.amount > 0);
@@ -389,7 +409,6 @@ export async function confirmProInvoice(
 		: null;
 	const cardCountry = charge?.payment_method_details?.card?.country ?? null;
 	const buyerCountry = sub.metadata?.buyer_country ?? null;
-	const country = invoice.customer_details?.address?.country || cardCountry || buyerCountry;
 	return {
 		invoiceId: invoice.id,
 		subscription: sub,
@@ -401,7 +420,7 @@ export async function confirmProInvoice(
 		managedPayments: sub.metadata?.managed_payments === '1',
 		cardCountry,
 		buyerCountry,
-		domestic: country === 'JP'
+		domestic: isDomestic(invoice.customer_details?.address?.country, cardCountry, buyerCountry)
 	};
 }
 
@@ -420,13 +439,12 @@ export async function billingPortalUrl(
 	returnUrl: string,
 	lang: string
 ) {
-	const res = await fetch('https://api.stripe.com/v1/billing_portal/sessions', {
-		method: 'POST',
-		headers: { authorization: `Bearer ${config.secretKey}` },
-		body: new URLSearchParams({ customer, return_url: returnUrl, locale: lang })
-	});
-	if (!res.ok) throw new StripeError(res.status, await res.text());
-	return (await res.json<{ url: string }>()).url;
+	const session = await stripePost<{ url: string }>(
+		config,
+		'billing_portal/sessions',
+		new URLSearchParams({ customer, return_url: returnUrl, locale: lang })
+	);
+	return session.url;
 }
 
 /** 付けてよいと確かめた支払い。台帳に残す。 */
@@ -442,10 +460,7 @@ type Purchase = {
 	cardCountry: string | null;
 	/** 買ったときのアクセス元の国。 */
 	buyerCountry: string | null;
-	/**
-	 * 国内の取引か。消費税の課税売上を数えるのに使い、アカウントを消しても残す。
-	 * 国は、買い手の住所の国、無ければカードの発行国で見る。どちらも無ければ、アクセス元の国で見る。
-	 */
+	/** 国内の取引か (`isDomestic`)。消費税の課税売上を数えるのに使い、アカウントを消しても残す。 */
 	domestic: boolean;
 };
 
@@ -479,16 +494,14 @@ export async function confirmPurchase(
 	config: StripeConfig,
 	sessionId: string
 ): Promise<Purchase | undefined> {
-	const query = new URLSearchParams([
-		['expand[]', 'line_items'],
-		['expand[]', 'payment_intent.latest_charge']
-	]);
-	const res = await fetch(
-		`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}?${query}`,
-		{ headers: { authorization: `Bearer ${config.secretKey}` } }
+	const session = await stripeGet<CheckoutSession>(
+		config,
+		`checkout/sessions/${encodeURIComponent(sessionId)}`,
+		new URLSearchParams([
+			['expand[]', 'line_items'],
+			['expand[]', 'payment_intent.latest_charge']
+		])
 	);
-	if (!res.ok) throw new StripeError(res.status, await res.text());
-	const session = await res.json<CheckoutSession>();
 	if (session.metadata?.product !== PRODUCT || session.payment_status !== 'paid') return undefined;
 	const items = session.line_items.data;
 	const price = items[0]?.price;
@@ -514,7 +527,6 @@ export async function confirmPurchase(
 	const cardCountry =
 		session.payment_intent.latest_charge?.payment_method_details?.card?.country ?? null;
 	const buyerCountry = session.metadata?.buyer_country ?? null;
-	const country = session.customer_details?.address?.country || cardCountry || buyerCountry;
 	return {
 		sessionId: session.id,
 		accountId: session.client_reference_id,
@@ -524,7 +536,7 @@ export async function confirmPurchase(
 		managedPayments: session.managed_payments?.enabled === true,
 		cardCountry,
 		buyerCountry,
-		domestic: country === 'JP'
+		domestic: isDomestic(session.customer_details?.address?.country, cardCountry, buyerCountry)
 	};
 }
 

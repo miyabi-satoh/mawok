@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import {
 	SYNC_ITEM_BYTES,
+	SYNC_TOMBSTONE_RETENTION,
 	SYNC_ACCOUNT_UPDATE_SQL,
 	SYNC_TOTAL_BYTES,
 	getSync,
@@ -55,6 +56,34 @@ describe('sync', () => {
 		).toMatchObject({ error: 'too_large', limit: 'total' });
 	});
 
+	it('answers an old base with the current item, a missing one as deleted, and rejects a different key', async () => {
+		const account = await newAccount();
+		const item = (id: string, base_seq: number | null, data: string) => ({
+			collection: 'settings' as const,
+			id,
+			base_seq,
+			deleted: false,
+			data
+		});
+		await putSync(env, account, { key_id: KEY, items: [item('one', null, 'AQ==')] });
+		await putSync(env, account, { key_id: KEY, items: [item('one', 1, 'Ag==')] });
+		expect(await putSync(env, account, { key_id: KEY, items: [item('one', 1, 'Aw==')] })).toEqual({
+			ok: false,
+			error: 'conflict',
+			conflicts: [{ collection: 'settings', id: 'one', seq: 2, deleted: false, data: 'Ag==' }]
+		});
+		expect(
+			await putSync(env, account, { key_id: KEY, items: [item('missing', 99, 'AQ==')] })
+		).toEqual({
+			ok: false,
+			error: 'conflict',
+			conflicts: [{ collection: 'settings', id: 'missing', seq: null, deleted: true, data: null }]
+		});
+		expect(
+			await putSync(env, account, { key_id: 'b'.repeat(16), items: [item('two', null, 'AQ==')] })
+		).toEqual({ ok: false, error: 'key_mismatch' });
+	});
+
 	it('purges old tombstones and only expires copies whose Pro ended long ago', async () => {
 		const t = 4_102_444_800;
 		const [active, ended, noSubscription] = [
@@ -73,14 +102,14 @@ describe('sync', () => {
 			`INSERT INTO sync_items (account_id, collection, id, seq, deleted, data, updated_at)
 			 VALUES (?, 'settings', 'gone', 3, 1, NULL, ?)`
 		)
-			.bind(active, t - 90 * 24 * 60 * 60)
+			.bind(active, t - SYNC_TOMBSTONE_RETENTION)
 			.run();
 		await env.DB.prepare(
 			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
 			 VALUES ('sync_active', ?, 'monthly', ?, 'active', 0),
 			        ('sync_ended', ?, 'monthly', ?, 'canceled', 0)`
 		)
-			.bind(active, t + 1, ended, t - 90 * 24 * 60 * 60)
+			.bind(active, t + 1, ended, t - SYNC_TOMBSTONE_RETENTION)
 			.run();
 
 		await purgeSync(env, t);

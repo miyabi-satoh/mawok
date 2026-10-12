@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
-	import { untrack } from 'svelte';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+	import SyncDialogFrame from '$lib/components/sync-dialog-frame.svelte';
 	import type { SyncChoice } from '$lib/bindings/SyncChoice';
 	import type { SyncConflict } from '$lib/bindings/SyncConflict';
 	import type { SyncConflictList } from '$lib/bindings/SyncConflictList';
 	import type { SyncResolution } from '$lib/bindings/SyncResolution';
 	import { errorCode } from '$lib/errors';
 	import type { Platform } from '$lib/keys';
+	import { OpenLoader } from '$lib/open-loader.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { CHOICE_SIDES, choiceText, sideName, type ChoiceSide } from '$lib/sync-choices';
 
@@ -24,8 +24,10 @@
 	/** 一覧の上に出す知らせ（読めなかった・選び直し・使えなかった） */
 	let notice = $state('');
 	let applying = $state(false);
-	/** 読み込みの通し番号。閉じた後や読み直した後に届いた前の答えを捨てる */
-	let loads = 0;
+	const loader = new OpenLoader(
+		() => open,
+		() => load()
+	);
 
 	/**
 	 * 中身があふれている欄だけ、フォーカスを置けるようにする（キーボードで送れるように）。
@@ -58,13 +60,13 @@
 			: m.settings_failed({ error: errorCode(e) });
 
 	async function load(message = '') {
-		const load = ++loads;
+		const current = loader.begin();
 		conflicts = null;
 		chosen = {};
 		notice = message;
 		try {
 			const list = await invoke<SyncConflictList>('sync_conflicts');
-			if (load !== loads) return;
+			if (!current()) return;
 			conflicts = list.items;
 			chosen = Object.fromEntries(list.items.map(({ id }) => [id, 'later']));
 			if (list.items.length > 0) return;
@@ -72,17 +74,11 @@
 			if (list.unreadable) notice = m.sync_choice_unreadable();
 			else if (!message) open = false;
 		} catch (e) {
-			if (load !== loads) return;
+			if (!current()) return;
 			conflicts = [];
 			notice = failure(e);
 		}
 	}
-
-	// 開くのは、呼んだ側（ボタン・トレイからの頼み）なので、開いたことはここで見て読みに行く
-	$effect(() => {
-		if (open) untrack(() => void load());
-		else loads++;
-	});
 
 	async function apply() {
 		const labels = new Map(items.map(({ conflict, text }) => [conflict.id, text.label]));
@@ -105,68 +101,56 @@
 	}
 </script>
 
-<AlertDialog.Root bind:open>
-	<AlertDialog.Content
-		class="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] data-[size=default]:max-w-lg data-[size=default]:sm:max-w-lg"
-	>
-		<AlertDialog.Header>
-			<AlertDialog.Title>{m.sync_choice_title()}</AlertDialog.Title>
-		</AlertDialog.Header>
-		<div class="-mx-4 flex flex-col gap-4 overflow-y-auto px-4">
-			{#if notice}
-				<p role="status" class="text-sm">{notice}</p>
-			{/if}
-			{#if conflicts === null}
-				<p role="status" class="text-sm text-muted-foreground">{m.sync_choice_loading()}</p>
-			{/if}
-			{#each items as { conflict, text } (conflict.id)}
-				<fieldset class="flex min-w-0 flex-col gap-1.5">
-					<legend class="mb-1.5 text-sm font-medium">{text.label}</legend>
-					<div class="grid grid-cols-2 gap-2">
-						{#each CHOICE_SIDES as { side, name } (side)}
-							<label
-								class={[
-									'flex min-w-0 flex-col gap-1 rounded-lg p-2 text-sm has-focus-visible:ring-3 has-focus-visible:ring-ring/50',
-									// 「あとで選ぶ」は値を持たないので、枠で囲まずに2つの値の下に置く
-									side === 'later' ? 'col-span-2' : 'border has-checked:border-primary'
-								]}
+<SyncDialogFrame
+	bind:open
+	title={m.sync_choice_title()}
+	{notice}
+	loading={conflicts === null}
+	busy={applying}
+	actionLabel={m.sync_choice_apply()}
+	actionDisabled={choices.length === 0}
+	onaction={apply}
+>
+	{#each items as { conflict, text } (conflict.id)}
+		<fieldset class="flex min-w-0 flex-col gap-1.5">
+			<legend class="mb-1.5 text-sm font-medium">{text.label}</legend>
+			<div class="grid grid-cols-2 gap-2">
+				{#each CHOICE_SIDES as { side, name } (side)}
+					<label
+						class={[
+							'flex min-w-0 flex-col gap-1 rounded-lg p-2 text-sm has-focus-visible:ring-3 has-focus-visible:ring-ring/50',
+							// 「あとで選ぶ」は値を持たないので、枠で囲まずに2つの値の下に置く
+							side === 'later' ? 'col-span-2' : 'border has-checked:border-primary'
+						]}
+					>
+						<span class="flex items-center gap-2">
+							<input
+								type="radio"
+								class="size-4 accent-primary"
+								name="sync-choice-{conflict.id}"
+								value={side}
+								aria-label={sideName(text.label, side)}
+								aria-describedby={side === 'later'
+									? undefined
+									: `sync-choice-${conflict.id}-${side}`}
+								disabled={applying}
+								bind:group={chosen[conflict.id]}
+							/>
+							{name()}
+						</span>
+						{#if side !== 'later'}
+							<!-- 長い値は切らずに、欄の中で送って読めるようにする -->
+							<span
+								id="sync-choice-{conflict.id}-{side}"
+								{@attach focusableWhenScrollable}
+								class="max-h-24 overflow-y-auto rounded-sm text-xs leading-snug wrap-anywhere whitespace-pre-wrap text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 							>
-								<span class="flex items-center gap-2">
-									<input
-										type="radio"
-										class="size-4 accent-primary"
-										name="sync-choice-{conflict.id}"
-										value={side}
-										aria-label={sideName(text.label, side)}
-										aria-describedby={side === 'later'
-											? undefined
-											: `sync-choice-${conflict.id}-${side}`}
-										disabled={applying}
-										bind:group={chosen[conflict.id]}
-									/>
-									{name()}
-								</span>
-								{#if side !== 'later'}
-									<!-- 長い値は切らずに、欄の中で送って読めるようにする -->
-									<span
-										id="sync-choice-{conflict.id}-{side}"
-										{@attach focusableWhenScrollable}
-										class="max-h-24 overflow-y-auto rounded-sm text-xs leading-snug wrap-anywhere whitespace-pre-wrap text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-									>
-										{side === 'this_device' ? text.thisDevice : text.otherDevice}
-									</span>
-								{/if}
-							</label>
-						{/each}
-					</div>
-				</fieldset>
-			{/each}
-		</div>
-		<AlertDialog.Footer>
-			<AlertDialog.Cancel disabled={applying}>{m.sync_choice_cancel()}</AlertDialog.Cancel>
-			<AlertDialog.Action disabled={applying || choices.length === 0} onclick={apply}>
-				{m.sync_choice_apply()}
-			</AlertDialog.Action>
-		</AlertDialog.Footer>
-	</AlertDialog.Content>
-</AlertDialog.Root>
+								{side === 'this_device' ? text.thisDevice : text.otherDevice}
+							</span>
+						{/if}
+					</label>
+				{/each}
+			</div>
+		</fieldset>
+	{/each}
+</SyncDialogFrame>

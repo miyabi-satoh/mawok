@@ -8,7 +8,14 @@ import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { DRAFT_ACTIONS_IN_SETTINGS, draftActionLabel, formatKeys, type Platform } from '$lib/keys';
 import { m } from '$lib/paraglide/messages';
 import type { Locale } from '$lib/paraglide/runtime';
-import type { CharWidths } from '$lib/settings.svelte';
+import {
+	CHAR_WIDTH_KINDS,
+	LANGUAGES,
+	optionName,
+	PUNCTUATION_STYLES,
+	THEMES,
+	WIDTH_STYLES
+} from '$lib/setting-options';
 import { snippetLabel } from '$lib/snippets';
 
 /** 別々に変えた1項目を、どちらを使うか選ぶ画面に出す文言。値は、複数行なら改行でつなぐ */
@@ -23,21 +30,6 @@ const orDefault = (text: string) => (text === '' ? m.sync_choice_default() : tex
 const orEmpty = (text: string) => (text === '' ? m.settings_row_empty() : text);
 const keysText = (key: string, platform: Platform) =>
 	key === '' ? m.settings_key_none() : formatKeys(key, platform);
-
-/** 文字を揃える種類。設定の画面と同じ並び */
-const CHAR_WIDTH_KINDS: { kind: keyof CharWidths; label: () => string }[] = [
-	{ kind: 'alphabet', label: m.settings_char_width_alphabet },
-	{ kind: 'digit', label: m.settings_char_width_digit },
-	{ kind: 'space', label: m.settings_char_width_space },
-	{ kind: 'symbol', label: m.settings_char_width_symbol },
-	{ kind: 'katakana', label: m.settings_char_width_katakana }
-];
-
-const WIDTH_NAMES = {
-	keep: m.settings_char_width_keep,
-	full: m.settings_char_width_full,
-	half: m.settings_char_width_half
-};
 
 /** 2つの値で違う項目だけを残す。値の一部だけが違う設定で、同じ所まで並べると、どこが違うのかを探すことになる */
 function differing<K>(keys: readonly K[], same: (key: K) => boolean): readonly K[] {
@@ -113,7 +105,7 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 		case 'action':
 			return m.sync_choice_row_action({ name: rowName(value) });
 		case 'order':
-			return m.sync_restore_order({
+			return m.sync_choice_order({
 				name:
 					{
 						replacements: m.settings_replacements(),
@@ -197,13 +189,9 @@ function valueText(value: SyncValue, other: SyncValue, platform: Platform): stri
 		case 'deleted':
 			return m.sync_choice_deleted();
 		case 'language':
-			return { system: m.settings_language_system(), ja: '日本語', en: 'English' }[value.value];
+			return optionName(LANGUAGES, value.value);
 		case 'theme':
-			return {
-				system: m.settings_theme_system,
-				light: m.settings_theme_light,
-				dark: m.settings_theme_dark
-			}[value.value]();
+			return optionName(THEMES, value.value);
 		case 'text_window_always_on_top':
 		case 'hide_text_window_on_blur':
 		case 'show_text_window_buttons':
@@ -214,11 +202,11 @@ function valueText(value: SyncValue, other: SyncValue, platform: Platform): stri
 		case 'text_font_size':
 			return String(value.value);
 		case 'punctuation_style':
-			return { keep: m.settings_char_width_keep(), kutouten: '、。', comma: '，．' }[value.value];
+			return optionName(PUNCTUATION_STYLES, value.value);
 		case 'char_widths': {
 			const theirs = sameType(value, other)?.value;
 			return differing(CHAR_WIDTH_KINDS, ({ kind }) => theirs?.[kind] === value.value[kind])
-				.map(({ kind, label }) => pair(label(), WIDTH_NAMES[value.value[kind]]()))
+				.map(({ kind, label }) => pair(label(), optionName(WIDTH_STYLES, value.value[kind])))
 				.join('\n');
 		}
 		case 'text_color_light':
