@@ -56,6 +56,34 @@ describe('sync', () => {
 		).toMatchObject({ error: 'too_large', limit: 'total' });
 	});
 
+	it('answers an old base with the current item, a missing one as deleted, and rejects a different key', async () => {
+		const account = await newAccount();
+		const item = (id: string, base_seq: number | null, data: string) => ({
+			collection: 'settings' as const,
+			id,
+			base_seq,
+			deleted: false,
+			data
+		});
+		await putSync(env, account, { key_id: KEY, items: [item('one', null, 'AQ==')] });
+		await putSync(env, account, { key_id: KEY, items: [item('one', 1, 'Ag==')] });
+		expect(await putSync(env, account, { key_id: KEY, items: [item('one', 1, 'Aw==')] })).toEqual({
+			ok: false,
+			error: 'conflict',
+			conflicts: [{ collection: 'settings', id: 'one', seq: 2, deleted: false, data: 'Ag==' }]
+		});
+		expect(
+			await putSync(env, account, { key_id: KEY, items: [item('missing', 99, 'AQ==')] })
+		).toEqual({
+			ok: false,
+			error: 'conflict',
+			conflicts: [{ collection: 'settings', id: 'missing', seq: null, deleted: true, data: null }]
+		});
+		expect(
+			await putSync(env, account, { key_id: 'b'.repeat(16), items: [item('two', null, 'AQ==')] })
+		).toEqual({ ok: false, error: 'key_mismatch' });
+	});
+
 	it('purges old tombstones and only expires copies whose Pro ended long ago', async () => {
 		const t = 4_102_444_800;
 		const [active, ended, noSubscription] = [

@@ -1,7 +1,16 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { pricing } from '../../src/pricing';
-import { accountId, app, grantsOf, linkApp, request, signIn } from '../helpers';
+import {
+	accountId,
+	addSubscription,
+	app,
+	FAR_FUTURE,
+	grantsOf,
+	linkApp,
+	request,
+	signIn
+} from '../helpers';
 
 const { freeGrant: FREE_GRANT } = pricing(env);
 
@@ -37,12 +46,12 @@ describe('balance', () => {
 	it('returns the active Pro plan through its earlier cancel_at time', async () => {
 		const { token } = await linkApp('pro-balance@example.com');
 		const account = await accountId('pro-balance@example.com');
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, cancel_at, created_at)
-			 VALUES ('sub_balance', ?, 'yearly', 4102444800, 'active', 4102444000, 0)`
-		)
-			.bind(account)
-			.run();
+		await addSubscription(account, {
+			id: 'sub_balance',
+			plan: 'yearly',
+			status: 'active',
+			cancelAt: FAR_FUTURE - 800
+		});
 		// 払った請求書があるので、試用ではない。
 		await env.DB.prepare(
 			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,

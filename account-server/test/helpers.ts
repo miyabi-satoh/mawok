@@ -4,6 +4,41 @@ import { expect, vi } from 'vitest';
 import { randomHex } from '../src/util';
 
 export const ORIGIN = 'http://account.test';
+/** 期限が切れない行を置くための、遠い先の時刻 (2100-01-01)。 */
+export const FAR_FUTURE = 4_102_444_800;
+
+/** Pro のサブスクの行を置き、id を返す。指定が無ければ、遠い先まで払い終えた試用中の月額。 */
+export async function addSubscription(
+	accountId: string,
+	fields: {
+		id?: string;
+		plan?: 'monthly' | 'yearly';
+		customer?: string;
+		paidThrough?: number;
+		status?: string;
+		cancelAtPeriodEnd?: boolean;
+		cancelAt?: number;
+	} = {}
+) {
+	const id = fields.id ?? randomHex(16);
+	await env.DB.prepare(
+		`INSERT INTO subscriptions
+		 (id, account_id, plan, stripe_customer_id, paid_through, status, cancel_at_period_end, cancel_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`
+	)
+		.bind(
+			id,
+			accountId,
+			fields.plan ?? 'monthly',
+			fields.customer ?? null,
+			fields.paidThrough ?? FAR_FUTURE,
+			fields.status ?? 'trialing',
+			fields.cancelAtPeriodEnd ? 1 : 0,
+			fields.cancelAt ?? null
+		)
+		.run();
+	return id;
+}
 
 /**
  * 送り主 (IP) は、指定が無ければ毎回変える。IP ごとの上限を確かめるテスト以外で当たらないように。

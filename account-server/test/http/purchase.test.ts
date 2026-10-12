@@ -4,6 +4,7 @@ import { costOf } from '../../src/ai';
 import { pricing } from '../../src/pricing';
 import {
 	accountId,
+	addSubscription,
 	app,
 	buy,
 	completed,
@@ -122,6 +123,21 @@ describe('buying credit', () => {
 		return { subscriptionId, invoiceId, paymentIntentId, stripe };
 	}
 
+	function refunded(paymentIntentId: string) {
+		return {
+			id: `evt_${crypto.randomUUID()}`,
+			type: 'charge.refunded',
+			data: { object: { payment_intent: paymentIntentId, refunded: true } }
+		};
+	}
+
+	/** Stripe の側のサブスクを打ち切ったか。 */
+	function canceledOnStripe(stripe: ReturnType<typeof proInvoiceApi>['stripe'], id: string) {
+		return stripe.mock.calls.some(
+			([url, init]) => String(url).endsWith(`/subscriptions/${id}`) && init?.method === 'DELETE'
+		);
+	}
+
 	function paidInvoice(invoiceId: string) {
 		return {
 			id: `evt_${crypto.randomUUID()}`,
@@ -131,6 +147,10 @@ describe('buying credit', () => {
 	}
 
 	it('shows a Pro trial confirmation for a selected plan, and gives Checkout the same note with or without a trial', async () => {
+		// サインインの前に開いても、サインインの後に選んだプランの最終確認へ戻る。
+		expect(await (await request('/account/buy?plan=monthly')).text()).toContain(
+			'name="next" value="/account/buy?plan=monthly"'
+		);
 		const { cookie } = await signIn('pro-offer@example.com');
 		const confirmation = await (await request('/account/buy?plan=monthly', { cookie })).text();
 		// 文言の出し分けは test/pages.test.ts が見る。ここは、初めての申し込みが試用つきの画面に届くことだけを見る。
@@ -153,12 +173,7 @@ describe('buying credit', () => {
 		);
 
 		const account = await accountId('pro-offer@example.com');
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
-			 VALUES ('sub_pro_offer', ?, 'monthly', 0, 'canceled', 0)`
-		)
-			.bind(account)
-			.run();
+		await addSubscription(account, { id: 'sub_pro_offer', paidThrough: 0, status: 'canceled' });
 		await env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(account).run();
 		expect(
 			(await postForm('/account/buy', { next: '/account/', plan: 'monthly' }, cookie)).status
@@ -174,13 +189,7 @@ describe('buying credit', () => {
 	it('shows the trial charge date, then renewal or cancellation on the account page', async () => {
 		const { cookie } = await signIn('pro-status@example.com');
 		const account = await accountId('pro-status@example.com');
-		await env.DB.prepare(
-			`INSERT INTO subscriptions
-			 (id, account_id, plan, stripe_customer_id, paid_through, status, cancel_at_period_end, created_at)
-			 VALUES ('sub_pro_status', ?, 'monthly', 'cus_pro_status', 4_102_444_800, 'trialing', 0, 0)`
-		)
-			.bind(account)
-			.run();
+		await addSubscription(account, { id: 'sub_pro_status', customer: 'cus_pro_status' });
 		let page = await (await request('/account/', { cookie })).text();
 		expect(page).toContain('から課金が始まります');
 		expect(page).toContain('「支払いを管理する」から解約');
@@ -221,13 +230,12 @@ describe('buying credit', () => {
 		const { cookie } = await signIn('pro-cancel-at@example.com');
 		const account = await accountId('pro-cancel-at@example.com');
 		const cancelAt = Date.UTC(2099, 11, 15) / 1000;
-		await env.DB.prepare(
-			`INSERT INTO subscriptions
-			 (id, account_id, plan, paid_through, status, cancel_at_period_end, cancel_at, created_at)
-			 VALUES ('sub_pro_cancel_at', ?, 'monthly', 4_102_444_800, 'active', 1, ?, 0)`
-		)
-			.bind(account, cancelAt)
-			.run();
+		await addSubscription(account, {
+			id: 'sub_pro_cancel_at',
+			status: 'active',
+			cancelAtPeriodEnd: true,
+			cancelAt
+		});
 		await env.DB.prepare(
 			`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
 			 amount, currency, managed_payments, domestic, stripe_subscription_id, created_at)
@@ -244,12 +252,7 @@ describe('buying credit', () => {
 	it('does not grant Pro credit from balance while the account is in its trial', async () => {
 		const { token } = await linkApp('pro-trial-credit@example.com');
 		const account = await accountId('pro-trial-credit@example.com');
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
-			 VALUES ('sub_pro_trial_credit', ?, 'monthly', 4_102_444_800, 'trialing', 0)`
-		)
-			.bind(account)
-			.run();
+		await addSubscription(account, { id: 'sub_pro_trial_credit' });
 		await app('/v1/balance', token);
 		expect(
 			await env.DB.prepare("SELECT 1 FROM grants WHERE account_id = ? AND kind = 'pro'")
@@ -275,12 +278,7 @@ describe('buying credit', () => {
 	it('does not grant Pro credit from AI relay while the account is in its trial', async () => {
 		const { token } = await linkApp('pro-trial-relay@example.com');
 		const account = await accountId('pro-trial-relay@example.com');
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
-			 VALUES ('sub_pro_trial_relay', ?, 'monthly', 4_102_444_800, 'trialing', 0)`
-		)
-			.bind(account)
-			.run();
+		await addSubscription(account, { id: 'sub_pro_trial_relay' });
 		geminiAnswers();
 		expect((await sendAi(token)).status).toBe(200);
 		expect(
@@ -318,12 +316,7 @@ describe('buying credit', () => {
 			buyer_country: 'US',
 			domestic: 0
 		});
-		expect(
-			stripe.mock.calls.some(
-				([url, init]) =>
-					String(url).endsWith(`/subscriptions/${subscriptionId}`) && init?.method === 'DELETE'
-			)
-		).toBe(true);
+		expect(canceledOnStripe(stripe, subscriptionId)).toBe(true);
 	});
 
 	it('takes back this month’s remaining Pro credit with a refunded Pro payment', async () => {
@@ -337,11 +330,7 @@ describe('buying credit', () => {
 		)
 			.bind(account)
 			.run();
-		await webhook({
-			id: `evt_${crypto.randomUUID()}`,
-			type: 'charge.refunded',
-			data: { object: { payment_intent: paymentIntentId, refunded: true } }
-		});
+		await webhook(refunded(paymentIntentId));
 		expect(
 			await env.DB.prepare('SELECT remaining, revoked FROM grants WHERE id = ?')
 				.bind('grant_pro_refund')
@@ -369,11 +358,7 @@ describe('buying credit', () => {
 		)
 			.bind(account)
 			.run();
-		await webhook({
-			id: `evt_${crypto.randomUUID()}`,
-			type: 'charge.refunded',
-			data: { object: { payment_intent: second.paymentIntentId, refunded: true } }
-		});
+		await webhook(refunded(second.paymentIntentId));
 		expect(
 			await env.DB.prepare('SELECT remaining, revoked FROM grants WHERE id = ?')
 				.bind('grant_duplicate_refund')
@@ -396,11 +381,7 @@ describe('buying credit', () => {
 		)
 			.bind(account)
 			.run();
-		await webhook({
-			id: `evt_${crypto.randomUUID()}`,
-			type: 'charge.refunded',
-			data: { object: { payment_intent: 'pi_cs_credit_refund_keeps_pro', refunded: true } }
-		});
+		await webhook(refunded('pi_cs_credit_refund_keeps_pro'));
 		expect(
 			await env.DB.prepare('SELECT remaining, revoked FROM grants WHERE id = ?')
 				.bind('grant_pro_kept')
@@ -472,13 +453,7 @@ describe('buying credit', () => {
 				.bind(second.subscriptionId)
 				.first()
 		).toEqual({ account_id: account, revoked_at: null });
-		expect(
-			second.stripe.mock.calls.some(
-				([url, init]) =>
-					String(url).endsWith(`/subscriptions/${second.subscriptionId}`) &&
-					init?.method === 'DELETE'
-			)
-		).toBe(true);
+		expect(canceledOnStripe(second.stripe, second.subscriptionId)).toBe(true);
 		expect(
 			await env.DB.prepare('SELECT status FROM stripe_events WHERE id = ?').bind(event.id).first()
 		).toEqual({ status: 'failed' });
@@ -501,13 +476,7 @@ describe('buying credit', () => {
 				.bind(second.subscriptionId)
 				.first()
 		).toEqual({ account_id: account });
-		expect(
-			second.stripe.mock.calls.some(
-				([url, init]) =>
-					String(url).endsWith(`/subscriptions/${second.subscriptionId}`) &&
-					init?.method === 'DELETE'
-			)
-		).toBe(false);
+		expect(canceledOnStripe(second.stripe, second.subscriptionId)).toBe(false);
 		vi.restoreAllMocks();
 	});
 
@@ -518,11 +487,7 @@ describe('buying credit', () => {
 		await webhook(paidInvoice(first.invoiceId));
 		vi.restoreAllMocks();
 		const second = proInvoiceApi(account);
-		await webhook({
-			id: `evt_${crypto.randomUUID()}`,
-			type: 'charge.refunded',
-			data: { object: { payment_intent: second.paymentIntentId, refunded: true } }
-		});
+		await webhook(refunded(second.paymentIntentId));
 		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
 		const event = paidInvoice(second.invoiceId);
 		await webhook(event);
@@ -610,11 +575,7 @@ describe('buying credit', () => {
 		await signIn('revoked-pro@example.com');
 		const account = await accountId('revoked-pro@example.com');
 		const { subscriptionId, invoiceId, paymentIntentId, stripe } = proInvoiceApi(account);
-		await webhook({
-			id: `evt_${crypto.randomUUID()}`,
-			type: 'charge.refunded',
-			data: { object: { payment_intent: paymentIntentId, refunded: true } }
-		});
+		await webhook(refunded(paymentIntentId));
 		expect((await webhook(paidInvoice(invoiceId))).status).toBe(200);
 		expect(
 			await env.DB.prepare('SELECT 1 FROM subscriptions WHERE id = ?').bind(subscriptionId).first()
@@ -624,24 +585,14 @@ describe('buying credit', () => {
 				.bind(subscriptionId)
 				.first<{ revoked_at: number | null }>()
 		).toMatchObject({ revoked_at: expect.any(Number) });
-		expect(
-			stripe.mock.calls.some(
-				([url, init]) =>
-					String(url).endsWith(`/subscriptions/${subscriptionId}`) && init?.method === 'DELETE'
-			)
-		).toBe(true);
+		expect(canceledOnStripe(stripe, subscriptionId)).toBe(true);
 	});
 
 	it('never restores a canceled Pro subscription from a late paid invoice', async () => {
 		await signIn('canceled-pro@example.com');
 		const account = await accountId('canceled-pro@example.com');
 		const subscriptionId = `sub_${crypto.randomUUID()}`;
-		await env.DB.prepare(
-			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
-			 VALUES (?, ?, 'monthly', 1, 'canceled', 0)`
-		)
-			.bind(subscriptionId, account)
-			.run();
+		await addSubscription(account, { id: subscriptionId, paidThrough: 1, status: 'canceled' });
 		const { invoiceId } = proInvoiceApi(account, { subscriptionId });
 		await webhook(paidInvoice(invoiceId));
 		expect(

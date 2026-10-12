@@ -1,18 +1,13 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { purgeSync, SYNC_ITEM_BYTES, SYNC_TOTAL_BYTES } from '../../src/sync';
-import { accountId, app, linkApp } from '../helpers';
+import { purgeSync, SYNC_ITEM_BYTES } from '../../src/sync';
+import { accountId, addSubscription, app, linkApp } from '../helpers';
 
 const KEY = 'a'.repeat(16);
 
 async function makePro(email: string) {
 	const account = await accountId(email);
-	await env.DB.prepare(
-		`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
-		 VALUES (?, ?, 'monthly', 4102444800, 'trialing', 0)`
-	)
-		.bind(`sync_${email}`, account)
-		.run();
+	await addSubscription(account, { id: `sync_${email}` });
 	return account;
 }
 
@@ -61,7 +56,8 @@ describe('sync HTTP', () => {
 		});
 	});
 
-	it('returns the current encrypted item for an old base and rejects a different key', async () => {
+	// 競合と上限の場合ごとの中身は test/sync.test.ts が見る。ここは、状態コードと本文が届くことだけを見る。
+	it('answers 409 with the current encrypted item for an old base', async () => {
 		const email = 'sync-conflict@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
@@ -73,39 +69,14 @@ describe('sync HTTP', () => {
 			key_id: KEY,
 			items: [{ collection: 'settings', id: 'one', base_seq: 1, deleted: false, data: 'Ag==' }]
 		});
-		expect(
-			await (
-				await put(token, {
-					key_id: KEY,
-					items: [{ collection: 'settings', id: 'one', base_seq: 1, deleted: false, data: 'Aw==' }]
-				})
-			).json()
-		).toEqual({
+		const response = await put(token, {
+			key_id: KEY,
+			items: [{ collection: 'settings', id: 'one', base_seq: 1, deleted: false, data: 'Aw==' }]
+		});
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
 			error: 'conflict',
 			conflicts: [{ collection: 'settings', id: 'one', seq: 2, deleted: false, data: 'Ag==' }]
-		});
-		expect(
-			await (
-				await put(token, {
-					key_id: 'b'.repeat(16),
-					items: [
-						{ collection: 'settings', id: 'two', base_seq: null, deleted: false, data: 'AQ==' }
-					]
-				})
-			).json()
-		).toEqual({ error: 'key_mismatch' });
-		expect(
-			await (
-				await put(token, {
-					key_id: KEY,
-					items: [
-						{ collection: 'settings', id: 'missing', base_seq: 99, deleted: false, data: 'AQ==' }
-					]
-				})
-			).json()
-		).toEqual({
-			error: 'conflict',
-			conflicts: [{ collection: 'settings', id: 'missing', seq: null, deleted: true, data: null }]
 		});
 	});
 
@@ -145,36 +116,24 @@ describe('sync HTTP', () => {
 		expect(synced.items).toHaveLength(2);
 	});
 
-	it('enforces the item and total limits', async () => {
+	it('answers 413 for an item over the limit', async () => {
 		const email = 'sync-limits@example.com';
 		const { token } = await linkApp(email);
-		const account = await makePro(email);
-		const oversized = btoa('x'.repeat(SYNC_ITEM_BYTES + 1));
-		expect(
-			await (
-				await put(token, {
-					key_id: KEY,
-					items: [
-						{ collection: 'settings', id: 'item', base_seq: null, deleted: false, data: oversized }
-					]
-				})
-			).json()
-		).toEqual({ error: 'too_large', limit: 'item' });
-		await env.DB.prepare(
-			'INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes) VALUES (?, ?, 0, 0, ?)'
-		)
-			.bind(account, KEY, SYNC_TOTAL_BYTES)
-			.run();
-		expect(
-			await (
-				await put(token, {
-					key_id: KEY,
-					items: [
-						{ collection: 'settings', id: 'total', base_seq: null, deleted: false, data: 'AQ==' }
-					]
-				})
-			).json()
-		).toEqual({ error: 'too_large', limit: 'total' });
+		await makePro(email);
+		const response = await put(token, {
+			key_id: KEY,
+			items: [
+				{
+					collection: 'settings',
+					id: 'item',
+					base_seq: null,
+					deleted: false,
+					data: btoa('x'.repeat(SYNC_ITEM_BYTES + 1))
+				}
+			]
+		});
+		expect(response.status).toBe(413);
+		expect(await response.json()).toEqual({ error: 'too_large', limit: 'item' });
 	});
 
 	it('resets an old key and requires peers to rebuild from the server copy', async () => {
