@@ -3,7 +3,6 @@
 ## プロジェクトルール
 
 - 開発の手順は [DEVELOPMENT.md](DEVELOPMENT.md)、コードだけでは分からない技術の説明は `docs/<テーマ>.md`。
-- コミット・PR 本文・issue は公開されるものとして書く (`public-repo-writing` skill)。
 - 要件・仕様・運用の決まりはこのリポジトリに置いていない。
 
 ## コードの規約
@@ -33,7 +32,6 @@
 - OS で違う所（キー・メニューバーとタスクトレイ・置き場所・片方の OS だけの説明）は、併記せずに書き分ける。窓は開いた OS の分だけを出す（`src/lib/manual.ts` の `selectPlatform`）。アプリの中のヘルプは開いた OS の書き方だけを出すのが多数派で、読み手が括弧の中を読み替えずに済むため。
   - 文の中は `{macos:…}{windows:…}`。中に波かっこは書けない。片方の OS では何も出さないなら、その側を空にする。
   - 段落・箇条書きの項目・表は、`::: macos` か `::: windows` の行から `:::` の行までで囲む。印の行は字下げしない。
-  - どちらの OS で描いても印が残らないことと、節の数が揃っていることは `src/lib/manual.test.ts` が見る。
 
 ### 画面
 
@@ -66,13 +64,11 @@
 
 ## Codex レビューの依頼
 
-`codex-review` skill の手順で依頼する。依頼文で対象から外す生成物は `src/lib/components/ui/**`・ロックファイル・`src-tauri/icons/**`・`src-tauri/gen/**`。
+依頼文で対象から外す生成物は `src/lib/components/ui/**`・ロックファイル・`src-tauri/icons/**`・`src-tauri/gen/**`。
 
 ## マージまでの基本フロー
 
 共通の指示の「git の運用」の流れに、このリポジトリでは次を足す。
 
 - 実機の確認を受けた直しも、二重のレビューに出してから積む。
-- push のとき、lefthook の pre-push フック (→ `just hooks-install`) が整形 (`just fmt-check`) を確かめる。
-- PR を作ると、GitHub Actions の CI が macOS と Windows で `just ci` を流す。
 - OS で分けたコード (`#[cfg(windows)]` だけでなく `#[cfg(target_os = "macos")]` も) の動きを変えた場合と、ユーザーに見える変更 (画面・動き・文言) を含む場合は、push した後、PR をマージする前に、もう片方の OS での E2E・確認を頼む。テストや文書だけの変更では頼まない。
