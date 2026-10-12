@@ -3,6 +3,13 @@
  * 1つでも無いか読めなければ投げる。窓口のどの入口も、DB に書く前にここで止める (src/index.ts)。
  */
 
+/** Pro のプラン。Stripe の Price・付ける原価・予約の `price` 列を分ける。 */
+export type ProPlan = 'monthly' | 'yearly';
+
+export function isProPlan(value: unknown): value is ProPlan {
+	return value === 'monthly' || value === 'yearly';
+}
+
 /** 原価を出すための値。 */
 export type Rates = {
 	/** 1 ドルの円。 */

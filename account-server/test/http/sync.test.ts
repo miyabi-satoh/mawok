@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { purgeSync, SYNC_TOTAL_BYTES } from '../../src/sync';
+import { purgeSync, SYNC_ITEM_BYTES, SYNC_TOTAL_BYTES } from '../../src/sync';
 import { accountId, app, linkApp } from '../helpers';
 
 const KEY = 'a'.repeat(16);
@@ -149,7 +149,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-limits@example.com';
 		const { token } = await linkApp(email);
 		const account = await makePro(email);
-		const oversized = btoa('x'.repeat(256 * 1024 + 1));
+		const oversized = btoa('x'.repeat(SYNC_ITEM_BYTES + 1));
 		expect(
 			await (
 				await put(token, {

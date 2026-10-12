@@ -2,7 +2,8 @@
  * 残高 (→ docs/account-server.md「残高」)。単位は原価の 1/1000 円 (milli_yen)。
  * 付与は1行ずつ (`grants`) で持ち、引くときは購入の分を古い順に使い、無料の分は最後に使う。
  */
-import { pricing } from './pricing';
+import { pricing, type ProPlan } from './pricing';
+import { PRO_PRODUCT } from './stripe';
 import { now, randomHex } from './util';
 
 /** 今の残高。`percent` は残りの割合 (切り上げ。使い切ったときだけ 0)。 */
@@ -10,12 +11,12 @@ export type Balance = { remaining: number; percent: number };
 export type Pro = {
 	active: boolean;
 	until: number | null;
-	plan: 'monthly' | 'yearly' | null;
+	plan: ProPlan | null;
 	trial: boolean;
 };
 
-/** アカウントの画面だけに出す、次の期間へ更新されるかどうかと表示する期限。 */
-export type AccountPro = Pro & { renews: boolean; displayUntil: number | null };
+/** アカウントの画面だけに出す、次の期間へ更新されるかどうか。 */
+export type AccountPro = Pro & { renews: boolean };
 
 /** `subscriptions` の Pro を使える期限。 */
 export const proUntilSql = 'min(coalesce(cancel_at, paid_through), paid_through)';
@@ -71,7 +72,7 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 		`SELECT plan, paid_through, status, cancel_at_period_end, cancel_at,
 		 EXISTS (SELECT 1 FROM purchases
 		         WHERE stripe_subscription_id = subscriptions.id
-		           AND product = 'mawok-pro' AND revoked_at IS NULL) AS paid
+		           AND product = '${PRO_PRODUCT}' AND revoked_at IS NULL) AS paid
 		 FROM subscriptions
 		 WHERE account_id = ? AND revoked_at IS NULL
 		   AND ${proUntilSql} > ?
@@ -79,7 +80,7 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 	)
 		.bind(accountId, t)
 		.first<{
-			plan: 'monthly' | 'yearly';
+			plan: ProPlan;
 			paid_through: number;
 			status: string;
 			cancel_at_period_end: number;
@@ -95,10 +96,9 @@ export async function proOf(env: Env, accountId: string, t = now()): Promise<Acc
 				renews:
 					row.status !== 'canceled' &&
 					row.cancel_at_period_end !== 1 &&
-					(row.cancel_at === null || row.cancel_at > row.paid_through),
-				displayUntil: proUntil(row.paid_through, row.cancel_at)
+					(row.cancel_at === null || row.cancel_at > row.paid_through)
 			}
-		: { active: false, until: null, plan: null, trial: false, renews: false, displayUntil: null };
+		: { active: false, until: null, plan: null, trial: false, renews: false };
 }
 
 /** Asia/Tokyo の暦月の終わり。Pro の付与はその月だけ使える。 */
@@ -125,6 +125,14 @@ export function grantProStatement(env: Env, accountId: string, pro: Pro, t = now
 		   SELECT 1 FROM grants WHERE account_id = ?2 AND kind = 'pro' AND expires_at = ?4
 		 )`
 	).bind(randomHex(16), accountId, amount, expiresAt, t, pro.active && !pro.trial ? 1 : 0);
+}
+
+/** 取りこぼした無料の分と、その暦月の Pro の分を付ける。残りを見る・使う前に呼ぶ。 */
+export async function topUp(env: Env, accountId: string): Promise<AccountPro> {
+	await grantFreeStatement(env, accountId).run();
+	const pro = await proOf(env, accountId);
+	if (pro.active && !pro.trial) await grantProStatement(env, accountId, pro).run();
+	return pro;
 }
 
 /**

@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import {
 	SYNC_ITEM_BYTES,
+	SYNC_TOMBSTONE_RETENTION,
 	SYNC_ACCOUNT_UPDATE_SQL,
 	SYNC_TOTAL_BYTES,
 	getSync,
@@ -73,14 +74,14 @@ describe('sync', () => {
 			`INSERT INTO sync_items (account_id, collection, id, seq, deleted, data, updated_at)
 			 VALUES (?, 'settings', 'gone', 3, 1, NULL, ?)`
 		)
-			.bind(active, t - 90 * 24 * 60 * 60)
+			.bind(active, t - SYNC_TOMBSTONE_RETENTION)
 			.run();
 		await env.DB.prepare(
 			`INSERT INTO subscriptions (id, account_id, plan, paid_through, status, created_at)
 			 VALUES ('sync_active', ?, 'monthly', ?, 'active', 0),
 			        ('sync_ended', ?, 'monthly', ?, 'canceled', 0)`
 		)
-			.bind(active, t + 1, ended, t - 90 * 24 * 60 * 60)
+			.bind(active, t + 1, ended, t - SYNC_TOMBSTONE_RETENTION)
 			.run();
 
 		await purgeSync(env, t);

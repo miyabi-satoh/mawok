@@ -243,7 +243,6 @@ describe('proOf', () => {
 		expect(await proOf(env, account, 1)).toMatchObject({
 			active: true,
 			until: cancelAt,
-			displayUntil: cancelAt,
 			renews: false
 		});
 	});
@@ -259,7 +258,6 @@ describe('proOf', () => {
 		expect(await proOf(env, account, 1)).toMatchObject({
 			active: true,
 			until: 4_102_444_800,
-			displayUntil: 4_102_444_800,
 			trial: true,
 			renews: true
 		});
