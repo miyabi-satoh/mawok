@@ -1,4 +1,4 @@
-import { errorCode } from '$lib/errors';
+import { codeMessage, errorCode } from '$lib/errors';
 import type { SendFailure } from '$lib/bindings/SendFailure';
 import { m } from '$lib/paraglide/messages';
 
@@ -39,6 +39,5 @@ export function isPartialSend(error: unknown): error is PartialSend {
  * 送信のエラーは `{ code, devices }` の形で届くので、符号を取り出して同じように扱う
  */
 export function lanErrorMessage(error: unknown): string {
-	const code = errorCode(error);
-	return Object.hasOwn(MESSAGES, code) ? MESSAGES[code]() : code;
+	return codeMessage(MESSAGES, errorCode(error));
 }

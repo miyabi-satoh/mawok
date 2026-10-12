@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchedIds, matchesFilter, shownRows, showsFilter } from './list-filter';
+import { matchedKeys, matchesFilter, shownRows, showsFilter } from './list-filter';
 
 describe('matchesFilter', () => {
 	it('どれかの文字列が語を含めば当たり、英字の大文字と小文字は区別しない', () => {
@@ -17,29 +17,29 @@ describe('matchesFilter', () => {
 	});
 });
 
-describe('matchedIds と shownRows', () => {
+describe('matchedKeys と shownRows', () => {
 	const rows = [
 		{ key: 'a', text: '確認' },
 		{ key: 'b', text: 'git status' }
 	];
 
 	it('語が空白だけなら絞り込まず、すべてを出す', () => {
-		const ids = matchedIds(
+		const keys = matchedKeys(
 			() => rows,
 			' ',
 			(row) => [row.text]
 		);
-		expect(ids).toBeNull();
-		expect(shownRows(rows, ids)).toEqual(rows);
+		expect(keys).toBeNull();
+		expect(shownRows(rows, keys)).toEqual(rows);
 	});
 
 	it('当たった行だけを、並びのまま出す', () => {
-		const ids = matchedIds(
+		const keys = matchedKeys(
 			() => rows,
 			'git',
 			(row) => [row.text]
 		);
-		expect(shownRows(rows, ids)).toEqual([rows[1]]);
+		expect(shownRows(rows, keys)).toEqual([rows[1]]);
 	});
 });
 

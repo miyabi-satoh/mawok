@@ -1,11 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { tick } from 'svelte';
-import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { m } from '$lib/paraglide/messages';
 import { settings, type AiService, type SettingsView } from '$lib/settings.svelte';
 import { settingsView } from '$lib/test-support/settings-view';
-import Page from './+page.svelte';
+import { renderAt } from './render-at';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(undefined)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -53,12 +52,6 @@ async function changeSettings(next: SettingsView) {
 	await tick();
 }
 
-async function openActions() {
-	const screen = await render(Page);
-	await screen.getByRole('tab', { name: m.settings_category_actions() }).click();
-	return screen;
-}
-
 describe('設定画面のアクションの AI サービス選択', () => {
 	beforeEach(() => {
 		invoked.mockClear();
@@ -70,7 +63,7 @@ describe('設定画面のアクションの AI サービス選択', () => {
 	});
 
 	it('サービスを替えると、選んだサービスのモデルを表示する', async () => {
-		const screen = await openActions();
+		const screen = await renderAt(m.settings_category_actions);
 
 		settings.current = { ...view('anthropic'), aiModels: { anthropic: 'anthropic-model' } };
 		await expect
@@ -91,7 +84,7 @@ describe('設定画面のアクションの AI サービス選択', () => {
 			...view('gemini'),
 			aiConsent: 'gemini'
 		};
-		const screen = await openActions();
+		const screen = await renderAt(m.settings_category_actions);
 		await waitPending('has_ai_key');
 		take('has_ai_key').resolve(true);
 		await expect
@@ -130,7 +123,7 @@ describe('設定画面のアクションの AI サービス選択', () => {
 			return command === 'has_ai_key' ? Promise.resolve(hasKey) : Promise.resolve(undefined);
 		});
 		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
-		const screen = await openActions();
+		const screen = await renderAt(m.settings_category_actions);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_delete() }).click();
 
@@ -151,7 +144,7 @@ describe('設定画面のアクションの AI サービス選択', () => {
 			return Promise.resolve(undefined);
 		});
 		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
-		const screen = await openActions();
+		const screen = await renderAt(m.settings_category_actions);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();
 		await screen.getByLabelText(m.settings_ai_key_input()).fill('secret-key');
@@ -170,7 +163,7 @@ describe('設定画面のアクションの AI サービス選択', () => {
 			return command === 'has_ai_key' ? Promise.resolve(false) : Promise.resolve(undefined);
 		});
 		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
-		const screen = await openActions();
+		const screen = await renderAt(m.settings_category_actions);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();
 		await screen.getByLabelText(m.settings_ai_key_input()).fill('secret-key');

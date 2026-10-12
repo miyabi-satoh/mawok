@@ -15,11 +15,11 @@
 	import { onMount, tick } from 'svelte';
 	import FolderButton from '$lib/components/folder-button.svelte';
 	import FolderPalette from '$lib/components/folder-palette.svelte';
+	import KeyCaps from '$lib/components/key-caps.svelte';
 	import SendTargetPalette from '$lib/components/send-target-palette.svelte';
 	import TextPalette, { type PaletteAction } from '$lib/components/text-palette.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
-	import * as Kbd from '$lib/components/ui/kbd';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '$lib/font';
 	import { draftGuidance } from '$lib/guidance';
@@ -35,14 +35,7 @@
 	} from '$lib/history.svelte';
 	import { caretLine } from '$lib/caret-line';
 	import { clamp } from '$lib/clamp';
-	import {
-		draftActionFor,
-		formatKeys,
-		isDismissKey,
-		keyHint,
-		keyLabels,
-		type DraftAction
-	} from '$lib/keys';
+	import { draftActionFor, formatKeys, isDismissKey, keyHint, type DraftAction } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
 	import type { ReceivedDraft } from '$lib/bindings/ReceivedDraft';
@@ -74,6 +67,10 @@
 				)
 			: ''
 	);
+
+	// ボタンの説明に添える、操作のキーと、その表し方を決める OS。設定が届く前は undefined
+	const keys = $derived(settings.current?.textWindowKeys);
+	const platform = $derived(settings.current?.platform);
 
 	// 入力欄の上下に操作のボタンを出すか
 	const showButtons = $derived(settings.current?.showTextWindowButtons ?? true);
@@ -195,11 +192,20 @@
 	let error = $state('');
 	// エラーの帯の見出し。コピーと送るで分ける
 	let errorTitle = $state('');
+	function showError(title: string, message: string) {
+		errorTitle = title;
+		error = message;
+	}
 	// 残高が尽きたときだけ、料金ページを開く操作を帯に添える。帯の文から決めるので、ほかの失敗で文が変わればボタンも消える
 	const noCredit = $derived(error === m.action_error_no_credit());
 	// 同じアカウントのデバイスへ送っている最中か。つないで送り終えるまで数秒かかることがあり、その間は書き換えさせない
 	let sending = $state(false);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
+	/** 画面の描き直し（一覧が閉じる、入力欄が編集できる状態に戻る）を待ってから、入力欄にフォーカスを移す */
+	async function focusDraft() {
+		await tick();
+		textarea?.focus();
+	}
 	// 隠す操作（コピーする・しない）の完了待ち。重ねて受け付けると、Esc の直後の Cmd+Enter でコピーしてしまう
 	let hiding = false;
 	// 変換中に隠すと、隠した後に確定イベントが届いて文字が入力欄に戻ることがあるので、次の表示時にも空にする
@@ -381,8 +387,7 @@
 			});
 			showNotice(added ? m.draft_snippet_registered() : m.draft_snippet_already_registered());
 		} catch (e) {
-			errorTitle = m.draft_snippet_register_failed();
-			error = errorCode(e);
+			showError(m.draft_snippet_register_failed(), errorCode(e));
 		}
 	}
 
@@ -457,6 +462,8 @@
 	// アクションを実行している最中の1回。していなければ null。
 	// 取り消しや次の実行と、遅れて届いた結果を見分けるため、同じものかどうかをそのまま比べる（proxy にしない）
 	let running = $state.raw<RunningAction | null>(null);
+	// 送っている間とアクションを実行している間は、入力欄を書き換える操作を止める
+	const busy = $derived(sending || running !== null);
 	// 下書きウィンドウが出ているか。画面の描き分けには使わないので、状態にしない。
 	// 実行は出ているときにしか始められないので、読み込んだときは出ているものとしてよい
 	let draftVisible = true;
@@ -512,8 +519,7 @@
 		try {
 			await move();
 		} catch (failure) {
-			errorTitle = m.folder_change_failed();
-			error = folderErrorMessage(failure);
+			showError(m.folder_change_failed(), folderErrorMessage(failure));
 		}
 		refreshFolderMenu();
 		textarea?.focus();
@@ -566,12 +572,10 @@
 			if (running !== session) return;
 			running = null;
 			if (errorCode(e) !== 'action.cancelled') {
-				errorTitle = m.action_failed();
-				error = actionErrorMessage(e) ?? errorCode(e);
+				showError(m.action_failed(), actionErrorMessage(e) ?? errorCode(e));
 				if (!draftVisible) notifyFinished(m.action_notify_failed({ action: label }));
 			}
-			await tick();
-			textarea?.focus();
+			await focusDraft();
 			return;
 		}
 		// 取り消した後に届いた結果は捨てる
@@ -581,8 +585,7 @@
 			running = null;
 			if (draftVisible) showNotice(m.draft_action_done({ action: label }));
 			else notifyFinished(m.action_notify_done({ action: label }));
-			await tick();
-			textarea?.focus();
+			await focusDraft();
 			return;
 		}
 		// 隠れている間に届いたら、出し直したときに差し替える（見えていない入力欄にはフォーカスを移せず、差し替えられないため）。
@@ -663,8 +666,7 @@
 	/** 送信先の一覧を閉じ、入力欄に戻る */
 	async function closeTargets() {
 		targetsOpen = false;
-		await tick();
-		textarea?.focus();
+		await focusDraft();
 	}
 
 	/** 送信先の一覧から送る。チェックが入っていて、つながったデバイスだけに送る */
@@ -709,17 +711,18 @@
 			clearOnShow = false;
 			if (command === 'send_draft' && isPartialSend(e)) {
 				// 一部のデバイスにだけ届かなかった。原因は出さず、どのデバイスに届かなかったかだけを出す
-				errorTitle = m.send_partial();
 				const names = e.devices.map((publicKey) =>
 					unbrokenAtHyphens(deviceNames.get(publicKey) ?? publicKey)
 				);
-				error = m.send_partial_devices({
-					devices: new Intl.ListFormat(settings.current?.locale).format(names)
-				});
+				showError(
+					m.send_partial(),
+					m.send_partial_devices({
+						devices: new Intl.ListFormat(settings.current?.locale).format(names)
+					})
+				);
 			} else {
-				errorTitle = failedTitle;
 				// 送れなかったときは、Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする
-				error = command === 'send_draft' ? lanErrorMessage(e) : errorCode(e);
+				showError(failedTitle, command === 'send_draft' ? lanErrorMessage(e) : errorCode(e));
 			}
 			// 隠れずに残るので、コピーのボタンで押したときも、そのまま書き続けてキーを使えるよう入力欄に戻す
 			textarea?.focus();
@@ -784,8 +787,7 @@
 			text = '';
 			clearOnShow = false;
 		}
-		await tick();
-		textarea?.focus();
+		await focusDraft();
 		const apply = pendingResult;
 		pendingResult = null;
 		await apply?.();
@@ -1010,23 +1012,16 @@
 		前・次は、覚えている履歴がなければ使えないので出さない。
 		列が狭いとき（最小の幅の近く）は、定型文とアクションをアイコンだけにする
 	-->
-	{#if showButtons && settings.current}
-		{@const platform = settings.current.platform}
-		{@const keys = settings.current.textWindowKeys}
+	{#if showButtons && keys && platform}
 		<div class="@container flex items-center gap-1">
 			{#if draftHistory.hasEntries}
 				<Button
 					tabindex={-1}
 					variant="ghost"
 					size="sm"
-					disabled={!draftHistory.canGoOlder || sending || running !== null}
-					title={settings.current?.textWindowKeys.historyOlder
-						? m.draft_history_older_hint_key({
-								keys: formatKeys(
-									settings.current.textWindowKeys.historyOlder,
-									settings.current.platform
-								)
-							})
+					disabled={!draftHistory.canGoOlder || busy}
+					title={keys.historyOlder
+						? m.draft_history_older_hint_key({ keys: formatKeys(keys.historyOlder, platform) })
 						: m.draft_history_older_hint()}
 					onclick={() => stepHistory('older')}
 				>
@@ -1037,14 +1032,9 @@
 					tabindex={-1}
 					variant="ghost"
 					size="sm"
-					disabled={!draftHistory.canGoNewer || sending || running !== null}
-					title={settings.current?.textWindowKeys.historyNewer
-						? m.draft_history_newer_hint_key({
-								keys: formatKeys(
-									settings.current.textWindowKeys.historyNewer,
-									settings.current.platform
-								)
-							})
+					disabled={!draftHistory.canGoNewer || busy}
+					title={keys.historyNewer
+						? m.draft_history_newer_hint_key({ keys: formatKeys(keys.historyNewer, platform) })
 						: m.draft_history_newer_hint()}
 					onclick={() => stepHistory('newer')}
 				>
@@ -1058,7 +1048,7 @@
 					variant="ghost"
 					size="sm"
 					title={keyHint(m.draft_snippets_hint(), keys.snippets, platform)}
-					disabled={sending || running !== null}
+					disabled={busy}
 					onclick={openSnippets}
 				>
 					<TextQuoteIcon data-icon="inline-start" />
@@ -1069,7 +1059,7 @@
 					variant="ghost"
 					size="sm"
 					title={keyHint(m.draft_actions_hint(), keys.actions, platform)}
-					disabled={sending || running !== null}
+					disabled={busy}
 					onclick={openActions}
 				>
 					<SparklesIcon data-icon="inline-start" />
@@ -1123,7 +1113,7 @@
 			]}
 			style="font-family: {fontFamily}; font-size: {fontSize}px; line-height: 1.5"
 			spellcheck="false"
-			readonly={sending || running !== null}
+			readonly={busy}
 			placeholder={guidance || undefined}
 			aria-label={m.draft_label()}
 			onkeydown={onKeydown}
@@ -1158,8 +1148,7 @@
 				onclick={async () => {
 					cancelAction();
 					// 押したボタンは消えるので、入力欄に戻す
-					await tick();
-					textarea?.focus();
+					await focusDraft();
 				}}
 			>
 				{m.draft_cancel_action()}
@@ -1171,9 +1160,7 @@
 			<span class="truncate">{notice}</span>
 		</p>
 	{/if}
-	{#if showButtons && settings.current}
-		{@const platform = settings.current.platform}
-		{@const keys = settings.current.textWindowKeys}
+	{#if showButtons && keys && platform}
 		<!--
 			下の並び。左に今のフォルダー、右に送る・コピー。キーを添えるのはコピーだけで、ほかは狭い窓に文字を詰め込まないよう、
 			マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
@@ -1182,7 +1169,7 @@
 			{#if folderMenu}
 				<FolderButton
 					menu={folderMenu}
-					disabled={sending || running !== null}
+					disabled={busy}
 					onopen={refreshFolderMenu}
 					onchange={(path) => moveFolderFromMenu(() => invoke('change_folder', { input: path }))}
 					onpick={() => moveFolderFromMenu(() => invoke('pick_folder'))}
@@ -1198,7 +1185,7 @@
 						size="sm"
 						class="rounded-r-none"
 						title={keyHint(m.draft_send_hint(), keys.send, platform)}
-						disabled={sending || running !== null}
+						disabled={busy}
 						onclick={send}
 					>
 						<SendIcon data-icon="inline-start" />
@@ -1211,7 +1198,7 @@
 						class="-ml-px rounded-l-none px-1.5"
 						aria-label={m.draft_send_targets()}
 						title={keyHint(m.draft_send_targets(), keys.sendTargets, platform)}
-						disabled={sending || running !== null}
+						disabled={busy}
 						onclick={() => (targetsOpen = true)}
 					>
 						<ChevronDownIcon />
@@ -1228,11 +1215,7 @@
 			>
 				{m.draft_copy()}
 				{#if keys.copy}
-					<Kbd.Group>
-						{#each keyLabels(keys.copy, platform) as label (label)}
-							<Kbd.Root>{label}</Kbd.Root>
-						{/each}
-					</Kbd.Group>
+					<KeyCaps key={keys.copy} {platform} />
 				{/if}
 			</Button>
 		</div>
@@ -1248,12 +1231,8 @@
 					tabindex={-1}
 					variant="outline"
 					size="sm"
-					title={settings.current
-						? keyHint(
-								m.draft_received_insert(),
-								settings.current.textWindowKeys.insertReceived,
-								settings.current.platform
-							)
+					title={keys && platform
+						? keyHint(m.draft_received_insert(), keys.insertReceived, platform)
 						: undefined}
 					disabled={sending}
 					onclick={insertReceived}
@@ -1264,12 +1243,8 @@
 					tabindex={-1}
 					variant="ghost"
 					size="sm"
-					title={settings.current
-						? keyHint(
-								m.draft_received_discard(),
-								settings.current.textWindowKeys.discardReceived,
-								settings.current.platform
-							)
+					title={keys && platform
+						? keyHint(m.draft_received_discard(), keys.discardReceived, platform)
 						: undefined}
 					onclick={discardReceived}
 				>
@@ -1360,10 +1335,7 @@
 			targetsKey={settings.current.textWindowKeys.sendTargets}
 			onsend={sendToTargets}
 			onclose={closeTargets}
-			onerror={(message) => {
-				errorTitle = m.draft_send_targets_save_failed();
-				error = message;
-			}}
+			onerror={(message) => showError(m.draft_send_targets_save_failed(), message)}
 		/>
 	{/if}
 </main>

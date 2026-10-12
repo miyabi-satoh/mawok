@@ -68,6 +68,22 @@ function committedText(): string | null {
 	return last ? (last[1] as { text: string }).text : null;
 }
 
+/** 入力欄に書き、カーソル（と選択範囲）を置いてから、Cmd と key で一覧（定型文は j、アクションは k）を出す */
+async function openListAt(
+	screen: Awaited<ReturnType<typeof render>>,
+	key: 'j' | 'k',
+	value: string,
+	start: number,
+	end: number
+) {
+	const textarea = screen.getByRole('textbox');
+	await textarea.fill(value);
+	(textarea.element() as HTMLTextAreaElement).setSelectionRange(start, end);
+	await userEvent.keyboard(`{Meta>}${key}{/Meta}`);
+	await expect.element(screen.getByRole('combobox')).toHaveFocus();
+	return textarea;
+}
+
 function commandsCalled(): string[] {
 	return invoked.mock.calls.map(([command]) => command as string);
 }
@@ -591,14 +607,8 @@ describe('定型文', () => {
 	type Screen = Awaited<ReturnType<typeof render>>;
 
 	/** 入力欄に書き、カーソル（と選択範囲）を置いてから Cmd+J で一覧を出す */
-	async function openAt(screen: Screen, value: string, start: number, end = start) {
-		const textarea = screen.getByRole('textbox');
-		await textarea.fill(value);
-		(textarea.element() as HTMLTextAreaElement).setSelectionRange(start, end);
-		await userEvent.keyboard('{Meta>}j{/Meta}');
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
-		return textarea;
-	}
+	const openAt = (screen: Screen, value: string, start: number, end = start) =>
+		openListAt(screen, 'j', value, start, end);
 
 	function selectionOf(textarea: ReturnType<Screen['getByRole']>) {
 		const element = textarea.element() as HTMLTextAreaElement;
@@ -1805,14 +1815,8 @@ describe('アクション', () => {
 	type Screen = Awaited<ReturnType<typeof render>>;
 
 	/** 入力欄に書き、範囲を選んでから Cmd+K でアクションの一覧を出す */
-	async function openAt(screen: Screen, value: string, start = 0, end = start) {
-		const textarea = screen.getByRole('textbox');
-		await textarea.fill(value);
-		(textarea.element() as HTMLTextAreaElement).setSelectionRange(start, end);
-		await userEvent.keyboard('{Meta>}k{/Meta}');
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
-		return textarea;
-	}
+	const openAt = (screen: Screen, value: string, start = 0, end = start) =>
+		openListAt(screen, 'k', value, start, end);
 
 	/** アクションを選び、run_action が呼ばれるまで待つ */
 	async function pick(index = 0) {

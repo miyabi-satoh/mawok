@@ -317,7 +317,7 @@ describe('restoreChangeText', () => {
 				names: [
 					m.settings_theme(),
 					m.sync_choice_row_replacement({ name: '濃度' }),
-					m.sync_restore_order({ name: m.settings_replacements() }),
+					m.sync_choice_order({ name: m.settings_replacements() }),
 					m.sync_restore_more({ count: 1 })
 				].join('、')
 			}),
@@ -345,7 +345,7 @@ describe('restoreChangeText', () => {
 			}
 		];
 		expect(restoreChangeText(changes, 'ja').changes).toBe(
-			m.sync_restore_changes({ names: m.sync_restore_order({ name: m.settings_replacements() }) })
+			m.sync_restore_changes({ names: m.sync_choice_order({ name: m.settings_replacements() }) })
 		);
 	});
 

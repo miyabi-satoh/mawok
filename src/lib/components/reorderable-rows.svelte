@@ -22,7 +22,7 @@
 	import { buttonVariants } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { matchedIds, shownRows } from '$lib/list-filter';
+	import { matchedKeys, shownRows } from '$lib/list-filter';
 	import { REORDER_FLIP_DURATION } from '$lib/reorder';
 	import type { Row, RowList } from '$lib/row-list.svelte';
 
@@ -33,7 +33,7 @@
 	 */
 	type Props = {
 		list: RowList<T>;
-		/** 開いている行の id。分類を移っても開いたままにするよう、持ち主が持つ */
+		/** 開いている行の画面用 key。分類を移っても開いたままにするよう、持ち主が持つ */
 		expanded: SvelteSet<string>;
 		nameLabel: string;
 		/** 閉じた行に、名前の横に出す本文の頭 */
@@ -78,8 +78,8 @@
 
 	/** ドラッグの並べ替えのアニメーションの長さ。動きを減らす設定なら 0 にする */
 	const flipDurationMs = $derived(prefersReducedMotion.current ? 0 : REORDER_FLIP_DURATION);
-	/** 絞り込みに当たった行の id。語を変えたときにだけ求め直す。null なら絞り込んでいない */
-	const matched = $derived(matchedIds(() => list.rows, query, searchText));
+	/** 絞り込みに当たった行の画面用 key。語を変えたときにだけ求め直す。null なら絞り込んでいない */
+	const matched = $derived(matchedKeys(() => list.rows, query, searchText));
 	const shown = $derived(shownRows(list.rows, matched));
 
 	function consider(e: CustomEvent<DndEvent<Row<T>>>) {

@@ -10,6 +10,7 @@ import { sideName } from '$lib/sync-choices';
 import { callsOf } from '$lib/test-support/calls';
 import { settingsView } from '$lib/test-support/settings-view';
 import Page from './+page.svelte';
+import { renderAt } from './render-at';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(undefined)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -47,12 +48,6 @@ const backups: SyncBackup[] = [
 /** トレイから、選ぶ画面を頼まれているか */
 let requested: boolean;
 
-async function openAccount() {
-	const screen = await render(Page);
-	await screen.getByRole('tab', { name: m.settings_category_account() }).click();
-	return screen;
-}
-
 describe('設定画面の同期', () => {
 	beforeEach(() => {
 		invoked.mockReset();
@@ -75,7 +70,7 @@ describe('設定画面の同期', () => {
 
 	it('Pro でなければ、同期のまとまりを出さない', async () => {
 		settings.current = settingsView({ mawokAccountSignedIn: true });
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_mawok_sign_out() }))
 			.toBeVisible();
@@ -86,7 +81,7 @@ describe('設定画面の同期', () => {
 
 	it('Pro なら同期する種類を切り替えられる', async () => {
 		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('switch', { name: m.settings_sync_settings() }).click();
 		expect(callsOf(invoked, 'set_sync_kind')).toEqual([
 			['set_sync_kind', { kind: 'settings', enabled: false }]
@@ -112,7 +107,7 @@ describe('設定画面の同期', () => {
 
 	it('Pro なら同期前の設定を選んで戻せる', async () => {
 		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_sync_restore_open() }).click();
 		const dialog = screen.getByRole('alertdialog', { name: m.sync_restore_title() });
 		const backupDate = new Intl.DateTimeFormat('ja', {
@@ -144,7 +139,7 @@ describe('設定画面の同期', () => {
 				command === 'sync_backups' ? [] : command === 'take_sync_choice_request' ? false : undefined
 			)
 		);
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_sync_restore_open() }).click();
 		await expect.element(screen.getByText(m.sync_restore_empty())).toBeVisible();
 	});
@@ -244,7 +239,7 @@ describe('設定画面の同期', () => {
 			proAvailable: true,
 			syncConflicts: 2
 		});
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect.element(screen.getByText(m.settings_sync_choice_notice())).toBeVisible();
 		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
 		await expect
@@ -287,7 +282,7 @@ describe('設定画面の同期', () => {
 				return Promise.resolve({ stale: true, rejected: [] });
 			return Promise.resolve(undefined);
 		});
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
 		await screen.getByRole('radio', { name: sideName(m.settings_theme(), 'this_device') }).click();
 		await screen.getByRole('button', { name: m.sync_choice_apply() }).click();
@@ -304,7 +299,7 @@ describe('設定画面の同期', () => {
 		invoked.mockImplementation((command) =>
 			command === 'sync_conflicts' ? Promise.reject('sync.unreachable') : Promise.resolve(undefined)
 		);
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
 		await expect.element(screen.getByText(m.sync_choice_unreachable())).toBeVisible();
 		await expect.element(screen.getByRole('radio')).not.toBeInTheDocument();
@@ -319,7 +314,7 @@ describe('設定画面の同期', () => {
 		invoked.mockImplementation((command) =>
 			Promise.resolve(command === 'sync_conflicts' ? { items: [], unreadable: true } : undefined)
 		);
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
 		await expect.element(screen.getByText(m.sync_choice_unreadable())).toBeVisible();
 	});
@@ -333,7 +328,7 @@ describe('設定画面の同期', () => {
 		invoked.mockImplementation((command) =>
 			Promise.resolve(command === 'sync_conflicts' ? { items: [], unreadable: false } : undefined)
 		);
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
 		await vi.waitFor(() => expect(callsOf(invoked, 'sync_conflicts')).toHaveLength(1));
 		await expect.element(screen.getByRole('alertdialog')).not.toBeInTheDocument();

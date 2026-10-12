@@ -6,32 +6,28 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import EraserIcon from '@lucide/svelte/icons/eraser';
 	import { invoke } from '@tauri-apps/api/core';
-	import { listen } from '@tauri-apps/api/event';
-	import { commandCaller } from '$lib/call';
+	import { commandCaller, valueOf } from '$lib/call';
 	import { clamp } from '$lib/clamp';
 	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '$lib/color';
 	import { EVENTS } from '$lib/bindings/constants';
 	import type { AccountStatus } from '$lib/bindings/AccountStatus';
-	import type { PairingOffer } from '$lib/bindings/PairingOffer';
-	import { deviceLabels } from '$lib/devices';
-	import { devicesPanel } from '$lib/devices-panel';
-	import { pairingOfferDescription, pairingOfferRemainingSeconds } from '$lib/pairing-offer';
 	import { errorCode } from '$lib/errors';
 	import SyncToggle from '$lib/components/sync-toggle.svelte';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
 	import SettingsActions from '$lib/components/settings-actions.svelte';
+	import SettingsDevices from '$lib/components/settings-devices.svelte';
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
 	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SettingsSync from '$lib/components/settings-sync.svelte';
+	import SettingsSyncNote from '$lib/components/settings-sync-note.svelte';
+	import SettingSyncToggle from '$lib/components/setting-sync-toggle.svelte';
 	import SettingsUpdate from '$lib/components/settings-update.svelte';
 	import * as Alert from '$lib/components/ui/alert';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
 	import { Input } from '$lib/components/ui/input';
-	import * as Kbd from '$lib/components/ui/kbd';
 	import { Switch } from '$lib/components/ui/switch';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -42,13 +38,17 @@
 	import { isBlankReplacement, isBlankSnippet } from '$lib/blank-rows';
 	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '$lib/history.svelte';
 	import { lanErrorMessage } from '$lib/lan-errors';
+	import { modifiedName } from '$lib/modified-settings';
+	import { onEvent } from '$lib/on-event';
 	import { ActionsEditor } from '$lib/actions-editor.svelte';
+	import KeyCaps from '$lib/components/key-caps.svelte';
 	import ListFilter from '$lib/components/list-filter.svelte';
-	import { matchedIds, showsFilter, shownRows } from '$lib/list-filter';
+	import { matchedKeys, showsFilter, shownRows } from '$lib/list-filter';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { actionErrorMessage } from '$lib/action-errors';
 	import { RowList } from '$lib/row-list.svelte';
 	import { coalescedSaver } from '$lib/saver';
+	import { CHAR_WIDTH_KINDS, LANGUAGES, PUNCTUATION_STYLES, THEMES } from '$lib/setting-options';
 	import { settingsCategories } from '$lib/settings-categories';
 	import { firstLine } from '$lib/snippets';
 	import {
@@ -58,7 +58,6 @@
 		hasNoModifiers,
 		isCloseWindowKey,
 		isImeKey,
-		keyLabels,
 		keyRejectionMessage,
 		toAccelerator,
 		toDraftKey,
@@ -67,7 +66,6 @@
 	import { m } from '$lib/paraglide/messages';
 	import {
 		settings,
-		type CharWidths,
 		type Replacement,
 		type SettingsView,
 		type Snippet
@@ -92,9 +90,6 @@
 	const callActions = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
 	/** ペアリングのコマンドを呼ぶ。Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする */
 	const callLan = commandCaller(lanErrorMessage, showError);
-	function modifiedName(name: string) {
-		return settings.current?.modifiedSettings.includes(name) ? name : undefined;
-	}
 	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
 	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
 	let refreshingMawokAccountStatus = false;
@@ -150,10 +145,7 @@
 			syncChoiceOpen = true;
 		};
 		void show();
-		const unlisten = listen(EVENTS.SYNC_CHOICE_REQUESTED, show);
-		return () => {
-			unlisten.then((fn) => fn());
-		};
+		return onEvent(EVENTS.SYNC_CHOICE_REQUESTED, show);
 	});
 
 	/** 設定を変えるコマンドを呼び、できたかを返す。変わった設定は settings-changed で届き、画面に反映される */
@@ -166,18 +158,8 @@
 		command: string,
 		args: Record<string, unknown>
 	): Promise<T[] | undefined> {
-		const result = await callSettings<T[]>(command, args);
-		return result.ok ? result.value : undefined;
+		return valueOf(await callSettings<T[]>(command, args));
 	}
-
-	/** 全角・半角の行。カタカナは全角に揃えるだけ（Rust 側の KatakanaWidth） */
-	const charWidthRows: { kind: keyof CharWidths; label: () => string; half: boolean }[] = [
-		{ kind: 'alphabet', label: m.settings_char_width_alphabet, half: true },
-		{ kind: 'digit', label: m.settings_char_width_digit, half: true },
-		{ kind: 'space', label: m.settings_char_width_space, half: true },
-		{ kind: 'symbol', label: m.settings_char_width_symbol, half: true },
-		{ kind: 'katakana', label: m.settings_char_width_katakana, half: false }
-	];
 
 	async function startRecording(target: 'hotkey' | DraftAction) {
 		hotkeyError = '';
@@ -279,16 +261,7 @@
 	 */
 	const replacements = new RowList<Replacement>(
 		settings.current?.replacements ?? [],
-		(rows) =>
-			saveItems<Replacement>('set_replacements', {
-				replacements: rows.map(({ id, from, to, enabled, sync }) => ({
-					id,
-					from,
-					to,
-					enabled,
-					sync
-				}))
-			}),
+		(replacements) => saveItems<Replacement>('set_replacements', { replacements }),
 		isBlankReplacement
 	);
 
@@ -301,10 +274,7 @@
 	/** 定型文。打っている途中に Rust 側からの反映で打ち消されないよう、辞書と同じく画面側で持つ */
 	const snippets = new RowList<Snippet>(
 		settings.current?.snippets ?? [],
-		(rows) =>
-			saveItems<Snippet>('set_snippets', {
-				snippets: rows.map(({ id, name, body, sync }) => ({ id, name, body, sync }))
-			}),
+		(snippets) => saveItems<Snippet>('set_snippets', { snippets }),
 		isBlankSnippet
 	);
 
@@ -314,7 +284,7 @@
 	let replacementFilter = $state('');
 	/** 絞り込みに当たった置き換え辞書の行の画面用 key。語を変えたときにだけ求め直す。null なら絞り込んでいない */
 	const replacementMatches = $derived(
-		matchedIds(
+		matchedKeys(
 			() => replacements.rows,
 			replacementFilter,
 			(row) => [row.from, row.to]
@@ -333,12 +303,7 @@
 	// 下書きウィンドウから定型文を足したら、開いている設定画面の並びにも足す。
 	// 足さないと、次に設定画面で直したときに、足す前の並びで保存して消してしまう。
 	// add は並び全体を保存し直すので、足す前の並びの保存が遅れて届いても、その後に保存して上書きする
-	$effect(() => {
-		const unlisten = listen<Snippet>(EVENTS.SNIPPET_ADDED, (event) => snippets.add(event.payload));
-		return () => {
-			unlisten.then((fn) => fn());
-		};
-	});
+	$effect(() => onEvent<Snippet>(EVENTS.SNIPPET_ADDED, (snippet) => snippets.add(snippet)));
 
 	/** フォントの設定。打っている途中に Rust 側からの反映で打ち消されないよう、辞書と同じく画面側で持つ */
 	let fontFamily = $state(settings.current?.textFontFamily ?? '');
@@ -472,8 +437,8 @@
 	// 同期が設定を変えたら、画面側で持っている一覧と欄を、届いた設定から写し直す。
 	// 写し直さないと、次に画面で直したときに、届く前の並びや値で保存して、届いた分を消してしまう。
 	// Rust 側は、通信の間に画面からの保存が無かったときだけ知らせるので、打った内容は届いた設定に入っている
-	$effect(() => {
-		const unlisten = listen<SettingsView>(EVENTS.SYNC_APPLIED, ({ payload: view }) => {
+	$effect(() =>
+		onEvent<SettingsView>(EVENTS.SYNC_APPLIED, (view) => {
 			replacements.recopy(view.replacements, true);
 			snippets.recopy(view.snippets, true);
 			actionsEditor.recopy(view);
@@ -488,11 +453,8 @@
 				textColors[theme] = color;
 				if (!textColorErrors[theme]) textColorInputs[theme] = color || DEFAULT_TEXT_COLORS[theme];
 			}
-		});
-		return () => {
-			unlisten.then((fn) => fn());
-		};
-	});
+		})
+	);
 
 	function addReplacement() {
 		// 置き換える前の文字列が空の行は何もしないので、書きかけのまま保存してよい
@@ -501,118 +463,10 @@
 		focusFirstField(`replacement-${row.key}`);
 	}
 
-	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分のデバイスへ送る」） */
-	let pairingCode = $state('');
-	/** `want` を受けて自動で出したコードか。相手のデバイスに出す案内だけを替える。 */
-	let pairingAutomatic = $state(false);
-	/** 違う確認コードを試した後に出したコードか。次のコードに替わるまで案内する。 */
-	let pairingPreviousCodeWasWrong = $state(false);
-	let pairingDescription = $derived(
-		pairingOfferDescription(pairingAutomatic, pairingPreviousCodeWasWrong)
-	);
-	/** 相手に出ているコードを入れる欄 */
-	let joinCode = $state('');
-	/** コードを入れて、相手を探している最中か */
-	let joining = $state(false);
-
-	/** 出したコードが使えなくなるまでの残り秒。Rust 側から受け取った残り秒を、画面の単調な時計で減らす */
-	let pairingRemainingSeconds = $state(0);
-	/** コードが使えなくなる時刻（performance.now() の値）。OS の時計の変更に影響されない */
-	let pairingDeadline = 0;
-	$effect(() => {
-		if (!pairingCode) return;
-		const timer = setInterval(() => {
-			pairingRemainingSeconds = pairingOfferRemainingSeconds(pairingDeadline, performance.now());
-		}, 250);
-		return () => clearInterval(timer);
-	});
-
-	$effect(() => {
-		const unlistenEnded = listen(EVENTS.PAIRING_CODE_ENDED, () => {
-			pairingCode = '';
-			pairingAutomatic = false;
-			pairingPreviousCodeWasWrong = false;
-		});
-		const unlistenOffered = listen<PairingOffer>(EVENTS.PAIRING_CODE_OFFERED, ({ payload }) => {
-			showPairingOffer(payload);
-		});
-		return () => {
-			unlistenEnded.then((fn) => fn());
-			unlistenOffered.then((fn) => fn());
-		};
-	});
-
-	async function startPairing() {
-		const offer = await callLan<PairingOffer>('start_pairing');
-		if (!offer.ok) return;
-		showPairingOffer(offer.value);
-	}
-
-	function showPairingOffer(offer: PairingOffer) {
-		pairingRemainingSeconds = offer.remainingSeconds;
-		pairingDeadline = performance.now() + offer.remainingSeconds * 1000;
-		pairingCode = offer.code;
-		pairingAutomatic = offer.automatic;
-		pairingPreviousCodeWasWrong = offer.previousCodeWasWrong;
-	}
-
-	function cancelPairing() {
-		pairingCode = '';
-		pairingAutomatic = false;
-		pairingPreviousCodeWasWrong = false;
-		pairingRemainingSeconds = 0;
-		run('cancel_pairing');
-	}
-
-	async function joinPairing() {
-		joining = true;
-		if ((await callLan('join_pairing', { code: joinCode })).ok) joinCode = '';
-		joining = false;
-	}
-
-	/** 設定を開いた後に `want` を受けて自動で出したコードも、設定画面に表示する。 */
-	$effect(() => {
-		if (category !== 'devices' || settings.current?.accountKeyStatus !== 'ready') return;
-		let active = true;
-		void (async () => {
-			const offer = await invoke<PairingOffer | null>('pairing_offer').catch(() => null);
-			if (active && offer) showPairingOffer(offer);
-		})();
-		return () => {
-			active = false;
-		};
-	});
-
-	let resetKeyOpen = $state(false);
-	/** 確かめを「このデバイスから始め直す」の言い方で出すか。開いたときに決め、実行して鍵の状態が変わっても、閉じるまで文を替えない */
-	let resetKeyRestarts = $state(false);
-	let resettingKey = $state(false);
-	function openResetKey(restarts: boolean) {
-		resetKeyRestarts = restarts;
-		resetKeyOpen = true;
-	}
-	async function resetAccountKey() {
-		resettingKey = true;
-		if ((await callLan('reset_account_key')).ok) resetKeyOpen = false;
-		resettingKey = false;
-	}
-
-	function setDeviceSendTo(publicKey: string, sendTo: boolean) {
-		const publicKeys = settings.current?.devices
-			.filter((device) => (device.publicKey === publicKey ? sendTo : device.sendTo))
-			.map((device) => device.publicKey);
-		if (publicKeys) void run('set_send_targets', { publicKeys });
-	}
-
-	$effect(() => {
-		void invoke('set_devices_open', { open: category === 'devices' });
-		return () => void invoke('set_devices_open', { open: false });
-	});
-
 	/** キーの記録中でないときのキー。記録中の Esc は記録の中止なので、そちらが受け取る */
 	function onKeydown(event: KeyboardEvent) {
 		const platform = settings.current?.platform;
-		// AI の了解のダイアログを出している間は、Esc で設定画面を閉じない
+		// 確かめや選ぶ画面のダイアログ（AI の了解・鍵の作り直し・同期）を出している間は、Esc で設定画面を閉じない
 		if (document.querySelector('[role="alertdialog"]')) return;
 		// 行の「…」メニューなど、開いている部品が受け持った Esc（bits-ui が preventDefault する）では、設定画面は閉じない。
 		// フォーカスの位置では、開いた直後のまだメニューに移っていない間を見分けられず、
@@ -631,21 +485,6 @@
 	}
 </script>
 
-<!-- 鍵を作り直す操作。鍵を待つ状態では、ほかのデバイスを使えない人向けの出口として案内する。 -->
-{#snippet resetKeyRow(restarts: boolean, title: string, start: string, description?: string)}
-	<SettingsRow>
-		<Field.Field orientation="horizontal" class="min-h-8">
-			<Field.Title>{title}</Field.Title>
-			<Button variant="destructive" onclick={() => openResetKey(restarts)}>
-				{start}
-			</Button>
-		</Field.Field>
-		{#if description}
-			<Field.Description class="leading-snug">{description}</Field.Description>
-		{/if}
-	</SettingsRow>
-{/snippet}
-
 <!-- 記録中の表示。ホットキーと下書きの操作で同じ形にする -->
 {#snippet recordingStatus()}
 	<div class="flex items-center gap-1">
@@ -655,7 +494,7 @@
 		>
 			{m.settings_hotkey_recording()}
 		</div>
-		<Button variant="ghost" onclick={stopRecording}>{m.settings_hotkey_cancel()}</Button>
+		<Button variant="ghost" onclick={stopRecording}>{m.common_cancel()}</Button>
 	</div>
 {/snippet}
 
@@ -695,15 +534,44 @@
 {#if settings.current}
 	{@const view = settings.current}
 	{#snippet syncSetting(name: string, label: string)}
-		{#if view.proAvailable && view.syncKinds.settings}
-			<SyncToggle
-				compact
-				settingName={name}
-				pressed={!view.syncExcludedSettings.includes(name)}
-				name={label}
-				onchange={(sync) => void run('set_sync_excluded_setting', { name, sync })}
-			/>
-		{/if}
+		<SettingSyncToggle {view} {name} {label} call={callSettings} />
+	{/snippet}
+	<!-- 今のキーを出すボタン。キーの表示そのものを押して記録を始める（macOS のシステム設定のキーボードショートカットと同じ） -->
+	{#snippet keyButton(target: 'hotkey' | DraftAction, key: string, label: string, classes: string)}
+		<Button
+			variant="outline"
+			class={classes}
+			aria-label={label}
+			onclick={() => startRecording(target)}
+		>
+			{#if key}
+				<KeyCaps {key} platform={view.platform} />
+			{:else}
+				<span class="px-1 text-muted-foreground">{m.settings_key_none()}</span>
+			{/if}
+		</Button>
+	{/snippet}
+	<!-- スイッチ1個の設定の行。name は設定の項目名で、既定から変えた印と同期の印に使う -->
+	{#snippet switchRow(
+		name: string,
+		id: string,
+		label: string,
+		checked: boolean,
+		command: string,
+		description?: string
+	)}
+		<SettingsRow modified={modifiedName(view, name)}>
+			<Field.Field orientation="horizontal" class="min-h-8">
+				<div class="flex-auto">
+					<Field.Label class="inline" for={id}>{label}</Field.Label>
+					{@render syncSetting(name, label)}
+				</div>
+				<Switch {id} bind:checked={() => checked, (enabled) => run(command, { enabled })} />
+			</Field.Field>
+			{#if description}
+				<Field.Description class="leading-snug">{description}</Field.Description>
+			{/if}
+		</SettingsRow>
 	{/snippet}
 	<main class="settings-page flex h-dvh" {@attach showWindow}>
 		<Tabs.Root
@@ -783,12 +651,10 @@
 				<Tabs.Content value="general">
 					<div class="flex flex-col gap-5">
 						{#if view.proAvailable && view.syncKinds.settings}
-							<p class="px-1 text-xs leading-snug text-muted-foreground">
-								{m.settings_sync_description()}
-							</p>
+							<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />
 						{/if}
 						<SettingsSection title={m.settings_section_startup()}>
-							<SettingsRow modified={modifiedName('autostart')}>
+							<SettingsRow modified={modifiedName(view, 'autostart')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<Field.Label for="autostart">{m.settings_autostart()}</Field.Label>
 									<Switch
@@ -801,67 +667,29 @@
 							</SettingsRow>
 						</SettingsSection>
 						<SettingsSection title={m.settings_section_draft_window()}>
-							<SettingsRow modified={modifiedName('text_window_always_on_top')}>
-								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex-auto">
-										<Field.Label class="inline" for="draft-always-on-top"
-											>{m.settings_draft_always_on_top()}</Field.Label
-										>
-										{@render syncSetting(
-											'text_window_always_on_top',
-											m.settings_draft_always_on_top()
-										)}
-									</div>
-									<Switch
-										id="draft-always-on-top"
-										bind:checked={
-											() => view.textWindowAlwaysOnTop,
-											(enabled) => run('set_draft_always_on_top', { enabled })
-										}
-									/>
-								</Field.Field>
-							</SettingsRow>
-							<SettingsRow modified={modifiedName('hide_text_window_on_blur')}>
-								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex-auto">
-										<Field.Label class="inline" for="hide-draft-on-blur"
-											>{m.settings_hide_draft_on_blur()}</Field.Label
-										>
-										{@render syncSetting(
-											'hide_text_window_on_blur',
-											m.settings_hide_draft_on_blur()
-										)}
-									</div>
-									<Switch
-										id="hide-draft-on-blur"
-										bind:checked={
-											() => view.hideTextWindowOnBlur,
-											(enabled) => run('set_hide_draft_on_blur', { enabled })
-										}
-									/>
-								</Field.Field>
-								<Field.Description class="leading-snug"
-									>{m.settings_hide_draft_on_blur_description()}</Field.Description
-								>
-							</SettingsRow>
-							<SettingsRow modified={modifiedName('show_text_window_buttons')}>
-								<Field.Field orientation="horizontal" class="min-h-8">
-									<div class="flex-auto">
-										<Field.Label class="inline" for="show-draft-buttons"
-											>{m.settings_draft_buttons()}</Field.Label
-										>
-										{@render syncSetting('show_text_window_buttons', m.settings_draft_buttons())}
-									</div>
-									<Switch
-										id="show-draft-buttons"
-										bind:checked={
-											() => view.showTextWindowButtons,
-											(enabled) => run('set_show_draft_buttons', { enabled })
-										}
-									/>
-								</Field.Field>
-							</SettingsRow>
-							<SettingsRow modified={modifiedName('text_history_size')}>
+							{@render switchRow(
+								'text_window_always_on_top',
+								'draft-always-on-top',
+								m.settings_draft_always_on_top(),
+								view.textWindowAlwaysOnTop,
+								'set_draft_always_on_top'
+							)}
+							{@render switchRow(
+								'hide_text_window_on_blur',
+								'hide-draft-on-blur',
+								m.settings_hide_draft_on_blur(),
+								view.hideTextWindowOnBlur,
+								'set_hide_draft_on_blur',
+								m.settings_hide_draft_on_blur_description()
+							)}
+							{@render switchRow(
+								'show_text_window_buttons',
+								'show-draft-buttons',
+								m.settings_draft_buttons(),
+								view.showTextWindowButtons,
+								'set_show_draft_buttons'
+							)}
+							<SettingsRow modified={modifiedName(view, 'text_history_size')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
 									<div class="flex-auto">
 										<Field.Label class="inline" for="draft-history-size"
@@ -885,7 +713,7 @@
 							</SettingsRow>
 						</SettingsSection>
 						<SettingsSection title={m.settings_section_appearance()}>
-							<SettingsRow modified={modifiedName('language')}>
+							<SettingsRow modified={modifiedName(view, 'language')}>
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<div class="flex flex-auto items-center gap-1">
 										<Field.Title id="language">{m.settings_language()}</Field.Title>
@@ -903,15 +731,13 @@
 											}
 										}
 									>
-										<ToggleGroup.Item value="system"
-											>{m.settings_language_system()}</ToggleGroup.Item
-										>
-										<ToggleGroup.Item value="ja" lang="ja">日本語</ToggleGroup.Item>
-										<ToggleGroup.Item value="en" lang="en">English</ToggleGroup.Item>
+										{#each LANGUAGES as { value, name, lang } (value)}
+											<ToggleGroup.Item {value} {lang}>{name()}</ToggleGroup.Item>
+										{/each}
 									</ToggleGroup.Root>
 								</Field.Field>
 							</SettingsRow>
-							<SettingsRow modified={modifiedName('theme')}>
+							<SettingsRow modified={modifiedName(view, 'theme')}>
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<div class="flex flex-auto items-center gap-1">
 										<Field.Title id="theme">{m.settings_theme()}</Field.Title>
@@ -928,9 +754,9 @@
 											}
 										}
 									>
-										<ToggleGroup.Item value="system">{m.settings_theme_system()}</ToggleGroup.Item>
-										<ToggleGroup.Item value="light">{m.settings_theme_light()}</ToggleGroup.Item>
-										<ToggleGroup.Item value="dark">{m.settings_theme_dark()}</ToggleGroup.Item>
+										{#each THEMES as { value, name } (value)}
+											<ToggleGroup.Item {value}>{name()}</ToggleGroup.Item>
+										{/each}
 									</ToggleGroup.Root>
 								</Field.Field>
 							</SettingsRow>
@@ -940,7 +766,7 @@
 				<Tabs.Content value="keys">
 					<SettingsSection>
 						<!-- 説明文は、題名と操作の行の下に全幅で置く -->
-						<SettingsRow modified={modifiedName('hotkey')}>
+						<SettingsRow modified={modifiedName(view, 'hotkey')}>
 							<Field.Field orientation="horizontal" class="flex-wrap">
 								<Field.Title class="shrink-0">{m.settings_hotkey()}</Field.Title>
 								{#if recording === 'hotkey'}
@@ -953,27 +779,16 @@
 										)}
 									</div>
 								{:else}
-									<!-- キーの表示そのものを押して記録を始める（macOS のシステム設定のキーボードショートカットと同じ） -->
-									<Button
-										variant="outline"
-										class="px-1.5"
-										aria-label={m.settings_hotkey_change_label({
+									{@render keyButton(
+										'hotkey',
+										view.hotkey,
+										m.settings_hotkey_change_label({
 											key: view.hotkey
 												? formatKeys(view.hotkey, view.platform)
 												: m.settings_key_none()
-										})}
-										onclick={() => startRecording('hotkey')}
-									>
-										{#if view.hotkey}
-											<Kbd.Group>
-												{#each keyLabels(view.hotkey, view.platform) as label (label)}
-													<Kbd.Root>{label}</Kbd.Root>
-												{/each}
-											</Kbd.Group>
-										{:else}
-											<span class="px-1 text-muted-foreground">{m.settings_key_none()}</span>
-										{/if}
-									</Button>
+										}),
+										'px-1.5'
+									)}
 								{/if}
 							</Field.Field>
 							{#if recording === 'hotkey'}
@@ -991,7 +806,7 @@
 								{#each DRAFT_ACTIONS_IN_SETTINGS as action (action)}
 									{@const key = view.textWindowKeys[action]}
 									{@const label = draftActionLabel(action)}
-									{@const modified = modifiedName(`text_window_keys.${action}`)}
+									{@const modified = modifiedName(view, `text_window_keys.${action}`)}
 									<div class="relative flex flex-col gap-0.5" data-modified={modified}>
 										{#if modified}
 											<SettingsModifiedMark class="inset-y-0 -left-4" />
@@ -1012,25 +827,15 @@
 													)}
 												</div>
 											{:else}
-												<Button
-													variant="outline"
-													class="ml-auto shrink-0 px-1.5"
-													aria-label={m.settings_key_change({
+												{@render keyButton(
+													action,
+													key,
+													m.settings_key_change({
 														action: label,
 														key: key ? formatKeys(key, view.platform) : m.settings_key_none()
-													})}
-													onclick={() => startRecording(action)}
-												>
-													{#if key}
-														<Kbd.Group>
-															{#each keyLabels(key, view.platform) as keyLabel (keyLabel)}
-																<Kbd.Root>{keyLabel}</Kbd.Root>
-															{/each}
-														</Kbd.Group>
-													{:else}
-														<span class="px-1 text-muted-foreground">{m.settings_key_none()}</span>
-													{/if}
-												</Button>
+													}),
+													'ml-auto shrink-0 px-1.5'
+												)}
 											{/if}
 										</Field.Field>
 										{#if keyError?.action === action}
@@ -1049,12 +854,10 @@
 				</Tabs.Content>
 				<Tabs.Content value="draft">
 					{#if view.proAvailable && view.syncKinds.settings}
-						<p class="mb-3 px-1 text-xs leading-snug text-muted-foreground">
-							{m.settings_sync_description()}
-						</p>
+						<SettingsSyncNote class="mb-3 px-1" text={m.settings_sync_description()} />
 					{/if}
 					<SettingsSection>
-						<SettingsRow modified={modifiedName('text_font')}>
+						<SettingsRow modified={modifiedName(view, 'text_font')}>
 							<div class="flex items-center gap-1">
 								<Field.Label for="draft-font-family">{m.settings_draft_font()}</Field.Label>
 								{@render syncSetting('text_font_family', m.settings_draft_font())}
@@ -1109,7 +912,7 @@
 								{m.settings_draft_font_description()}
 							</Field.Description>
 						</SettingsRow>
-						<SettingsRow modified={modifiedName('text_color')}>
+						<SettingsRow modified={modifiedName(view, 'text_color')}>
 							<Field.Title>{m.settings_draft_text_color()}</Field.Title>
 							<!-- 行の間は置き換え辞書と揃える。読めない値の知らせは、その行から離れないよう行と一緒に包む -->
 							<div class="flex flex-col gap-2">
@@ -1154,7 +957,7 @@
 								{/each}
 							</div>
 						</SettingsRow>
-						<SettingsRow modified={modifiedName('input_guidance')}>
+						<SettingsRow modified={modifiedName(view, 'input_guidance')}>
 							<!-- ほかの行のボタンと同じ高さにして、説明文までの間隔を揃える -->
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<div class="flex-auto">
@@ -1185,55 +988,26 @@
 				</Tabs.Content>
 				<Tabs.Content value="copy">
 					{#if view.proAvailable && (view.syncKinds.settings || view.syncKinds.replacements)}
-						<p class="mb-3 px-1 text-xs leading-snug text-muted-foreground">
-							{m.settings_sync_description()}
-						</p>
+						<SettingsSyncNote class="mb-3 px-1" text={m.settings_sync_description()} />
 					{/if}
 					<SettingsSection>
-						<SettingsRow modified={modifiedName('trim_trailing_whitespace')}>
-							<Field.Field orientation="horizontal" class="min-h-8">
-								<div class="flex-auto">
-									<Field.Label class="inline" for="trim-trailing"
-										>{m.settings_trim_trailing()}</Field.Label
-									>
-									{@render syncSetting('trim_trailing_whitespace', m.settings_trim_trailing())}
-								</div>
-								<Switch
-									id="trim-trailing"
-									bind:checked={
-										() => view.trimTrailingWhitespace,
-										(enabled) => run('set_trim_trailing_whitespace', { enabled })
-									}
-								/>
-							</Field.Field>
-							<Field.Description class="leading-snug">
-								{m.settings_trim_trailing_description()}
-							</Field.Description>
-						</SettingsRow>
-						<SettingsRow modified={modifiedName('exclude_from_clipboard_history')}>
-							<Field.Field orientation="horizontal" class="min-h-8">
-								<div class="flex-auto">
-									<Field.Label class="inline" for="exclude-history"
-										>{m.settings_exclude_history()}</Field.Label
-									>
-									{@render syncSetting(
-										'exclude_from_clipboard_history',
-										m.settings_exclude_history()
-									)}
-								</div>
-								<Switch
-									id="exclude-history"
-									bind:checked={
-										() => view.excludeFromClipboardHistory,
-										(enabled) => run('set_exclude_from_clipboard_history', { enabled })
-									}
-								/>
-							</Field.Field>
-							<Field.Description class="leading-snug">
-								{m.settings_exclude_history_description()}
-							</Field.Description>
-						</SettingsRow>
-						<SettingsRow modified={modifiedName('char_width')}>
+						{@render switchRow(
+							'trim_trailing_whitespace',
+							'trim-trailing',
+							m.settings_trim_trailing(),
+							view.trimTrailingWhitespace,
+							'set_trim_trailing_whitespace',
+							m.settings_trim_trailing_description()
+						)}
+						{@render switchRow(
+							'exclude_from_clipboard_history',
+							'exclude-history',
+							m.settings_exclude_history(),
+							view.excludeFromClipboardHistory,
+							'set_exclude_from_clipboard_history',
+							m.settings_exclude_history_description()
+						)}
+						<SettingsRow modified={modifiedName(view, 'char_width')}>
 							<div class="flex items-center gap-1">
 								<Field.Title>{m.settings_char_width()}</Field.Title>
 								{@render syncSetting('char_widths', m.settings_char_width())}
@@ -1260,13 +1034,12 @@
 										}
 									}
 								>
-									<ToggleGroup.Item value="keep">{m.settings_char_width_keep()}</ToggleGroup.Item>
-									<!-- 記号そのものが選択肢なので、文言にはしない -->
-									<ToggleGroup.Item value="kutouten" lang="ja">、。</ToggleGroup.Item>
-									<ToggleGroup.Item value="comma" lang="ja">，．</ToggleGroup.Item>
+									{#each PUNCTUATION_STYLES as { value, name, lang } (value)}
+										<ToggleGroup.Item {value} {lang}>{name()}</ToggleGroup.Item>
+									{/each}
 								</ToggleGroup.Root>
 							</Field.Field>
-							{#each charWidthRows as row (row.kind)}
+							{#each CHAR_WIDTH_KINDS as row (row.kind)}
 								<Field.Field orientation="horizontal" class="flex-wrap justify-between">
 									<span id="char-width-{row.kind}" class="text-sm">{row.label()}</span>
 									<ToggleGroup.Root
@@ -1283,13 +1056,9 @@
 											}
 										}
 									>
-										<ToggleGroup.Item value="keep">{m.settings_char_width_keep()}</ToggleGroup.Item>
-										<ToggleGroup.Item value="full">{m.settings_char_width_full()}</ToggleGroup.Item>
-										{#if row.half}
-											<ToggleGroup.Item value="half"
-												>{m.settings_char_width_half()}</ToggleGroup.Item
-											>
-										{/if}
+										{#each row.styles as { value, name } (value)}
+											<ToggleGroup.Item {value}>{name()}</ToggleGroup.Item>
+										{/each}
 									</ToggleGroup.Root>
 								</Field.Field>
 							{/each}
@@ -1299,9 +1068,7 @@
 								<Field.Title>{m.settings_replacements()}</Field.Title>
 							</Field.Field>
 							{#if view.proAvailable && !view.syncKinds.replacements}
-								<p class="text-xs leading-snug text-muted-foreground">
-									{m.settings_sync_replacements_off()}
-								</p>
+								<SettingsSyncNote text={m.settings_sync_replacements_off()} />
 							{/if}
 							{#if showsFilter(replacements.rows.length, replacementFilter)}
 								<ListFilter
@@ -1389,13 +1156,9 @@
 								: m.settings_snippets_description_no_key()}
 						</p>
 						{#if view.proAvailable && view.syncKinds.snippets}
-							<p class="px-1 text-xs leading-snug text-muted-foreground">
-								{m.settings_sync_description()}
-							</p>
+							<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />
 						{:else if view.proAvailable}
-							<p class="text-xs leading-snug text-muted-foreground">
-								{m.settings_sync_snippets_off()}
-							</p>
+							<SettingsSyncNote text={m.settings_sync_snippets_off()} />
 						{/if}
 						<SettingsSection>
 							<SettingsRow>
@@ -1445,138 +1208,13 @@
 					{/if}
 				</Tabs.Content>
 				<Tabs.Content value="devices">
-					{@const panel = devicesPanel(view.proAvailable, view.accountKeyStatus)}
-					<SettingsSection>
-						{#if panel === 'pro'}
-							<SettingsRow>
-								<Field.Description class="leading-snug">
-									{view.mawokAccountSignedIn
-										? m.settings_devices_pro_description()
-										: m.settings_devices_pro_sign_in()}
-								</Field.Description>
-								{#if view.mawokAccountSignedIn}
-									<Button
-										variant="outline"
-										size="sm"
-										class="w-fit"
-										onclick={() => run('open_mawok_pro_page')}
-									>
-										{m.settings_devices_pro_buy()}
-									</Button>
-								{:else}
-									<Button variant="outline" size="sm" class="w-fit" onclick={openAccount}>
-										{m.settings_account_open()}
-									</Button>
-								{/if}
-							</SettingsRow>
-						{:else if panel === 'none'}
-							<SettingsRow>
-								<Field.Description class="leading-snug"
-									>{m.settings_devices_not_ready()}</Field.Description
-								>
-							</SettingsRow>
-						{:else if panel === 'needsPairing'}
-							<!-- 鍵を持つ状態の「デバイスを追加」と同じく、題名を左、操作を右、説明を下に置く -->
-							<SettingsRow>
-								<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-									<Field.Title>{m.settings_devices_join_title()}</Field.Title>
-									<div class="flex gap-2">
-										<Input
-											class="w-32 font-mono text-sm"
-											inputmode="numeric"
-											autocomplete="off"
-											maxlength={6}
-											aria-label={m.settings_devices_join()}
-											bind:value={joinCode}
-										/>
-										<Button
-											variant="outline"
-											disabled={joining || joinCode.length !== 6}
-											onclick={joinPairing}
-										>
-											{joining ? m.settings_devices_joining() : m.settings_devices_join_submit()}
-										</Button>
-									</div>
-								</Field.Field>
-								<Field.Description class="leading-snug">
-									{m.settings_devices_needs_pairing()}
-								</Field.Description>
-							</SettingsRow>
-							{@render resetKeyRow(
-								true,
-								m.settings_devices_restart(),
-								m.settings_devices_restart_start(),
-								m.settings_devices_restart_description()
-							)}
-						{:else if panel === 'ready'}
-							<SettingsRow>
-								<Field.Title>{m.settings_devices_list_title()}</Field.Title>
-								{#if view.devices.length > 0}
-									{@const labels = deviceLabels(view.devices)}
-									<!-- 同じ名前のデバイスは、送信先の一覧と同じく公開鍵の先頭4文字で見分ける。 -->
-									<div class="flex flex-col gap-3">
-										{#each view.devices as device (device.publicKey)}
-											<Field.Field orientation="horizontal">
-												<Field.Label for={`send-to-${device.publicKey}`}>
-													{labels.get(device.publicKey) ?? device.name}
-												</Field.Label>
-												<Switch
-													id={`send-to-${device.publicKey}`}
-													bind:checked={
-														() => device.sendTo,
-														(sendTo) => setDeviceSendTo(device.publicKey, sendTo)
-													}
-												/>
-											</Field.Field>
-										{/each}
-									</div>
-								{:else}
-									<Field.Description class="leading-snug"
-										>{m.settings_devices_empty()}</Field.Description
-									>
-								{/if}
-							</SettingsRow>
-							<SettingsRow>
-								<Field.Field orientation="horizontal" class="min-h-8">
-									<Field.Title>{m.settings_devices_offer()}</Field.Title>
-									{#if pairingCode}
-										<div class="flex items-center gap-2">
-											<span class="font-mono text-2xl tracking-widest tabular-nums"
-												>{pairingCode}</span
-											>
-											{#if !pairingAutomatic}
-												<Button variant="ghost" onclick={cancelPairing}
-													>{m.settings_devices_offer_cancel()}</Button
-												>
-											{/if}
-										</div>
-									{:else}
-										<Button variant="outline" onclick={startPairing}
-											>{m.settings_devices_offer_start()}</Button
-										>
-									{/if}
-								</Field.Field>
-								<Field.Description
-									class="leading-snug"
-									role={pairingCode ? 'timer' : undefined}
-									aria-live="off"
-								>
-									{pairingCode
-										? pairingDescription === 'wrongCode'
-											? m.settings_devices_offer_wrong_code({ seconds: pairingRemainingSeconds })
-											: pairingDescription === 'automatic'
-												? m.settings_devices_offer_automatic({ seconds: pairingRemainingSeconds })
-												: m.settings_devices_offer_waiting({ seconds: pairingRemainingSeconds })
-										: m.settings_devices_offer_description()}
-								</Field.Description>
-							</SettingsRow>
-							{@render resetKeyRow(
-								false,
-								m.settings_devices_reset_key(),
-								m.settings_devices_reset_key_start()
-							)}
-						{/if}
-					</SettingsSection>
+					<SettingsDevices
+						{view}
+						open={category === 'devices'}
+						call={callSettings}
+						lanCall={callLan}
+						onopenaccount={openAccount}
+					/>
 				</Tabs.Content>
 				<Tabs.Content value="account">
 					{#if category === 'account'}
@@ -1666,32 +1304,6 @@
 			</div>
 		</Tabs.Root>
 	</main>
-	<AlertDialog.Root bind:open={resetKeyOpen}>
-		<AlertDialog.Content>
-			<AlertDialog.Header>
-				<AlertDialog.Title>
-					{resetKeyRestarts
-						? m.settings_devices_restart_confirm_title()
-						: m.settings_devices_reset_key_confirm_title()}
-				</AlertDialog.Title>
-				<AlertDialog.Description
-					>{resetKeyRestarts
-						? m.settings_devices_restart_confirm_description()
-						: m.settings_devices_reset_key_confirm_description()}</AlertDialog.Description
-				>
-			</AlertDialog.Header>
-			<AlertDialog.Footer>
-				<AlertDialog.Cancel disabled={resettingKey}
-					>{m.settings_devices_offer_cancel()}</AlertDialog.Cancel
-				>
-				<AlertDialog.Action disabled={resettingKey} onclick={resetAccountKey}>
-					{resetKeyRestarts
-						? m.settings_devices_restart_confirm_start()
-						: m.settings_devices_reset_key_start()}
-				</AlertDialog.Action>
-			</AlertDialog.Footer>
-		</AlertDialog.Content>
-	</AlertDialog.Root>
 {/if}
 
 <style>

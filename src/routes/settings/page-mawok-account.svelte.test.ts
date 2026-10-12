@@ -6,8 +6,10 @@ import { EVENTS } from '$lib/bindings/constants';
 import { m } from '$lib/paraglide/messages';
 import { settings } from '$lib/settings.svelte';
 import { callsOf } from '$lib/test-support/calls';
+import { emit } from '$lib/test-support/events';
 import { settingsView } from '$lib/test-support/settings-view';
 import Page from './+page.svelte';
+import { renderAt } from './render-at';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(undefined)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -37,21 +39,11 @@ function setSettings(options: { proAvailable?: boolean } = {}) {
 	});
 }
 
-/** MAWOK_SIGN_IN_ENDED を受け取る関数。画面が listen したときに受け取る */
+/** サインインの申し込みが終わった知らせ（MAWOK_SIGN_IN_ENDED）が届いたことにする */
 function signInEnded(signedInNow: boolean, id = 1) {
-	const handler = listened.mock.calls.findLast(
-		([event]) => event === EVENTS.MAWOK_SIGN_IN_ENDED
-	)?.[1];
-	if (!handler) throw new Error('not listening');
 	signedIn = signedInNow;
 	setSettings();
-	handler({ event: EVENTS.MAWOK_SIGN_IN_ENDED, id: 0, payload: { id, signedIn: signedInNow } });
-}
-
-async function openAccount() {
-	const screen = await render(Page);
-	await screen.getByRole('tab', { name: m.settings_category_account() }).click();
-	return screen;
+	emit(listened, EVENTS.MAWOK_SIGN_IN_ENDED, { id, signedIn: signedInNow });
 }
 
 describe('設定画面の Mawok のアカウント', () => {
@@ -74,7 +66,7 @@ describe('設定画面の Mawok のアカウント', () => {
 	});
 
 	it('アカウントの区分にサインインを出し、設定を載せたときに状態を問い合わせる', async () => {
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_mawok_sign_in() }))
 			.toBeVisible();
@@ -84,7 +76,7 @@ describe('設定画面の Mawok のアカウント', () => {
 	it('ウィンドウに戻ると、答えが来るまで前の残りを出したまま問い合わせ直す', async () => {
 		signedIn = true;
 		setSettings();
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect
 			.element(screen.getByText(m.settings_mawok_remaining({ percent: 42 })))
 			.toBeVisible();
@@ -102,7 +94,7 @@ describe('設定画面の Mawok のアカウント', () => {
 	});
 
 	it('サインインを始めるとブラウザでの手順を出し、結ばれたらアカウントと残りを出す', async () => {
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_mawok_sign_in() }).click();
 		await expect.element(screen.getByText(m.settings_mawok_signing_in())).toBeVisible();
 
@@ -122,15 +114,15 @@ describe('設定画面の Mawok のアカウント', () => {
 		signedIn = true;
 		status = accountStatus(42, true);
 		setSettings();
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect.element(screen.getByText(m.settings_mawok_pro())).toBeVisible();
 	});
 
 	it('Pro でなければ、料金のページを開ける', async () => {
 		signedIn = true;
 		setSettings();
-		const screen = await openAccount();
-		await screen.getByRole('button', { name: m.settings_devices_pro_buy() }).click();
+		const screen = await renderAt(m.settings_category_account);
+		await screen.getByRole('button', { name: m.settings_mawok_pro_pricing() }).click();
 		expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1);
 	});
 
@@ -141,12 +133,12 @@ describe('設定画面の Mawok のアカウント', () => {
 			return Promise.resolve(undefined);
 		});
 		setSettings({ proAvailable: true });
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect.element(screen.getByText(m.settings_mawok_pro())).toBeVisible();
 	});
 
 	it('結べなかったら、もう一度サインインするよう出す', async () => {
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_mawok_sign_in() }).click();
 		await expect.element(screen.getByText(m.settings_mawok_signing_in())).toBeVisible();
 		signInEnded(false);
@@ -157,7 +149,7 @@ describe('設定画面の Mawok のアカウント', () => {
 	});
 
 	it('前の申し込みの終わりでは、サインインの途中の表示を消さない', async () => {
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_mawok_sign_in() }).click();
 		await expect.element(screen.getByText(m.settings_mawok_signing_in())).toBeVisible();
 		signInEnded(false, 0);
@@ -173,16 +165,16 @@ describe('設定画面の Mawok のアカウント', () => {
 			if (command === 'mawok_account_status') return Promise.resolve(null);
 			return Promise.resolve(undefined);
 		});
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect.element(screen.getByText(m.settings_mawok_signing_in())).toBeVisible();
 		await screen.getByRole('tab', { name: m.settings_category_general() }).click();
 		expect(callsOf(invoked, 'cancel_mawok_sign_in')).toHaveLength(0);
 	});
 
 	it('やめると、待ち続けているサインインを打ち切る', async () => {
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_mawok_sign_in() }).click();
-		await screen.getByRole('button', { name: m.settings_mawok_sign_in_cancel() }).click();
+		await screen.getByRole('button', { name: m.common_cancel() }).click();
 		expect(callsOf(invoked, 'cancel_mawok_sign_in')).toHaveLength(1);
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_mawok_sign_in() }))
@@ -200,7 +192,7 @@ describe('設定画面の Mawok のアカウント', () => {
 			if (command === 'mawok_account_status') return Promise.resolve(signedIn ? status : null);
 			return Promise.resolve(undefined);
 		});
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect.element(screen.getByText('me@example.com')).toBeVisible();
 		await screen.getByRole('button', { name: m.settings_mawok_sign_out() }).click();
 		expect(callsOf(invoked, 'sign_out_mawok')).toHaveLength(1);
@@ -221,7 +213,7 @@ describe('設定画面の Mawok のアカウント', () => {
 			}
 			return Promise.resolve(undefined);
 		});
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_mawok_sign_in() }))
 			.toBeVisible();
@@ -234,7 +226,7 @@ describe('設定画面の Mawok のアカウント', () => {
 			if (command === 'mawok_account_status') return Promise.reject('account.unreachable');
 			return Promise.resolve(undefined);
 		});
-		const screen = await openAccount();
+		const screen = await renderAt(m.settings_category_account);
 		await expect.element(screen.getByText(m.settings_mawok_status_unknown())).toBeVisible();
 		// 裏の確かめ直しなので、どの区分を開いていても出る画面のエラーにはしない
 		await expect.element(screen.getByText(m.account_error_unreachable())).not.toBeInTheDocument();
