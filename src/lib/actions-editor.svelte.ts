@@ -1,6 +1,6 @@
 import { SvelteSet } from 'svelte/reactivity';
 import { newAction } from '$lib/action-target';
-import { valueOf, type Call } from '$lib/call';
+import { okValue, type Call } from '$lib/call';
 import { modelFor } from '$lib/ai-services';
 import { isBlankAction } from '$lib/blank-rows';
 import { RowList } from '$lib/row-list.svelte';
@@ -31,7 +31,7 @@ export class ActionsEditor {
 		this.#actionsLocale = view?.locale;
 		this.actions = new RowList(
 			view?.actions ?? [],
-			async (actions) => valueOf(await this.call<Action[]>('set_actions', { actions })),
+			async (actions) => okValue(await this.call<Action[]>('set_actions', { actions })),
 			isBlankAction
 		);
 		if (view) {

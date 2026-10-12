@@ -736,8 +736,10 @@ accountApp.post('/buy', async (c) => {
 });
 
 /** 支払いの画面の予約。`session` は Checkout Session を作るときにそのまま渡す分。 */
-type Checkout = {
+type Checkout<P> = {
 	id: string;
+	/** 予約に残っている売りもの。ほかのタブが先に取った予約なら、押したものと違うことがある。 */
+	price: P;
 	next: string;
 	lang: Lang;
 	origin: string;
@@ -756,15 +758,15 @@ type Checkout = {
  * 二重に払わせないように。払い終えた画面を開き直すと、Stripe が払い終えたことを示す。
  * `price` は残高なら空、Pro ならプラン。違うものを押し直すと、古い支払い画面は閉じる。
  */
-async function openCheckout(
+async function openCheckout<P extends '' | ProPlan>(
 	c: Context<App>,
 	account: { id: string; email: string },
 	config: StripeConfig,
 	lang: Lang,
 	next: string,
-	price: '' | ProPlan,
+	price: P,
 	title: string,
-	create: (checkout: Checkout) => Promise<{ id: string; url: string }>
+	create: (checkout: Checkout<P>) => Promise<{ id: string; url: string }>
 ) {
 	const t = now();
 	const old = await c.env.DB.prepare(
@@ -794,7 +796,7 @@ async function openCheckout(
 		)
 	]);
 	const row = (await c.env.DB.prepare(
-		`SELECT id, next, lang, url, expires_at, managed_payments, buyer_country
+		`SELECT id, next, lang, url, expires_at, managed_payments, buyer_country, price
 		 FROM checkouts WHERE account_id = ?`
 	)
 		.bind(account.id)
@@ -806,6 +808,7 @@ async function openCheckout(
 			expires_at: number;
 			managed_payments: number;
 			buyer_country: string | null;
+			price: P;
 		}>())!;
 	if (row.url) return c.redirect(row.url, 303);
 	// 画面がまだ無い予約 (ほかのタブが頼んでいる最中か、頼んだあとに失敗した) は、同じキーで頼み直す。
@@ -814,6 +817,7 @@ async function openCheckout(
 	try {
 		session = await create({
 			id: row.id,
+			price: row.price,
 			next: row.next,
 			lang: row.lang,
 			origin: new URL(c.req.url).origin,
@@ -911,9 +915,9 @@ async function startProCheckout(
 			const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang, pro: '1' });
 			return createProCheckoutSession(config, {
 				...checkout.session,
-				plan,
+				plan: checkout.price,
 				successUrl: `${checkout.origin}${ACCOUNT}/buy/done?${done}`,
-				cancelUrl: `${checkout.origin}${ACCOUNT}/buy?plan=${plan}&lang=${checkout.lang}`,
+				cancelUrl: `${checkout.origin}${ACCOUNT}/buy?plan=${checkout.price}&lang=${checkout.lang}`,
 				submitMessage: checkout.session.managedPayments
 					? undefined
 					: messages[checkout.lang].proCheckoutNote,

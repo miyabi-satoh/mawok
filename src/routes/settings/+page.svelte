@@ -6,7 +6,7 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import EraserIcon from '@lucide/svelte/icons/eraser';
 	import { invoke } from '@tauri-apps/api/core';
-	import { commandCaller, valueOf } from '$lib/call';
+	import { commandCaller, okValue } from '$lib/call';
 	import { clamp } from '$lib/clamp';
 	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '$lib/color';
 	import { EVENTS } from '$lib/bindings/constants';
@@ -158,7 +158,7 @@
 		command: string,
 		args: Record<string, unknown>
 	): Promise<T[] | undefined> {
-		return valueOf(await callSettings<T[]>(command, args));
+		return okValue(await callSettings<T[]>(command, args));
 	}
 
 	async function startRecording(target: 'hotkey' | DraftAction) {

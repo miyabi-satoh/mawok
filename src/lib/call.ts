@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 type CallResult<T> = { ok: true; value: T } | { ok: false };
 
 /** 成功していれば返り値、失敗していれば undefined */
-export function valueOf<T>(result: CallResult<T>): T | undefined {
+export function okValue<T>(result: CallResult<T>): T | undefined {
 	return result.ok ? result.value : undefined;
 }
 

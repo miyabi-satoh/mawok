@@ -57,7 +57,7 @@ describe('sync HTTP', () => {
 	});
 
 	// 競合と上限の場合ごとの中身は test/sync.test.ts が見る。ここは、状態コードと本文が届くことだけを見る。
-	it('answers 409 with the current encrypted item for an old base', async () => {
+	it('answers 409 with the current encrypted item for an old base, and for a different key', async () => {
 		const email = 'sync-conflict@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
@@ -78,6 +78,13 @@ describe('sync HTTP', () => {
 			error: 'conflict',
 			conflicts: [{ collection: 'settings', id: 'one', seq: 2, deleted: false, data: 'Ag==' }]
 		});
+		// 違う鍵も 409 だが、アプリは error で競合と見分ける。
+		const mismatch = await put(token, {
+			key_id: 'b'.repeat(16),
+			items: [{ collection: 'settings', id: 'two', base_seq: null, deleted: false, data: 'AQ==' }]
+		});
+		expect(mismatch.status).toBe(409);
+		expect(await mismatch.json()).toEqual({ error: 'key_mismatch' });
 	});
 
 	it('writes all 100 items without exceeding D1 bindings', async () => {

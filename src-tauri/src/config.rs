@@ -765,7 +765,7 @@ fn new_item_id() -> Result<String, String> {
 /// 空・不正・重複の ID を、新しいランダムな値へ替える。
 ///
 /// 画面から足した行もこの入口を通るので、ID は Rust 側だけで作る。
-pub fn repair_item_ids<T: SyncRow>(items: &mut [T]) -> Result<bool, String> {
+pub(crate) fn repair_item_ids<T: SyncRow>(items: &mut [T]) -> Result<bool, String> {
     let mut seen = std::collections::HashSet::new();
     let mut changed = false;
     for item in items {
