@@ -3,7 +3,10 @@
 use hkdf::Hkdf;
 use sha2::Sha256;
 
-use crate::{account_credentials, lan::to_hex};
+use crate::{
+    account_credentials,
+    hex::{from_hex, to_hex},
+};
 const KEY_ID_INFO: &[u8] = b"mawok key id v1";
 const LAN_INFO: &[u8] = b"mawok lan v1";
 
@@ -58,8 +61,7 @@ pub fn generate() -> Result<[u8; 32], String> {
 }
 
 pub fn decode(text: &str) -> Result<[u8; 32], String> {
-    let bytes = crate::lan::from_hex(text)
-        .ok_or_else(|| "the account key is not hexadecimal".to_string())?;
+    let bytes = from_hex(text).ok_or_else(|| "the account key is not hexadecimal".to_string())?;
     bytes
         .try_into()
         .map_err(|_| "the account key has the wrong length".to_string())

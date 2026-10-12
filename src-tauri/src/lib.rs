@@ -15,6 +15,7 @@ mod draft_keys;
 mod events;
 mod focus;
 mod folder;
+mod hex;
 mod history_store;
 mod hotkey;
 mod i18n;
@@ -27,6 +28,8 @@ mod placement;
 mod pro;
 mod secrets;
 mod sync;
+#[cfg(test)]
+mod test_support;
 mod text;
 // 境目の型は、Windows でもテストで書き出す。Windows では書き出すだけで使わない
 #[cfg(any(target_os = "macos", test))]
@@ -228,6 +231,23 @@ impl AppState {
         Lang::resolve(self.config.lock().unwrap().language, self.system_lang)
     }
 
+    /// 今使える Pro の状態。窓口と話せない間は、最後に確かめた状態を猶予の間だけ使う
+    fn available_pro(&self) -> Option<pro::State> {
+        self.pro_state
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(|pro| pro.available_at(pro::now()))
+    }
+
+    fn pro_available(&self) -> bool {
+        self.pro_state
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|pro| pro.available_at(pro::now()))
+    }
+
     /// `service` のキーが資格情報管理にあるか。確かめていないか、確かめたのが別の AI サービスなら None
     fn ai_key_available(&self, service: AiService) -> Option<bool> {
         self.ai_key_available
@@ -361,12 +381,7 @@ fn settings_view(state: &AppState) -> SettingsView {
         )
     };
     let lang = Lang::resolve(config.language, state.system_lang);
-    let pro_available = state
-        .pro_state
-        .lock()
-        .unwrap()
-        .as_ref()
-        .is_some_and(|pro| pro.available_at(pro::now()));
+    let pro_available = state.pro_available();
     let modified_settings = config::modified_settings(&config);
     SettingsView {
         revision,
@@ -1387,12 +1402,8 @@ fn set_replacements(
     info!("set replacements: {} entries", replacements.len());
     // 打つたびに呼ばれる。辞書はトレイにも下書きウィンドウにも関わらず、設定画面は自分で表の行を持っているので、
     // 保存するだけにして、開いているウィンドウとトレイへの反映はしない
-    let mut candidate = Config {
-        replacements,
-        ..Config::default()
-    };
-    config::repair_item_ids_in_config(&mut candidate)?;
-    let replacements = candidate.replacements;
+    let mut replacements = replacements;
+    config::repair_item_ids(&mut replacements)?;
     save_as_typed(&app, |config| config.replacements = replacements.clone())?;
     Ok(replacements)
 }
@@ -1402,12 +1413,8 @@ fn set_snippets(app: AppHandle, snippets: Vec<Snippet>) -> Result<Vec<Snippet>, 
     info!("set snippets: {} entries", snippets.len());
     // 打つたびに呼ばれる。設定画面は自分で欄を持っているが、下書きウィンドウの一覧が使うので、辞書と違い画面へは反映する。
     // トレイには関わらないので、打つたびに作り直さない
-    let mut candidate = Config {
-        snippets,
-        ..Config::default()
-    };
-    config::repair_item_ids_in_config(&mut candidate)?;
-    let snippets = candidate.snippets;
+    let mut snippets = snippets;
+    config::repair_item_ids(&mut snippets)?;
     save_as_typed(&app, |config| config.snippets = snippets.clone())?;
     emit_settings(&app);
     Ok(snippets)
@@ -1432,10 +1439,8 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
         info!("add snippet: already registered");
         return Ok(false);
     }
-    let mut candidate = Config::default();
-    candidate.snippets.push(snippet);
-    config::repair_item_ids_in_config(&mut candidate)?;
-    let snippet = candidate.snippets.pop().expect("added one snippet");
+    let mut snippet = snippet;
+    config::repair_item_ids(std::slice::from_mut(&mut snippet))?;
     info!("add snippet");
     save_as_typed(&app, |config| config.snippets.push(snippet.clone()))?;
     emit_settings(&app);
@@ -1514,12 +1519,8 @@ fn set_ai_model(app: AppHandle, service: AiService, model: String) -> Result<(),
 fn set_actions(app: AppHandle, actions: Vec<Action>) -> Result<Vec<Action>, String> {
     info!("set actions: {} entries", actions.len());
     // 打つたびに呼ばれる。定型文と同じく、下書きウィンドウの一覧が使うので画面へは反映し、トレイは作り直さない
-    let mut candidate = Config {
-        actions: Some(actions),
-        ..Config::default()
-    };
-    config::repair_item_ids_in_config(&mut candidate)?;
-    let actions = candidate.actions.expect("set above");
+    let mut actions = actions;
+    config::repair_item_ids(&mut actions)?;
     save_as_typed(&app, |config| config.actions = Some(actions.clone()))?;
     emit_settings(&app);
     Ok(actions)
@@ -1668,7 +1669,7 @@ fn request_sync(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
-            run_settings_sync(&app).await;
+            run_sync(&app).await;
             let again = {
                 let state = app.state::<AppState>();
                 let mut schedule = state.sync_schedule.lock().unwrap();
@@ -1710,13 +1711,9 @@ impl SyncAccess {
 async fn sync_access(app: &AppHandle) -> Option<SyncAccess> {
     let (key, key_id) = {
         let state = app.state::<AppState>();
-        let available = state
-            .pro_state
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|pro| pro.available_at(pro::now()));
-        if !available || *state.account_key_status.lock().unwrap() != account_key::Status::Ready {
+        if !state.pro_available()
+            || *state.account_key_status.lock().unwrap() != account_key::Status::Ready
+        {
             return None;
         }
         let key = *state.account_key.lock().unwrap();
@@ -1774,11 +1771,7 @@ fn remember_sync_conflicts(app: &AppHandle, count: usize) {
     }
 }
 
-fn sync_is_enabled(config: &Config) -> bool {
-    sync::kinds(config).any()
-}
-
-async fn run_settings_sync(app: &AppHandle) {
+async fn run_sync(app: &AppHandle) {
     let (config, generation, record_generation) = {
         let state = app.state::<AppState>();
         let (config, generation) = config_with_generation(&state);
@@ -1786,18 +1779,13 @@ async fn run_settings_sync(app: &AppHandle) {
         (config, generation, record_generation)
     };
     let kinds = sync::kinds(&config);
-    if !sync_is_enabled(&config) {
+    if !kinds.any() {
         return;
     }
-    let Some(SyncAccess {
-        client,
-        token,
-        key,
-        key_id,
-    }) = sync_access(app).await
-    else {
+    let Some(access) = sync_access(app).await else {
         return;
     };
+    let key_id = &access.key_id;
     // 読めない履歴ファイルは、画面が読み込むときに除けるので、この回は履歴を同期しない
     let local_history = match history_path(app) {
         _ if !kinds.history => None,
@@ -1810,14 +1798,9 @@ async fn run_settings_sync(app: &AppHandle) {
         .flatten(),
         _ => None,
     };
-    let before = load_sync_record(app, &key_id).await;
+    let before = load_sync_record(app, key_id).await;
     let synced = sync::sync_once(
-        sync::HttpTransport {
-            client: &client,
-            token: &token,
-            key: &key,
-            key_id: &key_id,
-        },
+        access.transport(),
         &config,
         before.clone(),
         local_history.as_ref(),
@@ -1829,15 +1812,11 @@ async fn run_settings_sync(app: &AppHandle) {
                 info!("sync server reset the local record");
             }
             let app_state = app.state::<AppState>();
-            // AI サービスを替えるコマンドと同じ排他を取る。サインアウトは、この排他の中で同期の記録を消すので、
-            // 記録の排他より先に取る
-            let action_state = app.state::<ActionState>();
-            let _settings = if result.changed && result.config.ai_service != config.ai_service {
-                Some(action_state.settings.lock().await)
-            } else {
-                None
-            };
-            let _commit = app_state.sync_commit.lock().await;
+            let _commit = lock_sync_commit(
+                app,
+                result.changed && result.config.ai_service != config.ai_service,
+            )
+            .await;
             if app_state.sync_record_generation.load(Ordering::SeqCst) != record_generation {
                 // サインアウトや鍵の替わりで記録を消した後。この結果は、前の鍵・前のアカウントのもの
                 return;
@@ -1852,9 +1831,7 @@ async fn run_settings_sync(app: &AppHandle) {
                         for item in &rejected {
                             sync::ignore_applied(&mut result.state, previous, item);
                         }
-                        apply_config(app);
-                        // 設定の窓は、一覧と打っている欄を自分で持っていて settings-changed では写し直さない
-                        let _ = app.emit(events::SYNC_APPLIED, settings_view(&app_state));
+                        apply_synced_config(app);
                     }
                     Ok(None) => {
                         discard = true;
@@ -1874,7 +1851,7 @@ async fn run_settings_sync(app: &AppHandle) {
                 }
             }
             let record = if discard {
-                sync::merge_written(before, &result.written, result.reset, &key_id)
+                sync::merge_written(before, &result.written, result.reset, key_id)
             } else {
                 result.state
             };
@@ -1883,9 +1860,7 @@ async fn run_settings_sync(app: &AppHandle) {
                 let current = app_state.config.lock().unwrap();
                 record.active_conflict_count(&current)
             };
-            if let Err(error) = save_sync_record(app, record).await {
-                warn!("couldn't save sync state: {error}");
-            }
+            let _ = save_sync_record(app, record).await;
             remember_sync_conflicts(app, conflicts);
             if retry {
                 request_sync(app);
@@ -1898,10 +1873,8 @@ async fn run_settings_sync(app: &AppHandle) {
                 let _commit = app_state.sync_commit.lock().await;
                 if app_state.sync_record_generation.load(Ordering::SeqCst) == record_generation {
                     let record =
-                        sync::merge_written(before, &failure.written, failure.reset, &key_id);
-                    if let Err(error) = save_sync_record(app, record).await {
-                        warn!("couldn't save sync state: {error}");
-                    }
+                        sync::merge_written(before, &failure.written, failure.reset, key_id);
+                    let _ = save_sync_record(app, record).await;
                 }
             }
             match failure.error {
@@ -1915,7 +1888,7 @@ async fn run_settings_sync(app: &AppHandle) {
                         warn!("couldn't clear a rejected Mawok token: {error}");
                     }
                 }
-                error => warn!("settings sync failed: {error}"),
+                error => warn!("sync failed: {error}"),
             }
         }
     }
@@ -1954,21 +1927,80 @@ async fn mark_paused_sync_kinds(app: &AppHandle) {
         // （全部オフの間と、つながらない間は、同期の回が来ない）
         Ok(Ok(Some(conflicts))) => remember_sync_conflicts(app, conflicts),
         Ok(Ok(None)) => {}
-        Ok(Err(error)) | Err(error) => warn!("couldn't save sync state: {error}"),
+        Ok(Err(error)) | Err(error) => warn_unsaved_sync_record(&error),
     }
 }
 
+fn warn_unsaved_sync_record(error: &str) {
+    warn!("couldn't save sync state: {error}");
+}
+
 /// 同期の記録を保存する。通信の間にスイッチがオフになった種類は、前の記録から作った結果で
-/// オフの印を上書きしないよう、保存する前に置き直す。`sync_commit` の中で呼ぶ
+/// オフの印を上書きしないよう、保存する前に置き直す。`sync_commit` の中で呼ぶ。
+/// 保存できなければ、警告を出してからその理由を返す
 async fn save_sync_record(app: &AppHandle, mut record: sync::State) -> Result<(), String> {
-    let config = {
-        let state = app.state::<AppState>();
-        let config = state.config.lock().unwrap().clone();
-        config
-    };
+    let state = app.state::<AppState>();
+    let config = state.config.lock().unwrap().clone();
     record.pause(&config);
-    let path = app.state::<AppState>().sync_state_path.clone();
-    run_blocking(move || sync::save(&path, &record)).await?
+    let path = state.sync_state_path.clone();
+    let saved = run_blocking(move || sync::save(&path, &record))
+        .await
+        .and_then(|saved| saved);
+    if let Err(error) = &saved {
+        warn_unsaved_sync_record(error);
+    }
+    saved
+}
+
+/// 同期の結果や、同期の外で作った設定と記録を置く間の排他。AI サービスが替わるなら、AI サービスを替えるコマンドと同じ排他も取る。
+/// サインアウトは、その排他の中で同期の記録を消すので、記録の排他より先に取る
+async fn lock_sync_commit(app: &AppHandle, ai_service_changes: bool) -> SyncCommitGuard<'_> {
+    let settings = if ai_service_changes {
+        Some(app.state::<ActionState>().inner().settings.lock().await)
+    } else {
+        None
+    };
+    let commit = app.state::<AppState>().inner().sync_commit.lock().await;
+    SyncCommitGuard {
+        _commit: commit,
+        _settings: settings,
+    }
+}
+
+/// `lock_sync_commit` で取った排他。取ったのと逆の順に返すよう、記録の排他を先に置く
+struct SyncCommitGuard<'a> {
+    _commit: tokio::sync::MutexGuard<'a, ()>,
+    _settings: Option<tokio::sync::MutexGuard<'a, ()>>,
+}
+
+/// 同期や控えから入れた設定を、開いている窓とトレイに反映する。
+fn apply_synced_config(app: &AppHandle) {
+    apply_config(app);
+    // 設定の窓は、一覧と打っている欄を自分で持っていて settings-changed では写し直さない
+    let _ = app.emit(
+        events::SYNC_APPLIED,
+        settings_view(&app.state::<AppState>()),
+    );
+}
+
+/// 食い違いを選ぶ画面のために、同期の記録と、窓口の今の値を読む。まだ同期していなければ None
+async fn read_sync_conflicts(
+    app: &AppHandle,
+    config: &Config,
+) -> Result<Option<(sync::State, Vec<sync::RemoteItem>)>, String> {
+    let access = sync_access(app)
+        .await
+        .ok_or_else(|| SYNC_UNREACHABLE.to_string())?;
+    let Some(record) = load_sync_record(app, &access.key_id).await else {
+        return Ok(None);
+    };
+    let remote = sync::read_conflicts(access.transport(), config, &record)
+        .await
+        .map_err(|error| {
+            warn!("couldn't read the settings changed on both devices: {error}");
+            SYNC_UNREACHABLE.to_string()
+        })?;
+    Ok(Some((record, remote)))
 }
 
 #[tauri::command]
@@ -2033,18 +2065,9 @@ async fn sync_conflicts_held(app: &AppHandle) -> Result<SyncConflictList, String
     let app_state = app.state::<AppState>();
     let (mut config, generation) = config_with_generation(&app_state);
     let record_generation = app_state.sync_record_generation.load(Ordering::SeqCst);
-    let access = sync_access(app)
-        .await
-        .ok_or_else(|| SYNC_UNREACHABLE.to_string())?;
-    let Some(mut record) = load_sync_record(app, &access.key_id).await else {
+    let Some((mut record, remote)) = read_sync_conflicts(app, &config).await? else {
         return Ok(none());
     };
-    let remote = sync::read_conflicts(access.transport(), &config, &record)
-        .await
-        .map_err(|error| {
-            warn!("couldn't read the settings changed on both devices: {error}");
-            SYNC_UNREACHABLE.to_string()
-        })?;
     // ほかのデバイスが同期から外した行は、選ばせずに、こちらでも同期しない行にする
     if let Some((next, released)) = sync::release_detached(&config, &record, &remote) {
         let change = SyncChange {
@@ -2130,18 +2153,9 @@ async fn resolve_sync_conflicts_held(
     let app_state = app.state::<AppState>();
     let (config, generation) = config_with_generation(&app_state);
     let record_generation = app_state.sync_record_generation.load(Ordering::SeqCst);
-    let access = sync_access(app)
-        .await
-        .ok_or_else(|| SYNC_UNREACHABLE.to_string())?;
-    let Some(before) = load_sync_record(app, &access.key_id).await else {
+    let Some((before, remote)) = read_sync_conflicts(app, &config).await? else {
         return Ok(stale());
     };
-    let remote = sync::read_conflicts(access.transport(), &config, &before)
-        .await
-        .map_err(|error| {
-            warn!("couldn't read the settings changed on both devices: {error}");
-            SYNC_UNREACHABLE.to_string()
-        })?;
     let Some(sync::Resolution {
         config: next,
         state: record,
@@ -2231,19 +2245,12 @@ async fn restore_sync_backup(app: AppHandle, name: String) -> Result<(), String>
                 Err(SYNC_RESTORE_PARTIAL.to_string())
             };
         }
-        let action_state = app.state::<ActionState>();
-        let _settings = if next.ai_service != current.ai_service {
-            Some(action_state.settings.lock().await)
-        } else {
-            None
-        };
-        let _commit = state.sync_commit.lock().await;
+        let _commit = lock_sync_commit(&app, next.ai_service != current.ai_service).await;
         match save_synced_config(&app, generation, next)? {
             Some(mut rejected) => {
                 rejected.extend(locally_rejected);
                 // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
-                apply_config(&app);
-                let _ = app.emit(events::SYNC_APPLIED, settings_view(&state));
+                apply_synced_config(&app);
                 if rejected.is_empty() {
                     Ok(())
                 } else {
@@ -2275,14 +2282,7 @@ async fn commit_sync_change(
     mut record: sync::State,
 ) -> Result<Option<Vec<String>>, String> {
     let app_state = app.state::<AppState>();
-    // 排他は、同期が結果を入れるときと同じ順に取る（`run_settings_sync`）
-    let action_state = app.state::<ActionState>();
-    let _settings = if next.ai_service != change.config.ai_service {
-        Some(action_state.settings.lock().await)
-    } else {
-        None
-    };
-    let _commit = app_state.sync_commit.lock().await;
+    let _commit = lock_sync_commit(app, next.ai_service != change.config.ai_service).await;
     if app_state.sync_record_generation.load(Ordering::SeqCst) != change.record_generation {
         return Ok(None);
     }
@@ -2294,18 +2294,14 @@ async fn commit_sync_change(
                     sync::hold_again(&mut record, change.before, item);
                     rejected.push(item.id.clone());
                 }
-                apply_config(app);
-                let _ = app.emit(events::SYNC_APPLIED, settings_view(&app_state));
+                apply_synced_config(app);
             }
             // 読んでいる間に、画面から設定が変わった。変わる前の設定から作った値を重ねて入れない
             None => return Ok(None),
         }
     }
     let conflicts = record.active_conflict_count(change.config);
-    save_sync_record(app, record).await.map_err(|error| {
-        warn!("couldn't save sync state: {error}");
-        error
-    })?;
+    save_sync_record(app, record).await?;
     remember_sync_conflicts(app, conflicts);
     Ok(Some(rejected))
 }
@@ -2585,16 +2581,8 @@ async fn mawok_account_status(app: AppHandle) -> Result<Option<account::AccountS
 async fn refresh_mawok_account_status(
     app: &AppHandle,
 ) -> Result<Option<account::AccountStatus>, String> {
-    let generation = app
-        .state::<AppState>()
-        .pro_generation
-        .load(Ordering::SeqCst);
-    let stale = || {
-        app.state::<AppState>()
-            .pro_generation
-            .load(Ordering::SeqCst)
-            != generation
-    };
+    let generation = current_pro_generation(app);
+    let stale = || !pro_generation_is_current(app, generation);
     let exists = run_blocking(account_credentials::exists)
         .await?
         .inspect_err(|error| warn!("couldn't check the Mawok account token: {error}"))?;
@@ -2667,10 +2655,7 @@ async fn refresh_mawok_account_status(
             if status.pro.active {
                 refresh_account_key(app, &client, &token, generation).await;
             } else {
-                *app.state::<AppState>().account_key_status.lock().unwrap() =
-                    account_key::Status::None;
-                app.state::<Arc<lan::Lan>>().refresh();
-                apply_config(app);
+                set_account_key_status(app, account_key::Status::None);
             }
             Ok(Some(status))
         }
@@ -2700,33 +2685,42 @@ async fn refresh_mawok_account_status(
 
 /// 窓口へつながらない間は、最後に確かめた Pro の猶予と資格情報管理の鍵で LAN を続ける。
 async fn restore_local_account_key(app: &AppHandle) {
-    let local = match run_blocking(account_key::load).await {
-        Ok(Ok(key)) => key,
-        Ok(Err(error)) | Err(error) => {
-            warn!("couldn't read the account key: {error}");
-            return;
-        }
-    };
-    use_unverified_account_key(app, local);
+    if let Some(local) = load_account_key().await {
+        use_unverified_account_key(app, local);
+    }
 }
 
 fn use_unverified_account_key(app: &AppHandle, local: Option<[u8; 32]>) {
     *app.state::<AppState>().account_key.lock().unwrap() = local;
-    *app.state::<AppState>().account_key_status.lock().unwrap() =
-        account_key::offline_status(local.as_ref());
+    set_account_key_status(app, account_key::offline_status(local.as_ref()));
+}
+
+/// アカウントの鍵の状態を置き、LAN と画面に反映する。
+fn set_account_key_status(app: &AppHandle, status: account_key::Status) {
+    *app.state::<AppState>().account_key_status.lock().unwrap() = status;
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(app);
 }
 
-fn account_key_generation_is_current(app: &AppHandle, generation: usize) -> bool {
+/// 資格情報管理のアカウントの鍵。鍵が無ければ `Some(None)`、読めなければ警告を出して None
+async fn load_account_key() -> Option<Option<[u8; 32]>> {
+    match run_blocking(account_key::load).await {
+        Ok(Ok(key)) => Some(key),
+        Ok(Err(error)) | Err(error) => {
+            warn!("couldn't read the account key: {error}");
+            None
+        }
+    }
+}
+
+fn current_pro_generation(app: &AppHandle) -> usize {
     app.state::<AppState>()
         .pro_generation
         .load(Ordering::SeqCst)
-        == generation
 }
 
-fn should_store_account_key(local: Option<&[u8; 32]>) -> bool {
-    local.is_none()
+fn pro_generation_is_current(app: &AppHandle, generation: usize) -> bool {
+    current_pro_generation(app) == generation
 }
 
 /// Pro の確認の直後に、窓口の鍵の印と資格情報管理の鍵をそろえる。
@@ -2739,40 +2733,36 @@ async fn refresh_account_key(
 ) {
     let state = app.state::<AppState>();
     let _refresh = state.account_key_refresh.lock().await;
-    if !account_key_generation_is_current(app, generation) {
+    if !pro_generation_is_current(app, generation) {
         return;
     }
-    let local = match run_blocking(account_key::load).await {
-        Ok(Ok(key)) => key,
-        Ok(Err(error)) | Err(error) => {
-            warn!("couldn't read the account key: {error}");
-            return;
-        }
+    let Some(local) = load_account_key().await else {
+        return;
     };
     let server = match account::sync_key_id(client, token).await {
         Ok(key_id) => key_id,
         Err(error) => {
             warn!("couldn't check the account key: {error:?}");
-            if account_key_generation_is_current(app, generation) {
+            if pro_generation_is_current(app, generation) {
                 use_unverified_account_key(app, local);
             }
             return;
         }
     };
-    if !account_key_generation_is_current(app, generation) {
+    if !pro_generation_is_current(app, generation) {
         return;
     }
     *app.state::<AppState>().account_key_id.lock().unwrap() = server.clone();
     if account_key::decide(server.as_deref(), local.as_ref()) == account_key::Status::NeedsPairing {
         if local.is_some() {
-            if !account_key_generation_is_current(app, generation) {
+            if !pro_generation_is_current(app, generation) {
                 return;
             }
             if let Err(error) = run_blocking(account_key::clear).await {
                 warn!("couldn't discard a mismatched account key: {error:?}");
             }
         }
-        if !account_key_generation_is_current(app, generation) {
+        if !pro_generation_is_current(app, generation) {
             return;
         }
         *app.state::<AppState>().account_key.lock().unwrap() = None;
@@ -2784,35 +2774,30 @@ async fn refresh_account_key(
         apply_config(app);
         return;
     }
-    let generated = should_store_account_key(local.as_ref());
+    let generated = local.is_none();
     let key = match local {
         Some(key) => key,
         None => match account_key::generate() {
             Ok(key) => key,
             Err(error) => {
                 warn!("couldn't generate an account key: {error}");
-                *app.state::<AppState>().account_key_status.lock().unwrap() =
-                    account_key::Status::None;
-                app.state::<Arc<lan::Lan>>().refresh();
-                apply_config(app);
+                set_account_key_status(app, account_key::Status::None);
                 return;
             }
         },
     };
     if server.is_none() {
         let reset = account::reset_sync(client, token, &account_key::key_id(&key)).await;
-        if !account_key_generation_is_current(app, generation) {
+        if !pro_generation_is_current(app, generation) {
             return;
         }
         if let Err(error) = reset {
             warn!("couldn't set the account key ID: {error:?}");
-            *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::None;
-            app.state::<Arc<lan::Lan>>().refresh();
-            apply_config(app);
+            set_account_key_status(app, account_key::Status::None);
             return;
         }
     }
-    if !account_key_generation_is_current(app, generation) {
+    if !pro_generation_is_current(app, generation) {
         return;
     }
     if generated {
@@ -2821,7 +2806,7 @@ async fn refresh_account_key(
             warn!("couldn't store the account key: {error:?}");
             return;
         }
-        if !account_key_generation_is_current(app, generation) {
+        if !pro_generation_is_current(app, generation) {
             return;
         }
         clear_sync_state(app).await;
@@ -2829,9 +2814,7 @@ async fn refresh_account_key(
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
     *app.state::<AppState>().account_key_id.lock().unwrap() =
         Some(server.unwrap_or_else(|| account_key::key_id(&key)));
-    *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
-    app.state::<Arc<lan::Lan>>().refresh();
-    apply_config(app);
+    set_account_key_status(app, account_key::Status::Ready);
     request_sync(app);
 }
 
@@ -2903,12 +2886,7 @@ async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus, ge
     if let Err(error) = run_blocking(move || pro::save(&saved_path, &state)).await {
         warn!("couldn't save the Pro state: {error}");
     }
-    if app
-        .state::<AppState>()
-        .pro_generation
-        .load(Ordering::SeqCst)
-        != generation
-    {
+    if !pro_generation_is_current(app, generation) {
         // 保存している間に消された。消した後の状態に合わせ直す。
         *app.state::<AppState>().pro_state.lock().unwrap() = None;
         if let Ok(Err(error)) = run_blocking(move || pro::clear(&path)).await {
@@ -2966,16 +2944,13 @@ async fn sign_out_mawok(app: AppHandle) -> Result<(), String> {
 /// 新しい鍵を窓口へ反映できたときだけ、資格情報管理の鍵を置き換える。
 #[tauri::command]
 async fn reset_account_key(app: AppHandle) -> Result<(), String> {
-    let generation = app
-        .state::<AppState>()
-        .pro_generation
-        .load(Ordering::SeqCst);
+    let generation = current_pro_generation(&app);
     let token = run_blocking(account_credentials::read_token)
         .await?
         .map_err(|_| "account.sign_in_required".to_string())?;
     let state = app.state::<AppState>();
     let _refresh = state.account_key_refresh.lock().await;
-    if !account_key_generation_is_current(&app, generation) {
+    if !pro_generation_is_current(&app, generation) {
         return Ok(());
     }
     if pro_account_tag(&app).is_none() {
@@ -2986,11 +2961,11 @@ async fn reset_account_key(app: AppHandle) -> Result<(), String> {
     account::reset_sync(&client, &token, &account_key::key_id(&key))
         .await
         .map_err(|_| "account.unreachable".to_string())?;
-    if !account_key_generation_is_current(&app, generation) {
+    if !pro_generation_is_current(&app, generation) {
         return Ok(());
     }
     run_blocking(move || account_key::store(&key)).await??;
-    if !account_key_generation_is_current(&app, generation) {
+    if !pro_generation_is_current(&app, generation) {
         return Ok(());
     }
     *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
@@ -3559,7 +3534,7 @@ struct ReceivedDraft {
 
 /// 見つけたデバイスを設定の順番と送信先の選択を保ったまま更新する。初めてなら末尾へ加える。
 fn remember_found_device(devices: &mut Vec<Device>, peer: lan::Peer, address: IpAddr) -> bool {
-    let public_key = lan::to_hex(&peer.public_key);
+    let public_key = hex::to_hex(&peer.public_key);
     let address = address.to_string();
     if let Some(device) = devices
         .iter_mut()
@@ -3583,7 +3558,7 @@ fn remember_found_device(devices: &mut Vec<Device>, peer: lan::Peer, address: Ip
 
 /// 握手が通ったデバイスの場所だけを更新する。UDP の名乗りだけでは設定を書き換えない。
 fn remember_device_address(devices: &mut [Device], public_key: &[u8], address: IpAddr) -> bool {
-    let public_key = lan::to_hex(public_key);
+    let public_key = hex::to_hex(public_key);
     let address = address.to_string();
     let Some(device) = devices
         .iter_mut()
@@ -3628,15 +3603,7 @@ impl lan::Host for AppHandle {
     }
 
     fn on_pairing_code_offered(&self, offer: lan::PairingOffer) {
-        let _ = self.emit(
-            events::PAIRING_CODE_OFFERED,
-            PairingOffer {
-                code: offer.code,
-                remaining_seconds: offer.remaining_seconds,
-                automatic: offer.automatic,
-                previous_code_was_wrong: offer.previous_code_was_wrong,
-            },
-        );
+        let _ = self.emit(events::PAIRING_CODE_OFFERED, offer);
     }
 
     fn on_device_address_seen(&self, public_key: &[u8], address: IpAddr) {
@@ -3655,7 +3622,7 @@ impl lan::Host for AppHandle {
     }
 
     fn on_received(&self, from: &[u8], text: String) -> bool {
-        let from = lan::to_hex(from);
+        let from = hex::to_hex(from);
         let state = self.state::<AppState>();
         let config = state.config.lock().unwrap();
         let name = received_device_name(&config.devices, &from);
@@ -3688,11 +3655,8 @@ impl lan::Host for AppHandle {
 
     fn pro_account_tag(&self) -> Option<[u8; lan::ACCOUNT_TAG_LEN]> {
         self.state::<AppState>()
-            .pro_state
-            .lock()
-            .unwrap()
+            .available_pro()
             .as_ref()
-            .filter(|pro| pro.available_at(pro::now()))
             .map(pro::State::account_tag)
     }
 
@@ -3716,9 +3680,7 @@ impl lan::Host for AppHandle {
             return false;
         }
         *self.state::<AppState>().account_key.lock().unwrap() = Some(key);
-        *self.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
-        self.state::<Arc<lan::Lan>>().refresh();
-        apply_config(self);
+        set_account_key_status(self, account_key::Status::Ready);
         true
     }
 }
@@ -3740,23 +3702,12 @@ fn take_received_drafts(state: tauri::State<'_, DraftState>) -> Vec<ReceivedDraf
     std::mem::take(&mut *state.received.lock().unwrap())
 }
 
-#[derive(Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(rename_all = "camelCase")]
-struct PairingOffer {
-    code: String,
-    remaining_seconds: u64,
-    automatic: bool,
-    previous_code_was_wrong: bool,
-}
-
 /// コードを出して、組み合わせる相手が入れるのを待つ。コードと画面表示用の残り秒を返す
 #[tauri::command]
 fn start_pairing(
     app: AppHandle,
     lan: tauri::State<'_, Arc<lan::Lan>>,
-) -> Result<PairingOffer, String> {
+) -> Result<lan::PairingOffer, String> {
     info!("start pairing");
     if pro_account_tag(&app).is_none() {
         return Err(lan::Failure::ProRequired.code().to_string());
@@ -3764,26 +3715,14 @@ fn start_pairing(
     if *app.state::<AppState>().account_key_status.lock().unwrap() != account_key::Status::Ready {
         return Err(lan::Failure::NeedsPairing.code().to_string());
     }
-    let offer = lan
-        .start_pairing(false)
-        .map_err(|error| lan_failure("couldn't start pairing", error))?;
-    Ok(PairingOffer {
-        code: offer.code,
-        remaining_seconds: offer.remaining_seconds,
-        automatic: offer.automatic,
-        previous_code_was_wrong: offer.previous_code_was_wrong,
-    })
+    lan.start_pairing(false)
+        .map_err(|error| lan_failure("couldn't start pairing", error))
 }
 
 /// 今表示しているコード。設定を開いた後、`want` を受けて自動で始めた組み合わせも画面に出す。
 #[tauri::command]
-fn pairing_offer(lan: tauri::State<'_, Arc<lan::Lan>>) -> Option<PairingOffer> {
-    lan.pairing_offer().map(|offer| PairingOffer {
-        code: offer.code,
-        remaining_seconds: offer.remaining_seconds,
-        automatic: offer.automatic,
-        previous_code_was_wrong: offer.previous_code_was_wrong,
-    })
+fn pairing_offer(lan: tauri::State<'_, Arc<lan::Lan>>) -> Option<lan::PairingOffer> {
+    lan.pairing_offer()
 }
 
 #[tauri::command]
@@ -3884,7 +3823,7 @@ fn device_targets(app: &AppHandle, include: impl Fn(&Device) -> bool) -> Vec<(De
         .devices
         .iter()
         .filter(|device| include(device))
-        .filter_map(|device| match lan::from_hex(&device.public_key) {
+        .filter_map(|device| match hex::from_hex(&device.public_key) {
             Some(key) => Some((device.clone(), key)),
             None => {
                 warn!("lan: a device's key is unreadable");
@@ -4774,12 +4713,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let accelerator = (!hotkey_unavailable).then_some(hotkey.as_str());
     let show_item = MenuItem::with_id(app, "show", lang.toggle_draft(), true, accelerator)?;
     let settings_item = MenuItem::with_id(app, "settings", lang.settings(), true, None::<&str>)?;
-    let pro_available = state
-        .pro_state
-        .lock()
-        .unwrap()
-        .as_ref()
-        .is_some_and(|pro| pro.available_at(pro::now()));
+    let pro_available = state.pro_available();
     let sync_conflicts = shown_sync_conflicts(&state, pro_available);
     // 設定を開かない利用者にも気づけるよう、食い違いがあるあいだだけ出す（docs/sync.md「食い違い」）
     let sync_choice_item = (sync_conflicts > 0)
@@ -5327,7 +5261,7 @@ mod tests {
             sync_history: false,
             ..Config::default()
         };
-        assert!(!sync_is_enabled(&config));
+        assert!(!sync::kinds(&config).any());
     }
 
     #[test]
@@ -5593,12 +5527,6 @@ mod tests {
             account_key_failure_for_lan(true, account_key::Status::Ready, true),
             None
         );
-    }
-
-    #[test]
-    fn only_a_new_account_key_needs_to_be_stored() {
-        assert!(should_store_account_key(None));
-        assert!(!should_store_account_key(Some(&[7; 32])));
     }
 
     #[test]

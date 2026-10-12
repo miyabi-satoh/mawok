@@ -67,11 +67,7 @@ pub fn save(path: &Path, state: &State) -> Result<(), String> {
 }
 
 pub fn clear(path: &Path) -> Result<(), String> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.to_string()),
-    }
+    atomic_file::remove(path).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -32,7 +32,7 @@ impl LinkRequest {
     pub fn new() -> Result<Self, String> {
         let verifier = random_hex::<32>()?;
         Ok(Self {
-            challenge: crate::lan::to_hex(&Sha256::digest(verifier.as_bytes())),
+            challenge: crate::hex::to_hex(&Sha256::digest(verifier.as_bytes())),
             verifier,
             state: random_hex::<16>()?,
         })
@@ -78,7 +78,7 @@ pub fn code_from(state: &str, request_line: &str) -> Option<String> {
 fn random_hex<const N: usize>() -> Result<String, String> {
     let mut bytes = [0u8; N];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
-    Ok(crate::lan::to_hex(&bytes))
+    Ok(crate::hex::to_hex(&bytes))
 }
 
 /// 窓口に問い合わせて分かった、アカウントの様子
@@ -163,17 +163,19 @@ pub async fn exchange_code(
     Err(last)
 }
 
-fn bearer(token: &str) -> Result<reqwest::header::HeaderValue, String> {
+pub(crate) fn bearer(token: &str) -> Result<reqwest::header::HeaderValue, String> {
     let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
         .map_err(|_| "the token has characters that can't be sent".to_string())?;
     value.set_sensitive(true);
     Ok(value)
 }
 
-/// アカウントのメールアドレス、残り、Pro を問い合わせる
-pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStatus, AccountError> {
-    let response = client
-        .get(format!("{ACCOUNT_URL}/v1/balance"))
+/// トークンを付けて送り、成功の答えだけを返す。トークンが外されていれば `SignedOut`
+async fn send_signed(
+    request: reqwest::RequestBuilder,
+    token: &str,
+) -> Result<reqwest::Response, AccountError> {
+    let response = request
         .header(
             reqwest::header::AUTHORIZATION,
             bearer(token).map_err(other)?,
@@ -187,6 +189,12 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
     if !response.status().is_success() {
         return Err(other(format!("HTTP {}", response.status().as_u16())));
     }
+    Ok(response)
+}
+
+/// アカウントのメールアドレス、残り、Pro を問い合わせる
+pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStatus, AccountError> {
+    let response = send_signed(client.get(format!("{ACCOUNT_URL}/v1/balance")), token).await?;
     let body: Value = response.json().await.map_err(other)?;
     let pro = body
         .get("pro")
@@ -249,21 +257,8 @@ pub async fn sync_key_id(
     client: &reqwest::Client,
     token: &str,
 ) -> Result<Option<String>, AccountError> {
-    let response = client
-        .get(format!("{ACCOUNT_URL}/v1/sync?since=0&limit=1"))
-        .header(
-            reqwest::header::AUTHORIZATION,
-            bearer(token).map_err(other)?,
-        )
-        .send()
-        .await
-        .map_err(other)?;
-    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(AccountError::SignedOut);
-    }
-    if !response.status().is_success() {
-        return Err(other(format!("HTTP {}", response.status().as_u16())));
-    }
+    let request = client.get(format!("{ACCOUNT_URL}/v1/sync?since=0&limit=1"));
+    let response = send_signed(request, token).await?;
     let body: Value = response.json().await.map_err(other)?;
     match body.get("key_id") {
         Some(Value::Null) | None => Ok(None),
@@ -278,24 +273,10 @@ pub async fn reset_sync(
     token: &str,
     key_id: &str,
 ) -> Result<(), AccountError> {
-    let response = client
+    let request = client
         .post(format!("{ACCOUNT_URL}/v1/sync/reset"))
-        .header(
-            reqwest::header::AUTHORIZATION,
-            bearer(token).map_err(other)?,
-        )
-        .json(&json!({ "key_id": key_id }))
-        .send()
-        .await
-        .map_err(other)?;
-    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(AccountError::SignedOut);
-    }
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        Err(other(format!("HTTP {}", response.status().as_u16())))
-    }
+        .json(&json!({ "key_id": key_id }));
+    send_signed(request, token).await.map(|_| ())
 }
 
 /// トークンを外す（Mawok でのサインアウト）。外せなくても、手元のトークンは消す（窓口の画面からも外せる）
@@ -389,7 +370,7 @@ mod tests {
         assert_eq!(link.state.len(), 32);
         assert_eq!(
             link.challenge,
-            crate::lan::to_hex(&Sha256::digest(link.verifier.as_bytes()))
+            crate::hex::to_hex(&Sha256::digest(link.verifier.as_bytes()))
         );
         let url = reqwest::Url::parse(&link.url(53682, "Taro の Mac", "ja")).unwrap();
         let params: Vec<(String, String)> = url.query_pairs().into_owned().collect();

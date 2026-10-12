@@ -328,17 +328,9 @@ impl std::fmt::Display for LoadError {
 /// 読めるようにする。履歴も消した時刻も無ければ、空のファイルを作らず、無い状態にする。
 pub fn save(path: &Path, history: &History) -> io::Result<()> {
     if *history == History::default() {
-        return remove(path);
+        return atomic_file::remove(path);
     }
     atomic_file::write_private(path, format(history).as_bytes())
-}
-
-fn remove(path: &Path) -> io::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
 }
 
 /// 読めなかった履歴を同じフォルダーの `history.broken-YYYYMMDD-HHMMSS.json` へ写してから消す。
@@ -348,23 +340,20 @@ pub fn set_aside(path: &Path, now: SystemTime) -> io::Result<Option<PathBuf>> {
     let Some(backup) = config::back_up(path, now)? else {
         return Ok(None);
     };
-    remove(path)?;
+    atomic_file::remove(path)?;
     Ok(Some(backup))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TempDir;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt as _;
     use std::{
         fs,
         time::{Duration, UNIX_EPOCH},
     };
-
-    fn temp_path(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("mawok-history-test-{}-{name}", std::process::id()))
-    }
 
     fn history(entries: &[(&str, u64)], cleared_at: u64) -> History {
         History {
@@ -436,7 +425,8 @@ mod tests {
 
     #[test]
     fn loading_the_text_only_version_saves_it_with_times() {
-        let path = temp_path("text-only");
+        let dir = TempDir::new("history-text-only");
+        let path = dir.join(FILE_NAME);
         fs::write(&path, r#"{"version": 1, "entries": ["old", "new"]}"#).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.texts(), texts(&["old", "new"]));
@@ -448,7 +438,6 @@ mod tests {
             Ok((loaded.clone(), false))
         );
         assert_eq!(load(&path), Ok(loaded));
-        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -487,15 +476,15 @@ mod tests {
 
     #[test]
     fn missing_file_is_empty() {
-        let path = temp_path("missing");
-        let _ = fs::remove_file(&path);
+        let dir = TempDir::new("history-missing");
+        let path = dir.join(FILE_NAME);
         assert_eq!(load(&path), Ok(History::default()));
     }
 
     #[test]
     fn saves_atomically_and_with_private_permissions() {
-        let path = temp_path("save");
-        let _ = fs::remove_file(&path);
+        let dir = TempDir::new("history-save");
+        let path = dir.join(FILE_NAME);
         let saved = history(&[("draft", 1)], 0);
         save(&path, &saved).unwrap();
         assert_eq!(load(&path), Ok(saved));
@@ -504,19 +493,18 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn an_empty_history_leaves_no_file_unless_it_was_cleared() {
-        let path = temp_path("empty");
+        let dir = TempDir::new("history-empty");
+        let path = dir.join(FILE_NAME);
         save(&path, &history(&[("draft", 1)], 0)).unwrap();
         save(&path, &History::default()).unwrap();
         assert!(!path.exists());
         // 消した時刻は、履歴が無くても置いておく
         save(&path, &history(&[], 9)).unwrap();
         assert_eq!(load(&path), Ok(history(&[], 9)));
-        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -824,9 +812,7 @@ mod tests {
 
     #[test]
     fn sets_aside_unreadable_history() {
-        let dir = temp_path("set-aside");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let dir = TempDir::new("history-set-aside");
         let path = dir.join(FILE_NAME);
         let now = UNIX_EPOCH + Duration::from_secs(1_789_281_005);
         assert_eq!(set_aside(&path, now).unwrap(), None);
@@ -844,6 +830,5 @@ mod tests {
             0o600
         );
         assert!(!path.exists());
-        let _ = fs::remove_dir_all(&dir);
     }
 }
