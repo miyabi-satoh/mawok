@@ -2105,7 +2105,7 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('要約');
 	});
 
-	it('宛先で始まる行にだけスイッチを出し、切ると、消さずに使わない定型文として保存する', async () => {
+	it('どの行にもスイッチを出し、切ると、消さずに使わない定型文として保存する', async () => {
 		const a = ai('A', 'a');
 		const greeting = newSnippet('挨拶', 'お疲れさまです。');
 		settings.current = { ...view(), snippets: [a, greeting] };
@@ -2113,7 +2113,7 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 
 		await expect
 			.element(screen.getByRole('switch', { name: m.settings_snippets_enabled({ name: '挨拶' }) }))
-			.not.toBeInTheDocument();
+			.toBeVisible();
 		await screen.getByRole('switch', { name: m.settings_snippets_enabled({ name: 'A' }) }).click();
 
 		expect(invoked).toHaveBeenLastCalledWith('set_snippets', {

@@ -71,21 +71,19 @@
 								}}
 							/>
 						{/if}
-						<!-- 一覧から外すスイッチは、選ぶと出す定型文にだけ出す。挿入する文は、消さずに外したい場面が少ない -->
-						{#if rowAddressee(row.body, view.devices) || !row.enabled}
-							<Switch
-								aria-label={row.name || firstLine(row.body)
-									? m.settings_snippets_enabled({ name: row.name || firstLine(row.body) })
-									: m.settings_snippets_enabled_unnamed()}
-								bind:checked={
-									() => row.enabled,
-									(enabled) => {
-										row.enabled = enabled;
-										editor.snippets.save();
-									}
+						<!-- 一覧から外すスイッチ。消さずに取っておくのは、挿入する文でも実行する行でも同じなので、どの行にも出す -->
+						<Switch
+							aria-label={row.name || firstLine(row.body)
+								? m.settings_snippets_enabled({ name: row.name || firstLine(row.body) })
+								: m.settings_snippets_enabled_unnamed()}
+							bind:checked={
+								() => row.enabled,
+								(enabled) => {
+									row.enabled = enabled;
+									editor.snippets.save();
 								}
-							/>
-						{/if}
+							}
+						/>
 					{/snippet}
 					{#snippet body(row)}
 						{@const addressee = rowAddressee(row.body, view.devices)}
