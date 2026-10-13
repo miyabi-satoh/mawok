@@ -2693,6 +2693,9 @@ async fn refresh_mawok_account_status(
 
 /// 窓口へつながらない間は、最後に確かめた Pro の猶予と資格情報管理の鍵で同期を続ける。
 async fn restore_local_shared_key(app: &AppHandle) {
+    // 読んでから置くまでの間に、ペアリングで受け取った鍵を、読んだ前の鍵で上書きしない
+    let state = app.state::<AppState>();
+    let _refresh = state.shared_key_refresh.lock().await;
     if let Some(local) = load_shared_key().await {
         use_unverified_shared_key(app, local);
     }
@@ -3690,6 +3693,18 @@ impl lan::Host for AppHandle {
             // Pro のデバイスの鍵は、窓口と照らして決める（refresh_shared_key）。照らす前にここで作ると、
             // 窓口が覚えている鍵と違う鍵を相手に渡してしまう
             return None;
+        }
+        // 起動の直後で、資格情報管理の鍵をまだ読み終えていないことがある。あれば使い、新しい鍵で上書きしない
+        match shared_key::load() {
+            Ok(Some(key)) => {
+                *state.shared_key.lock().unwrap() = Some(key);
+                return Some(key);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                warn!("couldn't read the shared key: {error}");
+                return None;
+            }
         }
         let key = shared_key::generate()
             .and_then(|key| shared_key::store(&key).map(|()| key))
