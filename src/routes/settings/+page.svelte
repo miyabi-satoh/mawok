@@ -1213,7 +1213,6 @@
 						open={category === 'devices'}
 						call={callSettings}
 						lanCall={callLan}
-						onopenaccount={openAccount}
 					/>
 				</Tabs.Content>
 				<Tabs.Content value="account">

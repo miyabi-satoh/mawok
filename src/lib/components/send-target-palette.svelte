@@ -31,8 +31,6 @@
 	let active = $state(0);
 	// 生存確認でつながったデバイスの公開鍵。確かめている間は null
 	let reachable = $state<Set<string> | null>(null);
-	/** このデバイスが Pro でないときだけ、送信先を選べない理由を一覧に出す。 */
-	let probeError = $state('');
 	const labels = $derived(deviceLabels(devices));
 	// 開いている間に設定が変わって台数が減っても、一覧の外を選ばないようにする
 	const selected = $derived(Math.min(active, devices.length - 1));
@@ -45,12 +43,9 @@
 			.then((keys) => {
 				if (!closed) reachable = new Set(keys);
 			})
-			.catch((error) => {
+			.catch(() => {
 				// 確かめられなければ、どれもつながらないとみなす。詳しくは Rust 側でログに残す
-				if (!closed) {
-					reachable = new Set();
-					if (errorCode(error) === 'lan.pro_required') probeError = m.lan_error_pro_required();
-				}
+				if (!closed) reachable = new Set();
 			});
 		return () => {
 			closed = true;
@@ -192,9 +187,6 @@
 			</li>
 		{/each}
 	</ul>
-	{#if probeError}
-		<p class="shrink-0 border-t px-3 py-1.5 text-xs text-muted-foreground">{probeError}</p>
-	{/if}
 	<div class="flex shrink-0 items-center gap-2 border-t px-3 py-1.5">
 		<span class="text-xs text-muted-foreground">{m.draft_send_targets_keys()}</span>
 		<Button

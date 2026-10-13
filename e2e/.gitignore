@@ -7,5 +7,5 @@ screenshots/
 .apps-theme-backup.json
 .msix-held.json
 .msix-original.json
-.msix-offline-pro.json
+.msix-shared-key.json
 .msix-localcache/

@@ -90,7 +90,7 @@ pub struct AccountStatus {
     pub email: String,
     /// 残りの割合（切り上げ。使い切ったときだけ 0）
     pub remaining_percent: u32,
-    /// LAN で同じアカウントかを見分けるための、窓口のランダムなアカウントID
+    /// 同期の鍵を受け渡すデバイスが同じアカウントかを見分けるための、窓口のランダムなアカウントID
     pub account_id: String,
     pub pro: ProStatus,
 }
@@ -252,7 +252,7 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
     })
 }
 
-/// 同期の最初のページだけを読み、アカウントの鍵の見分けを得る。
+/// 同期の最初のページだけを読み、共有の鍵の見分けを得る。
 pub async fn sync_key_id(
     client: &reqwest::Client,
     token: &str,

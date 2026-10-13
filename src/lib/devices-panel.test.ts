@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { devicesPanel } from '$lib/devices-panel';
 
 describe('devicesPanel', () => {
-	it('Pro でなければ鍵の状態にかかわらず Pro の案内を出す', () => {
-		expect(devicesPanel(false, 'none')).toBe('pro');
-		expect(devicesPanel(false, 'ready')).toBe('pro');
-		expect(devicesPanel(false, 'needsPairing')).toBe('pro');
+	it('同期の鍵を受け取り直すデバイスでは、追加済みのデバイスがあっても確認コードの入力を出す', () => {
+		expect(devicesPanel('needsPairing', 0)).toBe('needsPairing');
+		expect(devicesPanel('needsPairing', 2)).toBe('needsPairing');
 	});
 
-	it('Pro では鍵の状態に応じた操作を出す', () => {
-		expect(devicesPanel(true, 'none')).toBe('none');
-		expect(devicesPanel(true, 'needsPairing')).toBe('needsPairing');
-		expect(devicesPanel(true, 'ready')).toBe('ready');
+	it('追加したデバイスが無ければ、確認コードの表示と入力の両方を出す', () => {
+		expect(devicesPanel('none', 0)).toBe('start');
+		expect(devicesPanel('ready', 0)).toBe('start');
+	});
+
+	it('追加したデバイスがあれば、一覧と追加・解除を出す', () => {
+		expect(devicesPanel('none', 1)).toBe('devices');
+		expect(devicesPanel('ready', 1)).toBe('devices');
 	});
 });

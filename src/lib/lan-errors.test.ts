@@ -7,10 +7,8 @@ describe('lanErrorMessage', () => {
 		expect(lanErrorMessage('lan.unreachable')).toBe(m.lan_error_unreachable());
 		expect(lanErrorMessage('lan.wrong_code')).toBe(m.lan_error_wrong_code());
 		expect(lanErrorMessage('lan.internal')).toBe(m.lan_error_internal());
-		expect(lanErrorMessage('lan.pro_required')).toBe(m.lan_error_pro_required());
 		expect(lanErrorMessage('lan.needs_pairing')).toBe(m.lan_error_needs_pairing());
-		expect(lanErrorMessage('lan.receiver_pro_required')).toBe(m.lan_error_receiver_pro_required());
-		expect(lanErrorMessage('lan.account_mismatch')).toBe(m.lan_error_account_mismatch());
+		expect(lanErrorMessage('lan.not_ready')).toBe(m.lan_error_not_ready());
 		expect(lanErrorMessage('lan.key_mismatch')).toBe(m.lan_error_key_mismatch());
 	});
 

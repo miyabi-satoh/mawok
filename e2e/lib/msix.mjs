@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { APP_IDENTIFIER, APP_VERSION } from './app-conf.mjs';
 import { APP_DATA_DIRS } from './config.mjs';
 import { readBackupRecordSync, recordPath, writeJsonAtomicSync } from './files.mjs';
-import { describeForegroundWindow, isMawokRunning, runPowerShell } from './os.mjs';
+import { describeForegroundWindow, isMawokRunning, powerShellArgs, runPowerShell } from './os.mjs';
 import { waitFor } from './wait.mjs';
 import { readTaskbarButtons, WINDOW_TYPE } from './window.mjs';
 
@@ -431,24 +431,18 @@ ConvertTo-Json -Compress -InputObject @{ counted = $width * $rows; accent = $acc
 	return { name: button.name, width, height, ...JSON.parse(stdout.trim()) };
 }
 
-// 待ち受けを始めさせるための、仮の Pro の状態。待ち受けは、Pro でアカウントの鍵を持つときにだけ始まる (docs/lan.md)。
-// 起動の後の確かめは、トークンが無ければ Pro の状態を消し、窓口が答えればその答えに合わせるので、
-// 仮のトークンと鍵を資格情報マネージャーに、期限が先の Pro の状態を pro-state.json に置いたうえで、
-// 窓口へつながらないようにして起動する (`OFFLINE_ENV`)。つながらない間は、覚えている Pro の状態と手元の鍵で待ち受ける
-const PRO_STATE_PATH = path.join(APP_DATA_DIRS.roaming, 'pro-state.json');
-/** ai.rs の credential_user (Mawok)・account_credentials.rs の項目名と、secrets.rs のサービス名 */
-const PRO_CREDENTIALS = Object.freeze([
-	{ user: 'mawok-account', value: JSON.stringify({ token: 'msix-check', key: 'ab'.repeat(32) }) }
-]);
+// 待ち受けを始めさせるための、仮の共有の鍵。待ち受けは、共有の鍵を持つときにだけ始まる (docs/lan.md)。
+// 鍵だけの項目 (トークンが無い = サインインしていない) を資格情報マネージャーに置いて起動する。
+// トークンが無いので窓口へはつながらず、Pro の状態 (pro-state.json) も要らない
+/** account_credentials.rs の項目名 (CREDENTIAL_USER) と、secrets.rs のサービス名 */
+const SHARED_KEY_USER = 'mawok-account';
+const SHARED_KEY_VALUE = JSON.stringify({ key: 'ab'.repeat(32) });
 const credentialTarget = (user) => `${user}.${APP_IDENTIFIER}`;
 
-/**
- * 資格情報マネージャーに汎用の資格情報を書く。中身は、Mawok の読み方 (windows-native-keyring-store) に合わせて UTF-16LE で置く。
- * cmdkey の `/pass:` は二重引用符を含む値 (JSON) を受け取れないので、CredWrite を直接呼ぶ
- */
-async function writeCredential(target, user, value) {
-	await runPowerShell(
-		`
+// 資格情報を、Mawok の読み書き (windows-native-keyring-store) に合わせて UTF-16LE で読み書きする。
+// cmdkey の `/pass:` は二重引用符を含む値 (JSON) を受け取れず、中身も読めないので、CredWrite・CredRead を直接呼ぶ。
+// 型の定義は呼ぶたびに同じ中身で流す (同じ定義の Add-Type は2回目から何もしない)
+const CREDENTIAL_TYPE = `
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -462,6 +456,10 @@ public static class MawokE2eCredential {
     }
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern bool CredWrite(ref CREDENTIAL credential, int flags);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CredRead(string target, int type, int flags, out IntPtr credential);
+    [DllImport("advapi32.dll")]
+    static extern void CredFree(IntPtr buffer);
     public static void Write(string target, string user, string value) {
         byte[] blob = System.Text.Encoding.Unicode.GetBytes(value);
         // Type 1 は CRED_TYPE_GENERIC、Persist 3 は CRED_PERSIST_ENTERPRISE (Mawok が書くときと同じ)。
@@ -475,80 +473,87 @@ public static class MawokE2eCredential {
             Marshal.FreeHGlobal(credential.CredentialBlob);
         }
     }
+    // 無ければ null。読めなかったときは例外にする (無いものとして扱うと、利用者の資格情報を仮の鍵で上書きする)
+    public static string Read(string target) {
+        IntPtr pointer;
+        if (!CredRead(target, 1, 0, out pointer)) {
+            int error = Marshal.GetLastWin32Error();
+            // 1168 は ERROR_NOT_FOUND
+            if (error == 1168) return null;
+            throw new System.ComponentModel.Win32Exception(error);
+        }
+        try {
+            CREDENTIAL credential = (CREDENTIAL)Marshal.PtrToStructure(pointer, typeof(CREDENTIAL));
+            byte[] blob = new byte[credential.CredentialBlobSize];
+            Marshal.Copy(credential.CredentialBlob, blob, 0, blob.Length);
+            return System.Text.Encoding.Unicode.GetString(blob);
+        } finally {
+            CredFree(pointer);
+        }
+    }
 }
 "@
-[MawokE2eCredential]::Write($args[0], $args[1], $args[2])
-`,
+`;
+
+async function writeCredential(target, user, value) {
+	await runPowerShell(
+		`${CREDENTIAL_TYPE}\n[MawokE2eCredential]::Write($args[0], $args[1], $args[2])`,
 		[target, user, value]
 	);
 }
-/** 仮の Pro の状態の account_id。pro-state.json がこの値のままなら、資格情報も仮のまま */
-const OFFLINE_ACCOUNT_ID = 'msix-check';
-// 仮の Pro の状態を置いている間の印。中断されて残ったら、中断のシグナルの処理か次の回が片付ける
-const OFFLINE_PRO_RECORD_PATH = recordPath('.msix-offline-pro.json');
+
+/** 無ければ null */
+async function readCredential(target) {
+	const stdout = await runPowerShell(
+		`${CREDENTIAL_TYPE}\n$value = [MawokE2eCredential]::Read($args[0])\nif ($null -ne $value) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($value)) }`,
+		[target]
+	);
+	const encoded = stdout.trim();
+	return encoded ? Buffer.from(encoded, 'base64').toString('utf8') : null;
+}
+
+// 仮の鍵を置いている間の印。中断されて残ったら、中断のシグナルの処理か次の回が片付ける
+const SHARED_KEY_RECORD_PATH = recordPath('.msix-shared-key.json');
 
 /**
- * 窓口 (HTTPS) へつながらなくする環境変数。reqwest は環境変数のプロキシを使うので、誰も待ち受けていない口を指す。
- * 画面 (WebView2) は環境変数のプロキシを見ない
+ * 仮の鍵を片付ける。置いたままの値のときだけ消す。
+ * 中断の後に利用者が確認コードでデバイスを追加していれば、鍵は本物に替わっているので、触らない
+ * (印だけ消す)。同期なので、中断のシグナルを受けたときにも呼べる
  */
-export const OFFLINE_ENV = Object.freeze({ HTTPS_PROXY: 'http://127.0.0.1:9' });
-
-/** pro-state.json が、置いた仮のもののままか。無い・読めないときは、仮のものとは見ない */
-function offlineProStateRemains() {
+function removeSharedKey() {
+	const target = credentialTarget(SHARED_KEY_USER);
 	try {
-		return JSON.parse(fs.readFileSync(PRO_STATE_PATH, 'utf8')).account_id === OFFLINE_ACCOUNT_ID;
+		const script = `${CREDENTIAL_TYPE}\n$value = [MawokE2eCredential]::Read('${target}')\nif ($value -ceq '${SHARED_KEY_VALUE}') { 'yes' }`;
+		const remains = execFileSync('powershell', powerShellArgs(script), { encoding: 'utf8' }).trim();
+		if (remains === 'yes') execFileSync('cmdkey', [`/delete:${target}`], { stdio: 'ignore' });
 	} catch {
-		return false;
+		// 読めなかった・消せなかったときは、仮のものか見分けられないので置いたままにする。
+		// 印も残し、次の回の始めにもう一度片付ける (印を消すと、仮の鍵が残ったまま誰も片付けなくなる)
+		return;
 	}
+	fs.rmSync(SHARED_KEY_RECORD_PATH, { force: true });
 }
 
 /**
- * 仮の Pro の状態を片付ける。資格情報の中身は cmdkey で読めないので、pro-state.json が仮のもののままのときだけ消す。
- * 中断の後に利用者がサインインしていれば、Mawok が pro-state.json を本物のアカウントに書き換え、資格情報も本物なので、触らない。
- * pro-state.json が無いのは、Mawok が資格情報ごと片付けた後 (窓口に届いて仮のトークンを断られたときなど)
- */
-function removeOfflinePro() {
-	if (offlineProStateRemains()) {
-		for (const { user } of PRO_CREDENTIALS) {
-			try {
-				execFileSync('cmdkey', [`/delete:${credentialTarget(user)}`], { stdio: 'ignore' });
-			} catch {
-				// 無ければ失敗するが、それでよい (置く途中で止まったとき)
-			}
-		}
-		fs.rmSync(PRO_STATE_PATH, { force: true });
-	}
-	fs.rmSync(OFFLINE_PRO_RECORD_PATH, { force: true });
-}
-
-/**
- * 置いたままの仮の Pro の状態があれば、片付ける。Mawok を止めてから呼ぶ。
+ * 置いたままの仮の鍵があれば、片付ける。Mawok を止めてから呼ぶ。
  * 同期なので、中断のシグナルを受けたときにも呼べる
  */
-export function recoverOfflineProIfAny() {
-	if (fs.existsSync(OFFLINE_PRO_RECORD_PATH)) removeOfflinePro();
+export function recoverSharedKeyIfAny() {
+	if (fs.existsSync(SHARED_KEY_RECORD_PATH)) removeSharedKey();
 }
 
 /**
- * 仮の Pro の状態を置く。Mawok を止めた状態で、設定のフォルダーができてから呼ぶ。
- * この機で Mawok のアカウントにサインインしていれば (トークンか鍵が前からあれば)、触らずに null を返す
+ * 待ち受けを始めさせる仮の鍵を置く。Mawok を止めた状態で呼ぶ。
+ * この機にアカウントの資格情報が前からあれば (サインインしている・デバイスを追加済み)、触らずに null を返す
  *
  * @returns {Promise<{ restore: () => void } | null>}
  */
-export async function beginOfflinePro() {
-	const listed = execFileSync('cmdkey', ['/list'], { encoding: 'utf8' });
-	if (PRO_CREDENTIALS.some(({ user }) => listed.includes(credentialTarget(user)))) return null;
-	writeJsonAtomicSync(OFFLINE_PRO_RECORD_PATH, { savedAt: new Date().toISOString() });
-	// pro.rs の State。期限は1日先 (秒)。片付けはこのファイルで仮のものかを見分けるので、資格情報より先に置く
-	writeJsonAtomicSync(PRO_STATE_PATH, {
-		account_id: OFFLINE_ACCOUNT_ID,
-		until: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-		active: true
-	});
-	for (const { user, value } of PRO_CREDENTIALS) {
-		await writeCredential(credentialTarget(user), user, value);
-	}
-	return { restore: removeOfflinePro };
+export async function beginSharedKey() {
+	const target = credentialTarget(SHARED_KEY_USER);
+	if ((await readCredential(target)) !== null) return null;
+	writeJsonAtomicSync(SHARED_KEY_RECORD_PATH, { savedAt: new Date().toISOString() });
+	await writeCredential(target, SHARED_KEY_USER, SHARED_KEY_VALUE);
+	return { restore: removeSharedKey };
 }
 
 /** パッケージごとの場所 (`%LOCALAPPDATA%\Packages\<ファミリー名>`) */

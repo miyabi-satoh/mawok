@@ -1571,7 +1571,7 @@ describe('設定画面のデバイス', () => {
 			...view(),
 			devices,
 			proAvailable: true,
-			accountKeyStatus: 'ready',
+			sharedKeyStatus: 'ready',
 			mawokAccountSignedIn: true
 		};
 	});
@@ -1587,31 +1587,37 @@ describe('設定画面のデバイス', () => {
 	});
 
 	it('デバイスが見つかっていなければ、その理由を出す', async () => {
-		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'ready' };
+		settings.current = { ...view(), proAvailable: true, sharedKeyStatus: 'ready' };
 		const screen = await renderAt(m.settings_category_devices);
 
 		await expect.element(screen.getByText(m.settings_devices_empty())).toBeVisible();
 	});
 
-	it('Pro でなければサインイン前の案内だけを出す', async () => {
-		settings.current = { ...view(), devices };
+	it('追加したデバイスが無ければ、サインインしていなくても確認コードを表示・入力できる', async () => {
+		settings.current = view();
 		const screen = await renderAt(m.settings_category_devices);
 
-		await expect.element(screen.getByText(m.settings_devices_pro_sign_in())).toBeVisible();
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_devices_offer_start() }))
+			.toBeVisible();
+		await expect.element(screen.getByText(m.settings_devices_join_description())).toBeVisible();
+		await screen.getByLabelText(m.settings_devices_join()).fill('123456');
+		await screen.getByRole('button', { name: m.settings_devices_join_submit() }).click();
+
+		expect(invoked).toHaveBeenCalledWith('join_pairing', { code: '123456' });
+	});
+
+	it('追加したデバイスがあれば、確認コードの入力は出さない', async () => {
+		const screen = await renderAt(m.settings_category_devices);
+
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_devices_offer_start() }))
+			.toBeVisible();
 		expect(screen.getByLabelText(m.settings_devices_join()).query()).toBeNull();
 	});
 
-	it('Pro でないサインイン済みの人には料金のページを開く操作を出す', async () => {
-		settings.current = { ...view(), mawokAccountSignedIn: true };
-		const screen = await renderAt(m.settings_category_devices);
-
-		await expect.element(screen.getByText(m.settings_devices_pro_description())).toBeVisible();
-		await screen.getByRole('button', { name: m.settings_mawok_pro_pricing() }).click();
-		await vi.waitFor(() => expect(callsOf(invoked, 'open_mawok_pro_page')).toHaveLength(1));
-	});
-
-	it('鍵がないデバイスでは、確認コードを入力して接続できる', async () => {
-		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
+	it('同期の鍵を受け取り直すデバイスでは、確認コードを入力して接続できる', async () => {
+		settings.current = { ...view(), proAvailable: true, sharedKeyStatus: 'needsPairing' };
 		const screen = await renderAt(m.settings_category_devices);
 
 		await expect.element(screen.getByText(m.settings_devices_needs_pairing())).toBeVisible();
@@ -1621,8 +1627,8 @@ describe('設定画面のデバイス', () => {
 		expect(invoked).toHaveBeenCalledWith('join_pairing', { code: '123456' });
 	});
 
-	it('鍵がないデバイスでは、アカウントに同期を始める案内を出してデバイスを開ける', async () => {
-		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
+	it('同期の鍵を受け取り直すデバイスでは、アカウントに同期を始める案内を出してデバイスを開ける', async () => {
+		settings.current = { ...view(), proAvailable: true, sharedKeyStatus: 'needsPairing' };
 		const screen = await renderAt(m.settings_category_account);
 
 		await expect.element(screen.getByText(m.settings_sync_needs_pairing())).toBeVisible();
@@ -1630,8 +1636,8 @@ describe('設定画面のデバイス', () => {
 		await expect.element(screen.getByText(m.settings_devices_join_title())).toBeVisible();
 	});
 
-	it('鍵がないデバイスでは、このデバイスから始め直す前に確かめる', async () => {
-		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'needsPairing' };
+	it('同期の鍵を受け取り直すデバイスでは、このデバイスから始め直す前に確かめる', async () => {
+		settings.current = { ...view(), proAvailable: true, sharedKeyStatus: 'needsPairing' };
 		const screen = await renderAt(m.settings_category_devices);
 
 		await screen.getByRole('button', { name: m.settings_devices_restart_start() }).click();
@@ -1640,13 +1646,6 @@ describe('設定画面のデバイス', () => {
 				screen.getByRole('alertdialog', { name: m.settings_devices_restart_confirm_title() })
 			)
 			.toBeVisible();
-	});
-
-	it('鍵を確認できなければ、設定を開き直す案内を出す', async () => {
-		settings.current = { ...view(), proAvailable: true, accountKeyStatus: 'none' };
-		const screen = await renderAt(m.settings_category_devices);
-
-		await expect.element(screen.getByText(m.settings_devices_not_ready())).toBeVisible();
 	});
 
 	it('すべてのデバイスの接続を解除する前に確かめる', async () => {
@@ -1660,12 +1659,12 @@ describe('設定画面のデバイス', () => {
 				screen.getByRole('alertdialog', { name: m.settings_devices_reset_key_confirm_title() })
 			)
 			.toBeVisible();
-		expect(invoked).not.toHaveBeenCalledWith('reset_account_key', undefined);
+		expect(invoked).not.toHaveBeenCalledWith('reset_shared_key', undefined);
 		await screen
 			.getByRole('alertdialog')
 			.getByRole('button', { name: m.settings_devices_reset_key_start(), exact: true })
 			.click();
-		expect(invoked).toHaveBeenCalledWith('reset_account_key', undefined);
+		expect(invoked).toHaveBeenCalledWith('reset_shared_key', undefined);
 	});
 
 	it('新しいデバイスを見つけて自動でコードを出したときは、その案内を出す', async () => {

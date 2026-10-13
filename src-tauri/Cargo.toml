@@ -60,7 +60,7 @@ unicode-segmentation = "1.13.3"
 tokio = { version = "1.53.1", features = ["process", "io-util", "time", "macros", "net", "rt", "sync"] }
 # Mawok のアカウントと結ぶ申し込みの、検証用の値のハッシュ（account.rs の LinkRequest）。snow・spake2 の依存でもともと入っている
 sha2 = "0.10.9"
-# アカウントの鍵から、使い道ごとの鍵を導く（account_key.rs）。spake2 の依存でもともと入っている
+# 共有の鍵から、使い道ごとの鍵を導く（shared_key.rs）。spake2 の依存でもともと入っている
 hkdf = "0.12.4"
 # 同期する項目の暗号 (docs/sync.md「暗号」)。snow が使っている版に揃える
 chacha20poly1305 = "0.10.1"

@@ -1,4 +1,4 @@
-//! アカウントごとの秘密鍵。窓口には、この鍵から導いた見分けの印だけを渡す。
+//! 確認コードでつないだデバイスの組が共有する秘密鍵（docs/lan.md「共有の鍵」）。窓口には、この鍵から導いた見分けの印だけを渡す。
 
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -21,7 +21,7 @@ pub enum Status {
 }
 
 pub fn derive(key: &[u8; 32], info: &[u8]) -> [u8; 32] {
-    let hkdf = Hkdf::<Sha256>::from_prk(key).expect("a 32-byte account key is a valid HKDF PRK");
+    let hkdf = Hkdf::<Sha256>::from_prk(key).expect("a 32-byte shared key is a valid HKDF PRK");
     let mut output = [0; 32];
     hkdf.expand(info, &mut output)
         .expect("the fixed HKDF output length is valid");
@@ -61,10 +61,10 @@ pub fn generate() -> Result<[u8; 32], String> {
 }
 
 pub fn decode(text: &str) -> Result<[u8; 32], String> {
-    let bytes = from_hex(text).ok_or_else(|| "the account key is not hexadecimal".to_string())?;
+    let bytes = from_hex(text).ok_or_else(|| "the shared key is not hexadecimal".to_string())?;
     bytes
         .try_into()
-        .map_err(|_| "the account key has the wrong length".to_string())
+        .map_err(|_| "the shared key has the wrong length".to_string())
 }
 
 pub fn load() -> Result<Option<[u8; 32]>, String> {

@@ -981,7 +981,7 @@ describe('定型文', () => {
 	});
 });
 
-describe('見つけた同じアカウントのデバイスへ送る', () => {
+describe('追加済みのデバイスへ送る', () => {
 	const device = { name: 'Mac', publicKey: 'ab', address: '', sendTo: true };
 
 	/** Rust 側に溜まっている、届いた下書き（take_received_drafts で渡す） */
@@ -1000,7 +1000,7 @@ describe('見つけた同じアカウントのデバイスへ送る', () => {
 		settings.current = { ...view(), devices: [device] };
 	});
 
-	/** 同じアカウントのデバイスから下書きが届く。Rust 側に溜めてから、画面に知らせる */
+	/** 追加済みのデバイスから下書きが届く。Rust 側に溜めてから、画面に知らせる */
 	function receive(...drafts: { from: string; text: string }[]) {
 		pending.push(...drafts);
 		emit(EVENTS.DRAFT_RECEIVED);
@@ -1183,20 +1183,6 @@ describe('見つけた同じアカウントのデバイスへ送る', () => {
 			.toBeVisible();
 		expect(commandsCalled()).not.toContain('send_draft');
 		await expect.element(textarea).toHaveValue('git status');
-	});
-
-	it('このデバイスが Pro でなければ、送信先の一覧に案内を出す', async () => {
-		settings.current = { ...view(), devices: [device] };
-		invoked.mockImplementation((command) => {
-			if (command === 'probe_devices') return Promise.reject('lan.pro_required');
-			return Promise.resolve(undefined);
-		});
-		const screen = await render(Page);
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-
-		await expect.element(screen.getByText(m.lan_error_pro_required())).toBeVisible();
-		expect(callsOf(invoked, 'probe_devices')).toHaveLength(1);
 	});
 
 	it('一部のデバイスに届かなかったら、隠さずに届かなかったデバイスの名前を出す', async () => {

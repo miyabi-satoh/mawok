@@ -244,14 +244,4 @@ describe('設定画面の Mawok のアカウント', () => {
 			.element(screen.getByRole('button', { name: m.settings_mawok_sign_in() }))
 			.toBeVisible();
 	});
-
-	it('デバイスからアカウントを開ける', async () => {
-		const screen = await render(Page);
-		await screen.getByRole('tab', { name: m.settings_category_devices() }).click();
-		await expect.element(screen.getByText(m.settings_devices_pro_sign_in())).toBeVisible();
-		await screen.getByRole('button', { name: m.settings_account_open() }).click();
-		await expect
-			.element(screen.getByRole('button', { name: m.settings_mawok_sign_in() }))
-			.toBeVisible();
-	});
 });

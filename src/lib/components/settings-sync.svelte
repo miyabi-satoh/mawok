@@ -36,7 +36,7 @@
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
-	{#if view.accountKeyStatus === 'needsPairing'}
+	{#if view.sharedKeyStatus === 'needsPairing'}
 		<SettingsRow>
 			<p class="text-sm">{m.settings_sync_needs_pairing()}</p>
 			<Button variant="outline" size="sm" class="w-fit" onclick={onopendevices}>
