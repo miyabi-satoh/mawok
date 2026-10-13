@@ -1,6 +1,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import net from 'node:net';
+import { PROFILE, PROFILE_ENV } from './app-conf.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -47,7 +48,9 @@ export async function startTauriDriver({ port = 4444, nativePort = 9515, msedged
 				'--native-driver',
 				msedgedriverPath
 			],
-			{ stdio: ['ignore', 'pipe', 'pipe'] }
+			// アプリは tauri-driver → msedgedriver の順に環境変数を引き継ぐので、ここで渡せばアプリまで届く。
+			// プロファイルを分けて、常用のアカウントで同期しない・常用の設定と履歴に触れないようにする (src-tauri/src/profile.rs)
+			{ stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, [PROFILE_ENV]: PROFILE } }
 		);
 
 		let settled = false;

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP_IDENTIFIER, APP_VERSION } from './app-conf.mjs';
+import { APP_VERSION, PROFILE, PROFILE_ENV, PROFILE_IDENTIFIER } from './app-conf.mjs';
 import { APP_DATA_DIRS } from './config.mjs';
 import { readBackupRecordSync, recordPath, writeJsonAtomicSync } from './files.mjs';
 import { describeForegroundWindow, isMawokRunning, powerShellArgs, runPowerShell } from './os.mjs';
@@ -113,6 +113,7 @@ export async function launchExecutable(exePath) {
  * `env` は、mawok.exe に足して渡す環境変数 (値に空白や cmd の記号を入れない)
  */
 export async function launchInPackage(pkg, port, env = {}) {
+	env = { [PROFILE_ENV]: PROFILE, ...env };
 	const exe = path.join(pkg.installLocation, 'mawok.exe');
 	const extra = Object.entries(env)
 		.map(([name, value]) => `set ${name}=${value}&& `)
@@ -437,7 +438,7 @@ ConvertTo-Json -Compress -InputObject @{ counted = $width * $rows; accent = $acc
 /** account_credentials.rs の項目名 (CREDENTIAL_USER) と、secrets.rs のサービス名 */
 const SHARED_KEY_USER = 'mawok-account';
 const SHARED_KEY_VALUE = JSON.stringify({ key: 'ab'.repeat(32) });
-const credentialTarget = (user) => `${user}.${APP_IDENTIFIER}`;
+const credentialTarget = (user) => `${user}.${PROFILE_IDENTIFIER}`;
 
 // 資格情報を、Mawok の読み書き (windows-native-keyring-store) に合わせて UTF-16LE で読み書きする。
 // cmdkey の `/pass:` は二重引用符を含む値 (JSON) を受け取れず、中身も読めないので、CredWrite・CredRead を直接呼ぶ。
@@ -570,8 +571,8 @@ function localCacheDir(pkg) {
 export function redirectedDataDirs(pkg) {
 	const cache = localCacheDir(pkg);
 	return {
-		roaming: path.join(cache, 'Roaming', APP_IDENTIFIER),
-		local: path.join(cache, 'Local', APP_IDENTIFIER)
+		roaming: path.join(cache, 'Roaming', PROFILE_IDENTIFIER),
+		local: path.join(cache, 'Local', PROFILE_IDENTIFIER)
 	};
 }
 

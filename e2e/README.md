@@ -14,7 +14,7 @@
 - リポジトリ直下に `msedgedriver.exe` を用意する。WebView2 のバージョンと合わせる必要があるので、
   `cargo install --git https://github.com/chippers/msedgedriver-tool` などで入れた `msedgedriver-tool`
   を実行すると、入っている WebView2 に合わせて自動でダウンロードしてくれる。
-- 常用の Mawok が起動していると single-instance でテスト用のプロセスが起動できない。
+- 常用の Mawok が起動していると、グローバルホットキーと、`mawok.exe` を数える後始末の確認がかち合う。
   書きかけのテキストを消さないよう、自動では終了せず `ensureMawokNotRunning()` がはっきり
   失敗する (`lib/os.mjs`)。実行前に、書きかけのテキストがあれば確定させたうえで手動で終了しておく。
 
@@ -69,7 +69,7 @@ just msix-check msix        # msix/msix.test.mjs だけ
 - **常用版との入れ替え**: 常用の MSIX 版と同じパッケージなので、動いている Mawok (MSIX 版でも EXE 版でも) を終了し、外してから入れる (同じ版番号のまま上から入れられないため)。元から MSIX 版が入っていれば、終わると**試した版が常用版として残る** (外した版の MSIX は手元に残らないため)。入っていなければ外す。ログイン時の起動 (StartupTask) の状態は元に戻し、動いていた Mawok (MSIX 版か EXE 版か) を起動し直す。パッケージの中から起動した Mawok はコンソールの外で動くので、Ctrl+C では、設定や履歴を戻す前に止める。
 - **元の版のデータ**: 外すとパッケージごとの場所 (`LocalCache`) が消える。EXE 版のファイルが無い環境の利用者は、設定・履歴・ログがそこにあるので、外す前に `e2e/.msix-localcache/` へ写し、入れ直した後に戻す。
 - **中断されたとき**: 試す前の状態 (入っていたか・StartupTask・動いていた Mawok) を `e2e/.msix-original.json` に控え、後始末が最後まで済んだら消す。Ctrl+C や強制終了で後始末が走らなかったときは、次の回がこの控えを元の状態として戻す (そのとき見える状態を元の状態と取り違えない)。後始末は1つが落ちても残りを試し、落ちたものをまとめて知らせる。
-- **常用の設定と履歴**: EXE 版と同じ場所の実物を読み書きするので、E2E と同じ控え (`lib/config.mjs`) でテスト用の設定に替え、終わったら戻す。EXE 版のファイルが無い環境は、`%APPDATA%` と `%LOCALAPPDATA%` の `com.amiiby.mawok` を `….msix-check-held` に名前を変えて退かして作る。何を退かしたかは `e2e/.msix-held.json` に残し、中断されても Ctrl+C ならその場で、強制終了なら次の実行が戻す。
+- **設定と履歴**: パッケージの中から起動するときに、環境変数 `MAWOK_PROFILE=e2e` を cmd の `set` で渡す (`lib/msix.mjs` の `launchInPackage`)。常用版と分かれた `com.amiiby.mawok.e2e` の置き場を、E2E と同じ控え (`lib/config.mjs`) でテスト用の設定に替え、終わったら戻す。EXE 版のファイルが無い環境は、`%APPDATA%` と `%LOCALAPPDATA%` の `com.amiiby.mawok.e2e` を `….msix-check-held` に名前を変えて退かして作る。常用版の置き場には触れない。何を退かしたかは `e2e/.msix-held.json` に残し、中断されても Ctrl+C ならその場で、強制終了なら次の実行が戻す。
 - **待ち受けを始めさせる仮の共有の鍵**: 待ち受けは共有の鍵を持つときにしか始まらない (サインインも Pro も要らない) ので、「EXE 版のファイルがある環境」のテストの間、鍵だけの項目 (`mawok-account`、トークンなし) を資格情報マネージャーに置いて起動する (`lib/msix.mjs` の `beginSharedKey`)。トークンが無いので窓口へはつながらない。終わったら消す。中断されて残った分は、`e2e/.msix-shared-key.json` の印を見て、中断のシグナルの処理か次の回が消す。消すのは項目の中身が置いたままのときだけ (中断の後に確認コードでデバイスを追加していれば、鍵は本物に替わっているので触らない)。この機にアカウントの資格情報が前からあれば置かず、受信の規則だけを見る (待ち受けの確認は飛ばす)。
 - **読み方**: 通知はポップアップではなく、パッケージの AUMID の通知の履歴 (`ToastNotificationManager.History`) で見る (集中モードではポップアップが出ない)。タスクバーのアイコンの下地は、設定ウィンドウのボタンを撮り、アクセントの色 (`AccentPalette` の8色) の画素がボタンの2%未満であることで見る。タスクバーの背景がアクセントの色に染まっていることもあるので、ボタンの隅の背景に近い色は数えない。下地に載ったボタンは13%ほどがアクセントの色になり、下地なしでは0だった。
 - **画面とフォーカスを使う**: トレイのメニューを本物のマウスで開き、Windows の設定とエクスプローラーの窓が前面に出る (開いた窓は閉じる)。
@@ -77,11 +77,11 @@ just msix-check msix        # msix/msix.test.mjs だけ
 ## 注意点
 
 - **設定ファイルの名前の書き方**: 設定ファイルは TOML で、項目名は snake_case、既定と違う値だけが書かれる。テストは画面とのやり取りと同じ camelCase の名前（`textWindowKeys`・`hideTextWindowOnBlur` など）で読み書きし、`lib/config.mjs` が名前を付け替え、書いていない項目を既定値で埋める（既定値は `src-tauri/src/config.rs`・`draft_keys.rs` の写しなので、既定値を変えたら揃える）。TOML の読み書きには `smol-toml` を使う。
-- **設定ファイルの後始末**: `%APPDATA%\com.amiiby.mawok\config.toml` を書き換えるテストは、
+- **設定・履歴・資格情報は常用のものと分ける**: テストが起動するアプリは、プロファイル `e2e` で動く (`tauri-driver` を起動するときに環境変数 `MAWOK_PROFILE=e2e` を渡す。→ docs/platform.md「プロファイル」)。設定は `%APPDATA%\com.amiiby.mawok.e2e`、履歴・ログは `%LOCALAPPDATA%\com.amiiby.mawok.e2e` に置かれ、資格情報の service も別になる。サインインしていない状態で動くので、同期は走らない。プロファイルを見ない前の版を起動したら、プロファイルのログが書かれないので、起動したところで止まる (`lib/setup.mjs`)。
+- **設定ファイルの後始末**: `%APPDATA%\com.amiiby.mawok.e2e\config.toml` を書き換えるテストは、
   前後でバックアップ・復元する (`lib/config.mjs`)。落ちても壊れた設定が残らないよう、必ず
   `test.after` (ファイル単位の後処理) で復元すること。
   同じフォルダーの `.window-state.json` (テキストウィンドウと設定ウィンドウの位置と大きさの記録) も、同じ控えに入れて一緒に戻す。
-  同じフォルダーの同期の記録 (`sync-state.json`・`pro-state.json`) も控えてから外し、一緒に戻す。残っていると、その機の同期の食い違いなどがテストに入り、トレイに「どちらの設定を使うか選ぶ…」が出るなど結果が機ごとに変わる。
   設定ファイルを壊すテストがアプリに作らせた `config.broken-….toml` は、テストの前からあったものを残して消す (`tests/config-file.test.mjs`)。
 - **ウィンドウの大きさは、下限を見るときだけドラッグで変える**: `SetWindowPos` は最小の大きさを通り抜けて小さくなるので、最小の大きさは右下の角を本物のドラッグで縮めて見る (`lib/input.mjs` の `dragBottomRightCorner`)。位置と大きさの記憶を見るときは、`SetWindowPos` で動かす (`lib/window.mjs`)。
 - **中断したときに残るファイルは、次の実行が片付ける**: 実行中は `e2e/.e2e.lock` (同時に2つ

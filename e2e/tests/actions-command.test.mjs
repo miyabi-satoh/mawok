@@ -24,7 +24,7 @@ import {
 	waitAlert
 } from '../lib/app.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
-import { APP_IDENTIFIER } from '../lib/app-conf.mjs';
+import { PROFILE_IDENTIFIER } from '../lib/app-conf.mjs';
 import { APP_DATA_DIRS, beginTestConfig, tryReadConfig } from '../lib/config.mjs';
 import { markLog, readLogSince } from '../lib/files.mjs';
 import { getMawokProcessId, isMawokRunning, runPowerShell, setClipboard } from '../lib/os.mjs';
@@ -119,7 +119,7 @@ async function listPings(marker) {
 }
 
 /** AI サービスのキーを入れる資格情報の名前 (ai.rs の credential_user と、secrets.rs のサービス名) */
-const credentialName = (service) => `${service}-api-key.${APP_IDENTIFIER}`;
+const credentialName = (service) => `${service}-api-key.${PROFILE_IDENTIFIER}`;
 
 async function hasCredential(service) {
 	const stdout = await runPowerShell('cmdkey /list | Out-String');
