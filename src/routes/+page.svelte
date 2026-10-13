@@ -201,7 +201,7 @@
 		hoveredMatch = null;
 	});
 	let error = $state('');
-	// エラーの帯の見出し。コピーと送るで分ける
+	// エラーの帯の見出し。何に失敗したかで分ける
 	let errorTitle = $state('');
 	// 設定の「AI」で直す失敗か。帯に、その分類を開く操作を添える
 	let errorNeedsAiSettings = $state(false);
