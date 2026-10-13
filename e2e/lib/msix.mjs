@@ -522,7 +522,9 @@ function removeSharedKey() {
 		const remains = execFileSync('powershell', powerShellArgs(script), { encoding: 'utf8' }).trim();
 		if (remains === 'yes') execFileSync('cmdkey', [`/delete:${target}`], { stdio: 'ignore' });
 	} catch {
-		// 読めなかったときは、仮のものか見分けられないので置いたままにする
+		// 読めなかった・消せなかったときは、仮のものか見分けられないので置いたままにする。
+		// 印も残し、次の回の始めにもう一度片付ける (印を消すと、仮の鍵が残ったまま誰も片付けなくなる)
+		return;
 	}
 	fs.rmSync(SHARED_KEY_RECORD_PATH, { force: true });
 }
