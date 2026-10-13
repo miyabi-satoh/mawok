@@ -184,14 +184,18 @@
 			<div class="mt-2 flex flex-col gap-5 pl-4">
 				<Field.Content>
 					<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-						<Field.Title>
-							{view.mawokAccountSignedIn
-								? mawokRemainingText(mawokAccountStatus)
-								: m.settings_ai_mawok_sign_in()}
-						</Field.Title>
-						<Button variant="outline" onclick={onopenaccount}>
-							{m.settings_account_open()}
-						</Button>
+						<!-- クレジットは Mawok の AI を使うときだけのものなので、残りと買い足しはここにだけ出す -->
+						{#if view.mawokAccountSignedIn}
+							<Field.Title>{mawokRemainingText(mawokAccountStatus)}</Field.Title>
+							<Button variant="outline" onclick={() => editor.call('open_mawok_buy_page')}>
+								{m.settings_mawok_buy()}
+							</Button>
+						{:else}
+							<Field.Title>{m.settings_ai_mawok_sign_in()}</Field.Title>
+							<Button variant="outline" onclick={onopenaccount}>
+								{m.settings_account_open()}
+							</Button>
+						{/if}
 					</Field.Field>
 				</Field.Content>
 			</div>

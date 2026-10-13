@@ -7,7 +7,6 @@
 	import type { MawokSignIn } from '$lib/bindings/MawokSignIn';
 	import type { MawokSignInEnded } from '$lib/bindings/MawokSignInEnded';
 	import type { Call } from '$lib/call';
-	import { mawokRemainingText } from '$lib/mawok-account';
 	import { onEvent } from '$lib/on-event';
 	import { m } from '$lib/paraglide/messages';
 
@@ -120,14 +119,4 @@
 			</Button>
 		</Field.Content>
 	{/if}
-	<Field.Content>
-		<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-			<Field.Title>
-				{mawokRemainingText(status)}
-			</Field.Title>
-			<Button variant="outline" onclick={() => call('open_mawok_buy_page')}>
-				{m.settings_mawok_buy()}
-			</Button>
-		</Field.Field>
-	</Field.Content>
 {/if}
