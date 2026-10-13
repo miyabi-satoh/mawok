@@ -46,7 +46,7 @@ Write an addressee on the first line of the text, then press {macos:`Cmd+Shift+E
 
 | First line | What it does |
 | --- | --- |
-| `@ai instruction` | Asks AI and replaces the text with the result. For example: `@ai Rewrite this politely` |
+| `@ai instruction` | Asks AI (an AI action) and replaces the text with the result. For example: `@ai Rewrite this politely` |
 | `@sh command` | Runs the command and replaces the text with the result. For example: `@sh sort` |
 | `@all` | Sends to all the devices you have added |
 | `@device name` | Sends to that device |
@@ -149,7 +149,7 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 ## What is sent and privacy
 
 - Mawok does not send usage statistics or error reports.
-- It sends your text outside the app only when you ask AI with `@ai` (to the AI service you chose), send it to another device (to a device you have added), or sync with Pro.
+- It sends your text outside the app only when you run an AI action with `@ai` (to the AI service you chose), send it to another device (to a device you have added), or sync with Pro.
 - While you sync with Pro, what you sync is encrypted and stored on Mawok's server. Mawok's server cannot read it.
 - Before you choose an AI service and select "Agree", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
 
@@ -191,7 +191,7 @@ Changes you make directly take effect after you restart the app. The file contai
 | `[[replacements]]`               | None                             | One replacement entry (`from`, `to`, `enabled`)                          |
 | `[[snippets]]`                   | Default snippets for the display language | One snippet (`name`, `body`, `output` [`"replace"`, `"insert"`, `"none"`], `encoding` [`"utf-8"`, `"shift_jis"`, and so on], `enabled`) |
 | `[[devices]]`                    | None                             | Devices you have added                                                    |
-| `ai_service`                     | `"none"`                         | AI service used for `@ai` (`"none"`, `"mawok"`, `"gemini"`, `"anthropic"`, `"openai"`) |
+| `ai_service`                     | `"none"`                         | AI service used for AI actions (`@ai`) (`"none"`, `"mawok"`, `"gemini"`, `"anthropic"`, `"openai"`) |
 | `ai_consent`                     | None                             | AI services whose notice about what is sent and how it is handled you accepted |
 | `[ai_models]`                    | Default model for each AI service | AI model, per AI service (`gemini = "…"`, `anthropic = "…"`, and so on)  |
 
