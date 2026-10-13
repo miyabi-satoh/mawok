@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-	addressCandidates,
+	ADDRESS_CANDIDATES,
 	aiInstruction,
 	completedAddress,
 	isRunnable,
@@ -11,14 +11,6 @@ import {
 	splitFirstLine,
 	typedAddress
 } from './addressee';
-
-const device = (name: string, publicKey: string) => ({
-	name,
-	publicKey,
-	address: '',
-	sendTo: true
-});
-const devices = [device('MacBook Air', 'ab12cd'), device('AERO-13BE', 'ef34gh')];
 
 describe('aiInstruction・shCommand', () => {
 	it('行頭の宛先の後ろを、指示文・コマンドにする', () => {
@@ -55,122 +47,41 @@ describe('splitFirstLine', () => {
 	it('1行目と、2行目から下に分ける', () => {
 		expect(splitFirstLine('@sh sort\nb\na\n')).toEqual({ line: '@sh sort', rest: 'b\na\n' });
 		expect(splitFirstLine('@sh ls')).toEqual({ line: '@sh ls', rest: '' });
-		expect(splitFirstLine('@all\r\n本文')).toEqual({ line: '@all', rest: '本文' });
+		expect(splitFirstLine('@sh ls\r\n本文')).toEqual({ line: '@sh ls', rest: '本文' });
 	});
 });
 
 describe('resolveAddressee', () => {
 	it('@ai と @sh は、実行する行にする', () => {
-		expect(resolveAddressee('@ai 訳して', devices)).toEqual({
-			kind: 'run',
-			ai: true,
-			line: '@ai 訳して'
-		});
-		expect(resolveAddressee('@sh ls', devices)).toEqual({ kind: 'run', ai: false, line: '@sh ls' });
+		expect(resolveAddressee('@ai 訳して')).toEqual({ ai: true, line: '@ai 訳して' });
+		expect(resolveAddressee('@sh ls')).toEqual({ ai: false, line: '@sh ls' });
 	});
 
-	it('@all は、つないだデバイスの全部にする', () => {
-		expect(resolveAddressee('@all', devices)).toEqual({
-			kind: 'devices',
-			publicKeys: ['ab12cd', 'ef34gh']
-		});
-		expect(resolveAddressee('@all', [])).toEqual({ kind: 'devices', publicKeys: [] });
-	});
-
-	it('デバイスの名前は、空白を含んでいても、大文字と小文字を区別せずにそのまま合うものだけを受ける', () => {
-		expect(resolveAddressee('@macbook air', devices)).toEqual({
-			kind: 'devices',
-			publicKeys: ['ab12cd']
-		});
-		expect(resolveAddressee('@AERO-13BE ', devices)).toEqual({
-			kind: 'devices',
-			publicKeys: ['ef34gh']
-		});
-	});
-
-	it('途中までの名前、知らない名前、宛先の後ろに文が続く行は、宛先ではない', () => {
-		expect(resolveAddressee('@aero', devices)).toBeNull();
-		expect(resolveAddressee('@tanaka ありがとう', devices)).toBeNull();
-		expect(resolveAddressee('@AERO-13BE これを見て', devices)).toBeNull();
-		expect(resolveAddressee('ふつうの文', devices)).toBeNull();
-	});
-
-	it('宛先の語と大文字・小文字だけが違う名前のデバイスも、公開鍵の先頭を添えた名前で受ける', () => {
-		const shell = [device('Sh Phone', 'ab12cd')];
-
-		expect(resolveAddressee('@sh phone', shell)).toEqual({
-			kind: 'run',
-			ai: false,
-			line: '@sh phone'
-		});
-		expect(resolveAddressee('@Sh Phone (ab12)', shell)).toEqual({
-			kind: 'devices',
-			publicKeys: ['ab12cd']
-		});
-	});
-
-	it('大文字と小文字だけが違う名前のデバイスが2台あるときも、公開鍵の先頭を添えた名前で受ける', () => {
-		const cased = [device('Mac', 'ab12cd'), device('mac', 'ef34gh')];
-
-		expect(resolveAddressee('@mac', cased)).toBeNull();
-		expect(addressCandidates(cased).map((candidate) => candidate.address)).toEqual([
-			'@ai',
-			'@sh',
-			'@all',
-			'@Mac (ab12)',
-			'@mac (ef34)'
-		]);
-		expect(resolveAddressee('@mac (ef34)', cased)).toEqual({
-			kind: 'devices',
-			publicKeys: ['ef34gh']
-		});
-	});
-
-	it('同じ名前のデバイスと、宛先の語と同じ名前のデバイスは、公開鍵の先頭を添えた名前で受ける', () => {
-		const same = [device('Mac', 'ab12cd'), device('Mac', 'ef34gh'), device('all', '1234ab')];
-
-		expect(resolveAddressee('@Mac', same)).toBeNull();
-		expect(resolveAddressee('@Mac (ef34)', same)).toEqual({
-			kind: 'devices',
-			publicKeys: ['ef34gh']
-		});
-		expect(resolveAddressee('@all (1234)', same)).toEqual({
-			kind: 'devices',
-			publicKeys: ['1234ab']
-		});
-		expect(resolveAddressee('@all', same)).toEqual({
-			kind: 'devices',
-			publicKeys: ['ab12cd', 'ef34gh', '1234ab']
-		});
+	it('@ で始まっていても、@ai・@sh でなければ宛先ではない', () => {
+		expect(resolveAddressee('@all')).toBeNull();
+		expect(resolveAddressee('@MacBook Air')).toBeNull();
+		expect(resolveAddressee('@tanaka ありがとう')).toBeNull();
+		expect(resolveAddressee('ふつうの文')).toBeNull();
 	});
 });
 
 describe('rowAddressee', () => {
 	it('1行だけで宛先から始まる定型文は、選ぶと出す', () => {
-		expect(rowAddressee('@ai 訳して\n', devices)?.kind).toBe('run');
-		expect(rowAddressee('@sh sort', devices)?.kind).toBe('run');
-		expect(rowAddressee('@AERO-13BE', devices)?.kind).toBe('devices');
+		expect(rowAddressee('@ai 訳して\n')).toEqual({ ai: true, line: '@ai 訳して' });
+		expect(rowAddressee('@sh sort')).toEqual({ ai: false, line: '@sh sort' });
 	});
 
 	it('2行目から下に中身のある文、宛先の無い文、実行するものの無い行は、挿入する', () => {
-		expect(rowAddressee('@sh sort\nb\na', devices)).toBeNull();
-		expect(rowAddressee('お疲れさまです。', devices)).toBeNull();
-		expect(rowAddressee('@ai', devices)).toBeNull();
+		expect(rowAddressee('@sh sort\nb\na')).toBeNull();
+		expect(rowAddressee('お疲れさまです。')).toBeNull();
+		expect(rowAddressee('@all')).toBeNull();
+		expect(rowAddressee('@ai')).toBeNull();
 	});
 });
 
 describe('宛先の候補', () => {
-	const candidates = addressCandidates(devices);
-
-	it('@ai・@sh・@all と、つないだデバイスを出す。デバイスが無ければ @all は出さない', () => {
-		expect(candidates.map((candidate) => candidate.address)).toEqual([
-			'@ai',
-			'@sh',
-			'@all',
-			'@MacBook Air',
-			'@AERO-13BE'
-		]);
-		expect(addressCandidates([]).map((candidate) => candidate.address)).toEqual(['@ai', '@sh']);
+	it('@ai と @sh を出す', () => {
+		expect(ADDRESS_CANDIDATES.map((candidate) => candidate.address)).toEqual(['@ai', '@sh']);
 	});
 
 	it('テキストの先頭が @ で、カーソルが1行目の行末にあるときだけ、打った文字を返す', () => {
@@ -182,24 +93,20 @@ describe('宛先の候補', () => {
 	});
 
 	it('打った文字から始まる候補に絞り、大文字と小文字は区別しない', () => {
-		expect(matchingAddresses(candidates, '@a').map((candidate) => candidate.address)).toEqual([
-			'@ai',
-			'@all',
-			'@AERO-13BE'
-		]);
-		expect(matchingAddresses(candidates, '@mac').map((candidate) => candidate.address)).toEqual([
-			'@MacBook Air'
-		]);
+		const addresses = (typed: string) =>
+			matchingAddresses(ADDRESS_CANDIDATES, typed).map((candidate) => candidate.address);
+		expect(addresses('@')).toEqual(['@ai', '@sh']);
+		expect(addresses('@A')).toEqual(['@ai']);
+		expect(addresses('@s')).toEqual(['@sh']);
 	});
 
 	it('打った文字が候補そのものになったら、候補を出さない。指示を打ち始めた後も出さない', () => {
-		expect(matchingAddresses(candidates, '@sh')).toEqual([]);
-		expect(matchingAddresses(candidates, '@ai 訳して')).toEqual([]);
-		expect(matchingAddresses(candidates, '@tanaka')).toEqual([]);
+		expect(matchingAddresses(ADDRESS_CANDIDATES, '@sh')).toEqual([]);
+		expect(matchingAddresses(ADDRESS_CANDIDATES, '@ai 訳して')).toEqual([]);
+		expect(matchingAddresses(ADDRESS_CANDIDATES, '@tanaka')).toEqual([]);
 	});
 
-	it('@ai と @sh は、続けて打てるよう空白を添えて入れる', () => {
+	it('続けて打てるよう空白を添えて入れる', () => {
 		expect(completedAddress({ address: '@ai', kind: 'ai' })).toBe('@ai ');
-		expect(completedAddress({ address: '@AERO-13BE', kind: 'device' })).toBe('@AERO-13BE');
 	});
 });

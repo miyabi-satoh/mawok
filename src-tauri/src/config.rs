@@ -171,33 +171,18 @@ impl ActionEncoding {
     }
 }
 
-/// 確認コードで追加した自分のデバイス（docs/lan.md「同じ LAN の自分のデバイスへ送る」）
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// 確認コードで追加した自分のデバイス（docs/lan.md「デバイスを追加する」）
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
 #[serde(default, rename_all = "camelCase")]
 pub struct Device {
     /// ペアリングか生存確認で相手が名乗った名前
     pub name: String,
-    /// 相手の公開鍵（小文字の16進）。この鍵を持つ相手とだけ送り合う
+    /// 相手の公開鍵（小文字の16進）
     pub public_key: String,
-    /// 最後に相手へ送れた、または生存確認したときのアドレス。起動した直後で、相手の名乗りがまだ届いていないときに使う
+    /// 最後にペアリングか生存確認が通ったときのアドレス
     pub address: String,
-    /// 送信先にチェックを入れているか。送るキーとボタンは、チェックしたデバイスへ送る
-    pub send_to: bool,
-}
-
-/// 項目がない設定ファイル（送信先を選べるようになる前のもの）は、チェックを入れて読む。
-/// 新しく見つけたデバイスは送信先に加える
-impl Default for Device {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            public_key: String::new(),
-            address: String::new(),
-            send_to: true,
-        }
-    }
 }
 
 /// 読み込みは `parse`、書き出しは `apply` で項目ごとに行う。項目名は `key` にまとめてある
@@ -366,14 +351,11 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
         differs: |config, defaults| config.hotkey != defaults.hotkey,
     },
     ModifiedSetting::DraftKey(DraftAction::Copy),
-    ModifiedSetting::DraftKey(DraftAction::Send),
+    ModifiedSetting::DraftKey(DraftAction::Run),
     ModifiedSetting::DraftKey(DraftAction::Settings),
     ModifiedSetting::DraftKey(DraftAction::Snippets),
     ModifiedSetting::DraftKey(DraftAction::HistoryOlder),
     ModifiedSetting::DraftKey(DraftAction::HistoryNewer),
-    ModifiedSetting::DraftKey(DraftAction::SendTargets),
-    ModifiedSetting::DraftKey(DraftAction::InsertReceived),
-    ModifiedSetting::DraftKey(DraftAction::DiscardReceived),
     ModifiedSetting::DraftKey(DraftAction::ChangeFolder),
     ModifiedSetting::Value {
         name: key::AUTOSTART,
@@ -891,7 +873,6 @@ impl Row for Device {
             name: text_field(table, "name", default.name)?,
             public_key: text_field(table, "public_key", default.public_key)?,
             address: text_field(table, "address", default.address)?,
-            send_to: bool_field(table, "send_to", default.send_to)?,
         })
     }
 
@@ -900,7 +881,6 @@ impl Row for Device {
             ("name", Value::from(self.name.clone())),
             ("public_key", Value::from(self.public_key.clone())),
             ("address", Value::from(self.address.clone())),
-            ("send_to", Value::from(self.send_to)),
         ]
     }
 }
@@ -2199,7 +2179,7 @@ settings = "CommandOrControl+Alt+KeyK"
         assert_eq!(config.text_window_keys.copy, "CommandOrControl+KeyK");
         // 定型文の一覧の既定のキー（Cmd+K）は、書いたコピーのキーに譲り、知らせない
         assert_eq!(config.text_window_keys.snippets, "");
-        assert_eq!(config.text_window_keys.send, DraftKeys::default().send);
+        assert_eq!(config.text_window_keys.run, DraftKeys::default().run);
         assert_eq!(config.text_window_keys.settings, "");
         assert_eq!(
             error,
@@ -2207,9 +2187,9 @@ settings = "CommandOrControl+Alt+KeyK"
         );
 
         // text_window_keys のない設定ファイルで、ホットキーが既定のキーと重なっても知らせない
-        write(&path, "hotkey = \"CommandOrControl+KeyL\"\n");
+        write(&path, "hotkey = \"CommandOrControl+KeyD\"\n");
         let (config, error) = load_or_create(&path);
-        assert_eq!(config.text_window_keys.send_targets, "");
+        assert_eq!(config.text_window_keys.change_folder, "");
         assert_eq!(error, None);
     }
 
@@ -2769,7 +2749,6 @@ body = "git status"
                 name: "Mac".to_string(),
                 public_key: "ab".repeat(32),
                 address: "192.168.0.10".to_string(),
-                send_to: false,
             }],
             input_guidance: Some("自分用のメモ".to_string()),
             ai_service: AiService::Gemini,
@@ -3280,7 +3259,7 @@ replacements = [
             "[text_window_keys]\n# 自分の癖\ncopy = \"CommandOrControl+KeyJ\"\n",
         );
         save_change(&path, |config| {
-            config.text_window_keys.send = String::new();
+            config.text_window_keys.run = String::new();
         });
         let text = fs::read_to_string(&path).unwrap();
         assert!(
@@ -3300,19 +3279,19 @@ replacements = [
 
     #[test]
     fn keeps_yielded_draft_keys_out_of_the_file() {
-        // ホットキーが送信先の一覧の既定のキーと重なり、起動時に黙って外した
+        // ホットキーがフォルダーを移る欄の既定のキーと重なり、起動時に黙って外した
         let path = temp_path("draft-key-yielded");
-        write(&path, "hotkey = \"CommandOrControl+KeyL\"\n");
+        write(&path, "hotkey = \"CommandOrControl+KeyD\"\n");
         let (config, _) = load_or_create(&path);
-        assert_eq!(config.text_window_keys.send_targets, "");
-        assert_eq!(config.yielded_draft_keys, [DraftAction::SendTargets]);
+        assert_eq!(config.text_window_keys.change_folder, "");
+        assert_eq!(config.yielded_draft_keys, [DraftAction::ChangeFolder]);
 
         // ほかのキーを変えても、外したキーは書かない
         save_change(&path, |config| {
             config.text_window_keys.copy = "CommandOrControl+KeyU".to_string();
         });
         let text = fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("send_targets"), "{text}");
+        assert!(!text.contains("change_folder"), "{text}");
 
         // 割り当てなしを選び直したら、書いた操作として書く
         let (config, _) = load_or_create(&path);
@@ -3325,18 +3304,18 @@ replacements = [
         save_with_backup(&path, &next, loaded, NOW).unwrap();
         assert!(fs::read_to_string(&path)
             .unwrap()
-            .contains("send_targets = \"\""));
+            .contains("change_folder = \"\""));
         fs::write(&path, &text).unwrap();
 
         // 重なりが解ければ、既定のキーに戻る
         write(
             &path,
-            &text.replace("CommandOrControl+KeyL", "CommandOrControl+Alt+KeyK"),
+            &text.replace("CommandOrControl+KeyD", "CommandOrControl+Alt+KeyK"),
         );
         let (config, _) = load_or_create(&path);
         assert_eq!(
-            config.text_window_keys.send_targets,
-            DraftKeys::default().send_targets
+            config.text_window_keys.change_folder,
+            DraftKeys::default().change_folder
         );
         assert!(config.yielded_draft_keys.is_empty());
     }
@@ -3787,12 +3766,13 @@ command = "sort"
     }
 
     #[test]
-    fn reads_devices_without_send_to_as_checked() {
-        // 送信先を選べるようになる前の設定ファイルには send_to がない。見つけたデバイスを送信先にする既定で読む
+    fn ignores_items_of_features_that_no_longer_exist() {
+        // この版に無い項目（デバイスの send_to、text_window_keys の send_targets など）は読み捨て、修復の知らせにしない
         let path = temp_path("paired-devices");
         write(
             &path,
-            "[[devices]]\nname = \"Mac\"\npublic_key = \"ab\"\naddress = \"192.168.0.10\"\n",
+            "[[devices]]\nname = \"Mac\"\npublic_key = \"ab\"\naddress = \"192.168.0.10\"\nsend_to = false\n\n\
+             [text_window_keys]\nsend_targets = \"CommandOrControl+KeyL\"\ninsert_received = 1\n",
         );
         let (config, error) = load_or_create(&path);
         assert_eq!(error, None);
@@ -3802,9 +3782,9 @@ command = "sort"
                 name: "Mac".to_string(),
                 public_key: "ab".to_string(),
                 address: "192.168.0.10".to_string(),
-                send_to: true,
             }]
         );
+        assert_eq!(config.text_window_keys, DraftKeys::default());
     }
 
     #[test]

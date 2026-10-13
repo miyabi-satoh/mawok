@@ -19,12 +19,9 @@
 
 	let { id, top, candidates, active, onpick }: Props = $props();
 
-	// デバイスは名前で分かるので、説明を添えない。台数分、同じ説明が並ぶため
-	const hints: Record<AddressCandidate['kind'], (() => string) | null> = {
+	const hints: Record<AddressCandidate['kind'], () => string> = {
 		ai: m.draft_address_ai,
-		sh: m.draft_address_sh,
-		all: m.draft_address_all,
-		device: null
+		sh: m.draft_address_sh
 	};
 </script>
 
@@ -51,11 +48,7 @@
 			}}
 		>
 			<span class="font-mono whitespace-nowrap">{candidate.address}</span>
-			{#if hints[candidate.kind]}
-				<span class="text-xs whitespace-nowrap text-muted-foreground"
-					>{hints[candidate.kind]?.()}</span
-				>
-			{/if}
+			<span class="text-xs whitespace-nowrap text-muted-foreground">{hints[candidate.kind]()}</span>
 		</li>
 	{/each}
 </ul>

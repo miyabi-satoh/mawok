@@ -1253,7 +1253,7 @@ describe('設定画面のキー操作', () => {
 		};
 		const screen = await renderAt(m.settings_category_keys);
 
-		await expect.element(screen.getByText(m.settings_key_insertReceived())).toBeVisible();
+		await expect.element(screen.getByText(m.settings_key_changeFolder())).toBeVisible();
 		await expect.element(screen.getByText(m.settings_key_none())).toBeVisible();
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_key_reset_action() }))
@@ -1341,11 +1341,11 @@ describe('設定画面のキー操作', () => {
 	it('記録中だけ既定に戻すと外すを表示し、操作できる', async () => {
 		settings.current = {
 			...view(),
-			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, send: 'CommandOrControl+KeyJ', snippets: '' }
+			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, run: 'CommandOrControl+KeyJ', snippets: '' }
 		};
 		const screen = await renderAt(m.settings_category_keys);
 
-		await changeButton(screen, m.settings_key_send).click();
+		await changeButton(screen, m.settings_key_run).click();
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_key_reset_action() }))
 			.toBeVisible();
@@ -1356,7 +1356,7 @@ describe('設定画面のキー操作', () => {
 		await changeButton(screen, m.settings_key_settings).click();
 		await screen.getByRole('button', { name: m.settings_key_clear_action() }).click();
 
-		expect(invoked).toHaveBeenCalledWith('reset_draft_key', { action: 'send' });
+		expect(invoked).toHaveBeenCalledWith('reset_draft_key', { action: 'run' });
 		expect(invoked).toHaveBeenCalledWith('set_draft_key', { action: 'settings', key: '' });
 	});
 
@@ -1392,18 +1392,18 @@ describe('設定画面のキー操作', () => {
 	it('ホットキーが下書きの操作と重なって断られたら、登録できない旨ではなく重なりを出す', async () => {
 		invoked.mockImplementation((command) =>
 			command === 'set_hotkey'
-				? Promise.reject('keys.action.sendTargets')
+				? Promise.reject('keys.action.changeFolder')
 				: Promise.resolve(undefined)
 		);
 		const screen = await renderAt(m.settings_category_keys);
 		await screen.getByRole('button', { name: hotkeyButtonName }).click();
 
-		await userEvent.keyboard('{Meta>}l{/Meta}');
+		await userEvent.keyboard('{Meta>}d{/Meta}');
 
 		await expect
 			.element(
 				screen.getByText(
-					m.settings_key_used_by_action({ keys: '⌘L', action: m.settings_key_sendTargets() })
+					m.settings_key_used_by_action({ keys: '⌘D', action: m.settings_key_changeFolder() })
 				)
 			)
 			.toBeVisible();
@@ -1545,9 +1545,9 @@ describe('設定画面のほかのアプリに移ったら下書きを隠す', (
 
 describe('設定画面のデバイス', () => {
 	const devices = [
-		{ name: 'mac-mini', publicKey: 'de03ffff', address: '', sendTo: true },
-		{ name: 'mac-mini', publicKey: 'a1b2ffff', address: '', sendTo: true },
-		{ name: 'living-room-pc', publicKey: 'c3d4ffff', address: '', sendTo: true }
+		{ name: 'mac-mini', publicKey: 'de03ffff', address: '' },
+		{ name: 'mac-mini', publicKey: 'a1b2ffff', address: '' },
+		{ name: 'living-room-pc', publicKey: 'c3d4ffff', address: '' }
 	];
 
 	beforeEach(() => {
@@ -1560,14 +1560,13 @@ describe('設定画面のデバイス', () => {
 		};
 	});
 
-	it('同じ名前のデバイスは公開鍵の先頭4文字で見分け、送信先の切り替えはそのデバイスに対して行う', async () => {
+	it('追加済みのデバイスの名前を並べ、送信先のスイッチは出さない', async () => {
 		const screen = await renderAt(m.settings_category_devices);
 
-		await expect.element(screen.getByLabelText('mac-mini (a1b2)')).toBeChecked();
-		await screen.getByLabelText('mac-mini (a1b2)').click();
-		expect(invoked).toHaveBeenCalledWith('set_send_targets', {
-			publicKeys: ['de03ffff', 'c3d4ffff']
-		});
+		const list = screen.getByRole('list', { name: m.settings_devices_list_title() });
+		await expect.element(list.getByText('mac-mini (a1b2)')).toBeVisible();
+		await expect.element(list.getByText('living-room-pc')).toBeVisible();
+		expect(list.getByRole('switch').query()).toBeNull();
 	});
 
 	it('デバイスが見つかっていなければ、その理由を出す', async () => {

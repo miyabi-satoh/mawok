@@ -13,28 +13,22 @@ use crate::config;
 #[serde(rename_all = "camelCase")]
 pub enum DraftAction {
     Copy,
-    Send,
+    Run,
     Settings,
     Snippets,
     HistoryOlder,
     HistoryNewer,
-    SendTargets,
-    InsertReceived,
-    DiscardReceived,
     ChangeFolder,
 }
 
 impl DraftAction {
-    pub const ALL: [DraftAction; 10] = [
+    pub const ALL: [DraftAction; 7] = [
         DraftAction::Copy,
-        DraftAction::Send,
+        DraftAction::Run,
         DraftAction::Settings,
         DraftAction::Snippets,
         DraftAction::HistoryOlder,
         DraftAction::HistoryNewer,
-        DraftAction::SendTargets,
-        DraftAction::InsertReceived,
-        DraftAction::DiscardReceived,
         DraftAction::ChangeFolder,
     ];
 
@@ -42,14 +36,12 @@ impl DraftAction {
     pub fn name(self) -> &'static str {
         match self {
             DraftAction::Copy => "copy",
-            DraftAction::Send => "send",
+            // 実行のキーの項目名は `send`。保存済み・同期済みの設定のキーを失わないよう、項目名は変えない
+            DraftAction::Run => "send",
             DraftAction::Settings => "settings",
             DraftAction::Snippets => "snippets",
             DraftAction::HistoryOlder => "history_older",
             DraftAction::HistoryNewer => "history_newer",
-            DraftAction::SendTargets => "send_targets",
-            DraftAction::InsertReceived => "insert_received",
-            DraftAction::DiscardReceived => "discard_received",
             DraftAction::ChangeFolder => "change_folder",
         }
     }
@@ -58,16 +50,12 @@ impl DraftAction {
     fn default_key(self) -> &'static str {
         match self {
             DraftAction::Copy => "CommandOrControl+Enter",
-            DraftAction::Send => "CommandOrControl+Shift+Enter",
+            DraftAction::Run => "CommandOrControl+Shift+Enter",
             // Comma は JIS 配列でも US 配列でも同じ位置にある
             DraftAction::Settings => "CommandOrControl+Comma",
             DraftAction::Snippets => "CommandOrControl+KeyK",
             DraftAction::HistoryOlder => "CommandOrControl+Alt+ArrowUp",
             DraftAction::HistoryNewer => "CommandOrControl+Alt+ArrowDown",
-            DraftAction::SendTargets => "CommandOrControl+KeyL",
-            DraftAction::InsertReceived => "CommandOrControl+KeyI",
-            // CommandOrControl+Backspace は入力欄の削除（macOS は行頭まで、Windows は前の単語）と重なる
-            DraftAction::DiscardReceived => "CommandOrControl+Shift+Backspace",
             // D は Directory。どの OS の入力欄でも、編集の操作に使われていない
             DraftAction::ChangeFolder => "CommandOrControl+KeyD",
         }
@@ -81,14 +69,11 @@ impl DraftAction {
 #[serde(rename_all = "camelCase")]
 pub struct DraftKeys {
     pub copy: String,
-    pub send: String,
+    pub run: String,
     pub settings: String,
     pub snippets: String,
     pub history_older: String,
     pub history_newer: String,
-    pub send_targets: String,
-    pub insert_received: String,
-    pub discard_received: String,
     pub change_folder: String,
 }
 
@@ -97,14 +82,11 @@ impl Default for DraftKeys {
         let key = |action: DraftAction| action.default_key().to_string();
         Self {
             copy: key(DraftAction::Copy),
-            send: key(DraftAction::Send),
+            run: key(DraftAction::Run),
             settings: key(DraftAction::Settings),
             snippets: key(DraftAction::Snippets),
             history_older: key(DraftAction::HistoryOlder),
             history_newer: key(DraftAction::HistoryNewer),
-            send_targets: key(DraftAction::SendTargets),
-            insert_received: key(DraftAction::InsertReceived),
-            discard_received: key(DraftAction::DiscardReceived),
             change_folder: key(DraftAction::ChangeFolder),
         }
     }
@@ -114,14 +96,11 @@ impl DraftKeys {
     pub fn get(&self, action: DraftAction) -> &str {
         match action {
             DraftAction::Copy => &self.copy,
-            DraftAction::Send => &self.send,
+            DraftAction::Run => &self.run,
             DraftAction::Settings => &self.settings,
             DraftAction::Snippets => &self.snippets,
             DraftAction::HistoryOlder => &self.history_older,
             DraftAction::HistoryNewer => &self.history_newer,
-            DraftAction::SendTargets => &self.send_targets,
-            DraftAction::InsertReceived => &self.insert_received,
-            DraftAction::DiscardReceived => &self.discard_received,
             DraftAction::ChangeFolder => &self.change_folder,
         }
     }
@@ -129,14 +108,11 @@ impl DraftKeys {
     pub fn get_mut(&mut self, action: DraftAction) -> &mut String {
         match action {
             DraftAction::Copy => &mut self.copy,
-            DraftAction::Send => &mut self.send,
+            DraftAction::Run => &mut self.run,
             DraftAction::Settings => &mut self.settings,
             DraftAction::Snippets => &mut self.snippets,
             DraftAction::HistoryOlder => &mut self.history_older,
             DraftAction::HistoryNewer => &mut self.history_newer,
-            DraftAction::SendTargets => &mut self.send_targets,
-            DraftAction::InsertReceived => &mut self.insert_received,
-            DraftAction::DiscardReceived => &mut self.discard_received,
             DraftAction::ChangeFolder => &mut self.change_folder,
         }
     }
@@ -750,8 +726,8 @@ mod tests {
             Ok("")
         );
         assert_eq!(
-            check_hotkey(&keys, "CommandOrControl+KeyL", MAC),
-            Err(Rejection::Action(DraftAction::SendTargets))
+            check_hotkey(&keys, "CommandOrControl+KeyD", MAC),
+            Err(Rejection::Action(DraftAction::ChangeFolder))
         );
         assert_eq!(
             check_hotkey(&keys, "CommandOrControl+Shift+Space", MAC),
@@ -792,7 +768,7 @@ mod tests {
         ] {
             assert_eq!(
                 check_hotkey(&keys, hotkey, platform),
-                Err(Rejection::Action(DraftAction::Send)),
+                Err(Rejection::Action(DraftAction::Run)),
                 "{hotkey}"
             );
         }
@@ -827,13 +803,13 @@ mod tests {
                 send = 1
                 snippets = ""
                 history_older = "KeyK"
-                unknown = "CommandOrControl+KeyL"
+                send_targets = "CommandOrControl+KeyL"
                 "#,
             )),
             MAC,
         );
         assert_eq!(keys.copy, "CommandOrControl+Shift+KeyJ");
-        assert_eq!(keys.send, DraftAction::Send.default_key());
+        assert_eq!(keys.run, DraftAction::Run.default_key());
         assert_eq!(keys.snippets, "");
         assert_eq!(keys.history_older, DraftAction::HistoryOlder.default_key());
         assert_eq!(keys.settings, DraftAction::Settings.default_key());
@@ -842,6 +818,8 @@ mod tests {
             ["text_window_keys.send", "text_window_keys.history_older"]
         );
         assert_eq!(written, [DraftAction::Copy, DraftAction::Snippets]);
+        // 知らない項目は読み捨て、どの操作のキーにもしない
+        assert_eq!(keys.action_for("CommandOrControl+KeyL"), None);
 
         let parsed = parse(
             Some(&item(r#"text_window_keys = "CommandOrControl+KeyJ""#)),
@@ -868,8 +846,8 @@ mod tests {
     #[test]
     fn resolves_conflicts_in_action_order() {
         let mut keys = DraftKeys {
-            // 送るがコピーと同じキー、定型文がホットキーと同じキー、設定が編集キー
-            send: "CommandOrControl+Enter".to_string(),
+            // 実行がコピーと同じキー、定型文がホットキーと同じキー、設定が編集キー
+            run: "CommandOrControl+Enter".to_string(),
             snippets: "CommandOrControl+Shift+Space".to_string(),
             settings: "CommandOrControl+KeyC".to_string(),
             ..DraftKeys::default()
@@ -889,7 +867,7 @@ mod tests {
             ]
         );
         assert_eq!(keys.copy, "CommandOrControl+Enter");
-        assert_eq!(keys.send, "");
+        assert_eq!(keys.run, "");
         assert_eq!(keys.settings, "");
         assert_eq!(keys.snippets, "");
     }
@@ -899,13 +877,13 @@ mod tests {
         // ホットキーが、新しい版で足された操作の既定のキーと同じ人には、外すだけで知らせない
         let mut keys = DraftKeys::default();
         assert_eq!(
-            resolve_conflicts(&mut keys, "CommandOrControl+KeyL", MAC, &[]),
+            resolve_conflicts(&mut keys, "CommandOrControl+KeyD", MAC, &[]),
             Resolved {
                 removed: Vec::new(),
-                yielded: vec![DraftAction::SendTargets],
+                yielded: vec![DraftAction::ChangeFolder],
             }
         );
-        assert_eq!(keys.send_targets, "");
+        assert_eq!(keys.change_folder, "");
         assert_eq!(keys.snippets, DraftAction::Snippets.default_key());
     }
 
@@ -938,12 +916,12 @@ mod tests {
         assert_eq!(
             resolve_conflicts(
                 &mut keys,
-                "Shift+CommandOrControl+Backspace",
+                "Shift+CommandOrControl+Enter",
                 MAC,
                 &DraftAction::ALL
             )
             .removed,
-            ["text_window_keys.discard_received"]
+            ["text_window_keys.send"]
         );
         assert_eq!(
             check(

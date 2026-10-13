@@ -3719,12 +3719,17 @@ mod tests {
         *config.text_window_keys.get_mut(DraftAction::HistoryOlder) = "Alt+KeyP".into();
         config
             .text_window_keys
-            .get_mut(DraftAction::SendTargets)
+            .get_mut(DraftAction::ChangeFolder)
             .clear();
-        config.yielded_draft_keys = vec![DraftAction::SendTargets];
+        config.yielded_draft_keys = vec![DraftAction::ChangeFolder];
         let value = config_items(&config)[&text_window_keys_item()].clone();
         assert_eq!(value["history_older"], json!("Alt+KeyP"));
-        assert!(value.get("send_targets").is_none(), "{value}");
+        assert!(value.get("change_folder").is_none(), "{value}");
+        // 実行のキーは、設定ファイルと同じく `send` の名前で書く
+        assert_eq!(
+            value["send"],
+            json!(DraftKeys::default().get(DraftAction::Run))
+        );
 
         let mut received = Config::default();
         assert!(apply_value(&mut received, &text_window_keys_item(), &value));
@@ -3734,8 +3739,29 @@ mod tests {
         );
         // 書いていない操作は、重なりが無ければ既定のキーを使う
         assert_eq!(
-            received.text_window_keys.get(DraftAction::SendTargets),
-            DraftKeys::default().get(DraftAction::SendTargets)
+            received.text_window_keys.get(DraftAction::ChangeFolder),
+            DraftKeys::default().get(DraftAction::ChangeFolder)
+        );
+    }
+
+    #[test]
+    fn text_window_keys_with_actions_this_version_does_not_have_are_taken() {
+        // 知らない操作のキーは読み捨て、知っている操作のキーだけを入れる
+        let value = json!({
+            "copy": "Alt+KeyP",
+            "send_targets": "CommandOrControl+KeyL",
+            "insert_received": "CommandOrControl+KeyI",
+            "discard_received": "",
+        });
+        let mut received = Config::default();
+        assert!(apply_value(&mut received, &text_window_keys_item(), &value));
+        assert_eq!(received.text_window_keys.get(DraftAction::Copy), "Alt+KeyP");
+        // 知らない操作のキーは、どの操作のキーにもならない
+        assert_eq!(
+            received
+                .text_window_keys
+                .action_for("CommandOrControl+KeyL"),
+            None
         );
     }
 

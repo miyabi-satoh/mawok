@@ -17,8 +17,8 @@
 
 技術の説明:
 
-- [宛先へ出す（@ai・@sh・デバイス）と定型文](docs/actions.md)
-- [同じ LAN の自分のデバイスへ送る](docs/lan.md)
+- [宛先へ出す（@ai・@sh）と定型文](docs/actions.md)
+- [同じ LAN の自分のデバイスを追加する](docs/lan.md)
 - [設定ファイル](docs/config.md)
 - [設定と履歴の同期](docs/sync.md)
 - [OS ごとの作り](docs/platform.md)
@@ -92,7 +92,7 @@ just release-mac publish
 - 手元で動かす: `just dev-account-server`。メールは送らず、サインインのリンクをログに出す。
 - 本番に置く: `pnpm run deploy`（`site/` をビルドしてから置く）。
 - staging に置く: `pnpm run deploy --env staging`（`site/` をビルドしてから置く）。
-- 開発版を staging の窓口に向ける: `MAWOK_ACCOUNT_URL=https://mawok-account-staging.amiiby.workers.dev just dev`。2台のデバイスの間の動き（送受信・同期）を確かめるときに、両方をこうして起動する。値はビルドのときに読むので、`just dev` を打つ所で付ける。URL の末尾に `/` は付けない。
+- 開発版を staging の窓口に向ける: `MAWOK_ACCOUNT_URL=https://mawok-account-staging.amiiby.workers.dev just dev`。2台のデバイスの間の動き（同期）を確かめるときに、両方をこうして起動する。値はビルドのときに読むので、`just dev` を打つ所で付ける。URL の末尾に `/` は付けない。
 - 秘密の値: `pnpm exec wrangler secret put <名前>`（staging は `--env staging` を付ける）。
 - 表を変えたら、置く前に `pnpm exec wrangler d1 migrations apply DB --remote`（staging は `--env staging` も）。
 

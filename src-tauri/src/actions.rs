@@ -1,6 +1,5 @@
 //! 宛先へ出す。
 //! 1行目の行頭が `@ai` なら AI（ai.rs）へ、`@sh` ならシェル（command.rs）へ渡して、結果を下書きに出す（docs/actions.md）。
-//! デバイスの宛先（`@all`・デバイスの名前）は、画面がつないだデバイスと照らして送る。
 //! ここには実行先によらない決めごと（行の読み方、既定の定型文、失敗の種類）を置く
 
 use crate::{
@@ -12,9 +11,6 @@ use crate::{
 pub const AI_PREFIX: &str = "@ai";
 /// 行頭にあれば、残りをコマンドとしてその機のシェルで実行する宛先
 pub const SH_PREFIX: &str = "@sh";
-/// つないだすべてのデバイスへ送る宛先。宛先を照らすのは画面なので、Rust 側では画面へ書き出すだけ（bindings.rs）
-#[cfg(test)]
-pub const ALL_DEVICES: &str = "@all";
 /// 言語を替えても同じ既定の翻訳アクションを見分けるための ID。
 const DEFAULT_TRANSLATE_ACTION_ID: &str = "6b6a77e6d4f846f2a8bbf953fbd0e0d3";
 /// 言語を替えても同じ既定の並べ替えアクションを見分けるための ID。
@@ -26,7 +22,7 @@ fn ai_line(instruction: &str) -> String {
 }
 
 /// 行頭が宛先 `prefix` なら、その後ろ（前後の空白を除く）を返す。宛先の直後は空白か行の終わりに限る（`@aix` は `@ai` の行ではない）。
-/// 大文字と小文字は区別しない。デバイスの宛先と `@all` が区別しないので、`@AI` だけがふつうの文としてデバイスへ送られないようにする
+/// 大文字と小文字は区別しない（`@AI` と打っても宛先として読む）
 fn addressed<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
     let head = line.trim_start();
     let word = head.get(..prefix.len())?;

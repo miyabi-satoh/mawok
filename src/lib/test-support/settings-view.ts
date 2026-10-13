@@ -5,14 +5,11 @@ import { newSnippet } from '$lib/snippets';
 /** Rust 側の既定のキー（src-tauri/src/draft_keys.rs）の写し */
 export const DEFAULT_DRAFT_KEYS: DraftKeys = {
 	copy: 'CommandOrControl+Enter',
-	send: 'CommandOrControl+Shift+Enter',
+	run: 'CommandOrControl+Shift+Enter',
 	settings: 'CommandOrControl+Comma',
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	sendTargets: 'CommandOrControl+KeyL',
-	insertReceived: 'CommandOrControl+KeyI',
-	discardReceived: 'CommandOrControl+Shift+Backspace',
 	changeFolder: 'CommandOrControl+KeyD'
 };
 

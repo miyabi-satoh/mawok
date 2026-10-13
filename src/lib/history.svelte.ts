@@ -1,6 +1,5 @@
 /**
  * 下書きの履歴。コピーして隠した下書きを覚え、履歴の本文は Rust 側でディスクにも保存する。
- * 他のデバイスから届いた下書きはここへ record しない。
  */
 
 import { hasNoModifiers, isImeKey } from '$lib/keys';

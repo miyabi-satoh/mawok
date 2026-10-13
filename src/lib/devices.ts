@@ -1,19 +1,11 @@
 import type { Device } from '$lib/settings.svelte';
 
-/**
- * 文の中に並べるデバイス名を、ハイフンのところで改行させない。living-room-pc が「living-」と「room-pc」に分かれると読みにくいため。
- * ハイフンの後ろでの折り返しは CSS では止められないので、改行させない印（WORD JOINER）を挟む。空白では今までどおり折り返す
- */
-export function unbrokenAtHyphens(name: string): string {
-	return name.replaceAll('-', '-⁠');
-}
-
 /** 同じ名前のデバイスを見分けるために添える、公開鍵の先頭の文字数 */
 const KEY_PREFIX_LENGTH = 4;
 
 /**
  * 追加済みのデバイスの表示名。名前はコンピューター名なので、同じ名前のデバイスが2台以上あるときだけ、
- * 名前の後ろに公開鍵の先頭4文字を添えて見分ける（docs/lan.md「同じ LAN の自分のデバイスへ送る」）
+ * 名前の後ろに公開鍵の先頭4文字を添えて見分ける（docs/lan.md「デバイスを追加する」）
  */
 export function deviceLabels(devices: Device[]): Map<string, string> {
 	const counts = new Map<string, number>();
@@ -23,12 +15,9 @@ export function deviceLabels(devices: Device[]): Map<string, string> {
 	return new Map(
 		devices.map((device) => [
 			device.publicKey,
-			(counts.get(device.name) ?? 0) > 1 ? keyedDeviceName(device) : device.name
+			(counts.get(device.name) ?? 0) > 1
+				? `${device.name} (${device.publicKey.slice(0, KEY_PREFIX_LENGTH)})`
+				: device.name
 		])
 	);
-}
-
-/** 名前の後ろに公開鍵の先頭を添えた、ほかのデバイスや宛先の語と取り違えない名前 */
-export function keyedDeviceName(device: Device): string {
-	return `${device.name} (${device.publicKey.slice(0, KEY_PREFIX_LENGTH)})`;
 }

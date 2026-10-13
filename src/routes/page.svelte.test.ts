@@ -48,7 +48,6 @@ function emit(
 		| typeof EVENTS.SHOWN
 		| typeof EVENTS.HIDE_REQUESTED
 		| typeof EVENTS.DRAFT_HIDDEN
-		| typeof EVENTS.DRAFT_RECEIVED
 		| typeof EVENTS.DRAFT_HISTORY_SYNCED,
 	payload?: unknown
 ) {
@@ -982,448 +981,6 @@ describe('定型文', () => {
 	});
 });
 
-describe('追加済みのデバイスへ送る', () => {
-	const device = { name: 'Mac', publicKey: 'ab', address: '', sendTo: true };
-
-	/** Rust 側に溜まっている、届いた下書き（take_received_drafts で渡す） */
-	let pending: { from: string; text: string }[] = [];
-
-	beforeEach(() => {
-		pending = [];
-		invoked.mockImplementation((command) => {
-			if (command === 'take_received_drafts') {
-				const drafts = pending;
-				pending = [];
-				return Promise.resolve(drafts);
-			}
-			return Promise.resolve(command === 'send_draft' || command === 'commit' ? true : undefined);
-		});
-		settings.current = { ...view(), devices: [device] };
-	});
-
-	/** 追加済みのデバイスから下書きが届く。Rust 側に溜めてから、画面に知らせる */
-	function receive(...drafts: { from: string; text: string }[]) {
-		pending.push(...drafts);
-		emit(EVENTS.DRAFT_RECEIVED);
-	}
-
-	const sendButton = (screen: Screen) =>
-		screen.getByRole('button', { name: m.draft_send(), exact: true });
-
-	it('デバイスが見つかっていなければ、送るのボタンを出さない', async () => {
-		settings.current = view();
-		const screen = await render(Page);
-
-		await expect
-			.element(screen.getByRole('button', { name: m.draft_copy(), exact: false }))
-			.toBeVisible();
-		expect(sendButton(screen).query()).toBeNull();
-	});
-
-	it('送るを押すと、書いた内容で送り、入力欄を空にする', async () => {
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-
-		await textarea.fill('git status');
-		await sendButton(screen).click();
-
-		await expect.element(textarea).toHaveValue('');
-		expect(invoked).toHaveBeenCalledWith('send_draft', { text: 'git status' });
-	});
-
-	it('送るキーで送る', async () => {
-		settings.current = { ...view('windows'), devices: [device] };
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-
-		await textarea.fill('ls');
-		await userEvent.keyboard('{Control>}{Shift>}{Enter}{/Shift}{/Control}');
-
-		await expect.element(textarea).toHaveValue('');
-		expect(invoked).toHaveBeenCalledWith('send_draft', { text: 'ls' });
-		expect(commandsCalled()).not.toContain('commit');
-	});
-
-	it('送っている間は、入力欄を書き換えられない', async () => {
-		let finish: (sent: boolean) => void = () => {};
-		invoked.mockImplementation((command) =>
-			command === 'send_draft'
-				? new Promise((resolve) => (finish = resolve))
-				: Promise.resolve(undefined)
-		);
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-
-		await textarea.fill('git status');
-		await sendButton(screen).click();
-
-		await expect.element(textarea).toHaveAttribute('readonly');
-		await expect.element(screen.getByRole('button', { name: m.draft_sending() })).toBeDisabled();
-		finish(true);
-		await expect.element(textarea).toHaveValue('');
-		await expect.element(textarea).not.toHaveAttribute('readonly');
-	});
-
-	/** send_draft だけ、返した関数で終えるまで待たせる。ほかは beforeEach のまま */
-	function holdSend() {
-		const settle: { finish: (sent: boolean) => void; fail: (error: unknown) => void } = {
-			finish: () => {},
-			fail: () => {}
-		};
-		const fallback = invoked.getMockImplementation();
-		invoked.mockImplementation((command, ...rest) =>
-			command === 'send_draft'
-				? new Promise((resolve, reject) => {
-						settle.finish = resolve;
-						settle.fail = reject;
-					})
-				: fallback!(command, ...rest)
-		);
-		return settle;
-	}
-
-	it('送っている間に出し直しても空にせず、送れなければ書きかけを残す', async () => {
-		const send = holdSend();
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-		await textarea.fill('git status');
-		await sendButton(screen).click();
-		await expect.element(textarea).toHaveAttribute('readonly');
-
-		emit(EVENTS.SHOWN);
-		await tick();
-		await expect.element(textarea).toHaveValue('git status');
-		send.fail('lan.unreachable');
-
-		await expect.element(screen.getByText(m.send_failed())).toBeVisible();
-		await expect.element(textarea).toHaveValue('git status');
-	});
-
-	it('送っている間に出し直しても、送れたら空にし、後で書いた下書きは次に出したときも残す', async () => {
-		const send = holdSend();
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-		await textarea.fill('git status');
-		await sendButton(screen).click();
-		await expect.element(textarea).toHaveAttribute('readonly');
-
-		emit(EVENTS.SHOWN);
-		send.finish(true);
-		await expect.element(textarea).toHaveValue('');
-
-		await textarea.fill('次の下書き');
-		emit(EVENTS.SHOWN);
-		await tick();
-		await expect.element(textarea).toHaveValue('次の下書き');
-	});
-
-	it('送っている間は、履歴・定型文・届いた下書きの差し込みが効かない', async () => {
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-		// 履歴を1件作る（コピーは待たせない）
-		await textarea.fill('git diff');
-		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
-		await expect.element(textarea).toHaveValue('');
-		const send = holdSend();
-		await textarea.fill('git status');
-		await sendButton(screen).click();
-		await expect.element(textarea).toHaveAttribute('readonly');
-		receive({ from: 'Mac', text: '届いた' });
-		await expect.element(screen.getByText(m.draft_received({ device: 'Mac' }))).toBeVisible();
-
-		await expect
-			.element(screen.getByRole('button', { name: m.draft_history_older(), exact: true }))
-			.toBeDisabled();
-		await expect
-			.element(screen.getByRole('button', { name: m.draft_snippets(), exact: true }))
-			.toBeDisabled();
-		await expect
-			.element(screen.getByRole('button', { name: m.draft_received_insert() }))
-			.toBeDisabled();
-		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
-		await userEvent.keyboard('{ArrowUp}');
-		await userEvent.keyboard('{Meta>}{Alt>}{ArrowUp}{/Alt}{/Meta}');
-		await userEvent.keyboard('{Meta>}i{/Meta}');
-		await userEvent.keyboard('{Meta>}k{/Meta}');
-		await tick();
-		await expect.element(textarea).toHaveValue('git status');
-		expect(screen.getByRole('listbox').query()).toBeNull();
-
-		send.finish(true);
-		await expect.element(textarea).toHaveValue('');
-	});
-
-	it('送れなければ、書きかけを残して知らせる', async () => {
-		invoked.mockImplementation((command) =>
-			command === 'send_draft' ? Promise.reject('lan.unreachable') : Promise.resolve(undefined)
-		);
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-
-		await textarea.fill('git status');
-		await sendButton(screen).click();
-
-		await expect.element(screen.getByText(m.send_failed())).toBeVisible();
-		// Rust 側の符号ではなく、何をすればよいかの案内を出す
-		await expect.element(screen.getByText(m.lan_error_unreachable())).toBeVisible();
-		await expect.element(textarea).toHaveValue('git status');
-	});
-
-	it('送信先にチェックしたデバイスがなければ、送らずに送信先の一覧を開く', async () => {
-		settings.current = { ...view(), devices: [{ ...device, sendTo: false }] };
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-
-		await textarea.fill('git status');
-		await sendButton(screen).click();
-
-		await expect
-			.element(screen.getByRole('listbox', { name: m.draft_send_targets_list() }))
-			.toBeVisible();
-		expect(commandsCalled()).not.toContain('send_draft');
-		await expect.element(textarea).toHaveValue('git status');
-	});
-
-	it('一部のデバイスに届かなかったら、隠さずに届かなかったデバイスの名前を出す', async () => {
-		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), devices: [device, windows] };
-		invoked.mockImplementation((command) =>
-			command === 'send_draft'
-				? Promise.reject({ code: 'lan.partial', devices: ['cd'] })
-				: Promise.resolve(undefined)
-		);
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-
-		await textarea.fill('git status');
-		await sendButton(screen).click();
-
-		await expect.element(screen.getByText(m.send_partial())).toBeVisible();
-		await expect
-			.element(screen.getByText(m.send_partial_devices({ devices: 'Windows' })))
-			.toBeVisible();
-		await expect.element(textarea).toHaveValue('git status');
-	});
-
-	it('送信先の一覧では、つながらないデバイスはチェックできず、Enter でチェックしたデバイスへ送る', async () => {
-		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), devices: [device, windows] };
-		invoked.mockImplementation((command) => {
-			// Mac（ab）だけがつながる
-			if (command === 'probe_devices') return Promise.resolve(['ab']);
-			return Promise.resolve(command === 'send_draft' ? true : undefined);
-		});
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-		await textarea.fill('git status');
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-
-		const mac = screen.getByRole('option', { name: 'Mac' });
-		const unreachable = screen.getByRole('option', { name: /Windows/ });
-		await expect.element(mac).toHaveAttribute('aria-selected', 'true');
-		await expect.element(unreachable).toHaveAttribute('aria-disabled', 'true');
-		await expect.element(unreachable).toHaveAttribute('aria-selected', 'false');
-
-		// つながらないデバイスを押しても、チェックは変えない。
-		// aria-disabled の要素は locator.click が押せるようになるまで待ち続けるので、要素を直接押す
-		(unreachable.element() as HTMLElement).click();
-		await tick();
-		expect(commandsCalled()).not.toContain('set_send_targets');
-
-		await userEvent.keyboard('{Enter}');
-
-		await expect.element(textarea).toHaveValue('');
-		expect(invoked).toHaveBeenCalledWith('send_draft', { text: 'git status', targets: ['ab'] });
-	});
-
-	it('送信先の一覧でチェックを外すと、設定に覚える', async () => {
-		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), devices: [device, windows] };
-		invoked.mockImplementation((command) =>
-			Promise.resolve(command === 'probe_devices' ? ['ab', 'cd'] : undefined)
-		);
-		const screen = await render(Page);
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-		await expect
-			.element(screen.getByRole('option', { name: /Windows/ }))
-			.not.toHaveAttribute('aria-disabled', 'true');
-		await userEvent.keyboard('{ArrowDown}{ }');
-
-		expect(invoked).toHaveBeenCalledWith('set_send_targets', { publicKeys: ['ab'] });
-	});
-
-	it('設定に反映される前に続けて押しても、前に押したチェックを消さない', async () => {
-		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), devices: [device, windows] };
-		// set_send_targets を呼んでも settings-changed は届かない（設定は古いまま）
-		invoked.mockImplementation((command) =>
-			Promise.resolve(command === 'probe_devices' ? ['ab', 'cd'] : undefined)
-		);
-		const screen = await render(Page);
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-		await expect
-			.element(screen.getByRole('option', { name: /Windows/ }))
-			.not.toHaveAttribute('aria-disabled', 'true');
-		await userEvent.keyboard('{ }{ArrowDown}{ }');
-
-		await expect
-			.poll(() => invoked.mock.lastCall)
-			.toEqual(['set_send_targets', { publicKeys: [] }]);
-		await expect
-			.element(screen.getByRole('option', { name: 'Mac' }))
-			.toHaveAttribute('aria-selected', 'false');
-	});
-
-	it('続けて押したチェックは、前の保存が終わってから押した順に覚える', async () => {
-		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), devices: [device, windows] };
-		let finishFirst: () => void = () => {};
-		let saveCount = 0;
-		invoked.mockImplementation((command) => {
-			// 1つめの保存だけ、終わるのを止めておく
-			if (command === 'set_send_targets' && saveCount++ === 0) {
-				return new Promise((resolve) => (finishFirst = () => resolve(undefined)));
-			}
-			return Promise.resolve(command === 'probe_devices' ? ['ab', 'cd'] : undefined);
-		});
-		const saves = () => callsOf(invoked, 'set_send_targets');
-		const screen = await render(Page);
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-		await expect
-			.element(screen.getByRole('option', { name: /Windows/ }))
-			.not.toHaveAttribute('aria-disabled', 'true');
-		await userEvent.keyboard('{ }{ArrowDown}{ }');
-
-		// 1つめが終わるまで、2つめは投げない
-		expect(saves()).toEqual([['set_send_targets', { publicKeys: ['cd'] }]]);
-		finishFirst();
-		await expect.poll(() => saves().length).toBe(2);
-		expect(saves()[1]).toEqual(['set_send_targets', { publicKeys: [] }]);
-	});
-
-	it('前の保存が失敗したら、後に押した分の保存では、戻したチェックを書き戻さない', async () => {
-		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
-		settings.current = { ...view(), devices: [device, windows] };
-		let failFirst: () => void = () => {};
-		let saveCount = 0;
-		invoked.mockImplementation((command) => {
-			// 1つめの保存だけ、止めておいてから失敗させる
-			if (command === 'set_send_targets' && saveCount++ === 0) {
-				return new Promise((_, reject) => (failFirst = () => reject('permission denied')));
-			}
-			return Promise.resolve(command === 'probe_devices' ? ['ab', 'cd'] : undefined);
-		});
-		const saves = () => callsOf(invoked, 'set_send_targets');
-		const screen = await render(Page);
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-		await expect
-			.element(screen.getByRole('option', { name: /Windows/ }))
-			.not.toHaveAttribute('aria-disabled', 'true');
-		// Mac を外し（保存が止まる）、その間に Windows も外す
-		await userEvent.keyboard('{ }{ArrowDown}{ }');
-		failFirst();
-
-		// Mac のチェックは戻り、2つめの保存では Windows だけを外す
-		await expect.poll(() => saves().length).toBe(2);
-		expect(saves()[1]).toEqual(['set_send_targets', { publicKeys: ['ab'] }]);
-		await expect
-			.element(screen.getByRole('option', { name: 'Mac' }))
-			.toHaveAttribute('aria-selected', 'true');
-	});
-
-	it('同じデバイスを続けて切り替え、後の保存だけ失敗したら、前に保存できた状態に戻す', async () => {
-		let saveCount = 0;
-		// set_send_targets を呼んでも settings-changed は届かない（設定は古いまま）
-		invoked.mockImplementation((command) => {
-			// 1つめの保存は通り、2つめは失敗する
-			if (command === 'set_send_targets' && saveCount++ === 1) {
-				return Promise.reject('permission denied');
-			}
-			return Promise.resolve(command === 'probe_devices' ? ['ab'] : undefined);
-		});
-		const screen = await render(Page);
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-		const mac = screen.getByRole('option', { name: 'Mac' });
-		await expect.element(mac).not.toHaveAttribute('aria-disabled', 'true');
-		// 外して（保存できる）、また入れる（保存できない）
-		await userEvent.keyboard('{ }{ }');
-
-		await expect.element(screen.getByText(m.draft_send_targets_save_failed())).toBeVisible();
-		await expect.element(mac).toHaveAttribute('aria-selected', 'false');
-	});
-
-	it('送信先を覚えられなければ、チェックを戻して知らせる', async () => {
-		settings.current = { ...view(), devices: [device] };
-		invoked.mockImplementation((command) => {
-			if (command === 'set_send_targets') return Promise.reject('permission denied');
-			return Promise.resolve(command === 'probe_devices' ? ['ab'] : undefined);
-		});
-		const screen = await render(Page);
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-		const mac = screen.getByRole('option', { name: 'Mac' });
-		await expect.element(mac).not.toHaveAttribute('aria-disabled', 'true');
-		await userEvent.keyboard('{ }');
-
-		await expect.element(screen.getByText(m.draft_send_targets_save_failed())).toBeVisible();
-		await expect.element(mac).toHaveAttribute('aria-selected', 'true');
-	});
-
-	it('送信先の一覧を出したまま隠れたら、出し直したときは閉じて入力欄から始める', async () => {
-		const screen = await render(Page);
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-		const list = screen.getByRole('listbox', { name: m.draft_send_targets_list() });
-		await expect.element(list).toBeVisible();
-
-		emit(EVENTS.SHOWN);
-
-		await expect.poll(() => list.query()).toBeNull();
-		await expect.element(draftField(screen)).toHaveFocus();
-	});
-
-	it('画面の読み込み中に届いた下書きも、読み込み後に入れる', async () => {
-		pending = [{ from: 'Mac', text: '起動中に届いた' }];
-
-		const screen = await render(Page);
-
-		await expect.element(draftField(screen)).toHaveValue('起動中に届いた');
-	});
-
-	it('届いた下書きは、入力欄が空ならそのまま入れる', async () => {
-		const screen = await render(Page);
-
-		receive({ from: 'Mac', text: '届いた' });
-
-		await expect.element(draftField(screen)).toHaveValue('届いた');
-	});
-
-	it('書きかけがあれば帯で知らせ、挿入か破棄かを選ぶ', async () => {
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-		await textarea.fill('書きかけ');
-
-		receive({ from: 'Mac', text: '届いた' }, { from: 'Mac', text: '2通目' });
-
-		const notice = screen.getByText(m.draft_received({ device: 'Mac' }));
-		await expect.element(notice).toBeVisible();
-		await expect.element(textarea).toHaveValue('書きかけ');
-
-		await screen.getByRole('button', { name: m.draft_received_insert() }).click();
-		await expect.element(textarea).toHaveValue('書きかけ届いた');
-
-		// 2通目は、1通目を片付けてから知らせる
-		await screen.getByRole('button', { name: m.draft_received_discard() }).click();
-		await expect.element(textarea).toHaveValue('書きかけ届いた');
-		expect(notice.query()).toBeNull();
-	});
-});
-
 describe('下書きのボタン', () => {
 	beforeEach(() => {
 		invoked.mockImplementation((command) =>
@@ -1582,22 +1139,10 @@ describe('下書きのボタン', () => {
 });
 
 describe('キー操作', () => {
-	const device = { name: 'Mac', publicKey: 'ab', address: '', sendTo: true };
-
-	/** Rust 側に溜まっている、届いた下書き（take_received_drafts で渡す） */
-	let pending: { from: string; text: string }[] = [];
-
 	beforeEach(() => {
-		pending = [];
-		invoked.mockImplementation((command) => {
-			if (command === 'take_received_drafts') {
-				const drafts = pending;
-				pending = [];
-				return Promise.resolve(drafts);
-			}
-			if (command === 'probe_devices') return Promise.resolve(['ab']);
-			return Promise.resolve(command === 'commit' ? true : undefined);
-		});
+		invoked.mockImplementation((command) =>
+			Promise.resolve(command === 'commit' ? true : undefined)
+		);
 		settings.current = view();
 	});
 
@@ -1633,35 +1178,25 @@ describe('キー操作', () => {
 		await expect.element(textarea).toHaveValue('one\ntwo');
 	});
 
-	it('送信先の一覧を開くキーで一覧を出し、もう一度押すと閉じる', async () => {
-		settings.current = { ...view(), devices: [device] };
-		const screen = await render(Page);
-		await draftField(screen).click();
-
-		await userEvent.keyboard('{Meta>}l{/Meta}');
-		const list = screen.getByRole('dialog', { name: m.draft_send_targets_list() });
-		await expect.element(list).toBeVisible();
-
-		await userEvent.keyboard('{Meta>}l{/Meta}');
-		await expect.element(list).not.toBeInTheDocument();
-		await expect.element(draftField(screen)).toHaveFocus();
-	});
-
-	it('届いた下書きがなければ、差し込むキーと捨てるキーでは何もせず、既定の動作も止める', async () => {
+	it('今は使えない操作のキー（1行目が宛先でないときの実行）では何もせず、既定の動作も止める', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('draft');
 
-		for (const init of [
-			{ code: 'KeyI', key: 'i', metaKey: true },
-			{ code: 'Backspace', key: 'Backspace', metaKey: true, shiftKey: true }
-		]) {
-			const event = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true });
-			textarea.element().dispatchEvent(event);
-			// WebView の既定のキーに渡さない（WebView2 の Ctrl+J のように、下書きからフォーカスが外れることがある）
-			expect(event.defaultPrevented, init.code).toBe(true);
-		}
+		const event = new KeyboardEvent('keydown', {
+			code: 'Enter',
+			key: 'Enter',
+			metaKey: true,
+			shiftKey: true,
+			bubbles: true,
+			cancelable: true
+		});
+		textarea.element().dispatchEvent(event);
+
+		// WebView の既定のキーに渡さない（WebView2 の Ctrl+J のように、下書きからフォーカスが外れることがある）
+		expect(event.defaultPrevented).toBe(true);
 		await expect.element(textarea).toHaveValue('draft');
+		expect(commandsCalled()).not.toContain('commit');
 	});
 
 	it('読み込み直すキー（F5・Ctrl+R）は、入力欄でも一覧でも既定の動作を止め、下書きを残す', async () => {
@@ -1692,17 +1227,16 @@ describe('キー操作', () => {
 	});
 
 	it('一覧を開いている間も、ほかの操作のキーの既定の動作を止める', async () => {
-		settings.current = { ...view(), devices: [device] };
 		const screen = await render(Page);
 		await draftField(screen).click();
 		await userEvent.keyboard('{Meta>}k{/Meta}');
 		const search = snippetSearch(screen);
 		await expect.element(search).toHaveFocus();
 
-		// 送信先の一覧を開くキー。定型文の一覧の中では、一覧の操作でも閉じるキーでもない
+		// フォルダーを移る欄を出すキー。定型文の一覧の中では、一覧の操作でも閉じるキーでもない
 		const event = new KeyboardEvent('keydown', {
-			code: 'KeyL',
-			key: 'l',
+			code: 'KeyD',
+			key: 'd',
 			metaKey: true,
 			bubbles: true,
 			cancelable: true
@@ -1711,7 +1245,7 @@ describe('キー操作', () => {
 
 		expect(event.defaultPrevented).toBe(true);
 		await expect.element(search).toBeVisible();
-		expect(invoked).not.toHaveBeenCalledWith('probe_devices');
+		expect(commandsCalled()).not.toContain('current_folder');
 	});
 
 	it('余白をクリックして入力欄からフォーカスが外れても、Esc で隠し、操作のキーでコピーする', async () => {
@@ -1726,36 +1260,6 @@ describe('キー操作', () => {
 
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('commit', { text: 'git status' }));
-	});
-
-	it('デバイスが見つかっていなければ、送信先の一覧を開くキーでは何もしない', async () => {
-		const screen = await render(Page);
-		await draftField(screen).click();
-
-		await userEvent.keyboard('{Meta>}l{/Meta}');
-
-		expect(screen.getByRole('dialog').query()).toBeNull();
-		expect(invoked).not.toHaveBeenCalledWith('probe_devices');
-	});
-
-	it('届いた下書きを、差し込むキーで差し込み、捨てるキーで捨てる', async () => {
-		settings.current = { ...view(), devices: [device] };
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-		await textarea.fill('draft ');
-
-		pending.push({ from: 'Mac', text: 'hello' }, { from: 'Mac', text: 'bye' });
-		emit(EVENTS.DRAFT_RECEIVED);
-		await expect.element(screen.getByText(m.draft_received({ device: 'Mac' }))).toBeVisible();
-
-		await userEvent.keyboard('{Meta>}i{/Meta}');
-		await expect.element(textarea).toHaveValue('draft hello');
-
-		await userEvent.keyboard('{Meta>}{Shift>}{Backspace}{/Shift}{/Meta}');
-		await expect
-			.element(screen.getByText(m.draft_received({ device: 'Mac' })))
-			.not.toBeInTheDocument();
-		await expect.element(textarea).toHaveValue('draft hello');
 	});
 });
 
@@ -1788,7 +1292,7 @@ describe('宛先へ出す', () => {
 					actionRuns.push({ args: args as RunArgs, resolve, reject })
 				);
 			}
-			return Promise.resolve(command === 'commit' || command === 'send_draft' ? true : undefined);
+			return Promise.resolve(command === 'commit' ? true : undefined);
 		});
 		settings.current = {
 			...view(),
@@ -1810,8 +1314,7 @@ describe('宛先へ出す', () => {
 		return actionRuns[0];
 	}
 
-	it('1行目が @sh のテキストは、送るキーで2行目から下を渡して実行し、結果でテキスト全体を置き換えて、出す前のテキストを履歴に積む', async () => {
-		// つないだデバイスが無くても、1行目が `@ai`・`@sh` なら送るボタンを「実行」の名前で出し、キーも効く
+	it('1行目が @sh のテキストは、実行のキーで2行目から下を渡して実行し、結果でテキスト全体を置き換えて、出す前のテキストを履歴に積む', async () => {
 		settings.current = view();
 		const screen = await render(Page);
 		const textarea = draftField(screen);
@@ -1832,41 +1335,22 @@ describe('宛先へ出す', () => {
 		actionRuns[0].resolve('a\nb');
 
 		await expect.element(textarea).toHaveValue('a\nb');
-		expect(commandsCalled()).not.toContain('send_draft');
 		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
 		await userEvent.keyboard('{ArrowUp}');
 		await expect.element(textarea).toHaveValue('@sh sort\nb\na');
 	});
 
-	it('1行目がデバイスの名前のテキストは、送るキーで2行目から下（前の空行を除く）をそのデバイスへ送る', async () => {
-		settings.current = {
-			...view(),
-			devices: [
-				{ name: 'Mac', publicKey: 'ab12', address: '', sendTo: true },
-				{ name: 'AERO-13BE', publicKey: 'ef34', address: '', sendTo: false }
-			]
-		};
+	it('1行目が @ai・@sh でないテキストでは、実行のボタンを出さず、実行のキーでも何もしない', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
-		await textarea.fill('@AERO-13BE\n\nあとで見る\nhttps://example.com');
+		await textarea.fill('@all\nあとで見る');
 
 		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
 
-		await expect.element(textarea).toHaveValue('');
-		expect(callsOf(invoked, 'send_draft')).toEqual([
-			['send_draft', { text: 'あとで見る\nhttps://example.com', targets: ['ef34'] }]
-		]);
-		expect(commandsCalled()).not.toContain('run_action');
-	});
-
-	it('つないだデバイスが無いときに @all を送るキーで出すと、送らずに知らせる', async () => {
-		const screen = await render(Page);
-		await draftField(screen).fill('@all\nあとで見る');
-
-		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
-
-		await expect.element(screen.getByText(m.draft_address_no_device())).toBeVisible();
-		expect(commandsCalled()).not.toContain('send_draft');
+		expect(screen.getByRole('button', { name: m.draft_run(), exact: true }).query()).toBeNull();
+		await expect.element(textarea).toHaveValue('@all\nあとで見る');
+		expect(commandsCalled()).not.toContain('begin_action');
+		expect(commandsCalled()).not.toContain('commit');
 	});
 
 	it('1行目で @ を打つと宛先の候補を出し、Esc では候補だけを閉じ、Tab で選んだ候補を1行目に入れる', async () => {
@@ -2281,33 +1765,6 @@ describe('宛先へ出す', () => {
 		await userEvent.keyboard('{ArrowUp}');
 		await tick();
 		await expect.element(textarea).toHaveValue('git status');
-	});
-
-	it('実行している間に届いた下書きは、終わってから知らせる', async () => {
-		const device = { name: 'Mac', publicKey: 'aa', address: '192.168.0.2', sendTo: true };
-		settings.current = { ...settings.current!, devices: [device] };
-		invoked.mockImplementation((command, args) => {
-			if (command === 'take_received_drafts')
-				return Promise.resolve([{ from: 'Mac', text: 'hello' }]);
-			if (command === 'begin_action') return Promise.resolve(nextRequest++);
-			if (command === 'run_action') {
-				return new Promise((resolve, reject) =>
-					actionRuns.push({ args: args as RunArgs, resolve, reject })
-				);
-			}
-			return Promise.resolve(undefined);
-		});
-		const screen = await render(Page);
-		await openAt(screen, 'あいう');
-		const call = await pick();
-
-		emit(EVENTS.DRAFT_RECEIVED);
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		await tick();
-		expect(screen.getByText(m.draft_received({ device: 'Mac' })).elements()).toHaveLength(0);
-
-		call.resolve('アイウ');
-		await expect.element(screen.getByText(m.draft_received({ device: 'Mac' }))).toBeVisible();
 	});
 });
 

@@ -1,8 +1,8 @@
-//! 同じ LAN の、確認コードで追加した自分のデバイスへ、下書きを送る（docs/lan.md「同じ LAN の自分のデバイスへ送る」）。
+//! 同じ LAN の自分のデバイスを確認コードで追加し、共有の鍵を渡す（docs/lan.md）。
 //! 相手は UDP のブロードキャストの名乗りで見つける。mDNS は、無線の端末どうしのマルチキャストを中継しないアクセスポイントで届かないため使わない。
 //! ペアリングは、片方に出す 6 桁のコードから SPAKE2 で鍵を作り、それを事前共有鍵にした Noise の XXpsk2 で共有の鍵を渡す。
 //! コードをそのまま鍵にしないのは、やり取りを盗み見た相手に総当たりで当てられるため。
-//! 送るのは共有の鍵から導いた事前共有鍵を使う Noise の IKpsk1 で、同じ鍵の相手とだけつながる。
+//! 生存確認は共有の鍵から導いた事前共有鍵を使う Noise の IKpsk1 で、同じ鍵の相手とだけ握手が通る。
 
 use std::{
     collections::{HashMap, HashSet},
@@ -31,7 +31,7 @@ use crate::{
 
 /// このデバイスの鍵を置くファイルの名前（設定ファイルと同じフォルダー）。設定ファイルは人に見せることがあるので分ける
 pub const KEY_FILE_NAME: &str = "device-key";
-/// 下書きと組み合わせのやり取りを受ける TCP のポート。アドレスを手で入れる道を後で足すときに、ポートまで入れさせないよう固定する
+/// 組み合わせと生存確認を受ける TCP のポート。アドレスを手で入れる道を後で足すときに、ポートまで入れさせないよう固定する
 const TCP_PORT: u16 = 47626;
 /// 名乗りを送り合う UDP のポート
 const UDP_PORT: u16 = 47625;
@@ -66,47 +66,36 @@ fn hello_interval(offering: bool, wants_pairing: bool) -> Duration {
 const JOIN_WAIT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
-/// 1回に送れる下書きの大きさ（UTF-8 のバイト数）
-const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const PAIR_PATTERN: &str = "Noise_XXpsk2_25519_ChaChaPoly_BLAKE2s";
 // ADR: 事前共有鍵は1通目に混ぜる（psk1）。psk2 だと、受ける側は握手を終えても、相手が鍵を持つかを
 // 最初の本文を読むまで確かめられず、鍵を持たない相手をデバイスの一覧に足してしまう
-const SEND_PATTERN: &str = "Noise_IKpsk1_25519_ChaChaPoly_BLAKE2s";
+const PING_PATTERN: &str = "Noise_IKpsk1_25519_ChaChaPoly_BLAKE2s";
 const SPAKE2_IDENTITY: &[u8] = b"mawok pairing v1";
-/// Noise の1通の上限と、暗号化で付く認証タグの長さ
+/// Noise の1通の上限
 const NOISE_MAX: usize = 65535;
-const TAG_LEN: usize = 16;
 /// つないだ直後の1バイトで、何をしに来たかを伝える
 const KIND_PAIR: u8 = 1;
-const KIND_SEND: u8 = 2;
 /// 生存確認。握手だけして切る
 const KIND_PING: u8 = 3;
-/// 受け取った側が、最後まで受け取れたことを返す印
+/// 共有の鍵を受け取った側が、鍵を置けたことを返す印
 const ACK: &[u8] = b"ok";
 const REJECT_KEY_MISMATCH: &[u8] = b"key_mismatch";
 pub const ACCOUNT_TAG_LEN: usize = 32;
 
 type Result<T> = std::result::Result<T, String>;
 
-/// 組み合わせと送信の失敗の種類。画面は符号から、何をすればよいかの案内を出す（src/lib/lan-errors.ts）
+/// 組み合わせの失敗の種類。画面は符号から、何をすればよいかの案内を出す（src/lib/lan-errors.ts）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Failure {
-    /// 追加したデバイスがない
-    NoDevice,
-    /// 見つけたデバイスはあるが、送信先に選んだデバイスがない
-    NoTarget,
-    /// 相手とつながらない（場所が分からない、つなげない、コードを出している相手が見つからない）。
+    /// 相手とつながらない（つなげない、コードを出している相手が見つからない）。
     /// 原因はネットワークや OS しだいで、どれでも確かめる所は同じなので分けない
     Unreachable,
-    /// つながったが、相手が受け取らなかった
-    Refused,
     /// このデバイスの共有の鍵が、窓口が覚えている鍵と違うか、まだ無い。同期しているデバイスから受け取り直す
     NeedsPairing,
     /// Pro のデバイスで、窓口と照らした共有の鍵がまだ無い（起動の直後、窓口へつながらない）
     NotReady,
     /// 受け取った共有の鍵が、窓口が覚えている鍵と違う
     KeyMismatch,
-    TooLong,
     /// 入れたコードが6桁の数字でない
     BadCode,
     /// コードが違うか、もう使えない
@@ -119,14 +108,10 @@ impl Failure {
     /// 画面に渡す符号。src/lib/lan-errors.ts の MESSAGES と揃える
     pub fn code(self) -> &'static str {
         match self {
-            Self::NoDevice => "lan.no_device",
-            Self::NoTarget => "lan.no_target",
             Self::Unreachable => "lan.unreachable",
-            Self::Refused => "lan.refused",
             Self::NeedsPairing => "lan.needs_pairing",
             Self::NotReady => "lan.not_ready",
             Self::KeyMismatch => "lan.key_mismatch",
-            Self::TooLong => "lan.too_long",
             Self::BadCode => "lan.bad_code",
             Self::WrongCode => "lan.wrong_code",
             Self::Internal => "lan.internal",
@@ -182,8 +167,6 @@ pub trait Host: Send + Sync + 'static {
     fn on_pairing_code_ended(&self);
     /// 新しいコードを出した。設定画面は、取り逃がしたときだけ pairing_offer を読み直す。
     fn on_pairing_code_offered(&self, offer: PairingOffer);
-    /// 追加済みのデバイスから下書きが届いた。受け入れたら true。
-    fn on_received(&self, from: &[u8], text: String) -> bool;
     /// このデバイスが持つ共有の鍵。
     fn shared_key(&self) -> Option<[u8; 32]>;
     /// 確認コードを表示した側が渡す共有の鍵。まだ無ければ作って置く。置けないとき、Pro で窓口と照らした鍵がまだ無いときは None。
@@ -221,7 +204,7 @@ pub fn device_name() -> String {
 }
 
 fn generate_key() -> Result<DeviceKey> {
-    let params = SEND_PATTERN.parse().map_err(|error| format!("{error:?}"))?;
+    let params = PING_PATTERN.parse().map_err(|error| format!("{error:?}"))?;
     let keypair = Builder::new(params)
         .generate_keypair()
         .map_err(|error| format!("generate key: {error}"))?;
@@ -539,14 +522,14 @@ fn pair_as_joiner(
     Ok(peer)
 }
 
-/// 送る側の握手。同じ共有の鍵を持つ相手だけが通る。
-fn handshake_as_sender(
+/// 生存確認を始める側の握手。同じ共有の鍵を持つ相手だけが通る。
+fn handshake_as_prober(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
     remote_public: &[u8],
     psk: &[u8; 32],
 ) -> Result<TransportState> {
-    let mut noise = builder(SEND_PATTERN)?
+    let mut noise = builder(PING_PATTERN)?
         .local_private_key(&key.private)
         .and_then(|builder| builder.remote_public_key(remote_public))
         .and_then(|builder| builder.psk(1, psk))
@@ -557,13 +540,13 @@ fn handshake_as_sender(
     into_transport(noise)
 }
 
-/// 受ける側の握手。公開鍵をまだ覚えていなくても、同じ共有の鍵を持つ相手なら通す。
-fn handshake_as_receiver(
+/// 生存確認を受ける側の握手。公開鍵をまだ覚えていなくても、同じ共有の鍵を持つ相手なら通す。相手の公開鍵も返す
+fn handshake_as_probed(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
     psk: &[u8; 32],
 ) -> Result<(TransportState, Vec<u8>)> {
-    let mut noise = builder(SEND_PATTERN)?
+    let mut noise = builder(PING_PATTERN)?
         .local_private_key(&key.private)
         .and_then(|builder| builder.psk(1, psk))
         .and_then(Builder::build_responder)
@@ -578,70 +561,14 @@ fn handshake_as_receiver(
     Ok((transport, remote))
 }
 
-/// 下書きを送る。相手が最後まで受け取ったと返すまで待つ
-fn send_text(
-    stream: &mut (impl Read + Write),
-    key: &DeviceKey,
-    remote_public: &[u8],
-    psk: &[u8; 32],
-    text: &str,
-) -> std::result::Result<(), LanError> {
-    if text.len() > MAX_TEXT_BYTES {
-        return Err(LanError::new(
-            Failure::TooLong,
-            "the draft is too long to send",
-        ));
-    }
-    let mut transport =
-        handshake_as_sender(stream, key, remote_public, psk).fail_as(Failure::Refused)?;
-    // 1通に入りきらない分は分けて送り、空の1通で終わりを伝える
-    for chunk in text.as_bytes().chunks(NOISE_MAX - TAG_LEN) {
-        transport_write(&mut transport, chunk, stream).fail_as(Failure::Refused)?;
-    }
-    transport_write(&mut transport, &[], stream).fail_as(Failure::Refused)?;
-    if transport_read(&mut transport, stream).fail_as(Failure::Refused)? != ACK {
-        return Err(LanError::new(Failure::Refused, "unexpected reply"));
-    }
-    Ok(())
-}
-
-/// 下書きを受け取る。握手を通った（同じ共有の鍵を持つ）デバイスからだけ、中身を受け取る。
-/// 受け取り終えたら `deliver` に渡し、受け入れられた（true）ときだけ相手に受け取れたと返す。送ってきた相手の公開鍵を返す
-fn receive_text(
-    stream: &mut (impl Read + Write),
-    key: &DeviceKey,
-    psk: &[u8; 32],
-    deliver: impl FnOnce(&[u8], String) -> bool,
-) -> Result<Vec<u8>> {
-    let (mut transport, remote) = handshake_as_receiver(stream, key, psk)?;
-    let mut bytes = Vec::new();
-    loop {
-        let chunk = transport_read(&mut transport, stream)?;
-        if chunk.is_empty() {
-            break;
-        }
-        bytes.extend_from_slice(&chunk);
-        if bytes.len() > MAX_TEXT_BYTES {
-            return Err("the draft is too long".to_string());
-        }
-    }
-    let text = String::from_utf8(bytes).map_err(|_| "the draft is not UTF-8".to_string())?;
-    // 受け入れられなければ、相手へ完了を返さない
-    if !deliver(&remote, text) {
-        return Err("the device was unpaired while receiving".to_string());
-    }
-    transport_write(&mut transport, ACK, stream)?;
-    Ok(remote)
-}
-
-/// 生存確認。握手が通れば、相手は同じ共有の鍵を持っていて、送れる。相手が名乗った名前を返す
+/// 生存確認。握手が通れば、相手は同じ共有の鍵を持っている。相手が名乗った名前を返す
 fn probe_peer(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
     remote_public: &[u8],
     psk: &[u8; 32],
 ) -> Result<Vec<u8>> {
-    let mut transport = handshake_as_sender(stream, key, remote_public, psk)?;
+    let mut transport = handshake_as_prober(stream, key, remote_public, psk)?;
     transport_read(&mut transport, stream)
 }
 
@@ -787,7 +714,7 @@ pub struct Lan {
     pairing: AtomicBool,
     devices_open: AtomicBool,
     wanted: Mutex<Option<Instant>>,
-    /// 握手が通ったデバイスを、名乗りや受け取りで最後に見た場所（公開鍵ごと）
+    /// 握手が通ったデバイスを、名乗りや生存確認で最後に見た場所（公開鍵ごと）
     seen: Mutex<HashMap<Vec<u8>, IpAddr>>,
     /// UDP の名乗りだけを根拠に失敗した相手へ、しばらく握手を試さない。
     rejected: Mutex<HashMap<Vec<u8>, Instant>>,
@@ -975,22 +902,10 @@ impl Lan {
                 self.refresh();
                 result
             }
-            KIND_SEND => {
-                let shared_key = self.host.shared_key().ok_or("no shared key")?;
-                let from = receive_text(
-                    stream,
-                    &key,
-                    &crate::shared_key::lan_psk(&shared_key),
-                    |remote, text| self.host.on_received(remote, text),
-                )?;
-                info!("lan: received a draft");
-                self.start_discovery(from, ip, DiscoverySource::Authenticated);
-                Ok(())
-            }
             KIND_PING => {
                 let shared_key = self.host.shared_key().ok_or("no shared key")?;
                 let (mut transport, from) =
-                    handshake_as_receiver(stream, &key, &crate::shared_key::lan_psk(&shared_key))?;
+                    handshake_as_probed(stream, &key, &crate::shared_key::lan_psk(&shared_key))?;
                 transport_write(&mut transport, self.name.as_bytes(), stream)?;
                 self.start_discovery(from, ip, DiscoverySource::Authenticated);
                 Ok(())
@@ -1401,7 +1316,7 @@ impl Lan {
                 if remembered {
                     Ok(())
                 } else {
-                    // 覚えられなければ送れも受け取れもしないので、組み合わせられたとは返さない
+                    // 覚えられなければ一覧に出ないので、組み合わせられたとは返さない
                     self.refresh();
                     Err(LanError::new(
                         Failure::Internal,
@@ -1429,83 +1344,6 @@ impl Lan {
             thread::sleep(POLL_INTERVAL);
         }
     }
-
-    /// 追加済みのデバイスへ下書きを送る。名乗りで見た場所がなければ、覚えていた場所へ送る。送れた場所を返す
-    pub fn send(
-        &self,
-        remote_public: &[u8],
-        saved: Option<IpAddr>,
-        shared_key: &[u8; 32],
-        text: &str,
-    ) -> std::result::Result<IpAddr, LanError> {
-        // 送れない長さなら、相手につなぐ前にやめる
-        if text.len() > MAX_TEXT_BYTES {
-            return Err(LanError::new(
-                Failure::TooLong,
-                "the draft is too long to send",
-            ));
-        }
-        let key = self.key().fail_as(Failure::Internal)?;
-        let ip = self.locate(remote_public, saved)?;
-        let mut stream = connect_for(ip, KIND_SEND)?;
-        // つながった後に切られたのは、相手が受け取らなかったとみなす
-        send_text(
-            &mut stream,
-            &key,
-            remote_public,
-            &crate::shared_key::lan_psk(shared_key),
-            text,
-        )?;
-        self.remember_peer_address(remote_public, ip);
-        Ok(ip)
-    }
-
-    /// 追加済みのデバイスが動いていて、つながるかを確かめる（握手まで）。つながった場所を返す。
-    /// 握手が通らなかったときも、送れないので、つながらないとみなす
-    pub fn probe(
-        &self,
-        remote_public: &[u8],
-        saved: Option<IpAddr>,
-        shared_key: &[u8; 32],
-    ) -> std::result::Result<IpAddr, LanError> {
-        let key = self.key().fail_as(Failure::Internal)?;
-        let ip = self.locate(remote_public, saved)?;
-        let mut stream = connect_for(ip, KIND_PING)?;
-        probe_peer(
-            &mut stream,
-            &key,
-            remote_public,
-            &crate::shared_key::lan_psk(shared_key),
-        )
-        .fail_as(Failure::Unreachable)?;
-        self.remember_peer_address(remote_public, ip);
-        Ok(ip)
-    }
-
-    fn remember_peer_address(&self, remote_public: &[u8], ip: IpAddr) {
-        self.seen.lock().unwrap().insert(remote_public.to_vec(), ip);
-        self.host.on_device_address_seen(remote_public, ip);
-    }
-
-    /// 追加済みのデバイスの場所。名乗りで見た場所がなければ、覚えていた場所
-    fn locate(
-        &self,
-        remote_public: &[u8],
-        saved: Option<IpAddr>,
-    ) -> std::result::Result<IpAddr, LanError> {
-        self.seen
-            .lock()
-            .unwrap()
-            .get(remote_public)
-            .copied()
-            .or(saved)
-            .ok_or_else(|| {
-                LanError::new(
-                    Failure::Unreachable,
-                    "the device hasn't been found on the network",
-                )
-            })
-    }
 }
 
 #[cfg(test)]
@@ -1522,10 +1360,6 @@ mod tests {
         fn on_pairing_code_ended(&self) {}
 
         fn on_pairing_code_offered(&self, _: PairingOffer) {}
-
-        fn on_received(&self, _: &[u8], _: String) -> bool {
-            true
-        }
 
         fn pro_account_tag(&self) -> Option<[u8; ACCOUNT_TAG_LEN]> {
             Some(ACCOUNT_TAG)
@@ -1571,10 +1405,6 @@ mod tests {
 
         fn on_pairing_code_offered(&self, offer: PairingOffer) {
             self.offered.lock().unwrap().push(offer);
-        }
-
-        fn on_received(&self, _: &[u8], _: String) -> bool {
-            true
         }
 
         fn pro_account_tag(&self) -> Option<[u8; ACCOUNT_TAG_LEN]> {
@@ -1724,29 +1554,6 @@ mod tests {
     }
 
     #[test]
-    fn sends_a_draft_to_a_device_with_the_same_shared_key() {
-        let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
-        let (mut client, mut server) = connected();
-        let receiver_key = receiver.clone();
-        let received = thread::spawn(move || {
-            let mut delivered = None;
-            let from = receive_text(&mut server, &receiver_key, &LAN_PSK, |_, text| {
-                delivered = Some(text);
-                true
-            });
-            (from, delivered)
-        });
-        // 1通に入りきらない長さでも、分けて送って元に戻る
-        let text = format!("{}\n末尾", "あ".repeat(30_000));
-
-        send_text(&mut client, &sender, &receiver.public, &LAN_PSK, &text).unwrap();
-
-        let (from, delivered) = received.join().unwrap();
-        assert_eq!(from.unwrap(), sender.public);
-        assert_eq!(delivered, Some(text));
-    }
-
-    #[test]
     fn accepts_an_unremembered_device_only_with_the_same_shared_key() {
         let (sender, receiver, stranger) = (
             generate_key().unwrap(),
@@ -1758,86 +1565,28 @@ mod tests {
         let (mut client, mut server) = connected();
         let receiver_key = receiver.clone();
         let answered = thread::spawn(move || {
-            handshake_as_receiver(&mut server, &receiver_key, &LAN_PSK).map(|(_, remote)| remote)
+            handshake_as_probed(&mut server, &receiver_key, &LAN_PSK).map(|(_, remote)| remote)
         });
-        assert!(handshake_as_sender(&mut client, &sender, &receiver.public, &LAN_PSK).is_ok());
+        assert!(handshake_as_prober(&mut client, &sender, &receiver.public, &LAN_PSK).is_ok());
         assert_eq!(answered.join().unwrap().unwrap(), sender.public);
 
         // 組み合わせていない相手とは、握手が通らない
         let (mut client, mut server) = connected();
         let receiver_key = receiver.clone();
         let refused = thread::spawn(move || {
-            handshake_as_receiver(&mut server, &receiver_key, &LAN_PSK).map(|_| ())
+            handshake_as_probed(&mut server, &receiver_key, &LAN_PSK).map(|_| ())
         });
-        assert!(handshake_as_sender(&mut client, &stranger, &receiver.public, &[4; 32]).is_err());
+        assert!(handshake_as_prober(&mut client, &stranger, &receiver.public, &[4; 32]).is_err());
         assert!(refused.join().unwrap().is_err());
-    }
-
-    #[test]
-    fn refuses_a_device_with_a_different_shared_key() {
-        let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
-        let (mut client, mut server) = connected();
-        let receiver_public = receiver.public.clone();
-        let received =
-            thread::spawn(move || receive_text(&mut server, &receiver, &LAN_PSK, |_, _| true));
-
-        let sent = send_text(&mut client, &sender, &receiver_public, &[4; 32], "secret");
-
-        assert!(sent.is_err());
-        assert!(received.join().unwrap().is_err());
-    }
-
-    #[test]
-    fn refuses_when_the_receiver_does_not_accept_the_text() {
-        let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
-        let (mut client, mut server) = connected();
-        let receiver_public = receiver.public.clone();
-        let deliveries = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let counted = Arc::clone(&deliveries);
-        // 握手のときは組み合わせてあり、受け取り終えて渡すときには解除されていて受け入れられない
-        let received = thread::spawn(move || {
-            receive_text(&mut server, &receiver, &LAN_PSK, |_, _| {
-                counted.fetch_add(1, Ordering::Relaxed);
-                false
-            })
-        });
-
-        let sent = send_text(&mut client, &sender, &receiver_public, &LAN_PSK, "secret");
-
-        // 受け入れられなければ、相手には受け取れたと返さない
-        assert!(sent.is_err());
-        assert!(received.join().unwrap().is_err());
-        assert_eq!(deliveries.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn refuses_a_sender_with_a_different_key_before_receiving_its_text() {
-        let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
-        let (mut client, mut server) = connected();
-        let receiver_public = receiver.public.clone();
-        let received = thread::spawn(move || {
-            receive_text(&mut server, &receiver, &LAN_PSK, |_, _| {
-                panic!("a mismatched key must not deliver text")
-            })
-        });
-
-        let sent = send_text(&mut client, &sender, &receiver_public, &[8; 32], "secret");
-
-        assert_eq!(sent.unwrap_err().failure, Failure::Refused);
-        assert!(received.join().unwrap().is_err());
     }
 
     #[test]
     fn failure_codes_are_distinct() {
         let failures = [
-            Failure::NoDevice,
-            Failure::NoTarget,
             Failure::Unreachable,
-            Failure::Refused,
             Failure::NeedsPairing,
             Failure::NotReady,
             Failure::KeyMismatch,
-            Failure::TooLong,
             Failure::BadCode,
             Failure::WrongCode,
             Failure::Internal,

@@ -1,1 +1,1 @@
-"NSLocalNetworkUsageDescription" = "追加した自分のデバイスとテキストを送り合うために、同じネットワークのデバイスを探します。";
+"NSLocalNetworkUsageDescription" = "自分のデバイスを追加して設定と履歴を同期するために、同じネットワークのデバイスを探します。";

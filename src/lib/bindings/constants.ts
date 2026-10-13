@@ -6,14 +6,13 @@ export const CONSTANTS = {
 	DEFAULT_DRAFT_HISTORY_SIZE: 50,
 	MAX_DRAFT_HISTORY_SIZE: 100,
 	AI_SERVICES: ["none", "mawok", "gemini", "anthropic", "openai"],
-	DRAFT_ACTIONS: ["copy", "send", "settings", "snippets", "historyOlder", "historyNewer", "sendTargets", "insertReceived", "discardReceived", "changeFolder"],
+	DRAFT_ACTIONS: ["copy", "run", "settings", "snippets", "historyOlder", "historyNewer", "changeFolder"],
 	SUPPORTED_CODES: ["Digit0", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "KeyA", "KeyB", "KeyC", "KeyD", "KeyE", "KeyF", "KeyG", "KeyH", "KeyI", "KeyJ", "KeyK", "KeyL", "KeyM", "KeyN", "KeyO", "KeyP", "KeyQ", "KeyR", "KeyS", "KeyT", "KeyU", "KeyV", "KeyW", "KeyX", "KeyY", "KeyZ", "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "Backquote", "Backslash", "BracketLeft", "BracketRight", "Comma", "Equal", "Minus", "Period", "Quote", "Semicolon", "Slash", "Backspace", "CapsLock", "Enter", "Space", "Tab", "Delete", "End", "Home", "Insert", "PageDown", "PageUp", "Pause", "PrintScreen", "ScrollLock", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "NumLock", "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadEnter", "NumpadEqual", "NumpadMultiply", "NumpadSubtract", "Escape", "AudioVolumeDown", "AudioVolumeUp", "AudioVolumeMute", "MediaPlay", "MediaPause", "MediaPlayPause", "MediaStop", "MediaTrackNext", "MediaTrackPrevious"],
 	AI_PREFIX: "@ai",
 	SH_PREFIX: "@sh",
-	ALL_DEVICES: "@all",
 	NEW_SNIPPET: {"id":"","name":"","body":"","output":"replace","encoding":"utf-8","enabled":true,"sync":true},
 	SYNCABLE_SETTINGS: ["language", "theme", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "trim_trailing_whitespace", "punctuation_style", "char_widths", "exclude_from_clipboard_history", "text_font_family", "text_font_size", "text_color_light", "text_color_dark", "input_guidance", "ai_service", "ai_models"],
-	MODIFIED_SETTINGS: ["hotkey", "text_window_keys.copy", "text_window_keys.send", "text_window_keys.settings", "text_window_keys.snippets", "text_window_keys.historyOlder", "text_window_keys.historyNewer", "text_window_keys.sendTargets", "text_window_keys.insertReceived", "text_window_keys.discardReceived", "text_window_keys.changeFolder", "autostart", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "language", "theme", "text_font", "text_color", "input_guidance", "trim_trailing_whitespace", "exclude_from_clipboard_history", "char_width", "ai_service", "ai_models", "sync_settings", "sync_keys", "sync_replacements", "sync_snippets", "sync_history"]
+	MODIFIED_SETTINGS: ["hotkey", "text_window_keys.copy", "text_window_keys.run", "text_window_keys.settings", "text_window_keys.snippets", "text_window_keys.historyOlder", "text_window_keys.historyNewer", "text_window_keys.changeFolder", "autostart", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "language", "theme", "text_font", "text_color", "input_guidance", "trim_trailing_whitespace", "exclude_from_clipboard_history", "char_width", "ai_service", "ai_models", "sync_settings", "sync_keys", "sync_replacements", "sync_snippets", "sync_history"]
 } as const;
 
 export const EVENTS = {
@@ -26,7 +25,6 @@ export const EVENTS = {
 	AI_SETTINGS_REQUESTED: "ai-settings-requested",
 	PAIRING_CODE_ENDED: "pairing-code-ended",
 	PAIRING_CODE_OFFERED: "pairing-code-offered",
-	DRAFT_RECEIVED: "draft-received",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested",
 	DRAFT_HIDDEN: "draft-hidden",

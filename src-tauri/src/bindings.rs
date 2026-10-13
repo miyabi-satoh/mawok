@@ -31,7 +31,6 @@ export const CONSTANTS = {{\n\
 \tSUPPORTED_CODES: {:?},\n\
 \tAI_PREFIX: {:?},\n\
 \tSH_PREFIX: {:?},\n\
-\tALL_DEVICES: {:?},\n\
 \tNEW_SNIPPET: {},\n\
 \tSYNCABLE_SETTINGS: {:?},\n\
 \tMODIFIED_SETTINGS: {:?}\n\
@@ -46,7 +45,6 @@ export const EVENTS = {{\n\
 \tAI_SETTINGS_REQUESTED: {:?},\n\
 \tPAIRING_CODE_ENDED: {:?},\n\
 \tPAIRING_CODE_OFFERED: {:?},\n\
-\tDRAFT_RECEIVED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?},\n\
 \tDRAFT_HIDDEN: {:?},\n\
@@ -63,7 +61,6 @@ export const EVENTS = {{\n\
         draft_keys::SUPPORTED_CODES,
         actions::AI_PREFIX,
         actions::SH_PREFIX,
-        actions::ALL_DEVICES,
         new_snippet,
         sync::SYNCABLE_SETTING_NAMES,
         config::modified_setting_names(),
@@ -76,7 +73,6 @@ export const EVENTS = {{\n\
         events::AI_SETTINGS_REQUESTED,
         events::PAIRING_CODE_ENDED,
         events::PAIRING_CODE_OFFERED,
-        events::DRAFT_RECEIVED,
         events::SHOWN,
         events::HIDE_REQUESTED,
         events::DRAFT_HIDDEN,

@@ -175,8 +175,6 @@ icons:
     pnpm tauri icon src-tauri/assets/app-icon.svg --png 16,20,24,30,32,36,40,48,60,64,72,80,96,256 -o src-tauri/icons/msix
     pnpm tauri icon src-tauri/assets/tray.svg --png 32 -o src-tauri/icons/tray
     pnpm tauri icon src-tauri/assets/tray-template.svg --png 36 -o src-tauri/icons/tray-template
-    pnpm tauri icon src-tauri/assets/tray-received.svg --png 32 -o src-tauri/icons/tray-received
-    pnpm tauri icon src-tauri/assets/tray-template-received.svg --png 36 -o src-tauri/icons/tray-template-received
     node -e "for (const dir of ['android', 'ios']) require('fs').rmSync('src-tauri/icons/' + dir, { recursive: true, force: true })"
 
 # 要: cargo-about。→ docs/third-party-licenses.md「第三者のソフトウェア」

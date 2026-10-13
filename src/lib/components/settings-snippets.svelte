@@ -85,7 +85,7 @@
 						/>
 					{/snippet}
 					{#snippet body(row)}
-						{@const addressee = rowAddressee(row.body, view.devices)}
+						{@const addressee = rowAddressee(row.body)}
 						<div class="flex flex-col gap-1.5">
 							<span id="snippet-{row.key}-body" class="text-xs text-muted-foreground">
 								{m.settings_snippets_body()}
@@ -107,7 +107,7 @@
 							/>
 						</div>
 						<!-- 結果の出し方は `@ai`・`@sh` の行にだけ、文字コードは `@sh` の標準入力と標準出力にだけ効くので、効く行でだけ出す -->
-						{#if addressee?.kind === 'run'}
+						{#if addressee}
 							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 								<Field.Title
 									id="snippet-{row.key}-output"

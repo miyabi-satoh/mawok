@@ -34,7 +34,7 @@ export type Platform = GeneratedPlatform;
 export const DRAFT_ACTIONS = CONSTANTS.DRAFT_ACTIONS satisfies readonly GeneratedDraftAction[];
 
 /**
- * 設定画面に並べる順。下書きウィンドウのボタンの並び（上の行の履歴、下の列の左から右、届いた下書きの知らせ）に合わせる。
+ * 設定画面に並べる順。下書きウィンドウのボタンの並び（上の行の履歴、下の列の左から右）に合わせる。
  * 重なったときの優先の順（DRAFT_ACTIONS）とは別に持つ
  */
 export const DRAFT_ACTIONS_IN_SETTINGS = [
@@ -43,11 +43,8 @@ export const DRAFT_ACTIONS_IN_SETTINGS = [
 	'settings',
 	'snippets',
 	'changeFolder',
-	'send',
-	'sendTargets',
-	'copy',
-	'insertReceived',
-	'discardReceived'
+	'run',
+	'copy'
 ] as const satisfies readonly GeneratedDraftAction[];
 
 export type DraftAction = GeneratedDraftAction;
@@ -85,14 +82,11 @@ export function toDraftKey(event: KeyCombo, platform: Platform): string | null {
 export function draftActionLabel(action: DraftAction): string {
 	return {
 		copy: m.settings_key_copy,
-		send: m.settings_key_send,
+		run: m.settings_key_run,
 		settings: m.settings_key_settings,
 		snippets: m.settings_key_snippets,
 		historyOlder: m.settings_key_historyOlder,
 		historyNewer: m.settings_key_historyNewer,
-		sendTargets: m.settings_key_sendTargets,
-		insertReceived: m.settings_key_insertReceived,
-		discardReceived: m.settings_key_discardReceived,
 		changeFolder: m.settings_key_changeFolder
 	}[action]();
 }

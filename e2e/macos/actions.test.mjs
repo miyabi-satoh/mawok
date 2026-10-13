@@ -212,7 +212,7 @@ test.describe('macOS: コマンドの定型文', () => {
 		await clearAndHideDraft();
 	});
 
-	test('1行目に `@sh` で書いたコマンドを、送るキーで、登録しなくても実行できる (31.)', async () => {
+	test('1行目に `@sh` で書いたコマンドを、実行のキーで、登録しなくても実行できる (31.)', async () => {
 		await showDraftWith('@sh wc -l\nabc', { paste: true });
 		await keyCode(KEY.return, ['command down', 'shift down']);
 		await waitFor(draftValue, (value) => value.trim() === '1', {
