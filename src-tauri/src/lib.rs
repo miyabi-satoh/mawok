@@ -25,6 +25,7 @@ mod menu_tracking;
 mod package;
 mod placement;
 mod pro;
+mod profile;
 mod secrets;
 mod shared_key;
 mod sync;
@@ -5280,8 +5281,13 @@ pub fn run() {
         .on_web_content_process_terminate(diagnostics::web_content_process_terminated)
         .menu(macos_app_menu);
 
+    // 識別子が、設定・履歴・ログのフォルダーと単一起動の見分けを決める
+    let mut context = tauri::generate_context!();
+    let identifier = profile::scoped(&context.config().identifier);
+    context.config_mut().identifier = identifier;
+
     builder
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(
             |#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] app, event| match event

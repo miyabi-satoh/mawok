@@ -13,6 +13,12 @@ const draftWindow = tauriConf.app.windows.find((w) => w.label === 'main');
 
 /** 設定や履歴のフォルダー名になる、アプリの識別子 */
 export const APP_IDENTIFIER = tauriConf.identifier;
+// 自動の確認は、常用の Mawok と設定・履歴・ログ・資格情報の置き場を分けて起動する (src-tauri/src/profile.rs)。
+// その機でサインインしているアカウントで同期すると、テストの設定が窓口とほかのデバイスへ書かれるため
+export const PROFILE_ENV = 'MAWOK_PROFILE';
+export const PROFILE = 'e2e';
+/** プロファイルを分けて起動したときの、設定や履歴のフォルダー名 */
+export const PROFILE_IDENTIFIER = `${APP_IDENTIFIER}.${PROFILE}`;
 /** アプリの版番号 */
 export const APP_VERSION = tauriConf.version;
 

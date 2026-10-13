@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { APP_IDENTIFIER } from '../lib/app-conf.mjs';
+import { PROFILE_IDENTIFIER } from '../lib/app-conf.mjs';
 import {
 	brokenConfigCopies,
 	closeFinderWindow,
@@ -68,21 +68,21 @@ test.describe('macOS: 設定ファイル', () => {
 	test('設定の「Finder で表示」で、設定フォルダーが Finder で開き、config.toml が選ばれている', async () => {
 		await relaunchWithTestConfig('language = "ja"\n');
 		// 前から開いていた設定フォルダーのウィンドウは、利用者のものなので閉じない
-		const openedBefore = (await finderWindowNames()).includes(APP_IDENTIFIER);
+		const openedBefore = (await finderWindowNames()).includes(PROFILE_IDENTIFIER);
 		await openSettings('このアプリについて', 'Finder で表示');
 		await pressInSettings('AXButton', 'Finder で表示');
 		try {
 			await waitFor(frontmostApp, (front) => front === 'Finder', { label: 'Finder が前面に出る' });
 			assert.deepEqual(
 				await waitFor(
-					() => finderSelection(APP_IDENTIFIER),
+					() => finderSelection(PROFILE_IDENTIFIER),
 					(selected) => selected !== null,
 					{ label: '設定フォルダーの Finder のウィンドウ' }
 				),
 				['config.toml']
 			);
 		} finally {
-			if (!openedBefore) await closeFinderWindow(APP_IDENTIFIER);
+			if (!openedBefore) await closeFinderWindow(PROFILE_IDENTIFIER);
 		}
 	});
 });

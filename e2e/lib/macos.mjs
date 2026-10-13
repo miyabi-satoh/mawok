@@ -12,6 +12,9 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
 	APP_IDENTIFIER,
+	PROFILE,
+	PROFILE_ENV,
+	PROFILE_IDENTIFIER,
 	DRAFT_TITLE,
 	SETTINGS_TITLE,
 	SETTINGS_TITLES,
@@ -32,10 +35,12 @@ const execFileAsync = promisify(execFile);
 const APP_BUNDLE = process.env.MAWOK_APP ?? '/Applications/Mawok.app';
 const PROCESS_NAME = 'mawok';
 
-const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', APP_IDENTIFIER);
+const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', PROFILE_IDENTIFIER);
+// `open` は自分の環境変数を渡さないので、起動のたびに渡す
+const OPEN_APP = ['--env', `${PROFILE_ENV}=${PROFILE}`, APP_BUNDLE];
 const CONFIG_PATH = path.join(DATA_DIR, 'config.toml');
 const HISTORY_PATH = path.join(DATA_DIR, 'history.json');
-const LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', APP_IDENTIFIER, 'Mawok.log');
+const LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', PROFILE_IDENTIFIER, 'Mawok.log');
 // 設定・履歴・位置の記録。テストが書き換えるので、まとめて控えて戻す
 const HELD_FILES = ['config.toml', 'history.json', '.window-state.json'];
 
@@ -875,12 +880,16 @@ async function quitMawok() {
 	});
 }
 
-/** Finder から開くのと同じく LaunchServices で起動し、メニューバーのアイコンが出るまで待つ */
-async function launchMawok() {
+/**
+ * Finder から開くのと同じく LaunchServices で起動し、メニューバーのアイコンが出るまで待つ。
+ * `regular` なら、プロファイルを分けずに常用の Mawok として起動する (控えたときに動いていたものを起動し直すとき)
+ */
+async function launchMawok({ regular = false } = {}) {
+	const mark = markLog(LOG_PATH);
 	// 終了した直後は、LaunchServices がまだ前のプロセスを抱えていて -609 で失敗することがあるので、少し置いてやり直す
 	await waitFor(
 		() =>
-			execFileAsync('open', [APP_BUNDLE]).then(
+			execFileAsync('open', regular ? [APP_BUNDLE] : OPEN_APP).then(
 				() => true,
 				() => false
 			),
@@ -893,6 +902,13 @@ async function launchMawok() {
 		Boolean,
 		{ timeout: 20_000, interval: 300, label: 'Mawok の起動 (メニューバーのアイコン)' }
 	);
+	// プロファイルを知らない前の版は、常用の置き場で動いてアカウントと同期する。動かす前に止める
+	if (!regular && readLogSince(LOG_PATH, mark) === '') {
+		await quitMawok();
+		throw new Error(
+			`${APP_BUNDLE} が ${PROFILE_ENV} を見ていません。just bundle した版を入れ直すか、MAWOK_APP で指してください`
+		);
+	}
 }
 
 /**
@@ -966,7 +982,7 @@ function waitAppWindow(name) {
 
 /** 動いている Mawok を、Finder から開くのと同じく `open` で開き直す。`newInstance` なら `open -n` で2つ目を立てる */
 export function openAgain({ newInstance = false } = {}) {
-	return execFileAsync('open', newInstance ? ['-n', APP_BUNDLE] : [APP_BUNDLE]);
+	return execFileAsync('open', newInstance ? ['-n', ...OPEN_APP] : OPEN_APP);
 }
 
 /** 今からの Mawok のログを読む関数を返す (呼んだ時点より後に書かれた分) */
@@ -1066,6 +1082,7 @@ export async function holdUserState() {
 	// 控えを取り終える前に止まっても、動いていた Mawok を起動し直せるよう、先に書いておく
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'running.json'), { wasRunning });
 	await quitMawok();
+	await fs.mkdir(DATA_DIR, { recursive: true });
 	const present = [];
 	for (const name of HELD_FILES) {
 		const source = path.join(DATA_DIR, name);
@@ -1100,7 +1117,8 @@ export async function restoreUserState({ relaunch = true } = {}) {
 		const running = await fs
 			.readFile(path.join(BACKUP_DIR, 'running.json'), 'utf8')
 			.then(JSON.parse, () => ({ wasRunning: false }));
-		if (relaunch && running.wasRunning && !(await isMawokRunning())) await launchMawok();
+		if (relaunch && running.wasRunning && !(await isMawokRunning()))
+			await launchMawok({ regular: true });
 		await fs.rm(BACKUP_DIR, { recursive: true, force: true });
 		return running.wasRunning;
 	}
@@ -1132,7 +1150,7 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	await fs.rm(stateFile, { force: true });
 	await fs.rm(path.join(BACKUP_DIR, 'files'), { recursive: true, force: true });
 	await fs.rm(path.join(BACKUP_DIR, 'clipboard'), { recursive: true, force: true });
-	if (relaunch && state.wasRunning) await launchMawok();
+	if (relaunch && state.wasRunning) await launchMawok({ regular: true });
 	await fs.rm(BACKUP_DIR, { recursive: true, force: true });
 	return state.wasRunning;
 }
