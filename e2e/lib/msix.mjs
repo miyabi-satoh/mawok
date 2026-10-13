@@ -431,7 +431,7 @@ ConvertTo-Json -Compress -InputObject @{ counted = $width * $rows; accent = $acc
 	return { name: button.name, width, height, ...JSON.parse(stdout.trim()) };
 }
 
-// 待ち受けを始めさせるための、仮の Pro の状態。待ち受けは、Pro でアカウントの鍵を持つときにだけ始まる (docs/lan.md)。
+// 待ち受けを始めさせるための、仮の Pro の状態。待ち受けは、Pro で共有の鍵を持つときにだけ始まる (docs/lan.md)。
 // 起動の後の確かめは、トークンが無ければ Pro の状態を消し、窓口が答えればその答えに合わせるので、
 // 仮のトークンと鍵を資格情報マネージャーに、期限が先の Pro の状態を pro-state.json に置いたうえで、
 // 窓口へつながらないようにして起動する (`OFFLINE_ENV`)。つながらない間は、覚えている Pro の状態と手元の鍵で待ち受ける

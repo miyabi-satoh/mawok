@@ -72,7 +72,7 @@ deviceName: string,
 /**
  * デバイスの間の送受信を使える Pro か
  */
-proAvailable: boolean, accountKeyStatus: Status, 
+proAvailable: boolean, sharedKeyStatus: Status, 
 /**
  * Mawok のアカウントトークンを資格情報管理から読めたか
  */

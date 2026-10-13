@@ -36,7 +36,7 @@
 		onopenaccount: () => void;
 	} = $props();
 
-	const panel = $derived(devicesPanel(view.proAvailable, view.accountKeyStatus));
+	const panel = $derived(devicesPanel(view.proAvailable, view.sharedKeyStatus));
 
 	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分のデバイスへ送る」） */
 	let pairingCode = $state('');
@@ -102,7 +102,7 @@
 
 	/** 設定を開いた後に `want` を受けて自動で出したコードも、設定画面に表示する。 */
 	$effect(() => {
-		if (!open || view.accountKeyStatus !== 'ready') return;
+		if (!open || view.sharedKeyStatus !== 'ready') return;
 		let active = true;
 		void (async () => {
 			const offer = await invoke<PairingOffer | null>('pairing_offer').catch(() => null);
@@ -121,9 +121,9 @@
 		resetKeyRestarts = restarts;
 		resetKeyOpen = true;
 	}
-	async function resetAccountKey() {
+	async function resetSharedKey() {
 		resettingKey = true;
-		if ((await lanCall('reset_account_key')).ok) resetKeyOpen = false;
+		if ((await lanCall('reset_shared_key')).ok) resetKeyOpen = false;
 		resettingKey = false;
 	}
 
@@ -294,7 +294,7 @@
 		</AlertDialog.Header>
 		<AlertDialog.Footer>
 			<AlertDialog.Cancel disabled={resettingKey}>{m.common_cancel()}</AlertDialog.Cancel>
-			<AlertDialog.Action disabled={resettingKey} onclick={resetAccountKey}>
+			<AlertDialog.Action disabled={resettingKey} onclick={resetSharedKey}>
 				{resetKeyRestarts
 					? m.settings_devices_restart_confirm_start()
 					: m.settings_devices_reset_key_start()}

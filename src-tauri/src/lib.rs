@@ -1,6 +1,6 @@
 mod account;
 mod account_credentials;
-mod account_key;
+mod shared_key;
 mod actions;
 mod ai;
 mod atomic_file;
@@ -193,12 +193,12 @@ struct AppState {
     mawok_account_signed_in: AtomicBool,
     /// Pro の状態を消すたびに進める。問い合わせている間にサインアウトやアカウントの替わりがあったら、その答えを捨てる。
     pro_generation: AtomicUsize,
-    /// 窓口と照らしたアカウントの鍵。設定ファイルには置かない。
-    account_key: Mutex<Option<[u8; 32]>>,
-    account_key_id: Mutex<Option<String>>,
-    account_key_status: Mutex<account_key::Status>,
+    /// 窓口と照らした共有の鍵。設定ファイルには置かない。
+    shared_key: Mutex<Option<[u8; 32]>>,
+    shared_key_id: Mutex<Option<String>>,
+    shared_key_status: Mutex<shared_key::Status>,
     /// 鍵の生成・窓口への登録・資格情報管理への保存を、同じ鍵について一続きにする。
-    account_key_refresh: tokio::sync::Mutex<()>,
+    shared_key_refresh: tokio::sync::Mutex<()>,
     /// 設定を保存するたびに進める。同期の通信の間に利用者が変えた設定を、通信の前の設定から作った結果で戻さない。
     sync_generation: AtomicUsize,
     /// 同期の記録を消すたびに進める。サインアウトや鍵の替わりの後に、通信中だった同期が古い記録を書き戻さない。
@@ -331,7 +331,7 @@ struct SettingsView {
     device_name: String,
     /// デバイスの間の送受信を使える Pro か
     pro_available: bool,
-    account_key_status: account_key::Status,
+    shared_key_status: shared_key::Status,
     /// Mawok のアカウントトークンを資格情報管理から読めたか
     mawok_account_signed_in: bool,
     /// デバイスごとに選ぶ同期する種類
@@ -419,7 +419,7 @@ fn settings_view(state: &AppState) -> SettingsView {
         devices: config.devices,
         device_name: state.device_name.clone(),
         pro_available,
-        account_key_status: *state.account_key_status.lock().unwrap(),
+        shared_key_status: *state.shared_key_status.lock().unwrap(),
         mawok_account_signed_in: state.mawok_account_signed_in.load(Ordering::Relaxed),
         punctuation_style: config.punctuation_style,
         char_widths: config.char_widths,
@@ -1712,12 +1712,12 @@ async fn sync_access(app: &AppHandle) -> Option<SyncAccess> {
     let (key, key_id) = {
         let state = app.state::<AppState>();
         if !state.pro_available()
-            || *state.account_key_status.lock().unwrap() != account_key::Status::Ready
+            || *state.shared_key_status.lock().unwrap() != shared_key::Status::Ready
         {
             return None;
         }
-        let key = *state.account_key.lock().unwrap();
-        let key_id = state.account_key_id.lock().unwrap().clone();
+        let key = *state.shared_key.lock().unwrap();
+        let key_id = state.shared_key_id.lock().unwrap().clone();
         (key?, key_id?)
     };
     let token = match run_blocking(account_credentials::read_token).await {
@@ -1879,7 +1879,7 @@ async fn run_sync(app: &AppHandle) {
             }
             match failure.error {
                 sync::Error::KeyMismatch => {
-                    info!("sync key mismatch; refreshing the account key");
+                    info!("sync key mismatch; refreshing the shared key");
                     let _ = refresh_mawok_account_status(app).await;
                 }
                 sync::Error::SignedOut => {
@@ -2649,13 +2649,13 @@ async fn refresh_mawok_account_status(
                 .as_ref()
                 .is_some_and(|old| old.account_id != status.account_id);
             if changed_account {
-                clear_account_key(app).await;
+                clear_shared_key(app).await;
             }
             remember_pro_state(app, &status, generation).await;
             if status.pro.active {
-                refresh_account_key(app, &client, &token, generation).await;
+                refresh_shared_key(app, &client, &token, generation).await;
             } else {
-                set_account_key_status(app, account_key::Status::None);
+                set_shared_key_status(app, shared_key::Status::None);
             }
             Ok(Some(status))
         }
@@ -2669,12 +2669,12 @@ async fn refresh_mawok_account_status(
             if pro_account_tag(app).is_some()
                 && app
                     .state::<AppState>()
-                    .account_key
+                    .shared_key
                     .lock()
                     .unwrap()
                     .is_none()
             {
-                restore_local_account_key(app).await;
+                restore_local_shared_key(app).await;
             } else {
                 apply_config(app);
             }
@@ -2684,30 +2684,30 @@ async fn refresh_mawok_account_status(
 }
 
 /// 窓口へつながらない間は、最後に確かめた Pro の猶予と資格情報管理の鍵で LAN を続ける。
-async fn restore_local_account_key(app: &AppHandle) {
-    if let Some(local) = load_account_key().await {
-        use_unverified_account_key(app, local);
+async fn restore_local_shared_key(app: &AppHandle) {
+    if let Some(local) = load_shared_key().await {
+        use_unverified_shared_key(app, local);
     }
 }
 
-fn use_unverified_account_key(app: &AppHandle, local: Option<[u8; 32]>) {
-    *app.state::<AppState>().account_key.lock().unwrap() = local;
-    set_account_key_status(app, account_key::offline_status(local.as_ref()));
+fn use_unverified_shared_key(app: &AppHandle, local: Option<[u8; 32]>) {
+    *app.state::<AppState>().shared_key.lock().unwrap() = local;
+    set_shared_key_status(app, shared_key::offline_status(local.as_ref()));
 }
 
-/// アカウントの鍵の状態を置き、LAN と画面に反映する。
-fn set_account_key_status(app: &AppHandle, status: account_key::Status) {
-    *app.state::<AppState>().account_key_status.lock().unwrap() = status;
+/// 共有の鍵の状態を置き、LAN と画面に反映する。
+fn set_shared_key_status(app: &AppHandle, status: shared_key::Status) {
+    *app.state::<AppState>().shared_key_status.lock().unwrap() = status;
     app.state::<Arc<lan::Lan>>().refresh();
     apply_config(app);
 }
 
-/// 資格情報管理のアカウントの鍵。鍵が無ければ `Some(None)`、読めなければ警告を出して None
-async fn load_account_key() -> Option<Option<[u8; 32]>> {
-    match run_blocking(account_key::load).await {
+/// 資格情報管理の共有の鍵。鍵が無ければ `Some(None)`、読めなければ警告を出して None
+async fn load_shared_key() -> Option<Option<[u8; 32]>> {
+    match run_blocking(shared_key::load).await {
         Ok(Ok(key)) => Some(key),
         Ok(Err(error)) | Err(error) => {
-            warn!("couldn't read the account key: {error}");
+            warn!("couldn't read the shared key: {error}");
             None
         }
     }
@@ -2725,26 +2725,26 @@ fn pro_generation_is_current(app: &AppHandle, generation: usize) -> bool {
 
 /// Pro の確認の直後に、窓口の鍵の印と資格情報管理の鍵をそろえる。
 /// 鍵を初めて作る流れは、並行した確認どうしで別の鍵を登録しないよう直列にする。
-async fn refresh_account_key(
+async fn refresh_shared_key(
     app: &AppHandle,
     client: &reqwest::Client,
     token: &str,
     generation: usize,
 ) {
     let state = app.state::<AppState>();
-    let _refresh = state.account_key_refresh.lock().await;
+    let _refresh = state.shared_key_refresh.lock().await;
     if !pro_generation_is_current(app, generation) {
         return;
     }
-    let Some(local) = load_account_key().await else {
+    let Some(local) = load_shared_key().await else {
         return;
     };
     let server = match account::sync_key_id(client, token).await {
         Ok(key_id) => key_id,
         Err(error) => {
-            warn!("couldn't check the account key: {error:?}");
+            warn!("couldn't check the shared key: {error:?}");
             if pro_generation_is_current(app, generation) {
-                use_unverified_account_key(app, local);
+                use_unverified_shared_key(app, local);
             }
             return;
         }
@@ -2752,22 +2752,22 @@ async fn refresh_account_key(
     if !pro_generation_is_current(app, generation) {
         return;
     }
-    *app.state::<AppState>().account_key_id.lock().unwrap() = server.clone();
-    if account_key::decide(server.as_deref(), local.as_ref()) == account_key::Status::NeedsPairing {
+    *app.state::<AppState>().shared_key_id.lock().unwrap() = server.clone();
+    if shared_key::decide(server.as_deref(), local.as_ref()) == shared_key::Status::NeedsPairing {
         if local.is_some() {
             if !pro_generation_is_current(app, generation) {
                 return;
             }
-            if let Err(error) = run_blocking(account_key::clear).await {
-                warn!("couldn't discard a mismatched account key: {error:?}");
+            if let Err(error) = run_blocking(shared_key::clear).await {
+                warn!("couldn't discard a mismatched shared key: {error:?}");
             }
         }
         if !pro_generation_is_current(app, generation) {
             return;
         }
-        *app.state::<AppState>().account_key.lock().unwrap() = None;
-        *app.state::<AppState>().account_key_status.lock().unwrap() =
-            account_key::Status::NeedsPairing;
+        *app.state::<AppState>().shared_key.lock().unwrap() = None;
+        *app.state::<AppState>().shared_key_status.lock().unwrap() =
+            shared_key::Status::NeedsPairing;
         clear_sync_state(app).await;
         forget_devices(app);
         app.state::<Arc<lan::Lan>>().refresh();
@@ -2777,23 +2777,23 @@ async fn refresh_account_key(
     let generated = local.is_none();
     let key = match local {
         Some(key) => key,
-        None => match account_key::generate() {
+        None => match shared_key::generate() {
             Ok(key) => key,
             Err(error) => {
-                warn!("couldn't generate an account key: {error}");
-                set_account_key_status(app, account_key::Status::None);
+                warn!("couldn't generate an shared key: {error}");
+                set_shared_key_status(app, shared_key::Status::None);
                 return;
             }
         },
     };
     if server.is_none() {
-        let reset = account::reset_sync(client, token, &account_key::key_id(&key)).await;
+        let reset = account::reset_sync(client, token, &shared_key::key_id(&key)).await;
         if !pro_generation_is_current(app, generation) {
             return;
         }
         if let Err(error) = reset {
-            warn!("couldn't set the account key ID: {error:?}");
-            set_account_key_status(app, account_key::Status::None);
+            warn!("couldn't set the shared key ID: {error:?}");
+            set_shared_key_status(app, shared_key::Status::None);
             return;
         }
     }
@@ -2802,8 +2802,8 @@ async fn refresh_account_key(
     }
     if generated {
         let key_to_store = key;
-        if let Err(error) = run_blocking(move || account_key::store(&key_to_store)).await {
-            warn!("couldn't store the account key: {error:?}");
+        if let Err(error) = run_blocking(move || shared_key::store(&key_to_store)).await {
+            warn!("couldn't store the shared key: {error:?}");
             return;
         }
         if !pro_generation_is_current(app, generation) {
@@ -2811,10 +2811,10 @@ async fn refresh_account_key(
         }
         clear_sync_state(app).await;
     }
-    *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
-    *app.state::<AppState>().account_key_id.lock().unwrap() =
-        Some(server.unwrap_or_else(|| account_key::key_id(&key)));
-    set_account_key_status(app, account_key::Status::Ready);
+    *app.state::<AppState>().shared_key.lock().unwrap() = Some(key);
+    *app.state::<AppState>().shared_key_id.lock().unwrap() =
+        Some(server.unwrap_or_else(|| shared_key::key_id(&key)));
+    set_shared_key_status(app, shared_key::Status::Ready);
     request_sync(app);
 }
 
@@ -2832,15 +2832,15 @@ async fn clear_sync_state(app: &AppHandle) {
 
 /// 鍵を置く処理（確かめ・作り直し・ペアリングでの受け取り）と同じ排他を取り、消すのを必ず後にする。
 /// 取らないと、サインアウトと重なった保存が、消した後に鍵を書き戻す
-async fn clear_account_key(app: &AppHandle) {
+async fn clear_shared_key(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let _refresh = state.account_key_refresh.lock().await;
-    *app.state::<AppState>().account_key.lock().unwrap() = None;
-    *app.state::<AppState>().account_key_id.lock().unwrap() = None;
-    *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::None;
+    let _refresh = state.shared_key_refresh.lock().await;
+    *app.state::<AppState>().shared_key.lock().unwrap() = None;
+    *app.state::<AppState>().shared_key_id.lock().unwrap() = None;
+    *app.state::<AppState>().shared_key_status.lock().unwrap() = shared_key::Status::None;
     clear_sync_state(app).await;
-    if let Err(error) = run_blocking(account_key::clear).await {
-        warn!("couldn't clear the account key: {error:?}");
+    if let Err(error) = run_blocking(shared_key::clear).await {
+        warn!("couldn't clear the shared key: {error:?}");
     }
     forget_devices(app);
     app.state::<Arc<lan::Lan>>().refresh();
@@ -2906,7 +2906,7 @@ async fn clear_pro_state(app: &AppHandle) {
     app.state::<AppState>()
         .mawok_account_signed_in
         .store(false, Ordering::Relaxed);
-    clear_account_key(app).await;
+    clear_shared_key(app).await;
     match run_blocking(move || pro::clear(&path)).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) | Err(error) => warn!("couldn't clear the Pro state: {error}"),
@@ -2943,34 +2943,34 @@ async fn sign_out_mawok(app: AppHandle) -> Result<(), String> {
 
 /// 新しい鍵を窓口へ反映できたときだけ、資格情報管理の鍵を置き換える。
 #[tauri::command]
-async fn reset_account_key(app: AppHandle) -> Result<(), String> {
+async fn reset_shared_key(app: AppHandle) -> Result<(), String> {
     let generation = current_pro_generation(&app);
     let token = run_blocking(account_credentials::read_token)
         .await?
         .map_err(|_| "account.sign_in_required".to_string())?;
     let state = app.state::<AppState>();
-    let _refresh = state.account_key_refresh.lock().await;
+    let _refresh = state.shared_key_refresh.lock().await;
     if !pro_generation_is_current(&app, generation) {
         return Ok(());
     }
     if pro_account_tag(&app).is_none() {
         return Err(lan::Failure::ProRequired.code().to_string());
     }
-    let key = run_blocking(account_key::generate).await??;
+    let key = run_blocking(shared_key::generate).await??;
     let client = http_client(&app)?;
-    account::reset_sync(&client, &token, &account_key::key_id(&key))
+    account::reset_sync(&client, &token, &shared_key::key_id(&key))
         .await
         .map_err(|_| "account.unreachable".to_string())?;
     if !pro_generation_is_current(&app, generation) {
         return Ok(());
     }
-    run_blocking(move || account_key::store(&key)).await??;
+    run_blocking(move || shared_key::store(&key)).await??;
     if !pro_generation_is_current(&app, generation) {
         return Ok(());
     }
-    *app.state::<AppState>().account_key.lock().unwrap() = Some(key);
-    *app.state::<AppState>().account_key_id.lock().unwrap() = Some(account_key::key_id(&key));
-    *app.state::<AppState>().account_key_status.lock().unwrap() = account_key::Status::Ready;
+    *app.state::<AppState>().shared_key.lock().unwrap() = Some(key);
+    *app.state::<AppState>().shared_key_id.lock().unwrap() = Some(shared_key::key_id(&key));
+    *app.state::<AppState>().shared_key_status.lock().unwrap() = shared_key::Status::Ready;
     clear_sync_state(&app).await;
     forget_devices(&app);
     app.state::<Arc<lan::Lan>>().refresh();
@@ -3660,27 +3660,27 @@ impl lan::Host for AppHandle {
             .map(pro::State::account_tag)
     }
 
-    fn account_key(&self) -> Option<[u8; 32]> {
-        *self.state::<AppState>().account_key.lock().unwrap()
+    fn shared_key(&self) -> Option<[u8; 32]> {
+        *self.state::<AppState>().shared_key.lock().unwrap()
     }
 
-    fn account_key_id(&self) -> Option<String> {
+    fn shared_key_id(&self) -> Option<String> {
         self.state::<AppState>()
-            .account_key_id
+            .shared_key_id
             .lock()
             .unwrap()
             .clone()
     }
 
-    fn receive_account_key(&self, key: [u8; 32]) -> bool {
+    fn receive_shared_key(&self, key: [u8; 32]) -> bool {
         // LAN のスレッドから呼ばれる（非同期の文脈ではない）。握手の間にサインアウトしていたら置かない
         let state = self.state::<AppState>();
-        let _refresh = state.account_key_refresh.blocking_lock();
-        if pro_account_tag(self).is_none() || account_key::store(&key).is_err() {
+        let _refresh = state.shared_key_refresh.blocking_lock();
+        if pro_account_tag(self).is_none() || shared_key::store(&key).is_err() {
             return false;
         }
-        *self.state::<AppState>().account_key.lock().unwrap() = Some(key);
-        set_account_key_status(self, account_key::Status::Ready);
+        *self.state::<AppState>().shared_key.lock().unwrap() = Some(key);
+        set_shared_key_status(self, shared_key::Status::Ready);
         true
     }
 }
@@ -3712,7 +3712,7 @@ fn start_pairing(
     if pro_account_tag(&app).is_none() {
         return Err(lan::Failure::ProRequired.code().to_string());
     }
-    if *app.state::<AppState>().account_key_status.lock().unwrap() != account_key::Status::Ready {
+    if *app.state::<AppState>().shared_key_status.lock().unwrap() != shared_key::Status::Ready {
         return Err(lan::Failure::NeedsPairing.code().to_string());
     }
     lan.start_pairing(false)
@@ -3747,8 +3747,8 @@ async fn join_pairing(
     if pro_account_tag(&app).is_none() {
         return Err(lan::Failure::ProRequired.code().to_string());
     }
-    if *app.state::<AppState>().account_key_status.lock().unwrap()
-        != account_key::Status::NeedsPairing
+    if *app.state::<AppState>().shared_key_status.lock().unwrap()
+        != shared_key::Status::NeedsPairing
     {
         return Err(lan::Failure::Internal.code().to_string());
     }
@@ -3758,7 +3758,7 @@ async fn join_pairing(
         .map_err(|error| lan_failure("couldn't pair", error))
 }
 
-/// アカウントの鍵が替わった・消えたときに、デバイスの一覧を空にする。一覧は「今の鍵で確かめた相手」なので、
+/// 共有の鍵が替わった・消えたときに、デバイスの一覧を空にする。一覧は「今の鍵で確かめた相手」なので、
 /// 前の鍵の相手を残すと、送れない送信先が並ぶ。新しい鍵を持つデバイスは、次の名乗りで一覧に戻る
 fn forget_devices(app: &AppHandle) {
     let empty = app
@@ -3883,29 +3883,29 @@ fn on_each_device<'a, T: Send>(
     })
 }
 
-fn account_key_failure_for_lan(
+fn shared_key_failure_for_lan(
     pro_available: bool,
-    status: account_key::Status,
-    has_account_key: bool,
+    status: shared_key::Status,
+    has_shared_key: bool,
 ) -> Option<lan::Failure> {
     if !pro_available {
         Some(lan::Failure::ProRequired)
-    } else if status != account_key::Status::Ready || !has_account_key {
+    } else if status != shared_key::Status::Ready || !has_shared_key {
         Some(lan::Failure::NeedsPairing)
     } else {
         None
     }
 }
 
-fn ready_account_key_for_lan(app: &AppHandle) -> Result<[u8; 32], lan::Failure> {
-    let key = *app.state::<AppState>().account_key.lock().unwrap();
-    let status = *app.state::<AppState>().account_key_status.lock().unwrap();
+fn ready_shared_key_for_lan(app: &AppHandle) -> Result<[u8; 32], lan::Failure> {
+    let key = *app.state::<AppState>().shared_key.lock().unwrap();
+    let status = *app.state::<AppState>().shared_key_status.lock().unwrap();
     if let Some(failure) =
-        account_key_failure_for_lan(pro_account_tag(app).is_some(), status, key.is_some())
+        shared_key_failure_for_lan(pro_account_tag(app).is_some(), status, key.is_some())
     {
         return Err(failure);
     }
-    Ok(key.expect("a Ready account key is present"))
+    Ok(key.expect("a Ready shared key is present"))
 }
 
 fn send_and_hide(
@@ -3915,7 +3915,7 @@ fn send_and_hide(
 ) -> Result<bool, SendFailure> {
     let sent = !text.is_empty();
     if sent {
-        let account_key = ready_account_key_for_lan(app)
+        let shared_key = ready_shared_key_for_lan(app)
             .map_err(|failure| SendFailure::from(failure.code().to_string()))?;
         if app
             .state::<AppState>()
@@ -3936,7 +3936,7 @@ fn send_and_hide(
         }
         // 送るのは整える前の入力欄の中身。整えるのは、受け取った側がコピーするとき
         let results = on_each_device(app, &targets, |lan, key, saved| {
-            lan.send(key, saved, Some(account_key), text)
+            lan.send(key, saved, Some(shared_key), text)
         });
         let mut reached = Vec::new();
         let mut failures = Vec::new();
@@ -3994,11 +3994,11 @@ fn send_and_hide(
 #[tauri::command]
 async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
     run_blocking(move || {
-        let account_key =
-            ready_account_key_for_lan(&app).map_err(|failure| failure.code().to_string())?;
+        let shared_key =
+            ready_shared_key_for_lan(&app).map_err(|failure| failure.code().to_string())?;
         let targets = device_targets(&app, |_| true);
         let reached: Vec<(String, IpAddr)> = on_each_device(&app, &targets, |lan, key, saved| {
-            lan.probe(key, saved, Some(account_key))
+            lan.probe(key, saved, Some(shared_key))
                 // つながらないのはよくあること（電源が入っていないなど）なので、細かい中身だけログに残す
                 .inspect_err(|error| info!("probe: {}", error.detail))
                 .ok()
@@ -4938,7 +4938,7 @@ pub fn run() {
             reopen_mawok_sign_in_page,
             mawok_account_status,
             sign_out_mawok,
-            reset_account_key,
+            reset_shared_key,
             open_mawok_buy_page,
             open_mawok_pro_page,
             run_action,
@@ -5147,10 +5147,10 @@ pub fn run() {
                 pro_state: Mutex::new(pro_state),
                 mawok_account_signed_in: AtomicBool::new(false),
                 pro_generation: AtomicUsize::new(0),
-                account_key: Mutex::new(None),
-                account_key_id: Mutex::new(None),
-                account_key_status: Mutex::new(account_key::Status::None),
-                account_key_refresh: tokio::sync::Mutex::new(()),
+                shared_key: Mutex::new(None),
+                shared_key_id: Mutex::new(None),
+                shared_key_status: Mutex::new(shared_key::Status::None),
+                shared_key_refresh: tokio::sync::Mutex::new(()),
                 sync_generation: AtomicUsize::new(0),
                 sync_record_generation: AtomicUsize::new(0),
                 sync_commit: tokio::sync::Mutex::new(()),
@@ -5172,7 +5172,7 @@ pub fn run() {
                     move || resume_hotkey_after_menu(&end),
                 );
             }
-            // Pro でアカウントの鍵を持っていれば、待ち受けと名乗りを始める
+            // Pro で共有の鍵を持っていれば、待ち受けと名乗りを始める
             let lan = lan::Lan::new(key_path, device_name, Arc::new(app.handle().clone()));
             app.manage(Arc::clone(&lan));
             lan.refresh();
@@ -5512,19 +5512,19 @@ mod tests {
     #[test]
     fn distinguishes_missing_keys_from_missing_pro() {
         assert_eq!(
-            account_key_failure_for_lan(false, account_key::Status::Ready, true),
+            shared_key_failure_for_lan(false, shared_key::Status::Ready, true),
             Some(lan::Failure::ProRequired)
         );
         assert_eq!(
-            account_key_failure_for_lan(true, account_key::Status::NeedsPairing, false),
+            shared_key_failure_for_lan(true, shared_key::Status::NeedsPairing, false),
             Some(lan::Failure::NeedsPairing)
         );
         assert_eq!(
-            account_key_failure_for_lan(true, account_key::Status::None, false),
+            shared_key_failure_for_lan(true, shared_key::Status::None, false),
             Some(lan::Failure::NeedsPairing)
         );
         assert_eq!(
-            account_key_failure_for_lan(true, account_key::Status::Ready, true),
+            shared_key_failure_for_lan(true, shared_key::Status::Ready, true),
             None
         );
     }

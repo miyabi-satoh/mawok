@@ -62,7 +62,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		devices: [],
 		deviceName: 'desk-pc',
 		proAvailable: false,
-		accountKeyStatus: 'none',
+		sharedKeyStatus: 'none',
 		mawokAccountSignedIn: false,
 		syncKinds: {
 			settings: true,

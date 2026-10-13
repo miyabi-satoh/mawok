@@ -252,7 +252,7 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
     })
 }
 
-/// 同期の最初のページだけを読み、アカウントの鍵の見分けを得る。
+/// 同期の最初のページだけを読み、共有の鍵の見分けを得る。
 pub async fn sync_key_id(
     client: &reqwest::Client,
     token: &str,
