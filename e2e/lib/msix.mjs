@@ -113,7 +113,8 @@ export async function launchExecutable(exePath) {
  * `env` は、mawok.exe に足して渡す環境変数 (値に空白や cmd の記号を入れない)
  */
 export async function launchInPackage(pkg, port, env = {}) {
-	env = { [PROFILE_ENV]: PROFILE, ...env };
+	// 置き場と資格情報の名前を e2e で決め打ちしているので、呼ぶ側の値で替えさせない
+	env = { ...env, [PROFILE_ENV]: PROFILE };
 	const exe = path.join(pkg.installLocation, 'mawok.exe');
 	const extra = Object.entries(env)
 		.map(([name, value]) => `set ${name}=${value}&& `)
