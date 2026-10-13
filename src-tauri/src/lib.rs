@@ -2433,6 +2433,7 @@ async fn wait_for_link(
     let (title, body) = lang.mawok_sign_in_page(signed_in);
     let page = format!(
         "<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\">\
+         <meta name=\"color-scheme\" content=\"light dark\">\
          <title>{title}</title><body style=\"font-family:system-ui,sans-serif;max-width:28rem;margin:3rem auto;padding:0 1rem;line-height:1.7;word-break:auto-phrase\">\
          <h1 style=\"font-size:1.25rem\">{title}</h1><p>{body}</p></body></html>",
         lang = lang.code()
