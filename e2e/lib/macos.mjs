@@ -376,7 +376,7 @@ export async function escapeComposition(before, isOpen) {
 	throw new Error(`Esc を3回送っても、入力欄が ${JSON.stringify(before)} に戻らない`);
 }
 
-/** 開いている一覧 (アクション・定型文) の行 (「名前 本文の頭」の文)。一覧が開いていなければ null */
+/** 開いている定型文の一覧の行 (「名前 本文の頭」の文)。一覧が開いていなければ null */
 export async function paletteOptions() {
 	const elements = (await windowElements(DRAFT_TITLE)) ?? [];
 	const list = elements.findIndex(({ role }) => role === 'AXList');
@@ -389,20 +389,20 @@ export async function paletteOptions() {
 }
 
 /**
- * 下書きで Cmd+K でアクションの一覧を開き、絞り込みに `filter` を打って、`option` で始まる行を選ぶ。
- * 一覧の先頭は、絞り込みに書いたものをそのまま実行する「この内容で実行」なので、Enter の前に ↓ で行まで移る。
+ * 下書きで Cmd+K で定型文の一覧を開き、絞り込みに `filter` を打って、`option` で始まる行 (宛先で始まる定型文) を選んで実行する。
  * 絞り込みは英数で打つ (日本語入力のままだと変換される)
  */
 export async function runAction(filter, option = `${filter} `) {
 	await keyCode(KEY.k, ['command down']);
-	await waitFor(paletteOptions, (options) => options !== null, { label: 'アクションの一覧' });
+	await waitFor(paletteOptions, (options) => options !== null, { label: '定型文の一覧' });
 	await keystroke(filter);
-	// 先頭の「この内容で実行」が打った文字を写していれば、絞り込み終えている。終える前の一覧で数えると、行の位置がずれる
+	// 打った文字を含まない行が、末尾の「…定型文に登録」だけになれば、絞り込み終えている。終える前の一覧で数えると、行の位置がずれる
 	const options = await waitFor(
 		paletteOptions,
 		(current) =>
-			current?.[0] === `この内容で実行 ${filter}` &&
-			current.some((name) => name.startsWith(option)),
+			current !== null &&
+			current.some((name) => name.startsWith(option)) &&
+			current.every((name) => name.includes(filter) || name.includes('定型文に登録')),
 		{ label: `一覧の「${option.trim()}」の行` }
 	);
 	const index = options.findIndex((name) => name.startsWith(option));

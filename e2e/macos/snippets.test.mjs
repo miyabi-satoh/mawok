@@ -33,7 +33,7 @@ import { expectStays, waitFor } from '../lib/wait.mjs';
 
 // 定型文のうち、Windows の E2E (WebDriver) で見られないものを macOS で見る。
 // - 設定の行のつまみのドラッグ (本物のマウスで動かす)
-// - 下書きの Cmd+J の一覧の、WKWebView でのキーと日本語入力、ほかのアプリに移ったとき
+// - 下書きの Cmd+K の一覧の、WKWebView でのキーと日本語入力、ほかのアプリに移ったとき
 // 定型文は config.toml で登録する。名前は英数にし、日本語入力は変換中のキーを見るときだけ使う
 // (ライブ変換の結果しだいで、絞り込みに当たらなくなるため)。項目の名前で押すので、日本語で起動する
 
@@ -103,9 +103,9 @@ async function prepareDraft() {
 	});
 }
 
-/** Cmd+J で一覧を出し、絞り込みの欄にフォーカスがあるまで待って、行を返す */
+/** Cmd+K で一覧を出し、絞り込みの欄にフォーカスがあるまで待って、行を返す */
 async function openPalette() {
-	await keyCode(KEY.j, ['command down']);
+	await keyCode(KEY.k, ['command down']);
 	await waitFor(
 		draftState,
 		(s) => s.focusedRole !== null && s.focusedRole !== 'AXTextArea' && s.value === '',
@@ -139,7 +139,7 @@ test.describe('macOS: 定型文', () => {
 		await restoreUserState();
 	});
 
-	test('Cmd+J で一覧が出て絞り込みの欄にフォーカスがあり、名前のない定型文は本文で出る', async () => {
+	test('Cmd+K で一覧が出て絞り込みの欄にフォーカスがあり、名前のない定型文は本文で出る', async () => {
 		await prepareDraft();
 		const options = await openPalette();
 		assert.equal(options.length, 4, JSON.stringify(options));
