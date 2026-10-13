@@ -55,7 +55,7 @@ pub enum Theme {
     Dark,
 }
 
-/// 定型文の1件。下書きで定型文のキー（既定は Cmd+J、Windows は Ctrl+J）で出す一覧から選び、カーソルの位置に差し込む
+/// 定型文の1件。下書きで定型文のキーで出す一覧から選ぶ。選ぶと、挿入するか、宛先へ出す（docs/actions.md「定型文」）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -65,8 +65,15 @@ pub struct Snippet {
     pub id: String,
     /// 一覧で選ぶときの見出し。空なら、画面側で本文の最初の空でない行を代わりに出す
     pub name: String,
-    /// 差し込む文。複数行にできる
+    /// 登録した文。1行だけで行頭が宛先（`@ai`・`@sh`・`@all`・デバイスの名前）なら、選ぶと今のテキストを中身にして出す。
+    /// ほかは、選ぶと挿入する（docs/actions.md「定型文」）
     pub body: String,
+    /// 宛先が `@ai`・`@sh` の行の、結果の出し方
+    pub output: ActionOutput,
+    /// 宛先が `@sh` の行の、標準入力と標準出力の文字コード
+    pub encoding: ActionEncoding,
+    /// 消さずに一覧から外せるようにするため、1件ずつ切れる（置き換え辞書と同じ）
+    pub enabled: bool,
     /// ほかのデバイスと同期するか
     pub sync: bool,
 }
@@ -77,13 +84,16 @@ impl Default for Snippet {
             id: String::new(),
             name: String::new(),
             body: String::new(),
+            output: ActionOutput::default(),
+            encoding: ActionEncoding::default(),
+            enabled: true,
             sync: true,
         }
     }
 }
 
-/// アクションの結果の出し方。
-/// コマンドが下書きを使うか、結果を返すかは Mawok から見分けられないので、アクションごとに持つ
+/// 宛先へ出した結果の出し方。
+/// コマンドが下書きを使うか、結果を返すかは Mawok から見分けられないので、定型文ごとに持つ
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -115,8 +125,8 @@ impl ActionOutput {
     }
 }
 
-/// コマンドのアクションとやりとりする文字コード（docs/actions.md「コマンド」）。標準入力へ渡す文と、標準出力を読むときに使う。
-/// Windows の `sort` のように、UTF-8 ではなくシステムの文字コード（日本語なら Shift_JIS）で読み書きするコマンドがあるため、アクションごとに持つ
+/// `@sh` のコマンドとやりとりする文字コード（docs/actions.md「コマンド」）。標準入力へ渡す文と、標準出力を読むときに使う。
+/// Windows の `sort` のように、UTF-8 ではなくシステムの文字コード（日本語なら Shift_JIS）で読み書きするコマンドがあるため、定型文ごとに持つ
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -158,41 +168,6 @@ impl ActionEncoding {
         Self::ALL
             .into_iter()
             .find(|encoding| encoding.name() == name)
-    }
-}
-
-/// アクションの1件。一覧から選ぶと、コマンドの行を実行して結果を下書きに出す
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(default)]
-pub struct Action {
-    /// 同期でこの1件を見分けるランダムな値
-    pub id: String,
-    /// 一覧で選ぶときの見出し。空なら、画面側でコマンドの行を代わりに出す
-    pub name: String,
-    /// 1行のコマンド。行頭が `@ai` なら AI のアクション（actions.rs の ai_instruction）。空なら一覧に出さない
-    pub command: String,
-    pub output: ActionOutput,
-    /// コマンドの標準入力と標準出力の文字コード。`@ai` の行では使わない
-    pub encoding: ActionEncoding,
-    /// 消さずに一覧から外せるようにするため、1件ずつ切れる（置き換え辞書と同じ）
-    pub enabled: bool,
-    /// ほかのデバイスと同期するか
-    pub sync: bool,
-}
-
-impl Default for Action {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            command: String::new(),
-            output: ActionOutput::default(),
-            encoding: ActionEncoding::default(),
-            enabled: true,
-            sync: true,
-        }
     }
 }
 
@@ -243,8 +218,6 @@ pub struct Config {
     pub sync_replacements: bool,
     /// Pro で、定型文をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
     pub sync_snippets: bool,
-    /// Pro で、アクションをほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
-    pub sync_actions: bool,
     /// Pro で、テキストウィンドウの履歴をほかのデバイスと同期するか。同じく同期しない
     pub sync_history: bool,
     /// 種類「設定」から外した設定ファイルの項目名。知らない名前は残し、同期では無視する
@@ -263,8 +236,8 @@ pub struct Config {
     pub trim_trailing_whitespace: bool,
     /// クリップボードへ渡すときに適用する置き換え辞書。最長一致で適用し、左側が同じ項目は並びで最初を使う
     pub replacements: Vec<Replacement>,
-    /// 定型文。一覧には登録した順に並べる
-    pub snippets: Vec<Snippet>,
+    /// 定型文。一覧には登録した順に並べる。None なら既定の定型文（今の表示言語のもの、actions::default_snippets）、空の並びなら定型文なし
+    pub snippets: Option<Vec<Snippet>>,
     /// クリップボードへ渡すときに、句読点をどちらに揃えるか
     pub punctuation_style: PunctuationStyle,
     /// クリップボードへ渡すときに、全角と半角を文字の種類ごとにどちらへ揃えるか
@@ -290,8 +263,6 @@ pub struct Config {
     pub ai_consent: Option<AiService>,
     /// AI サービスごとのモデル。書いていないサービスは既定のモデルを使う。空文字は持たない
     pub ai_models: BTreeMap<AiService, String>,
-    /// アクションの並び。None なら既定のアクション（今の表示言語のもの、actions::default_actions）、空の並びならアクションなし
-    pub actions: Option<Vec<Action>>,
 }
 
 impl Config {
@@ -352,7 +323,6 @@ impl Default for Config {
             sync_keys: true,
             sync_replacements: true,
             sync_snippets: true,
-            sync_actions: true,
             sync_history: true,
             sync_excluded_settings: Vec::new(),
             language: Language::default(),
@@ -363,7 +333,7 @@ impl Default for Config {
             text_history_size: DEFAULT_DRAFT_HISTORY_SIZE,
             trim_trailing_whitespace: true,
             replacements: Vec::new(),
-            snippets: Vec::new(),
+            snippets: None,
             punctuation_style: PunctuationStyle::default(),
             char_widths: CharWidths::default(),
             exclude_from_clipboard_history: true,
@@ -376,7 +346,6 @@ impl Default for Config {
             ai_service: AiService::default(),
             ai_consent: None,
             ai_models: BTreeMap::new(),
-            actions: None,
         }
     }
 }
@@ -400,7 +369,6 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
     ModifiedSetting::DraftKey(DraftAction::Send),
     ModifiedSetting::DraftKey(DraftAction::Settings),
     ModifiedSetting::DraftKey(DraftAction::Snippets),
-    ModifiedSetting::DraftKey(DraftAction::Actions),
     ModifiedSetting::DraftKey(DraftAction::HistoryOlder),
     ModifiedSetting::DraftKey(DraftAction::HistoryNewer),
     ModifiedSetting::DraftKey(DraftAction::SendTargets),
@@ -506,10 +474,6 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
         differs: |config, defaults| config.sync_snippets != defaults.sync_snippets,
     },
     ModifiedSetting::Value {
-        name: key::SYNC_ACTIONS,
-        differs: |config, defaults| config.sync_actions != defaults.sync_actions,
-    },
-    ModifiedSetting::Value {
         name: key::SYNC_HISTORY,
         differs: |config, defaults| config.sync_history != defaults.sync_history,
     },
@@ -571,7 +535,6 @@ mod key {
     pub const SYNC_KEYS: &str = "sync_keys";
     pub const SYNC_REPLACEMENTS: &str = "sync_replacements";
     pub const SYNC_SNIPPETS: &str = "sync_snippets";
-    pub const SYNC_ACTIONS: &str = "sync_actions";
     pub const SYNC_HISTORY: &str = "sync_history";
     pub const SYNC_EXCLUDED_SETTINGS: &str = "sync_excluded_settings";
     pub const LANGUAGE: &str = "language";
@@ -599,7 +562,6 @@ mod key {
     pub const AI_SERVICE: &str = "ai_service";
     pub const AI_CONSENT: &str = "ai_consent";
     pub const AI_MODELS: &str = "ai_models";
-    pub const ACTIONS: &str = "actions";
 }
 
 /// 項目を1つずつ読み、読めなかった項目の名前を集める
@@ -714,7 +676,7 @@ fn rows(item: &Item) -> Option<Vec<Option<&dyn TableLike>>> {
     }
 }
 
-/// 並びの1行（置き換え辞書・定型文・アクション・見つけたデバイス）
+/// 並びの1行（置き換え辞書・定型文・見つけたデバイス）
 trait Row: Sized + PartialEq {
     /// 行を読む。省いた項目は既定値として読み、型の合わない項目があれば None
     fn read(table: &dyn TableLike) -> Option<Self>;
@@ -787,15 +749,14 @@ pub(crate) fn repair_item_ids<T: SyncRow>(items: &mut [T]) -> Result<bool, Strin
 /// 設定の行の ID を、種類ごとに直す。
 fn repair_item_ids_in_config(config: &mut Config) -> Result<bool, String> {
     let replacements = repair_item_ids(&mut config.replacements)?;
-    let snippets = repair_item_ids(&mut config.snippets)?;
-    let actions = match &mut config.actions {
-        Some(actions) => repair_item_ids(actions)?,
+    let snippets = match &mut config.snippets {
+        Some(snippets) => repair_item_ids(snippets)?,
         None => false,
     };
-    Ok(replacements || snippets || actions)
+    Ok(replacements || snippets)
 }
 
-/// 同期する行（置き換え辞書・定型文・アクション）。ID で同じ行を見分け、行ごとに同期するかを持つ
+/// 同期する行（置き換え辞書・定型文）。ID で同じ行を見分け、行ごとに同期するかを持つ
 pub(crate) trait SyncRow: Serialize + for<'a> Deserialize<'a> + Clone {
     fn id(&self) -> &str;
     fn set_id(&mut self, id: String);
@@ -830,21 +791,6 @@ impl SyncRow for Snippet {
         self.sync = sync
     }
 }
-impl SyncRow for Action {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn set_id(&mut self, id: String) {
-        self.id = id
-    }
-    fn sync(&self) -> bool {
-        self.sync
-    }
-    fn set_sync(&mut self, sync: bool) {
-        self.sync = sync
-    }
-}
-
 impl Row for Replacement {
     fn read(table: &dyn TableLike) -> Option<Self> {
         let default = Replacement::default();
@@ -869,42 +815,14 @@ impl Row for Replacement {
 }
 
 impl Row for Snippet {
+    /// 知らない出し方や文字コードの行は、型の合わない行として読み飛ばす
     fn read(table: &dyn TableLike) -> Option<Self> {
         Some(Self {
             id: item_id_field(table),
             name: text_field(table, "name", String::new())?,
             body: text_field(table, "body", String::new())?,
-            sync: bool_field(table, "sync", true)?,
-        })
-    }
-
-    fn fields(&self) -> Vec<(&'static str, Value)> {
-        vec![
-            ("id", Value::from(self.id.clone())),
-            ("name", Value::from(self.name.clone())),
-            ("body", Value::from(self.body.clone())),
-            ("sync", Value::from(self.sync)),
-        ]
-    }
-}
-
-impl Row for Action {
-    /// 知らない出し方や文字コードの行は、型の合わない行として読み飛ばす
-    fn read(table: &dyn TableLike) -> Option<Self> {
-        let output = match table.get("output") {
-            None => ActionOutput::default(),
-            Some(item) => ActionOutput::from_name(item.as_str()?)?,
-        };
-        let encoding = match table.get("encoding") {
-            None => ActionEncoding::default(),
-            Some(item) => ActionEncoding::from_name(item.as_str()?)?,
-        };
-        Some(Self {
-            id: item_id_field(table),
-            name: text_field(table, "name", String::new())?,
-            command: text_field(table, "command", String::new())?,
-            output,
-            encoding,
+            output: output_field(table)?,
+            encoding: encoding_field(table)?,
             enabled: bool_field(table, "enabled", true)?,
             sync: bool_field(table, "sync", true)?,
         })
@@ -914,12 +832,55 @@ impl Row for Action {
         vec![
             ("id", Value::from(self.id.clone())),
             ("name", Value::from(self.name.clone())),
-            ("command", Value::from(self.command.clone())),
+            ("body", Value::from(self.body.clone())),
             ("output", Value::from(self.output.name().to_string())),
             ("encoding", Value::from(self.encoding.name().to_string())),
             ("enabled", Value::from(self.enabled)),
             ("sync", Value::from(self.sync)),
         ]
+    }
+}
+
+fn output_field(table: &dyn TableLike) -> Option<ActionOutput> {
+    match table.get("output") {
+        None => Some(ActionOutput::default()),
+        Some(item) => ActionOutput::from_name(item.as_str()?),
+    }
+}
+
+fn encoding_field(table: &dyn TableLike) -> Option<ActionEncoding> {
+    match table.get("encoding") {
+        None => Some(ActionEncoding::default()),
+        Some(item) => ActionEncoding::from_name(item.as_str()?),
+    }
+}
+
+/// アクションと定型文が別の並びだったころの設定ファイルの項目。読んで定型文へ移し、書くときに消す
+mod legacy {
+    pub const ACTIONS: &str = "actions";
+    pub const SYNC_ACTIONS: &str = "sync_actions";
+}
+
+/// 別の並びだったころのアクションの行。コマンドの行を、宛先で始まる定型文にして読む
+#[derive(PartialEq)]
+struct LegacyAction(Snippet);
+
+impl Row for LegacyAction {
+    fn read(table: &dyn TableLike) -> Option<Self> {
+        let command = text_field(table, "command", String::new())?;
+        Some(Self(Snippet {
+            id: item_id_field(table),
+            name: text_field(table, "name", String::new())?,
+            body: crate::actions::legacy_action_body(&command),
+            output: output_field(table)?,
+            encoding: encoding_field(table)?,
+            enabled: bool_field(table, "enabled", true)?,
+            sync: bool_field(table, "sync", true)?,
+        }))
+    }
+
+    fn fields(&self) -> Vec<(&'static str, Value)> {
+        self.0.fields()
     }
 }
 
@@ -981,7 +942,17 @@ fn describe_parse_error(text: &str, error: &TomlError) -> String {
 
 /// 設定ファイルの中身を読む。型の合わない項目は既定値のまま読み進め、その項目名を返す。
 /// TOML として読めなければ Err。知らない項目は読み飛ばし、ログにだけ出す
-fn parse(text: &str) -> Result<(Config, Vec<String>, bool), String> {
+struct Parsed {
+    config: Config,
+    /// 型が合わず、既定に戻した・読み飛ばした項目
+    repaired: Vec<String>,
+    /// 同期する行の ID を振り直したか
+    repaired_item_ids: bool,
+    /// アクションが別の並びだったころの項目を、定型文へ移したか
+    migrated: bool,
+}
+
+fn parse(text: &str) -> Result<Parsed, String> {
     let document: DocumentMut = text
         .parse()
         .map_err(|error| describe_parse_error(text, &error))?;
@@ -996,7 +967,6 @@ fn parse(text: &str) -> Result<(Config, Vec<String>, bool), String> {
     reader.read_bool(key::SYNC_KEYS, &mut config.sync_keys);
     reader.read_bool(key::SYNC_REPLACEMENTS, &mut config.sync_replacements);
     reader.read_bool(key::SYNC_SNIPPETS, &mut config.sync_snippets);
-    reader.read_bool(key::SYNC_ACTIONS, &mut config.sync_actions);
     reader.read_bool(key::SYNC_HISTORY, &mut config.sync_history);
     reader.read_with(
         key::SYNC_EXCLUDED_SETTINGS,
@@ -1035,7 +1005,6 @@ fn parse(text: &str) -> Result<(Config, Vec<String>, bool), String> {
         &mut config.trim_trailing_whitespace,
     );
     reader.read_rows(key::REPLACEMENTS, &mut config.replacements);
-    reader.read_rows(key::SNIPPETS, &mut config.snippets);
     reader.read_choice(key::PUNCTUATION_STYLE, &mut config.punctuation_style);
     reader.read_choice(key::ALPHABET_WIDTH, &mut config.char_widths.alphabet);
     reader.read_choice(key::DIGIT_WIDTH, &mut config.char_widths.digit);
@@ -1069,16 +1038,42 @@ fn parse(text: &str) -> Result<(Config, Vec<String>, bool), String> {
         item.as_str().and_then(AiService::from_name).map(Some)
     });
     reader.read_ai_models(&mut config.ai_models);
-    // 項目がなければ既定のアクション。空の並び（`actions = []`）は、利用者が全部消したものとして空のまま
-    if reader.table.contains_key(key::ACTIONS) {
-        let mut actions = Vec::new();
+    // 項目がなければ既定の定型文。空の並び（`snippets = []`）は、利用者が全部消したものとして空のまま。
+    // 並びでない値（`snippets = "…"` など）は、既定の定型文に戻す
+    let read_optional_rows = |reader: &mut Reader, key: &str| -> Option<Vec<LegacyAction>> {
+        if !reader.table.contains_key(key) {
+            return None;
+        }
+        let mut rows = Vec::new();
         let before = reader.repaired.len();
-        reader.read_rows(key::ACTIONS, &mut actions);
-        // 並びでない値（`actions = "…"` など）は、既定のアクションに戻す
-        let not_rows = reader.repaired[before..]
-            .iter()
-            .any(|name| name == key::ACTIONS);
-        config.actions = (!not_rows).then_some(actions);
+        if key == key::SNIPPETS {
+            let mut snippets: Vec<Snippet> = Vec::new();
+            reader.read_rows(key, &mut snippets);
+            rows = snippets.into_iter().map(LegacyAction).collect();
+        } else {
+            reader.read_rows(key, &mut rows);
+        }
+        let not_rows = reader.repaired[before..].iter().any(|name| name == key);
+        (!not_rows).then_some(rows)
+    };
+    let migrated = reader.table.contains_key(legacy::ACTIONS)
+        || reader.table.contains_key(legacy::SYNC_ACTIONS);
+    let snippets = read_optional_rows(&mut reader, key::SNIPPETS);
+    // アクションが別の並びだったころの設定ファイルは、アクションを定型文の後ろへ移す。
+    // 同期は、どちらかを切っていたら切ったままにする。切っていた種類を、移した拍子に窓口へ出さないため
+    let legacy_actions = read_optional_rows(&mut reader, legacy::ACTIONS);
+    let mut legacy_sync_actions = true;
+    reader.read_bool(legacy::SYNC_ACTIONS, &mut legacy_sync_actions);
+    config.sync_snippets &= legacy_sync_actions;
+    if snippets.is_some() || legacy_actions.is_some() {
+        config.snippets = Some(
+            snippets
+                .into_iter()
+                .chain(legacy_actions)
+                .flatten()
+                .map(|row| row.0)
+                .collect(),
+        );
     }
     let platform = Platform::current();
     let parsed = draft_keys::parse(
@@ -1101,7 +1096,12 @@ fn parse(text: &str) -> Result<(Config, Vec<String>, bool), String> {
         log::info!("ignored unknown settings: {}", unknown.join(", "));
     }
     let repaired_item_ids = repair_item_ids_in_config(&mut config)?;
-    Ok((config, reader.repaired, repaired_item_ids))
+    Ok(Parsed {
+        config,
+        repaired: reader.repaired,
+        repaired_item_ids,
+        migrated,
+    })
 }
 
 /// 選択肢の名前。serde の `rename_all` で決めた書き方で、設定ファイルと画面とのやり取りで同じ名前を使う（`read_choice` の逆）
@@ -1418,7 +1418,7 @@ fn sync_draft_keys(root: &mut Table, keys: &DraftKeys, yielded: &[DraftAction]) 
     sync_subtable(root, key::TEXT_WINDOW_KEYS, &names, &written);
 }
 
-/// 空の並びも書く並び（アクション。項目がないのは既定、空の並びはアクションなし、と分けるため）。
+/// 空の並びも書く並び（定型文。項目がないのは既定、空の並びは定型文なし、と分けるため）。
 /// 空なら `key = []` にする。インラインの配列で書いてあれば、その書き方のまま行を消す
 fn sync_rows_keeping_empty<T: Row>(root: &mut Table, key: &str, rows: &[T]) {
     if !rows.is_empty() {
@@ -1499,7 +1499,6 @@ fn apply(root: &mut Table, config: &Config, changes: &Changes<'_>) {
     scalar!(key::SYNC_SNIPPETS, sync_snippets, |v: &bool| Value::from(
         *v
     ));
-    scalar!(key::SYNC_ACTIONS, sync_actions, |v: &bool| Value::from(*v));
     scalar!(key::SYNC_HISTORY, sync_history, |v: &bool| Value::from(*v));
     scalar!(
         key::SYNC_EXCLUDED_SETTINGS,
@@ -1586,8 +1585,21 @@ fn apply(root: &mut Table, config: &Config, changes: &Changes<'_>) {
     }) {
         sync_rows(root, key::REPLACEMENTS, &config.replacements);
     }
-    if changes.includes(key::SNIPPETS, |old| old.snippets != config.snippets) {
-        sync_rows(root, key::SNIPPETS, &config.snippets);
+    // アクションが別の並びだったころの項目が残っていれば、移した定型文と一緒に書き直す。
+    // 片方だけ書くと、次に読むときに同じ行を2回移す
+    let legacy_actions = root.remove(legacy::ACTIONS).is_some();
+    if root.remove(legacy::SYNC_ACTIONS).is_some() {
+        let next = (config.sync_snippets != defaults.sync_snippets)
+            .then(|| Value::from(config.sync_snippets));
+        sync_value(root, key::SYNC_SNIPPETS, next);
+    }
+    if legacy_actions || changes.includes(key::SNIPPETS, |old| old.snippets != config.snippets) {
+        match &config.snippets {
+            None => {
+                root.remove(key::SNIPPETS);
+            }
+            Some(snippets) => sync_rows_keeping_empty(root, key::SNIPPETS, snippets),
+        }
     }
     if changes.includes(key::AI_SERVICE, |old| old.ai_service != config.ai_service) {
         let next = (config.ai_service != defaults.ai_service)
@@ -1605,14 +1617,6 @@ fn apply(root: &mut Table, config: &Config, changes: &Changes<'_>) {
     }
     if changes.includes(key::AI_MODELS, |old| old.ai_models != config.ai_models) {
         sync_ai_models(root, &config.ai_models);
-    }
-    if changes.includes(key::ACTIONS, |old| old.actions != config.actions) {
-        match &config.actions {
-            None => {
-                root.remove(key::ACTIONS);
-            }
-            Some(actions) => sync_rows_keeping_empty(root, key::ACTIONS, actions),
-        }
     }
     if changes.includes(key::DEVICES, |old| old.devices != config.devices) {
         sync_rows(root, key::DEVICES, &config.devices);
@@ -1660,7 +1664,9 @@ fn write_repaired_item_ids<T: Row + SyncRow>(root: &mut Table, key: &str, rows: 
 }
 
 /// 既存の設定ファイルを読んだ直後に、同期する行へ足した ID だけを書き戻す。
-fn save_repaired_item_ids(path: &Path, text: &str, config: &Config) -> io::Result<()> {
+/// アクションが別の並びだったころの項目を移したとき（`migrated`）は、移した定型文も書き、元の項目を消す。
+/// 書いておかないと、定型文だけを保存した後に、残ったアクションの並びをもう一度移す
+fn save_repaired_rows(path: &Path, text: &str, config: &Config, migrated: bool) -> io::Result<()> {
     let mut document: DocumentMut = text.parse().map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -1668,10 +1674,19 @@ fn save_repaired_item_ids(path: &Path, text: &str, config: &Config) -> io::Resul
         )
     })?;
     let root = document.as_table_mut();
+    if migrated {
+        apply(
+            root,
+            config,
+            &Changes::Since {
+                old: config,
+                repaired: &[],
+            },
+        );
+    }
     write_repaired_item_ids(root, key::REPLACEMENTS, &config.replacements);
-    write_repaired_item_ids(root, key::SNIPPETS, &config.snippets);
-    if let Some(actions) = &config.actions {
-        write_repaired_item_ids(root, key::ACTIONS, actions);
+    if let Some(snippets) = &config.snippets {
+        write_repaired_item_ids(root, key::SNIPPETS, snippets);
     }
     atomic_file::write(path, document.to_string().as_bytes())
 }
@@ -1685,10 +1700,15 @@ pub fn load_or_create(path: &Path) -> (Config, Option<LoadProblem>) {
     };
     match fs::read_to_string(path) {
         Ok(text) => match parse(&text) {
-            Ok((config, repaired, repaired_item_ids)) => {
-                if repaired_item_ids {
-                    if let Err(error) = save_repaired_item_ids(path, &text, &config) {
-                        log::warn!("couldn't save repaired item IDs: {error}");
+            Ok(Parsed {
+                config,
+                repaired,
+                repaired_item_ids,
+                migrated,
+            }) => {
+                if migrated || repaired_item_ids {
+                    if let Err(error) = save_repaired_rows(path, &text, &config, migrated) {
+                        log::warn!("couldn't save repaired rows: {error}");
                     }
                 }
                 if repaired.is_empty() {
@@ -1793,7 +1813,7 @@ pub fn load_sync_backup(path: &Path, name: &str) -> io::Result<Config> {
     let target = sync_backups_dir(path).join(name);
     let text = fs::read_to_string(target)?;
     parse(&text)
-        .map(|(config, _, _)| config)
+        .map(|parsed| parsed.config)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
@@ -2169,19 +2189,19 @@ autostart = false
 [text_window_keys]
 copy = "CommandOrControl+KeyK"
 send = 1
-snippets = "CommandOrControl+Alt+KeyK"
+settings = "CommandOrControl+Alt+KeyK"
 "#,
         );
         let (config, error) = load_or_create(&path);
         assert!(!config.autostart);
         assert_eq!(config.text_window_keys.copy, "CommandOrControl+KeyK");
-        // アクションの一覧の既定のキー（Cmd+K）は、書いたコピーのキーに譲り、知らせない
-        assert_eq!(config.text_window_keys.actions, "");
-        assert_eq!(config.text_window_keys.send, DraftKeys::default().send);
+        // 定型文の一覧の既定のキー（Cmd+K）は、書いたコピーのキーに譲り、知らせない
         assert_eq!(config.text_window_keys.snippets, "");
+        assert_eq!(config.text_window_keys.send, DraftKeys::default().send);
+        assert_eq!(config.text_window_keys.settings, "");
         assert_eq!(
             error,
-            repaired(&["text_window_keys.send", "text_window_keys.snippets"])
+            repaired(&["text_window_keys.send", "text_window_keys.settings"])
         );
 
         // text_window_keys のない設定ファイルで、ホットキーが既定のキーと重なっても知らせない
@@ -2443,27 +2463,22 @@ body = "git status"
         let (config, error) = load_or_create(&path);
         assert_eq!(
             config.snippets,
-            vec![
+            Some(vec![
                 Snippet {
                     id: item_id('a'),
                     name: "確認".to_string(),
                     body: "一つずつ質問してください。".to_string(),
-                    sync: true,
+                    ..Snippet::default()
                 },
                 Snippet {
                     id: item_id('b'),
                     name: String::new(),
                     body: "git status".to_string(),
-                    sync: true,
+                    ..Snippet::default()
                 },
-            ]
+            ])
         );
         assert_eq!(error, repaired(&["snippets[1]"]));
-
-        write(&path, "snippets = \"git status\"\n");
-        let (config, error) = load_or_create(&path);
-        assert_eq!(config.snippets, Vec::new());
-        assert_eq!(error, repaired(&["snippets"]));
     }
 
     #[test]
@@ -2611,7 +2626,6 @@ body = "git status"
                 config.sync_replacements = false;
             }),
             (key::SYNC_SNIPPETS, |config| config.sync_snippets = false),
-            (key::SYNC_ACTIONS, |config| config.sync_actions = false),
             (key::SYNC_HISTORY, |config| config.sync_history = false),
         ];
         assert_eq!(
@@ -2690,7 +2704,6 @@ body = "git status"
             sync_keys: false,
             sync_replacements: false,
             sync_snippets: false,
-            sync_actions: false,
             sync_history: false,
             sync_excluded_settings: Vec::new(),
             language: Language::En,
@@ -2707,12 +2720,36 @@ body = "git status"
                 enabled: false,
                 sync: false,
             }],
-            snippets: vec![Snippet {
-                id: "2".repeat(32),
-                name: "確認".to_string(),
-                body: "一つずつ質問してください。\n以上です。".to_string(),
-                sync: false,
-            }],
+            snippets: Some(vec![
+                Snippet {
+                    id: "2".repeat(32),
+                    name: "確認".to_string(),
+                    body: "一つずつ質問してください。\n以上です。".to_string(),
+                    output: ActionOutput::Replace,
+                    encoding: ActionEncoding::Utf8,
+                    enabled: false,
+                    sync: false,
+                },
+                Snippet {
+                    id: "3".repeat(32),
+                    name: "敬語".to_string(),
+                    body: "@ai 丁寧に書き直してください。\n書き直した文だけを返してください。"
+                        .to_string(),
+                    output: ActionOutput::Insert,
+                    encoding: ActionEncoding::Utf8,
+                    enabled: true,
+                    sync: false,
+                },
+                Snippet {
+                    id: "4".repeat(32),
+                    name: "並べ替え".to_string(),
+                    body: "@sh sort | uniq".to_string(),
+                    output: ActionOutput::None,
+                    encoding: ActionEncoding::ShiftJis,
+                    enabled: true,
+                    sync: false,
+                },
+            ]),
             punctuation_style: PunctuationStyle::Comma,
             char_widths: CharWidths {
                 alphabet: WidthStyle::Half,
@@ -2736,27 +2773,6 @@ body = "git status"
             ai_service: AiService::Gemini,
             ai_consent: Some(AiService::Gemini),
             ai_models: BTreeMap::from([(AiService::Gemini, "gemini-3.8-flash".to_string())]),
-            actions: Some(vec![
-                Action {
-                    id: "3".repeat(32),
-                    name: "敬語".to_string(),
-                    command: "@ai 丁寧に書き直してください。\n書き直した文だけを返してください。"
-                        .to_string(),
-                    output: ActionOutput::Insert,
-                    encoding: ActionEncoding::Utf8,
-                    enabled: true,
-                    sync: false,
-                },
-                Action {
-                    id: "4".repeat(32),
-                    name: "並べ替え".to_string(),
-                    command: "sort | uniq".to_string(),
-                    output: ActionOutput::None,
-                    encoding: ActionEncoding::ShiftJis,
-                    enabled: true,
-                    sync: false,
-                },
-            ]),
         }
     }
 
@@ -2901,7 +2917,7 @@ to = "b"
             "{text}"
         );
         // 分断していた定型文もそのまま読める
-        assert_eq!(config.snippets.len(), 2);
+        assert_eq!(config.snippets.map(|snippets| snippets.len()), Some(2));
     }
 
     #[test]
@@ -3357,8 +3373,8 @@ replacements = [
     }
 
     #[test]
-    fn reads_ai_settings_and_actions_and_repairs_broken_ones() {
-        let path = temp_path("actions");
+    fn reads_ai_settings_and_snippets_and_repairs_broken_ones() {
+        let path = temp_path("ai-snippets");
         write(
             &path,
             r#"ai_service = "gemini"
@@ -3368,36 +3384,36 @@ ai_consent = "gemini"
 gemini = "gemini-3.8-flash"
 mistral = "mistral-large"
 
-[[actions]]
+[[snippets]]
 id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 name = "敬語"
-command = "@ai 丁寧に: {{t}}"
+body = "@ai 丁寧に: {{t}}"
 output = "insert"
 
-[[actions]]
+[[snippets]]
 id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-command = "date"
+body = "@sh date"
 encoding = "euc-jp"
 enabled = false
 
-[[actions]]
+[[snippets]]
 id = "cccccccccccccccccccccccccccccccc"
-name = "コマンドがない"
+name = "本文がない"
 output = "none"
 
-[[actions]]
-command = "sort"
+[[snippets]]
+body = "@sh sort"
 output = "append"
 
-[[actions]]
+[[snippets]]
 name = 1
-command = "sort"
+body = "@sh sort"
 
-[[actions]]
-command = ["sort"]
+[[snippets]]
+body = ["@sh sort"]
 
-[[actions]]
-command = "sort"
+[[snippets]]
+body = "@sh sort"
 encoding = "cp932"
 "#,
         );
@@ -3405,32 +3421,32 @@ encoding = "cp932"
         assert!(config.ai_available(Some(true)));
         assert_eq!(config.ai_model(), "gemini-3.8-flash");
         assert_eq!(
-            config.actions,
+            config.snippets,
             Some(vec![
-                Action {
+                Snippet {
                     id: item_id('a'),
                     name: "敬語".to_string(),
-                    command: "@ai 丁寧に: {{t}}".to_string(),
+                    body: "@ai 丁寧に: {{t}}".to_string(),
                     output: ActionOutput::Insert,
                     encoding: ActionEncoding::Utf8,
                     enabled: true,
                     sync: true,
                 },
                 // 出し方を省いたら置き換える。切った行も読む
-                Action {
+                Snippet {
                     id: item_id('b'),
                     name: String::new(),
-                    command: "date".to_string(),
+                    body: "@sh date".to_string(),
                     output: ActionOutput::Replace,
                     encoding: ActionEncoding::EucJp,
                     enabled: false,
                     sync: true,
                 },
-                // コマンドの行を省いた行は、空の行として読む（一覧には出さない）。文字コードを省いたら UTF-8
-                Action {
+                // 本文を省いた行は、空の行として読む。文字コードを省いたら UTF-8
+                Snippet {
                     id: item_id('c'),
-                    name: "コマンドがない".to_string(),
-                    command: String::new(),
+                    name: "本文がない".to_string(),
+                    body: String::new(),
                     output: ActionOutput::None,
                     encoding: ActionEncoding::Utf8,
                     enabled: true,
@@ -3441,15 +3457,15 @@ encoding = "cp932"
         // 知らない AI サービスのモデルは読み飛ばすだけで、知らせない
         assert_eq!(
             error,
-            repaired(&["actions[3]", "actions[4]", "actions[5]", "actions[6]"])
+            repaired(&["snippets[3]", "snippets[4]", "snippets[5]", "snippets[6]"])
         );
 
-        // 知らない AI サービスの名前、文字列でないモデル、並びでないアクションは既定に戻す
+        // 知らない AI サービスの名前、文字列でないモデル、並びでない定型文は既定に戻す
         write(
             &path,
             r#"ai_service = "mistral"
 ai_consent = 1
-actions = "丁寧に"
+snippets = "丁寧に"
 
 [ai_models]
 gemini = 3
@@ -3460,10 +3476,10 @@ gemini = 3
         assert_eq!(config.ai_service, AiService::None);
         assert_eq!(config.ai_consent, None);
         assert_eq!(config.ai_model(), AiService::None.default_model());
-        assert_eq!(config.actions, None);
+        assert_eq!(config.snippets, None);
         assert_eq!(
             error,
-            repaired(&["ai_service", "ai_consent", "ai_models.gemini", "actions"])
+            repaired(&["ai_service", "ai_consent", "ai_models.gemini", "snippets"])
         );
     }
 
@@ -3508,30 +3524,200 @@ gemini = 3
     }
 
     #[test]
-    fn keeps_empty_actions_apart_from_the_default() {
-        // 項目がないのは既定のアクション、空の並びは利用者が全部消したもの。空にしても項目を消さない
-        let path = temp_path("actions-empty");
+    fn keeps_empty_snippets_apart_from_the_default() {
+        // 項目がないのは既定の定型文、空の並びは利用者が全部消したもの。空にしても項目を消さない
+        let path = temp_path("snippets-empty");
         write(
             &path,
-            "[[actions]]\nname = \"敬語\"\ncommand = \"@ai 丁寧に\"\n",
+            "[[snippets]]\nname = \"敬語\"\nbody = \"@ai 丁寧に\"\n",
         );
-        save_change(&path, |config| config.actions = Some(Vec::new()));
-        assert_eq!(fs::read_to_string(&path).unwrap(), "actions = []\n");
-        assert_eq!(load_or_create(&path).0.actions, Some(Vec::new()));
+        save_change(&path, |config| config.snippets = Some(Vec::new()));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "snippets = []\n");
+        assert_eq!(load_or_create(&path).0.snippets, Some(Vec::new()));
 
         // インラインの配列で書いた並びは、書き方とコメントを残して空にする
         write(
             &path,
-            "# アクション\nactions = [\n  { name = \"敬語\", command = \"@ai 丁寧に\" },\n]\n",
+            "# 定型文\nsnippets = [\n  { name = \"敬語\", body = \"@ai 丁寧に\" },\n]\n",
         );
-        save_change(&path, |config| config.actions = Some(Vec::new()));
+        save_change(&path, |config| config.snippets = Some(Vec::new()));
         let text = fs::read_to_string(&path).unwrap();
-        assert!(text.starts_with("# アクション\nactions = ["), "{text}");
-        assert_eq!(load_or_create(&path).0.actions, Some(Vec::new()));
+        assert!(text.starts_with("# 定型文\nsnippets = ["), "{text}");
+        assert_eq!(load_or_create(&path).0.snippets, Some(Vec::new()));
 
         // 既定に戻すと項目を消す
-        save_change(&path, |config| config.actions = None);
+        save_change(&path, |config| config.snippets = None);
         assert_eq!(fs::read_to_string(&path).unwrap().trim(), "");
+    }
+
+    #[test]
+    fn moves_rows_of_the_separate_action_list_behind_the_snippets() {
+        // コマンドの行はシェルの宛先を付けた本文にし、行のほかの値はそのまま保つ
+        let path = temp_path("legacy-actions");
+        write(
+            &path,
+            r#"[[actions]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+name = "並べ替え"
+command = "sort"
+output = "insert"
+encoding = "shift_jis"
+enabled = false
+sync = false
+
+[[actions]]
+id = "cccccccccccccccccccccccccccccccc"
+name = "英訳"
+command = "@ai 訳して"
+
+[[snippets]]
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+name = "確認"
+body = "以上です。"
+"#,
+        );
+        let (config, problem) = load_or_create(&path);
+        assert_eq!(problem, None);
+        assert_eq!(
+            config.snippets,
+            Some(vec![
+                Snippet {
+                    id: item_id('a'),
+                    name: "確認".to_string(),
+                    body: "以上です。".to_string(),
+                    ..Snippet::default()
+                },
+                Snippet {
+                    id: item_id('b'),
+                    name: "並べ替え".to_string(),
+                    body: "@sh sort".to_string(),
+                    output: ActionOutput::Insert,
+                    encoding: ActionEncoding::ShiftJis,
+                    enabled: false,
+                    sync: false,
+                },
+                Snippet {
+                    id: item_id('c'),
+                    name: "英訳".to_string(),
+                    body: "@ai 訳して".to_string(),
+                    ..Snippet::default()
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn keeps_an_emptied_separate_action_list_apart_from_the_default() {
+        // アクションを全部消していた人に、既定の定型文を出さない
+        let path = temp_path("legacy-actions-empty");
+        write(&path, "actions = []\n");
+        assert_eq!(
+            load_or_create(&path),
+            (
+                Config {
+                    snippets: Some(Vec::new()),
+                    ..Config::default()
+                },
+                None
+            )
+        );
+
+        write(&path, "autostart = true\n");
+        assert_eq!(load_or_create(&path).0.snippets, None);
+    }
+
+    #[test]
+    fn keeps_sync_off_when_either_separate_kind_was_off() {
+        // 切っていた種類を、移した拍子に窓口へ出さない
+        let path = temp_path("legacy-sync-actions");
+        for (toml, expected) in [
+            ("sync_actions = false\n", false),
+            ("sync_actions = true\n", true),
+            ("sync_snippets = false\nsync_actions = true\n", false),
+        ] {
+            write(&path, toml);
+            let (config, problem) = load_or_create(&path);
+            assert_eq!(problem, None, "{toml}");
+            assert_eq!(config.sync_snippets, expected, "{toml}");
+        }
+    }
+
+    /// アクションと定型文が別の並びだったころの設定ファイル
+    const LEGACY_ACTIONS: &str = r#"# 自分用のメモ
+theme = "dark"
+sync_actions = false
+
+[[snippets]]
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+name = "確認"
+body = "以上です。"
+
+[[actions]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+name = "並べ替え"
+command = "sort"
+"#;
+
+    fn snippet_bodies(config: &Config) -> Vec<&str> {
+        config
+            .snippets
+            .iter()
+            .flatten()
+            .map(|snippet| snippet.body.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn rewrites_the_separate_action_list_as_snippets_when_reading() {
+        // 元の項目を残すと、定型文だけを保存した後の読み込みで、同じ行をもう一度移す
+        let path = temp_path("legacy-actions-rewrite");
+        write(&path, LEGACY_ACTIONS);
+        let (config, problem) = load_or_create(&path);
+        assert_eq!(problem, None);
+        assert_eq!(snippet_bodies(&config), ["以上です。", "@sh sort"]);
+        assert!(!config.sync_snippets);
+
+        let text = fs::read_to_string(&path).unwrap();
+        let document: DocumentMut = text.parse().unwrap();
+        assert!(!document.contains_key(legacy::ACTIONS), "{text}");
+        assert!(!document.contains_key(legacy::SYNC_ACTIONS), "{text}");
+        // 移す項目のほかは、書き方をそのまま残す
+        assert!(
+            text.starts_with("# 自分用のメモ\ntheme = \"dark\"\n"),
+            "{text}"
+        );
+        assert!(text.contains("sync_snippets = false"), "{text}");
+        assert!(text.contains("body = \"@sh sort\""), "{text}");
+
+        // 書き直した後は、読んでも行が増えず、ファイルも変わらない
+        assert_eq!(load_or_create(&path), (config, None));
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn saving_snippets_over_a_remaining_separate_action_list_does_not_duplicate_rows() {
+        // 読んだときの書き直しに失敗した・起動した後に手で戻したファイルに、移した定型文を保存する
+        let path = temp_path("legacy-actions-save");
+        write(&path, LEGACY_ACTIONS);
+        let (old, problem) = load_or_create(&path);
+        assert_eq!(problem, None);
+        write(&path, LEGACY_ACTIONS);
+
+        let mut next = old.clone();
+        next.snippets.as_mut().unwrap()[0].body = "以上。".to_string();
+        let loaded = Loaded::Read {
+            old: &old,
+            repaired: &[],
+        };
+        assert_eq!(save_with_backup(&path, &next, loaded, NOW).unwrap(), None);
+
+        let text = fs::read_to_string(&path).unwrap();
+        let document: DocumentMut = text.parse().unwrap();
+        assert!(!document.contains_key(legacy::ACTIONS), "{text}");
+        assert!(!document.contains_key(legacy::SYNC_ACTIONS), "{text}");
+        assert_eq!(load_or_create(&path), (next.clone(), None));
+        assert_eq!(snippet_bodies(&next), ["以上。", "@sh sort"]);
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
     }
 
     #[test]
@@ -3622,7 +3808,6 @@ gemini = 3
         let path = temp_path("item-ids");
         let valid_replacement = "a".repeat(32);
         let valid_snippet = "b".repeat(32);
-        let valid_action = "c".repeat(32);
         let invalid_id = "A".repeat(32);
         write(
             &path,
@@ -3677,30 +3862,10 @@ id = "{invalid_id}"
 name = "invalid"
 body = "new"
 
-[[actions]]
-id = "{valid_action}"
-name = "keep"
-command = "echo kept"
-sync = false
-
-[[actions]]
-id = "{valid_action}"
-name = "duplicate"
-command = "echo new"
-
-[[actions]]
+[[snippets]]
 id = 123
-name = "invalid"
-command = "echo new"
-
-[[actions]]
-id = ""
-name = "empty"
-command = "echo new"
-
-[[actions]]
-name = "missing"
-command = "echo new"
+name = "not text"
+body = "new"
 "#
             ),
         );
@@ -3708,34 +3873,17 @@ command = "echo new"
         let (config, problem) = load_or_create(&path);
         assert_eq!(problem, None);
         assert_eq!(config.replacements[0].id, valid_replacement);
-        assert_eq!(config.snippets[0].id, valid_snippet);
-        assert_eq!(config.actions.as_ref().unwrap()[0].id, valid_action);
+        let snippets = config.snippets.as_ref().unwrap();
+        assert_eq!(snippets.len(), 6);
+        assert_eq!(snippets[0].id, valid_snippet);
         assert!(has_valid_ids(
             config.replacements.iter().map(|row| row.id.clone())
         ));
-        assert!(has_valid_ids(
-            config.snippets.iter().map(|row| row.id.clone())
-        ));
-        assert!(has_valid_ids(
-            config
-                .actions
-                .as_ref()
-                .unwrap()
-                .iter()
-                .map(|row| row.id.clone())
-        ));
+        assert!(has_valid_ids(snippets.iter().map(|row| row.id.clone())));
         assert!(!config.replacements[0].sync);
         assert!(config.replacements.iter().skip(1).all(|row| row.sync));
-        assert!(!config.snippets[0].sync);
-        assert!(config.snippets.iter().skip(1).all(|row| row.sync));
-        assert!(!config.actions.as_ref().unwrap()[0].sync);
-        assert!(config
-            .actions
-            .as_ref()
-            .unwrap()
-            .iter()
-            .skip(1)
-            .all(|row| row.sync));
+        assert!(!snippets[0].sync);
+        assert!(snippets.iter().skip(1).all(|row| row.sync));
 
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("sync = false"), "{text}");
@@ -3752,11 +3900,6 @@ replacements = [{ id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", from = "濃度", to =
 id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 name = "確認"
 body = "以上です。"
-
-[[actions]]
-id = "cccccccccccccccccccccccccccccccc"
-name = "大文字"
-command = "tr a-z A-Z"
 "#;
         write(&path, text);
 
@@ -3764,8 +3907,7 @@ command = "tr a-z A-Z"
 
         assert_eq!(problem, None);
         assert_eq!(config.replacements[0].id, item_id('a'));
-        assert_eq!(config.snippets[0].id, item_id('b'));
-        assert_eq!(config.actions.as_ref().unwrap()[0].id, item_id('c'));
+        assert_eq!(config.snippets.unwrap()[0].id, item_id('b'));
         assert_eq!(fs::read_to_string(&path).unwrap(), text);
     }
 
@@ -3781,10 +3923,6 @@ to = "Node.js"
 [[snippets]]
 name = "確認"
 body = "以上です。"
-
-[[actions]]
-name = "大文字"
-command = "tr a-z A-Z"
 "#;
         write(&path, text);
 
@@ -3794,8 +3932,7 @@ command = "tr a-z A-Z"
         let mut written = fs::read_to_string(&path).unwrap();
         for id in [
             &config.replacements[0].id,
-            &config.snippets[0].id,
-            &config.actions.as_ref().unwrap()[0].id,
+            &config.snippets.as_ref().unwrap()[0].id,
         ] {
             written = written.replace(id, "<generated>");
         }
@@ -3811,11 +3948,6 @@ id = "<generated>"
 [[snippets]]
 name = "確認"
 body = "以上です。"
-id = "<generated>"
-
-[[actions]]
-name = "大文字"
-command = "tr a-z A-Z"
 id = "<generated>"
 "#
         );

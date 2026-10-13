@@ -1,14 +1,20 @@
-//! アクション。
-//! 登録した1行のコマンドを実行して、結果を下書きに出す。行頭が `@ai` なら AI（ai.rs）へ、それ以外はシェル（command.rs）へ渡す。
-//! ここには実行先によらない決めごと（行の読み方、既定のアクション、失敗の種類）を置く
+//! 宛先へ出す。
+//! 1行目の行頭が `@ai` なら AI（ai.rs）へ、`@sh` ならシェル（command.rs）へ渡して、結果を下書きに出す（docs/actions.md）。
+//! デバイスの宛先（`@all`・デバイスの名前）は、画面がつないだデバイスと照らして送る。
+//! ここには実行先によらない決めごと（行の読み方、既定の定型文、失敗の種類）を置く
 
 use crate::{
-    config::{Action, ActionEncoding, ActionOutput},
+    config::{ActionEncoding, ActionOutput, Snippet},
     i18n::Lang,
 };
 
-/// 行頭にあれば、残りを指示文として AI サービスへ送る印
+/// 行頭にあれば、残りを指示文として AI サービスへ送る宛先
 pub const AI_PREFIX: &str = "@ai";
+/// 行頭にあれば、残りをコマンドとしてその機のシェルで実行する宛先
+pub const SH_PREFIX: &str = "@sh";
+/// つないだすべてのデバイスへ送る宛先。宛先を照らすのは画面なので、Rust 側では画面へ書き出すだけ（bindings.rs）
+#[cfg(test)]
+pub const ALL_DEVICES: &str = "@all";
 /// コマンドの行や指示文の中で、実行する文に置き換える印
 pub const TEXT_MARK: &str = "{{t}}";
 /// 言語を替えても同じ既定の翻訳アクションを見分けるための ID。
@@ -21,17 +27,37 @@ fn ai_line(instruction: &str) -> String {
     format!("{AI_PREFIX} {}", instruction.trim())
 }
 
-/// 行頭が `@ai` なら、その後ろ（前後の空白を除く）の指示文を返す。`@ai` の直後は空白か行の終わりに限る（`@aix` は AI の行ではない）
-pub fn ai_instruction(command: &str) -> Option<&str> {
-    let rest = command.trim_start().strip_prefix(AI_PREFIX)?;
+/// 行頭が宛先 `prefix` なら、その後ろ（前後の空白を除く）を返す。宛先の直後は空白か行の終わりに限る（`@aix` は `@ai` の行ではない）
+fn addressed<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = line.trim_start().strip_prefix(prefix)?;
     (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
 }
 
-/// 既定のアクション。設定ファイルにアクションの項目がないときに、今の表示言語で使う。
+/// 行頭が `@ai` なら、その後ろの指示文を返す
+pub fn ai_instruction(line: &str) -> Option<&str> {
+    addressed(line, AI_PREFIX)
+}
+
+/// 行頭が `@sh` なら、その後ろのコマンドを返す
+pub fn sh_command(line: &str) -> Option<&str> {
+    addressed(line, SH_PREFIX)
+}
+
+/// アクションが別の並びだったころのコマンドの行を、宛先で始まる定型文の本文にする。`@ai` の行はそのまま、ほかはシェルの行だったので `@sh` を付ける
+pub fn legacy_action_body(command: &str) -> String {
+    // コマンドを書いていなかった行は、一覧に出ない空の定型文のままにする
+    if command.trim().is_empty() || ai_instruction(command).is_some() {
+        command.to_string()
+    } else {
+        format!("{SH_PREFIX} {command}")
+    }
+}
+
+/// 既定の定型文。設定ファイルに定型文の項目がないときに、今の表示言語で使う。
 /// AI の見本（英訳）と、どの OS にも入っているコマンドの見本（`sort`。標準入力を並べ替えて返す）を1つずつ。
 /// Windows の `sort` はシステムの文字コードで読み書きするので、Shift_JIS にする。
 /// 文字コードの既定が OS で違うコマンドの見本は、同期しない行にしておく（docs/sync.md「同期する単位」）
-pub fn default_actions(lang: Lang) -> Vec<Action> {
+pub fn default_snippets(lang: Lang) -> Vec<Snippet> {
     let (translate, translate_instruction, sort) = match lang {
         Lang::Ja => (
             "英訳",
@@ -60,16 +86,16 @@ pub fn default_actions(lang: Lang) -> Vec<Action> {
         (
             DEFAULT_SORT_ACTION_ID,
             sort,
-            "sort".to_string(),
+            format!("{SH_PREFIX} sort"),
             sort_encoding,
             false,
         ),
     ]
     .into_iter()
-    .map(|(id, name, command, encoding, sync)| Action {
+    .map(|(id, name, body, encoding, sync)| Snippet {
         id: id.to_string(),
         name: name.to_string(),
-        command,
+        body,
         output: ActionOutput::Replace,
         encoding,
         enabled: true,
@@ -212,29 +238,29 @@ mod tests {
     #[test]
     fn only_the_command_sample_is_kept_out_of_sync() {
         for lang in [Lang::Ja, Lang::En] {
-            let synced: Vec<_> = default_actions(lang)
+            let synced: Vec<_> = default_snippets(lang)
                 .into_iter()
-                .map(|action| (action.command == "sort", action.sync))
+                .map(|snippet| (snippet.body == "@sh sort", snippet.sync))
                 .collect();
             assert_eq!(synced, [(false, true), (true, false)]);
         }
     }
 
     #[test]
-    fn has_one_ai_action_and_one_command_action_by_default_in_each_language() {
+    fn has_one_ai_row_and_one_command_row_by_default_in_each_language() {
         let mut ids: Option<Vec<String>> = None;
         for lang in [Lang::Ja, Lang::En] {
-            let actions = default_actions(lang);
-            assert_eq!(actions.len(), 2);
-            assert!(actions.iter().all(|action| !action.name.is_empty()
-                && action.enabled
-                && action.output == ActionOutput::Replace));
-            assert!(ai_instruction(&actions[0].command)
+            let snippets = default_snippets(lang);
+            assert_eq!(snippets.len(), 2);
+            assert!(snippets.iter().all(|snippet| !snippet.name.is_empty()
+                && snippet.enabled
+                && snippet.output == ActionOutput::Replace));
+            assert!(ai_instruction(&snippets[0].body)
                 .is_some_and(|instruction| !instruction.is_empty()));
-            assert_eq!(actions[1].command, "sort");
-            let current = actions
+            assert_eq!(sh_command(&snippets[1].body), Some("sort"));
+            let current = snippets
                 .iter()
-                .map(|action| action.id.clone())
+                .map(|snippet| snippet.id.clone())
                 .collect::<Vec<_>>();
             if let Some(ref ids) = ids {
                 assert_eq!(current.as_slice(), ids.as_slice());
@@ -255,5 +281,20 @@ mod tests {
         assert_eq!(ai_instruction("@aix"), None);
         assert_eq!(ai_instruction("echo @ai"), None);
         assert_eq!(ai_line(" 訳して "), "@ai 訳して");
+    }
+
+    #[test]
+    fn reads_the_sh_prefix_only_at_the_head_of_the_line() {
+        assert_eq!(sh_command("@sh sort | uniq"), Some("sort | uniq"));
+        assert_eq!(sh_command("@sh"), Some(""));
+        assert_eq!(sh_command("@shell ls"), None);
+        assert_eq!(sh_command("sort"), None);
+    }
+
+    #[test]
+    fn turns_a_command_line_from_the_separate_action_list_into_an_addressed_body() {
+        assert_eq!(legacy_action_body("sort"), "@sh sort");
+        assert_eq!(legacy_action_body("@ai 訳して"), "@ai 訳して");
+        assert_eq!(legacy_action_body(""), "");
     }
 }

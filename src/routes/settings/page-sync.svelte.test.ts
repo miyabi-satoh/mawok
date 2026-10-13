@@ -6,6 +6,7 @@ import type { SyncConflict } from '$lib/bindings/SyncConflict';
 import type { SyncBackup } from '$lib/bindings/SyncBackup';
 import { m } from '$lib/paraglide/messages';
 import { settings } from '$lib/settings.svelte';
+import { newSnippet } from '$lib/snippets';
 import { sideName } from '$lib/sync-choices';
 import { callsOf } from '$lib/test-support/calls';
 import { settingsView } from '$lib/test-support/settings-view';
@@ -89,14 +90,12 @@ describe('設定画面の同期', () => {
 		await screen.getByRole('switch', { name: m.settings_sync_keys() }).click();
 		await screen.getByRole('switch', { name: m.settings_sync_replacements() }).click();
 		await screen.getByRole('switch', { name: m.settings_sync_snippets() }).click();
-		await screen.getByRole('switch', { name: m.settings_sync_actions() }).click();
 		await screen.getByRole('switch', { name: m.settings_sync_history() }).click();
 		expect(callsOf(invoked, 'set_sync_kind')).toEqual(
 			expect.arrayContaining([
 				['set_sync_kind', { kind: 'keys', enabled: false }],
 				['set_sync_kind', { kind: 'replacements', enabled: false }],
 				['set_sync_kind', { kind: 'snippets', enabled: false }],
-				['set_sync_kind', { kind: 'actions', enabled: false }],
 				['set_sync_kind', { kind: 'history', enabled: false }]
 			])
 		);
@@ -175,7 +174,6 @@ describe('設定画面の同期', () => {
 				keys: true,
 				replacements: true,
 				snippets: true,
-				actions: true,
 				history: true
 			}
 		});
@@ -202,7 +200,7 @@ describe('設定画面の同期', () => {
 		for (const label of [
 			m.settings_category_draft(),
 			m.settings_category_copy(),
-			m.settings_category_actions()
+			m.settings_category_snippets()
 		]) {
 			await screen.getByRole('tab', { name: label }).click();
 			collect();
@@ -220,10 +218,9 @@ describe('設定画面の同期', () => {
 				keys: true,
 				replacements: true,
 				snippets: false,
-				actions: true,
 				history: true
 			},
-			snippets: [{ id: 'a', name: '挨拶', body: 'こんにちは', sync: true }]
+			snippets: [newSnippet('挨拶', 'こんにちは')]
 		});
 		const screen = await render(Page);
 		await screen.getByRole('tab', { name: m.settings_category_snippets() }).click();

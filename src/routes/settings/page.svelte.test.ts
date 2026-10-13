@@ -14,13 +14,13 @@ import {
 	settings,
 	type PunctuationStyle,
 	type Replacement,
-	type Action,
 	type SettingsView,
 	type Snippet
 } from '$lib/settings.svelte';
+import { newSnippet } from '$lib/snippets';
 import { callsOf } from '$lib/test-support/calls';
 import { emit } from '$lib/test-support/events';
-import { aiAction as ai, DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
+import { aiSnippet as ai, DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
 import Page from './+page.svelte';
 import { renderAt } from './render-at';
 
@@ -83,7 +83,7 @@ function labelBeforeKey(label: (key: string) => string) {
 
 const hotkeyButtonName = labelBeforeKey((key) => m.settings_hotkey_change_label({ key }));
 
-/** 定型文・アクションの閉じている行をすべて開く。閉じた行には、名前と本文の欄が無い */
+/** 定型文の閉じている行をすべて開く。閉じた行には、名前と本文の欄が無い */
 async function openRows(screen: Awaited<ReturnType<typeof render>>) {
 	// 直前に足した行が描かれてから探す
 	await tick();
@@ -112,9 +112,7 @@ function savedRows(command: string, args: unknown) {
 			? 'replacements'
 			: command === 'set_snippets'
 				? 'snippets'
-				: command === 'set_actions'
-					? 'actions'
-					: null;
+				: null;
 	if (!key) return undefined;
 	const rows = (args as Record<string, Array<{ id: string }>>)[key];
 	return rows.map((row, index) => ({ ...row, id: row.id || `${key}-${index}` }));
@@ -171,7 +169,7 @@ describe('既定の値から変えた設定の印', () => {
 			m.settings_category_keys,
 			m.settings_category_draft,
 			m.settings_category_copy,
-			m.settings_category_actions,
+			m.settings_category_snippets,
 			m.settings_category_account
 		]) {
 			await screen.getByRole('tab', { name: category() }).click();
@@ -368,7 +366,7 @@ describe('設定画面の下書きの履歴', () => {
 describe('設定画面の定型文', () => {
 	type SnippetContent = Pick<Snippet, 'name' | 'body'>;
 	const snippetRows = (rows: SnippetContent[]): Snippet[] =>
-		rows.map((row, index) => ({ id: `snippet-${index}`, sync: true, ...row }));
+		rows.map((row, index) => ({ ...newSnippet(row.name, row.body), id: `snippet-${index}` }));
 
 	/** set_snippets に最後に渡された定型文。呼ばれていなければ null */
 	function lastSavedSnippets(): SnippetContent[] | null {
@@ -398,14 +396,7 @@ describe('設定画面の定型文', () => {
 		await syncButton.click();
 		expect(syncButton.element().getAttribute('aria-pressed')).toBe('false');
 		expect(callsOf(invoked, 'set_snippets').at(-1)?.[1]).toEqual({
-			snippets: [
-				{
-					id: 'snippet-0',
-					name: confirm.name,
-					body: confirm.body,
-					sync: false
-				}
-			]
+			snippets: [{ ...newSnippet(confirm.name, confirm.body), id: 'snippet-0', sync: false }]
 		});
 	});
 
@@ -422,14 +413,6 @@ describe('設定画面の定型文', () => {
 		await expect
 			.element(screen.getByLabelText(m.settings_snippets_body()))
 			.toHaveValue(confirm.body);
-	});
-
-	it('説明に、一覧を出すキーを書く', async () => {
-		const screen = await renderAt(m.settings_category_snippets);
-
-		await expect
-			.element(screen.getByText(m.settings_snippets_description({ key: '⌘J' })))
-			.toBeInTheDocument();
 	});
 
 	it('追加すると、名前も本文も空の1件のまま保存し、名前の欄にフォーカスを移す', async () => {
@@ -1786,7 +1769,7 @@ describe('設定画面のデバイス', () => {
 	});
 });
 
-describe('設定画面のアクション', () => {
+describe('設定画面の定型文の AI サービス', () => {
 	let responses: Record<string, unknown>;
 
 	beforeEach(() => {
@@ -1798,19 +1781,13 @@ describe('設定画面のアクション', () => {
 		);
 	});
 
-	/** 絞り込みの欄が出る6件。当てる行は「要約」 */
-	const sixActions = () => [
-		...['A', 'B', 'C', 'D', 'E'].map((name) => ai(name, name.toLowerCase())),
-		ai('要約', 'まとめて')
-	];
-
-	it('設定画面を開いただけではキーを確かめず、アクションの分類を開くと確かめる', async () => {
+	it('設定画面を開いただけではキーを確かめず、定型文の分類を開くと確かめる', async () => {
 		settings.current = { ...view(), aiService: 'gemini' };
 		const screen = await render(Page);
 		await tick();
 		expect(invoked).not.toHaveBeenCalledWith('has_ai_key', undefined);
 
-		await screen.getByRole('tab', { name: m.settings_category_actions() }).click();
+		await screen.getByRole('tab', { name: m.settings_category_snippets() }).click();
 
 		await expect
 			.element(screen.getByText(m.settings_ai_key_absent(), { exact: true }))
@@ -1818,20 +1795,8 @@ describe('設定画面のアクション', () => {
 		expect(invoked).toHaveBeenCalledWith('has_ai_key', undefined);
 	});
 
-	it('定型文があっても、アクションの分類を開くと一覧を出す', async () => {
-		// 定型文の一覧は分類を開く前から描かれている。並べ替えの部品が2つ目でも作れることを見る
-		settings.current = {
-			...view(),
-			snippets: [{ id: 'snippet-0', name: '確認', body: '以上です。', sync: true }],
-			actions: [ai('要約', 'まとめて')]
-		};
-		const screen = await renderAt(m.settings_category_actions);
-
-		await expect.element(screen.getByText('要約', { exact: true })).toBeVisible();
-	});
-
 	it('AI サービスの選択肢を「使わない」から表示し、選んだサービスの説明を出す', async () => {
-		const screen = await renderAt(m.settings_category_actions);
+		const screen = await renderAt(m.settings_category_snippets);
 
 		const service = screen.getByRole('combobox', { name: m.settings_ai_service() });
 		await expect.element(service).toHaveValue('none');
@@ -1846,7 +1811,7 @@ describe('設定画面のアクション', () => {
 	});
 
 	it('「使わない」ではキーとモデルを隠し、サービスを選ぶと表示する', async () => {
-		const screen = await renderAt(m.settings_category_actions);
+		const screen = await renderAt(m.settings_category_snippets);
 
 		await expect
 			.element(screen.getByText(m.settings_ai_key(), { exact: true }))
@@ -1879,7 +1844,7 @@ describe('設定画面のアクション', () => {
 				? Promise.resolve(responses[command])
 				: Promise.resolve(savedRows(command, args));
 		});
-		const screen = await renderAt(m.settings_category_actions);
+		const screen = await renderAt(m.settings_category_snippets);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();
 		await screen.getByLabelText(m.settings_ai_key_input()).fill('secret-key');
@@ -1909,7 +1874,7 @@ describe('設定画面のアクション', () => {
 	it('キーがあり了解の記録が無ければ、分類を開いたときに了解を求める', async () => {
 		settings.current = { ...view(), aiService: 'gemini', aiConsent: null };
 		responses.has_ai_key = true;
-		const screen = await renderAt(m.settings_category_actions);
+		const screen = await renderAt(m.settings_category_snippets);
 
 		const dialog = screen.getByRole('alertdialog');
 		await expect.element(dialog).toHaveFocus();
@@ -1936,7 +1901,7 @@ describe('設定画面のアクション', () => {
 				? Promise.resolve(responses[command])
 				: Promise.resolve(savedRows(command, args));
 		});
-		const screen = await renderAt(m.settings_category_actions);
+		const screen = await renderAt(m.settings_category_snippets);
 
 		await expect.element(screen.getByLabelText(m.settings_ai_model())).toHaveValue('custom-model');
 		await screen.getByRole('button', { name: m.settings_ai_key_replace() }).click();
@@ -1948,7 +1913,7 @@ describe('設定画面のアクション', () => {
 	it('了解を出している間に「使わない」を選ぶと、了解を送らずに閉じる', async () => {
 		settings.current = { ...view(), aiService: 'gemini' };
 		responses.has_ai_key = true;
-		const screen = await renderAt(m.settings_category_actions);
+		const screen = await renderAt(m.settings_category_snippets);
 
 		await expect.element(screen.getByRole('alertdialog')).toBeVisible();
 		settings.current = view();
@@ -1958,7 +1923,7 @@ describe('設定画面のアクション', () => {
 
 	it('モデルは既定のときも既定のモデルを欄に出し、打つと保存し、空にすると既定に戻す', async () => {
 		settings.current = { ...view(), aiService: 'gemini' };
-		const screen = await renderAt(m.settings_category_actions);
+		const screen = await renderAt(m.settings_category_snippets);
 		const model = screen.getByLabelText(m.settings_ai_model());
 
 		await expect.element(model).toHaveValue('gemini-3.5-flash-lite');
@@ -1975,186 +1940,190 @@ describe('設定画面のアクション', () => {
 		(model.element() as HTMLInputElement).blur();
 		await expect.element(model).toHaveValue('gemini-3.5-flash-lite');
 	});
+});
 
-	it('既定のアクションを追加すると、今のアクションの後ろに追加して保存する', async () => {
+describe('設定画面の定型文の宛先・既定・絞り込み', () => {
+	let defaults: Snippet[];
+
+	beforeEach(() => {
+		defaults = [];
+		invoked.mockImplementation((command, args) =>
+			Promise.resolve(command === 'default_snippets' ? defaults : savedRows(command, args))
+		);
+	});
+
+	/** set_snippets に渡された定型文の並び */
+	const savedSnippets = () =>
+		callsOf(invoked, 'set_snippets').map(([, args]) => (args as { snippets: Snippet[] }).snippets);
+
+	/** 絞り込みの欄が出る6件。当てる行は「要約」 */
+	const sixSnippets = () => [
+		...['A', 'B', 'C', 'D', 'E'].map((name) => ai(name, name.toLowerCase())),
+		ai('要約', 'まとめて')
+	];
+
+	it('既定の定型文を追加すると、今の定型文の後ろに追加して保存する', async () => {
 		const mine = ai('要約', '要約してください。');
-		const defaults = [ai('ビジネス向け', '丁寧に書き直してください。')];
-		settings.current = { ...view(), actions: [mine] };
-		responses.default_actions = defaults;
-		const screen = await renderAt(m.settings_category_actions);
+		defaults = [ai('ビジネス向け', '丁寧に書き直してください。')];
+		settings.current = { ...view(), snippets: [mine] };
+		const screen = await renderAt(m.settings_category_snippets);
 
-		await screen.getByRole('button', { name: m.settings_actions_add_defaults() }).click();
+		await screen.getByRole('button', { name: m.settings_snippets_add_defaults() }).click();
 
 		await vi.waitFor(() =>
-			expect(invoked).toHaveBeenCalledWith('set_actions', {
-				actions: [mine, ...defaults]
+			expect(invoked).toHaveBeenCalledWith('set_snippets', {
+				snippets: [mine, ...defaults]
 			})
 		);
 		await expect.element(screen.getByRole('button', { name: /^ビジネス向け/ })).toBeVisible();
 	});
 
-	it('アクションを打って別の分類へ移り、戻っても、打った内容が残り、続けて打った内容で保存する', async () => {
-		settings.current = { ...view(), actions: [ai('', '')] };
-		const screen = await renderAt(m.settings_category_actions);
+	it('定型文を打って別の分類へ移り、戻っても、打った内容が残り、続けて打った内容で保存する', async () => {
+		settings.current = { ...view(), snippets: [ai('', '')] };
+		const screen = await renderAt(m.settings_category_snippets);
 		await openRows(screen);
 
-		await screen.getByLabelText(m.settings_actions_name()).fill('要約');
+		await screen.getByLabelText(m.settings_snippets_name()).fill('要約');
+		await screen.getByRole('tab', { name: m.settings_category_general() }).click();
 		await screen.getByRole('tab', { name: m.settings_category_snippets() }).click();
-		await screen.getByRole('tab', { name: m.settings_category_actions() }).click();
 
-		await expect.element(screen.getByLabelText(m.settings_actions_name())).toHaveValue('要約');
-		await screen.getByLabelText(m.settings_actions_command()).fill('@ai 要約してください。');
+		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('要約');
+		await screen.getByLabelText(m.settings_snippets_body()).fill('@ai 要約してください。');
 
-		const saved = callsOf(invoked, 'set_actions').map(
-			([, args]) => (args as { actions: Action[] }).actions
-		);
+		const saved = savedSnippets();
 		// 最初の保存で Rust（のモック）が振った ID を、続きの保存でも渡す
-		expect(saved.at(-1)).toEqual([{ ...ai('要約', '要約してください。'), id: 'actions-0' }]);
-		expect(saved.every((actions) => actions.length === 1)).toBe(true);
+		expect(saved.at(-1)).toEqual([{ ...ai('要約', '要約してください。'), id: 'snippets-0' }]);
+		expect(saved.every((snippets) => snippets.length === 1)).toBe(true);
 	});
 
-	it('説明は並びの上に一度だけ出し、Windows の ! と ^ の注意は {{t}} のあるシェルの行にだけ出す', async () => {
-		const command = (text: string): Action => ({
-			id: '',
-			name: '',
-			command: text,
-			output: 'replace',
-			encoding: 'utf-8',
-			enabled: true,
-			sync: true
-		});
+	it('説明は、一覧を出すキーを入れて並びの上に一度だけ出し、Windows の ! と ^ の注意は {{t}} のある @sh の行にだけ出す', async () => {
 		// 注意を出す行と出さない行を1つずつ。どの行に出すかの決まりは hasDelayedExpansionChars の単体テストで見る
-		const actions = [command('echo {{t}}!'), command('echo {{t}}')];
-		const special = m.settings_actions_command_special_chars({ mark: '{{t}}' });
-		const description = m.settings_actions_description({ mark: '{{t}}' });
+		const snippets = [newSnippet('', '@sh echo {{t}}!'), newSnippet('', '@sh echo {{t}}')];
+		const special = m.settings_snippets_special_chars({ mark: '{{t}}' });
+		const description = m.settings_snippets_description({ key: 'Ctrl+K', mark: '{{t}}' });
 
-		settings.current = { ...view(), platform: 'windows', actions };
-		const screen = await renderAt(m.settings_category_actions);
+		settings.current = { ...view(), platform: 'windows', snippets };
+		const screen = await renderAt(m.settings_category_snippets);
 		await openRows(screen);
-		await expect
-			.element(screen.getByText(m.settings_actions_description({ mark: '{{t}}' })))
-			.toBeVisible();
-		expect(screen.getByText(m.settings_actions_description({ mark: '{{t}}' })).all()).toHaveLength(
-			1
-		);
-		const fields = screen.getByLabelText(m.settings_actions_command()).all();
+		await expect.element(screen.getByText(description)).toBeVisible();
+		expect(screen.getByText(description).all()).toHaveLength(1);
+		const fields = screen.getByLabelText(m.settings_snippets_body()).all();
 		expect(fields).toHaveLength(2);
 		await expect.element(fields[0]).toHaveAccessibleDescription(`${description} ${special}`);
 		await expect.element(fields[1]).toHaveAccessibleDescription(description);
 		expect(screen.getByText(special).all()).toHaveLength(1);
 		screen.unmount();
 
-		settings.current = { ...view(), platform: 'macos', actions };
-		const mac = await renderAt(m.settings_category_actions);
+		settings.current = { ...view(), platform: 'macos', snippets };
+		const mac = await renderAt(m.settings_category_snippets);
 		await openRows(mac);
-		await expect.element(mac.getByLabelText(m.settings_actions_command()).first()).toBeVisible();
+		await expect
+			.element(mac.getByText(m.settings_snippets_description({ key: '⌘K', mark: '{{t}}' })))
+			.toBeVisible();
+		await expect.element(mac.getByLabelText(m.settings_snippets_body()).first()).toBeVisible();
 		expect(mac.getByText(special).all()).toHaveLength(0);
 	});
 
-	it('追加すると、コマンドの欄と結果の出し方と文字コードを持つ1件を足し、打ったコマンドと出し方と文字コードを保存する', async () => {
-		settings.current = { ...view(), actions: [] };
-		const screen = await renderAt(m.settings_category_actions);
+	it('@sh の行でだけ文字コードを、@ai・@sh の行でだけ結果の出し方を出し、選んだ出し方と文字コードを保存する', async () => {
+		const screen = await renderAt(m.settings_category_snippets);
+		await screen.getByRole('button', { name: m.settings_snippets_add() }).click();
+		const body = screen.getByLabelText(m.settings_snippets_body());
+		const output = screen.getByRole('radio', { name: m.settings_actions_output_none() });
+		const encoding = screen.getByRole('combobox', { name: m.settings_snippets_encoding() });
 
-		await screen.getByRole('button', { name: m.settings_actions_add() }).click();
+		// どの行が出すものかの決まりは rowAddressee の単体テストで見る
+		await body.fill('お疲れさまです。');
+		await expect.element(output).not.toBeInTheDocument();
+		await expect.element(encoding).not.toBeInTheDocument();
 
-		const command = screen.getByLabelText(m.settings_actions_command());
-		await command.fill('tr a-z A-Z');
-		// コマンドは1行なので、Enter では改行を入れない
-		await userEvent.type(command, '{Enter}');
-		await expect.element(command).toHaveValue('tr a-z A-Z');
-		await screen.getByRole('radio', { name: m.settings_actions_output_none() }).click();
-		await screen
-			.getByRole('combobox', { name: m.settings_actions_encoding() })
-			.selectOptions('Shift_JIS');
-
-		await vi.waitFor(() => {
-			const saved = callsOf(invoked, 'set_actions').map(
-				([, args]) => (args as { actions: Action[] }).actions
-			);
-			expect(saved.at(-1)).toEqual([
+		await body.fill('@sh tr a-z A-Z');
+		await output.click();
+		await encoding.selectOptions('Shift_JIS');
+		await vi.waitFor(() =>
+			expect(savedSnippets().at(-1)).toEqual([
 				{
-					id: 'actions-0',
-					name: '',
-					command: 'tr a-z A-Z',
+					...newSnippet('', '@sh tr a-z A-Z'),
+					id: 'snippets-0',
 					output: 'none',
-					encoding: 'shift_jis',
-					enabled: true,
-					sync: true
+					encoding: 'shift_jis'
 				}
-			]);
-		});
+			])
+		);
 
 		// 文字コードはコマンドの標準入力と標準出力にだけ効くので、`@ai` の行では出さない
-		await command.fill('@ai 訳して');
-		await expect
-			.element(screen.getByRole('combobox', { name: m.settings_actions_encoding() }))
-			.not.toBeInTheDocument();
+		await body.fill('@ai 訳して');
+		await expect.element(output).toBeVisible();
+		await expect.element(encoding).not.toBeInTheDocument();
 	});
 
-	it('開いたまま表示言語を替えたら、画面で変えていないアクションは新しい言語のアクションに写し直す', async () => {
-		settings.current = { ...view(), actions: [ai('ビジネス向け', '丁寧に')] };
-		const screen = await renderAt(m.settings_category_actions);
+	it('開いたまま表示言語を替えたら、画面で変えていない定型文は新しい言語の定型文に写し直す', async () => {
+		settings.current = { ...view(), snippets: [ai('ビジネス向け', '丁寧に')] };
+		const screen = await renderAt(m.settings_category_snippets);
 		await expect.element(screen.getByRole('button', { name: /^ビジネス向け/ })).toBeVisible();
 
 		settings.current = {
 			...settings.current,
 			revision: settings.current.revision + 1,
 			locale: 'en',
-			actions: [ai('Business', 'Politely')]
+			snippets: [ai('Business', 'Politely')]
 		};
 
 		await expect.element(screen.getByRole('button', { name: /^Business/ })).toBeVisible();
-		expect(callsOf(invoked, 'set_actions')).toEqual([]);
+		expect(callsOf(invoked, 'set_snippets')).toEqual([]);
 	});
 
 	it('表示言語を替えて写し直しても、開いていた行は開いたままにする', async () => {
-		settings.current = { ...view(), actions: [ai('ビジネス向け', '丁寧に')] };
-		const screen = await renderAt(m.settings_category_actions);
+		settings.current = { ...view(), snippets: [ai('ビジネス向け', '丁寧に')] };
+		const screen = await renderAt(m.settings_category_snippets);
 		await openRows(screen);
 
 		settings.current = {
 			...settings.current,
 			revision: settings.current.revision + 1,
 			locale: 'en',
-			actions: [ai('Business', 'Politely')]
+			snippets: [ai('Business', 'Politely')]
 		};
 
-		await expect.element(screen.getByLabelText(m.settings_actions_name())).toHaveValue('Business');
+		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('Business');
 	});
 
-	it('アクションを画面で変えていたら、表示言語を替えても写し直さない', async () => {
-		settings.current = { ...view(), actions: [ai('', '')] };
-		const screen = await renderAt(m.settings_category_actions);
+	it('定型文を画面で変えていたら、表示言語を替えても写し直さない', async () => {
+		settings.current = { ...view(), snippets: [ai('', '')] };
+		const screen = await renderAt(m.settings_category_snippets);
 		await openRows(screen);
-		await screen.getByLabelText(m.settings_actions_name()).fill('要約');
+		await screen.getByLabelText(m.settings_snippets_name()).fill('要約');
 
 		settings.current = {
 			...settings.current,
 			revision: settings.current.revision + 1,
 			locale: 'en',
-			actions: [ai('Business', 'Politely')]
+			snippets: [ai('Business', 'Politely')]
 		};
 
 		await tick();
-		await expect.element(screen.getByLabelText(m.settings_actions_name())).toHaveValue('要約');
+		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('要約');
 	});
 
-	it('スイッチを切ると、消さずに使わないアクションとして保存する', async () => {
+	it('宛先で始まる行にだけスイッチを出し、切ると、消さずに使わない定型文として保存する', async () => {
 		const a = ai('A', 'a');
-		settings.current = { ...view(), actions: [a] };
-		const screen = await renderAt(m.settings_category_actions);
+		const greeting = newSnippet('挨拶', 'お疲れさまです。');
+		settings.current = { ...view(), snippets: [a, greeting] };
+		const screen = await renderAt(m.settings_category_snippets);
 
-		await screen.getByRole('switch', { name: m.settings_actions_enabled({ name: 'A' }) }).click();
+		await expect
+			.element(screen.getByRole('switch', { name: m.settings_snippets_enabled({ name: '挨拶' }) }))
+			.not.toBeInTheDocument();
+		await screen.getByRole('switch', { name: m.settings_snippets_enabled({ name: 'A' }) }).click();
 
-		expect(invoked).toHaveBeenLastCalledWith('set_actions', {
-			actions: [{ ...a, enabled: false }]
+		expect(invoked).toHaveBeenLastCalledWith('set_snippets', {
+			snippets: [{ ...a, enabled: false }, greeting]
 		});
 	});
 
-	it('6件からは絞り込みの欄を出し、名前かコマンドで絞り込む。絞り込んでいる間は並べ替えを出さない', async () => {
-		settings.current = { ...view(), actions: sixActions() };
-		const screen = await renderAt(m.settings_category_actions);
-		await screen.getByRole('searchbox', { name: m.settings_actions_filter() }).fill('まとめ');
+	it('6件からは絞り込みの欄を出し、名前か本文で絞り込む。絞り込んでいる間は並べ替えを出さない', async () => {
+		settings.current = { ...view(), snippets: sixSnippets() };
+		const screen = await renderAt(m.settings_category_snippets);
+		await screen.getByRole('searchbox', { name: m.settings_snippets_filter() }).fill('まとめ');
 
 		await expect.element(screen.getByRole('button', { name: /^要約/ })).toBeVisible();
 		expect(screen.getByRole('button', { name: 'A @ai a' }).all()).toHaveLength(0);
@@ -2168,21 +2137,21 @@ describe('設定画面のアクション', () => {
 	});
 
 	it('絞り込んだ行を書き換えて当たらなくなっても、語を変えるまで出したままにする', async () => {
-		settings.current = { ...view(), actions: sixActions() };
-		const screen = await renderAt(m.settings_category_actions);
-		await screen.getByRole('searchbox', { name: m.settings_actions_filter() }).fill('まとめ');
+		settings.current = { ...view(), snippets: sixSnippets() };
+		const screen = await renderAt(m.settings_category_snippets);
+		await screen.getByRole('searchbox', { name: m.settings_snippets_filter() }).fill('まとめ');
 		await screen.getByRole('button', { name: /^要約/ }).click();
 
-		await screen.getByLabelText(m.settings_actions_name()).fill('短く');
-		await screen.getByLabelText(m.settings_actions_command()).fill('@ai 短く');
+		await screen.getByLabelText(m.settings_snippets_name()).fill('短く');
+		await screen.getByLabelText(m.settings_snippets_body()).fill('@ai 短く');
 
-		await expect.element(screen.getByLabelText(m.settings_actions_name())).toHaveValue('短く');
+		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('短く');
 	});
 
 	it('絞り込んだまま件数が減っても欄を出し続け、当たる行がなければその旨を出す', async () => {
-		settings.current = { ...view(), actions: sixActions() };
-		const screen = await renderAt(m.settings_category_actions);
-		const filter = screen.getByRole('searchbox', { name: m.settings_actions_filter() });
+		settings.current = { ...view(), snippets: sixSnippets() };
+		const screen = await renderAt(m.settings_category_snippets);
+		const filter = screen.getByRole('searchbox', { name: m.settings_snippets_filter() });
 		await filter.fill('まとめ');
 
 		await chooseFromRowMenu(screen, '要約', m.settings_row_remove());
@@ -2191,50 +2160,25 @@ describe('設定画面のアクション', () => {
 		await expect.element(filter).toHaveValue('まとめ');
 	});
 
-	it('既定のアクションを追加すると、絞り込みを解いて足した行を見せる', async () => {
-		settings.current = { ...view(), actions: sixActions() };
-		responses.default_actions = [ai('ビジネス向け', '丁寧に書き直してください。')];
-		const screen = await renderAt(m.settings_category_actions);
-		await screen.getByRole('searchbox', { name: m.settings_actions_filter() }).fill('まとめ');
+	it('既定の定型文を追加すると、絞り込みを解いて足した行を見せる', async () => {
+		settings.current = { ...view(), snippets: sixSnippets() };
+		defaults = [ai('ビジネス向け', '丁寧に書き直してください。')];
+		const screen = await renderAt(m.settings_category_snippets);
+		await screen.getByRole('searchbox', { name: m.settings_snippets_filter() }).fill('まとめ');
 
-		await screen.getByRole('button', { name: m.settings_actions_add_defaults() }).click();
+		await screen.getByRole('button', { name: m.settings_snippets_add_defaults() }).click();
 
 		await expect.element(screen.getByRole('button', { name: /^ビジネス向け/ })).toBeVisible();
 		await expect.element(screen.getByRole('button', { name: 'A @ai a' })).toBeVisible();
 	});
 
-	it('名前もコマンドも空の行は、「未入力」と出す', async () => {
-		settings.current = { ...view(), actions: [] };
-		const screen = await renderAt(m.settings_category_actions);
-		await screen.getByRole('button', { name: m.settings_actions_add() }).click();
+	it('名前も本文も空の行は、「未入力」と出す', async () => {
+		const screen = await renderAt(m.settings_category_snippets);
+		await screen.getByRole('button', { name: m.settings_snippets_add() }).click();
 
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_row_empty(), exact: true }))
 			.toBeVisible();
-	});
-
-	it('アクションを削除すると、その1件を除いて保存する', async () => {
-		const a = ai('A', 'a');
-		const b = ai('B', 'b');
-		settings.current = { ...view(), actions: [a, b] };
-		const screen = await renderAt(m.settings_category_actions);
-
-		await chooseFromRowMenu(screen, 'B', m.settings_row_remove());
-
-		expect(invoked).toHaveBeenCalledWith('set_actions', { actions: [a] });
-	});
-
-	it('アクションを下へ移動すると、その1件を1つ下げて保存する', async () => {
-		const a = ai('A', 'a');
-		const b = ai('B', 'b');
-		const c = ai('C', 'c');
-		settings.current = { ...view(), actions: [a, b, c] };
-		const screen = await renderAt(m.settings_category_actions);
-
-		// 1件目を1つ下げる → [B, A, C]
-		await chooseFromRowMenu(screen, 'A', m.settings_reorder_down());
-
-		expect(invoked).toHaveBeenLastCalledWith('set_actions', { actions: [b, a, c] });
 	});
 });
 

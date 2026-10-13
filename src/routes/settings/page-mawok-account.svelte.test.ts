@@ -232,10 +232,10 @@ describe('設定画面の Mawok のアカウント', () => {
 		await expect.element(screen.getByText(m.account_error_unreachable())).not.toBeInTheDocument();
 	});
 
-	it('アクションからアカウントを開ける', async () => {
+	it('定型文の AI サービスの欄からアカウントを開ける', async () => {
 		const screen = await render(Page);
-		await screen.getByRole('tab', { name: m.settings_category_actions() }).click();
-		await expect.element(screen.getByText(m.settings_actions_mawok_sign_in())).toBeVisible();
+		await screen.getByRole('tab', { name: m.settings_category_snippets() }).click();
+		await expect.element(screen.getByText(m.settings_ai_mawok_sign_in())).toBeVisible();
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_mawok_sign_in() }))
 			.not.toBeInTheDocument();

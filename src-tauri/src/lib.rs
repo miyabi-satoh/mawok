@@ -68,9 +68,7 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use crate::{
     ai::AiService,
-    config::{
-        Action, ActionEncoding, ActionOutput, Config, Device, Language, LoadProblem, Snippet, Theme,
-    },
+    config::{ActionEncoding, ActionOutput, Config, Device, Language, LoadProblem, Snippet, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     hotkey::Registrar as _,
     i18n::Lang,
@@ -333,7 +331,7 @@ struct SettingsView {
     text_history_size: u16,
     trim_trailing_whitespace: bool,
     replacements: Vec<Replacement>,
-    /// 定型文。登録した順
+    /// 定型文。登録した順。設定ファイルに書いていなければ、今の表示言語の既定の定型文
     snippets: Vec<Snippet>,
     /// 確認コードで追加した自分のデバイス。見つけた順
     devices: Vec<Device>,
@@ -372,8 +370,6 @@ struct SettingsView {
     ai_models: BTreeMap<AiService, String>,
     /// AI サービスごとの既定のモデル。既定は Rust 側だけで決める
     default_ai_models: BTreeMap<AiService, String>,
-    /// アクションの並び。設定ファイルに書いていなければ、今の表示言語の既定のアクション
-    actions: Vec<Action>,
     /// アプリのバージョン。ログの先頭に出しているものと同じ
     version: String,
     /// 表示言語の設定と OS の言語から決めた Paraglide のロケール
@@ -408,9 +404,6 @@ fn settings_view(state: &AppState) -> SettingsView {
             .filter(|service| *service != AiService::None)
             .map(|service| (service, service.default_model().to_string()))
             .collect(),
-        actions: config
-            .actions
-            .unwrap_or_else(|| actions::default_actions(lang)),
         platform: Platform::current(),
         hotkey: config.hotkey,
         modified_settings,
@@ -426,7 +419,9 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_history_size: config.text_history_size,
         trim_trailing_whitespace: config.trim_trailing_whitespace,
         replacements: config.replacements,
-        snippets: config.snippets,
+        snippets: config
+            .snippets
+            .unwrap_or_else(|| actions::default_snippets(lang)),
         devices: config.devices,
         device_name: state.device_name.clone(),
         pro_available,
@@ -1426,7 +1421,7 @@ fn set_snippets(app: AppHandle, snippets: Vec<Snippet>) -> Result<Vec<Snippet>, 
     // トレイには関わらないので、打つたびに作り直さない
     let mut snippets = snippets;
     config::repair_item_ids(&mut snippets)?;
-    save_as_typed(&app, |config| config.snippets = snippets.clone())?;
+    save_as_typed(&app, |config| config.snippets = Some(snippets.clone()))?;
     emit_settings(&app);
     Ok(snippets)
 }
@@ -1438,14 +1433,19 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     if snippet.body.trim().is_empty() {
         return Err("the snippet body is empty".to_string());
     }
-    let exists = app
-        .state::<AppState>()
+    let state = app.state::<AppState>();
+    let lang = state.lang();
+    let exists = state
         .config
         .lock()
         .unwrap()
         .snippets
-        .iter()
-        .any(|existing| existing.body == snippet.body);
+        .as_deref()
+        .is_some_and(|snippets| {
+            snippets
+                .iter()
+                .any(|existing| existing.body == snippet.body)
+        });
     if exists {
         info!("add snippet: already registered");
         return Ok(false);
@@ -1453,7 +1453,13 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     let mut snippet = snippet;
     config::repair_item_ids(std::slice::from_mut(&mut snippet))?;
     info!("add snippet");
-    save_as_typed(&app, |config| config.snippets.push(snippet.clone()))?;
+    // 既定の定型文のままなら、既定の定型文を書き出してから足す。足した1件だけを書くと、既定の定型文が消える
+    save_as_typed(&app, |config| {
+        config
+            .snippets
+            .get_or_insert_with(|| actions::default_snippets(lang))
+            .push(snippet.clone())
+    })?;
     emit_settings(&app);
     // 設定画面は定型文の並びを自分で持っていて settings-changed では写し直さないので、足した1件を別に知らせる。
     // 知らせないと、設定画面を開いたままにしていたとき、次に設定画面で直したときの保存で消える
@@ -1526,22 +1532,11 @@ fn set_ai_model(app: AppHandle, service: AiService, model: String) -> Result<(),
     })
 }
 
+/// 今の表示言語の既定の定型文。設定画面は、打っている途中の定型文を消さないよう、並びを自分で持ち、
+/// これを後ろに足してから set_snippets で保存する
 #[tauri::command]
-fn set_actions(app: AppHandle, actions: Vec<Action>) -> Result<Vec<Action>, String> {
-    info!("set actions: {} entries", actions.len());
-    // 打つたびに呼ばれる。定型文と同じく、下書きウィンドウの一覧が使うので画面へは反映し、トレイは作り直さない
-    let mut actions = actions;
-    config::repair_item_ids(&mut actions)?;
-    save_as_typed(&app, |config| config.actions = Some(actions.clone()))?;
-    emit_settings(&app);
-    Ok(actions)
-}
-
-/// 今の表示言語の既定のアクション。設定画面は、打っている途中のアクションを消さないよう、並びを自分で持ち、
-/// これを後ろに足してから set_actions で保存する
-#[tauri::command]
-fn default_actions(app: AppHandle) -> Vec<Action> {
-    actions::default_actions(app.state::<AppState>().lang())
+fn default_snippets(app: AppHandle) -> Vec<Snippet> {
+    actions::default_snippets(app.state::<AppState>().lang())
 }
 
 /// 今の AI サービスのキーがあるか。中身は読まない
@@ -2022,7 +2017,6 @@ async fn set_sync_kind(app: AppHandle, kind: sync::SyncKind, enabled: bool) -> R
         sync::SyncKind::Keys => config.sync_keys = enabled,
         sync::SyncKind::Replacements => config.sync_replacements = enabled,
         sync::SyncKind::Snippets => config.sync_snippets = enabled,
-        sync::SyncKind::Actions => config.sync_actions = enabled,
         sync::SyncKind::History => config.sync_history = enabled,
     })
     .await
@@ -3061,8 +3055,8 @@ impl From<actions::ActionError> for ActionFailure {
     }
 }
 
-/// アクションのコマンドの行を実行し、結果の文を返す。行頭が `@ai` なら指示文と実行する文を AI サービスへ送り、それ以外はシェルで実行する。
-/// 画面から渡された行をそのまま実行する（一覧でその場で打った行も実行するため）。
+/// 宛先の行を実行し、結果の文を返す。行頭が `@ai` なら指示文と実行する文を AI サービスへ送り、`@sh` ならシェルで実行する。
+/// 画面から渡された行をそのまま実行する（テキストウィンドウの1行目に書いた行も実行するため）。
 /// 結果の出し方が「出さない」なら、結果は空の文を返す。
 /// 失敗したら符号（actions.rs の Failure::code）を返し、詳しい中身はログにだけ残す。送った文と結果はログに書かない。
 /// `request` は begin_action で受け取った番号。より大きい番号のアクションを始めるか、
@@ -3072,7 +3066,9 @@ async fn run_action(
     app: AppHandle,
     request: u64,
     text: String,
-    action: Action,
+    line: String,
+    output: ActionOutput,
+    encoding: ActionEncoding,
 ) -> Result<String, ActionFailure> {
     let state = app.state::<ActionState>();
     if request <= state.requests.lock().unwrap().settled_through {
@@ -3080,24 +3076,32 @@ async fn run_action(
         return Err(ACTION_CANCELLED.into());
     }
     let stopper = command::Stopper::default();
-    let discard_output = action.output == ActionOutput::None;
+    let discard_output = output == ActionOutput::None;
     let tauri::async_runtime::JoinHandle::Tokio(task) =
-        match actions::ai_instruction(&action.command) {
-            Some(instruction) => start_ai_action(
+        match (actions::ai_instruction(&line), actions::sh_command(&line)) {
+            (Some(instruction), _) => start_ai_action(
                 &app,
                 request,
                 ai::Prompt::new(instruction, &text),
                 discard_output,
             )?,
-            None => start_command_action(
+            (None, Some(command)) => start_command_action(
                 &app,
                 request,
                 text,
-                action.command,
-                action.encoding,
+                command.to_string(),
+                encoding,
                 discard_output,
                 stopper.clone(),
             )?,
+            // 画面は、宛先が `@ai`・`@sh` の行だけを渡す
+            (None, None) => {
+                return Err(actions::ActionError::new(
+                    actions::Failure::Unexpected,
+                    "the line has no executable addressee",
+                )
+                .into())
+            }
         };
     let abort = task.abort_handle();
     {
@@ -5001,8 +5005,7 @@ pub fn run() {
             consent_ai,
             set_ai_service,
             set_ai_model,
-            set_actions,
-            default_actions,
+            default_snippets,
             has_ai_key,
             set_ai_key,
             delete_ai_key,
@@ -5331,7 +5334,6 @@ mod tests {
             sync_keys: false,
             sync_replacements: false,
             sync_snippets: false,
-            sync_actions: false,
             sync_history: false,
             ..Config::default()
         };

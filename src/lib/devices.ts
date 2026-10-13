@@ -23,9 +23,12 @@ export function deviceLabels(devices: Device[]): Map<string, string> {
 	return new Map(
 		devices.map((device) => [
 			device.publicKey,
-			(counts.get(device.name) ?? 0) > 1
-				? `${device.name} (${device.publicKey.slice(0, KEY_PREFIX_LENGTH)})`
-				: device.name
+			(counts.get(device.name) ?? 0) > 1 ? keyedDeviceName(device) : device.name
 		])
 	);
+}
+
+/** 名前の後ろに公開鍵の先頭を添えた、ほかのデバイスや宛先の語と取り違えない名前 */
+export function keyedDeviceName(device: Device): string {
+	return `${device.name} (${device.publicKey.slice(0, KEY_PREFIX_LENGTH)})`;
 }

@@ -6,11 +6,17 @@ import { userEvent } from 'vitest/browser';
 import { draftGuidance } from '$lib/guidance';
 import { m } from '$lib/paraglide/messages';
 import { type Platform } from '$lib/keys';
-import { settings, type Action, type SettingsView, type Snippet } from '$lib/settings.svelte';
+import {
+	settings,
+	type ActionEncoding,
+	type ActionOutput,
+	type SettingsView,
+	type Snippet
+} from '$lib/settings.svelte';
 import { EVENTS } from '$lib/bindings/constants';
 import { callsOf } from '$lib/test-support/calls';
-import { newAction as commandAction } from '$lib/action-target';
-import { aiAction as ai, DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
+import { newSnippet } from '$lib/snippets';
+import { aiSnippet as ai, DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
 import Page from './+page.svelte';
 // 一覧と入力欄の重なり順を見るテストのために、画面と同じ CSS を当てる
 import './layout.css';
@@ -33,7 +39,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 const invoked = vi.mocked(invoke);
 
 function snippet(id: string, name: string, body: string): Snippet {
-	return { id, name, body, sync: true };
+	return { ...newSnippet(name, body), id };
 }
 
 /** Rust 側から届くイベントを起こす */
@@ -68,19 +74,22 @@ function committedText(): string | null {
 	return last ? (last[1] as { text: string }).text : null;
 }
 
-/** 入力欄に書き、カーソル（と選択範囲）を置いてから、Cmd と key で一覧（定型文は j、アクションは k）を出す */
-async function openListAt(
-	screen: Awaited<ReturnType<typeof render>>,
-	key: 'j' | 'k',
-	value: string,
-	start: number,
-	end: number
-) {
-	const textarea = screen.getByRole('textbox');
+type Screen = Awaited<ReturnType<typeof render>>;
+
+/** 入力欄。宛先の候補を出すので role は combobox で、一覧の絞り込みの欄と重なる。ラベルで引く */
+const draftField = (screen: Screen) => screen.getByLabelText(m.draft_label(), { exact: true });
+
+/** 定型文の一覧の、絞り込みの欄 */
+const snippetSearch = (screen: Screen) =>
+	screen.getByRole('combobox', { name: m.snippets_search() });
+
+/** 入力欄に書き、カーソル（と選択範囲）を置いてから、Cmd+K で定型文の一覧を出す */
+async function openListAt(screen: Screen, value: string, start: number, end: number) {
+	const textarea = draftField(screen);
 	await textarea.fill(value);
 	(textarea.element() as HTMLTextAreaElement).setSelectionRange(start, end);
-	await userEvent.keyboard(`{Meta>}${key}{/Meta}`);
-	await expect.element(screen.getByRole('combobox')).toHaveFocus();
+	await userEvent.keyboard('{Meta>}k{/Meta}');
+	await expect.element(snippetSearch(screen)).toHaveFocus();
 	return textarea;
 }
 
@@ -116,8 +125,8 @@ describe('下書きウィンドウ', () => {
 	 * style 属性そのものを見る。toHaveStyle は期待値も受け取り値も getComputedStyle で比べるので、
 	 * var(--font-sans) がテスト文書で解決できず、どちらも同じ継承値へ潰れて必ず一致してしまう
 	 */
-	function draftStyle(screen: { getByRole: (role: string) => { element: () => Element } }) {
-		return screen.getByRole('textbox').element().getAttribute('style') ?? '';
+	function draftStyle(screen: Screen) {
+		return draftField(screen).element().getAttribute('style') ?? '';
 	}
 
 	it('設定のフォントと大きさを入力欄に当てる', async () => {
@@ -131,7 +140,7 @@ describe('下書きウィンドウ', () => {
 
 	it('Mac では Cmd+Enter でコピーして、入力欄を空にする', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
@@ -142,7 +151,7 @@ describe('下書きウィンドウ', () => {
 
 	it('変換中の Cmd+Enter ではコピーしない（変換の確定を横取りしない）', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('のうど');
 		pressWhileComposing(textarea.element(), 'Enter', { metaKey: true });
@@ -152,7 +161,7 @@ describe('下書きウィンドウ', () => {
 
 	it('Esc ではコピーせずに隠し、書きかけを残す', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('書きかけ');
 		await userEvent.keyboard('{Escape}');
@@ -164,7 +173,7 @@ describe('下書きウィンドウ', () => {
 
 	it('Esc で隠した後に出し直しても、書きかけを残す', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('書きかけ');
 		await userEvent.keyboard('{Escape}');
@@ -181,7 +190,7 @@ describe('下書きウィンドウ', () => {
 			command === 'dismiss' ? new Promise(() => {}) : Promise.resolve(undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('書きかけ');
 		await userEvent.keyboard('{Escape}');
@@ -195,7 +204,7 @@ describe('下書きウィンドウ', () => {
 
 	it('Mac では Cmd+, で設定ウィンドウを開く（開いていれば閉じる）', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('書きかけ');
 		await userEvent.keyboard('{Meta>},{/Meta}');
@@ -211,12 +220,12 @@ describe('下書きウィンドウ', () => {
 
 		emit(EVENTS.SHOWN);
 
-		await expect.element(screen.getByRole('textbox')).toHaveFocus();
+		await expect.element(draftField(screen)).toHaveFocus();
 	});
 
 	it('隠すよう言われたら（前面で押したホットキー）、コピーして入力欄を空にする', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		emit(EVENTS.HIDE_REQUESTED);
@@ -232,7 +241,7 @@ describe('下書きウィンドウ', () => {
 				: Promise.resolve(undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
@@ -252,7 +261,7 @@ describe('下書きウィンドウ', () => {
 			command === 'commit' ? commitCall : Promise.resolve(undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
@@ -273,8 +282,8 @@ describe('下書きウィンドウ', () => {
 		await expect.element(textarea).toHaveValue('打ち直した下書き');
 	});
 
-	function placeholderOf(screen: { getByRole: (role: string) => { element: () => Element } }) {
-		return screen.getByRole('textbox').element().getAttribute('placeholder');
+	function placeholderOf(screen: Screen) {
+		return draftField(screen).element().getAttribute('placeholder');
 	}
 
 	it('案内の設定がなければ、既定の案内を今のホットキーで出す', async () => {
@@ -329,7 +338,7 @@ describe('下書きの履歴', () => {
 
 	it('先頭の上キーで古い方へ出し、末尾の下キーで最後まで戻ると打っていた内容に戻す', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
 		await copy(textarea, 'git diff');
 		await textarea.fill('書きかけ');
@@ -359,7 +368,7 @@ describe('下書きの履歴', () => {
 			return new Promise((resolve) => (finishReload = resolve));
 		});
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await vi.waitFor(() => expect(loads).toBe(1));
 		await tick();
 
@@ -387,7 +396,7 @@ describe('下書きの履歴', () => {
 
 	it('1行目の途中の上キーは先頭へ移り、もう一度押すと履歴を出す', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
 		await textarea.fill('1行目の途中');
 		(textarea.element() as HTMLTextAreaElement).setSelectionRange(3, 3);
@@ -403,7 +412,7 @@ describe('下書きの履歴', () => {
 
 	it('2行目以降の上キーでは履歴を出さない', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
 		const text = '1行目\n2行目';
 		await textarea.fill(text);
@@ -416,7 +425,7 @@ describe('下書きの履歴', () => {
 
 	it('最終行の途中の下キーは末尾へ移り、もう一度押すと新しい履歴へ戻る', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		const element = textarea.element() as HTMLTextAreaElement;
 		// 改行はないが、入力欄の幅で折り返して見た目は複数行になる
 		const long = 'あ'.repeat(200);
@@ -437,7 +446,7 @@ describe('下書きの履歴', () => {
 
 	it('空の入力欄では、上キー1回で履歴へ移る', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
 		await textarea.fill('');
 
@@ -447,7 +456,7 @@ describe('下書きの履歴', () => {
 
 	it('移る先がないときは、見た目の端へアプリからは移さない', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		const element = textarea.element() as HTMLTextAreaElement;
 		await copy(textarea, 'git status');
 		await userEvent.keyboard('{ArrowUp}');
@@ -466,7 +475,7 @@ describe('下書きの履歴', () => {
 
 	it('出した履歴を書き換えると、たどるのをやめ、下キーで打っていた内容に戻さない', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
 		await textarea.fill('書きかけ');
 		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
@@ -488,7 +497,7 @@ describe('下書きの履歴', () => {
 			Promise.resolve(command === 'commit' ? false : undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, '   ');
 
 		await userEvent.keyboard('{ArrowUp}');
@@ -499,7 +508,7 @@ describe('下書きの履歴', () => {
 
 	it('変換中の上キーでは履歴を出さない（変換候補の選択を横取りしない）', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
 
 		pressWhileComposing(textarea.element(), 'ArrowUp');
@@ -510,7 +519,7 @@ describe('下書きの履歴', () => {
 
 	it('下キーで戻したときは、カーソルを末尾に置く', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
 		await textarea.fill('書きかけ');
 		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
@@ -528,7 +537,7 @@ describe('下書きの履歴', () => {
 
 	it('実行中に件数を減らすと、その場で古いものから忘れる', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, '1');
 		await copy(textarea, '2');
 		await copy(textarea, '3');
@@ -545,7 +554,7 @@ describe('下書きの履歴', () => {
 
 	it('クリップボードを変えなかったコピーでも、たどっていた状態は終える', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
 		await textarea.fill('書きかけ');
 		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
@@ -573,7 +582,7 @@ describe('下書きの履歴', () => {
 				: Promise.resolve(undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		await vi.waitFor(() => expect(finishCommit).toBeDefined());
@@ -604,18 +613,16 @@ describe('定型文', () => {
 		settings.current = { ...view(), snippets: [confirm, status] };
 	});
 
-	type Screen = Awaited<ReturnType<typeof render>>;
-
-	/** 入力欄に書き、カーソル（と選択範囲）を置いてから Cmd+J で一覧を出す */
+	/** 入力欄に書き、カーソル（と選択範囲）を置いてから Cmd+K で一覧を出す */
 	const openAt = (screen: Screen, value: string, start: number, end = start) =>
-		openListAt(screen, 'j', value, start, end);
+		openListAt(screen, value, start, end);
 
 	function selectionOf(textarea: ReturnType<Screen['getByRole']>) {
 		const element = textarea.element() as HTMLTextAreaElement;
 		return [element.selectionStart, element.selectionEnd];
 	}
 
-	it('Cmd+J で一覧を出し、名前と本文の1行目を並べる。名前が空なら本文の行を出す', async () => {
+	it('Cmd+K で一覧を出し、名前と本文の1行目を並べる。名前が空なら本文の行を出す', async () => {
 		const screen = await render(Page);
 		await openAt(screen, '', 0);
 
@@ -641,12 +648,12 @@ describe('定型文', () => {
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいう', 2);
 
-		await screen.getByRole('combobox').fill('以上');
+		await snippetSearch(screen).fill('以上');
 		await userEvent.keyboard('{Enter}');
 
 		await expect.element(textarea).toHaveValue(`あい${confirm.body}う`);
 		await expect.element(textarea).toHaveFocus();
-		expect(screen.getByRole('combobox').elements()).toHaveLength(0);
+		expect(snippetSearch(screen).elements()).toHaveLength(0);
 		const end = 'あい'.length + confirm.body.length;
 		expect(selectionOf(textarea)).toEqual([end, end]);
 	});
@@ -682,7 +689,7 @@ describe('定型文', () => {
 		const textarea = await openAt(screen, '', 0);
 
 		await userEvent.keyboard('{ArrowDown}{ArrowDown}');
-		await screen.getByRole('combobox').fill('git');
+		await snippetSearch(screen).fill('git');
 		await userEvent.keyboard('{Enter}');
 
 		await expect.element(textarea).toHaveValue('git status');
@@ -704,17 +711,17 @@ describe('定型文', () => {
 		await userEvent.keyboard('{Escape}');
 
 		await expect.element(textarea).toHaveFocus();
-		expect(screen.getByRole('combobox').elements()).toHaveLength(0);
+		expect(snippetSearch(screen).elements()).toHaveLength(0);
 		expect(selectionOf(textarea)).toEqual([1, 2]);
 		await expect.element(textarea).toHaveValue('あいう');
 		expect(commandsCalled()).not.toContain('dismiss');
 	});
 
-	it('もう一度 Cmd+J を押すと、差し込まずに閉じる', async () => {
+	it('もう一度 Cmd+K を押すと、差し込まずに閉じる', async () => {
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいう', 3);
 
-		await userEvent.keyboard('{Meta>}j{/Meta}');
+		await userEvent.keyboard('{Meta>}k{/Meta}');
 
 		await expect.element(textarea).toHaveFocus();
 		await expect.element(textarea).toHaveValue('あいう');
@@ -735,7 +742,7 @@ describe('定型文', () => {
 	it('変換中の Enter と Esc では、差し込みも閉じもしない', async () => {
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいう', 3);
-		const combobox = screen.getByRole('combobox');
+		const combobox = snippetSearch(screen);
 
 		pressWhileComposing(combobox.element(), 'Enter');
 		pressWhileComposing(combobox.element(), 'Escape');
@@ -754,7 +761,7 @@ describe('定型文', () => {
 
 		expect(commandsCalled()).not.toContain('commit');
 		// 一覧の Enter として受け取って差し込むこともしない
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
+		await expect.element(snippetSearch(screen)).toHaveFocus();
 		await expect.element(textarea).toHaveValue('git status');
 	});
 
@@ -763,9 +770,9 @@ describe('定型文', () => {
 		const textarea = await openAt(screen, 'あいう', 3);
 
 		await userEvent.keyboard('{Tab}');
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
+		await expect.element(snippetSearch(screen)).toHaveFocus();
 		await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
+		await expect.element(snippetSearch(screen)).toHaveFocus();
 		await expect.element(textarea).toHaveValue('あいう');
 	});
 
@@ -773,7 +780,7 @@ describe('定型文', () => {
 		const screen = await render(Page);
 		await openAt(screen, '', 0);
 
-		await screen.getByRole('combobox').fill('zzz');
+		await snippetSearch(screen).fill('zzz');
 
 		await expect.element(screen.getByText(m.snippets_no_match())).toBeInTheDocument();
 	});
@@ -785,7 +792,7 @@ describe('定型文', () => {
 		emit(EVENTS.SHOWN);
 
 		await expect.element(textarea).toHaveFocus();
-		expect(screen.getByRole('combobox').elements()).toHaveLength(0);
+		expect(snippetSearch(screen).elements()).toHaveLength(0);
 	});
 
 	/** add_snippet の返事（足したか）を決める。ほかのコマンドは既定のまま */
@@ -815,12 +822,10 @@ describe('定型文', () => {
 		await options.nth(2).click();
 
 		await vi.waitFor(() =>
-			expect(addedSnippets()).toEqual([
-				{ id: '', name: '', body: 'よろしく\nお願いします', sync: true }
-			])
+			expect(addedSnippets()).toEqual([newSnippet('', 'よろしく\nお願いします')])
 		);
 		await expect.element(screen.getByText(m.draft_snippet_registered())).toBeInTheDocument();
-		expect(screen.getByRole('combobox').elements()).toHaveLength(0);
+		expect(snippetSearch(screen).elements()).toHaveLength(0);
 		await expect.element(textarea).toHaveFocus();
 		await expect.element(textarea).toHaveValue('よろしく\nお願いします');
 		expect(selectionOf(textarea)).toEqual([2, 2]);
@@ -850,9 +855,7 @@ describe('定型文', () => {
 			.toMatchTextContent(m.snippets_register_selection());
 		await screen.getByRole('option').nth(2).click();
 
-		await vi.waitFor(() =>
-			expect(addedSnippets()).toEqual([{ id: '', name: '', body: 'いう', sync: true }])
-		);
+		await vi.waitFor(() => expect(addedSnippets()).toEqual([newSnippet('', 'いう')]));
 		expect(selectionOf(textarea)).toEqual([1, 3]);
 	});
 
@@ -861,7 +864,7 @@ describe('定型文', () => {
 		const screen = await render(Page);
 		await openAt(screen, 'あいう', 3);
 
-		await screen.getByRole('combobox').fill(' 挨拶 ');
+		await snippetSearch(screen).fill(' 挨拶 ');
 
 		await expect.element(screen.getByText(m.snippets_no_match())).toBeInTheDocument();
 		const options = screen.getByRole('option');
@@ -871,16 +874,14 @@ describe('定型文', () => {
 			.toMatchTextContent(m.snippets_register_draft_named({ name: '挨拶' }));
 		await userEvent.keyboard('{Enter}');
 
-		await vi.waitFor(() =>
-			expect(addedSnippets()).toEqual([{ id: '', name: '挨拶', body: 'あいう', sync: true }])
-		);
+		await vi.waitFor(() => expect(addedSnippets()).toEqual([newSnippet('挨拶', 'あいう')]));
 	});
 
 	it('当たる定型文があれば、Enter では定型文を差し込み、登録しない', async () => {
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいう', 3);
 
-		await screen.getByRole('combobox').fill('git');
+		await snippetSearch(screen).fill('git');
 		await userEvent.keyboard('{Enter}');
 
 		await expect.element(textarea).toHaveValue('あいうgit status');
@@ -959,7 +960,7 @@ describe('定型文', () => {
 	it('差し込むと、履歴をたどっている途中ならそこでやめる', async () => {
 		settings.current = { ...view(), snippets: [snippet('sudo', '管理者で', 'sudo ')] };
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		await expect.element(textarea).toHaveValue('');
@@ -969,8 +970,8 @@ describe('定型文', () => {
 		await expect.element(textarea).toHaveValue('git status');
 
 		// 出した履歴のカーソルは先頭。そこに差し込む
-		await userEvent.keyboard('{Meta>}j{/Meta}');
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
+		await userEvent.keyboard('{Meta>}k{/Meta}');
+		await expect.element(snippetSearch(screen)).toHaveFocus();
 		await userEvent.keyboard('{Enter}');
 		await expect.element(textarea).toHaveValue('sudo git status');
 		// 1行だけなので、たどっている途中なら下キーで「書きかけ」に戻ってしまう
@@ -1006,8 +1007,6 @@ describe('追加済みのデバイスへ送る', () => {
 		emit(EVENTS.DRAFT_RECEIVED);
 	}
 
-	type Screen = Awaited<ReturnType<typeof render>>;
-
 	const sendButton = (screen: Screen) =>
 		screen.getByRole('button', { name: m.draft_send(), exact: true });
 
@@ -1023,7 +1022,7 @@ describe('追加済みのデバイスへ送る', () => {
 
 	it('送るを押すと、書いた内容で送り、入力欄を空にする', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await sendButton(screen).click();
@@ -1035,7 +1034,7 @@ describe('追加済みのデバイスへ送る', () => {
 	it('送るキーで送る', async () => {
 		settings.current = { ...view('windows'), devices: [device] };
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('ls');
 		await userEvent.keyboard('{Control>}{Shift>}{Enter}{/Shift}{/Control}');
@@ -1053,7 +1052,7 @@ describe('追加済みのデバイスへ送る', () => {
 				: Promise.resolve(undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await sendButton(screen).click();
@@ -1086,7 +1085,7 @@ describe('追加済みのデバイスへ送る', () => {
 	it('送っている間に出し直しても空にせず、送れなければ書きかけを残す', async () => {
 		const send = holdSend();
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 		await sendButton(screen).click();
 		await expect.element(textarea).toHaveAttribute('readonly');
@@ -1103,7 +1102,7 @@ describe('追加済みのデバイスへ送る', () => {
 	it('送っている間に出し直しても、送れたら空にし、後で書いた下書きは次に出したときも残す', async () => {
 		const send = holdSend();
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 		await sendButton(screen).click();
 		await expect.element(textarea).toHaveAttribute('readonly');
@@ -1120,7 +1119,7 @@ describe('追加済みのデバイスへ送る', () => {
 
 	it('送っている間は、履歴・定型文・届いた下書きの差し込みが効かない', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		// 履歴を1件作る（コピーは待たせない）
 		await textarea.fill('git diff');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
@@ -1145,7 +1144,7 @@ describe('追加済みのデバイスへ送る', () => {
 		await userEvent.keyboard('{ArrowUp}');
 		await userEvent.keyboard('{Meta>}{Alt>}{ArrowUp}{/Alt}{/Meta}');
 		await userEvent.keyboard('{Meta>}i{/Meta}');
-		await userEvent.keyboard('{Meta>}j{/Meta}');
+		await userEvent.keyboard('{Meta>}k{/Meta}');
 		await tick();
 		await expect.element(textarea).toHaveValue('git status');
 		expect(screen.getByRole('listbox').query()).toBeNull();
@@ -1159,7 +1158,7 @@ describe('追加済みのデバイスへ送る', () => {
 			command === 'send_draft' ? Promise.reject('lan.unreachable') : Promise.resolve(undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await sendButton(screen).click();
@@ -1173,7 +1172,7 @@ describe('追加済みのデバイスへ送る', () => {
 	it('送信先にチェックしたデバイスがなければ、送らずに送信先の一覧を開く', async () => {
 		settings.current = { ...view(), devices: [{ ...device, sendTo: false }] };
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await sendButton(screen).click();
@@ -1194,7 +1193,7 @@ describe('追加済みのデバイスへ送る', () => {
 				: Promise.resolve(undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await sendButton(screen).click();
@@ -1215,7 +1214,7 @@ describe('追加済みのデバイスへ送る', () => {
 			return Promise.resolve(command === 'send_draft' ? true : undefined);
 		});
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 
 		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
@@ -1385,7 +1384,7 @@ describe('追加済みのデバイスへ送る', () => {
 		emit(EVENTS.SHOWN);
 
 		await expect.poll(() => list.query()).toBeNull();
-		await expect.element(screen.getByRole('textbox')).toHaveFocus();
+		await expect.element(draftField(screen)).toHaveFocus();
 	});
 
 	it('画面の読み込み中に届いた下書きも、読み込み後に入れる', async () => {
@@ -1393,7 +1392,7 @@ describe('追加済みのデバイスへ送る', () => {
 
 		const screen = await render(Page);
 
-		await expect.element(screen.getByRole('textbox')).toHaveValue('起動中に届いた');
+		await expect.element(draftField(screen)).toHaveValue('起動中に届いた');
 	});
 
 	it('届いた下書きは、入力欄が空ならそのまま入れる', async () => {
@@ -1401,12 +1400,12 @@ describe('追加済みのデバイスへ送る', () => {
 
 		receive({ from: 'Mac', text: '届いた' });
 
-		await expect.element(screen.getByRole('textbox')).toHaveValue('届いた');
+		await expect.element(draftField(screen)).toHaveValue('届いた');
 	});
 
 	it('書きかけがあれば帯で知らせ、挿入か破棄かを選ぶ', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('書きかけ');
 
 		receive({ from: 'Mac', text: '届いた' }, { from: 'Mac', text: '2通目' });
@@ -1433,8 +1432,6 @@ describe('下書きのボタン', () => {
 		settings.current = { ...view(), snippets: [snippet('confirm', '確認', '以上です。')] };
 	});
 
-	type Screen = Awaited<ReturnType<typeof render>>;
-
 	const copyButton = (screen: Screen) =>
 		screen.getByRole('button', { name: m.draft_copy(), exact: false });
 	const olderButton = (screen: Screen) =>
@@ -1444,7 +1441,7 @@ describe('下書きのボタン', () => {
 
 	/** 書いてコピーのボタンを押し、入力欄が空に戻るまで待つ */
 	async function copyWithButton(screen: Screen, text: string) {
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill(text);
 		await copyButton(screen).click();
 		await expect.element(textarea).toHaveValue('');
@@ -1467,12 +1464,12 @@ describe('下書きのボタン', () => {
 
 	it('定型文を押すと一覧を出し、押す前のカーソルの位置に差し込んで、入力欄にフォーカスを戻す', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('あいう');
 		(textarea.element() as HTMLTextAreaElement).setSelectionRange(2, 2);
 
 		await screen.getByRole('button', { name: m.draft_snippets(), exact: true }).click();
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
+		await expect.element(snippetSearch(screen)).toHaveFocus();
 		await userEvent.keyboard('{Enter}');
 
 		await expect.element(textarea).toHaveValue('あい以上です。う');
@@ -1492,7 +1489,7 @@ describe('下書きのボタン', () => {
 
 		await expect
 			.element(screen.getByRole('button', { name: m.draft_snippets(), exact: true }))
-			.toHaveAttribute('title', m.key_hint({ label: m.draft_snippets_hint(), keys: '⌘J' }));
+			.toHaveAttribute('title', m.key_hint({ label: m.draft_snippets_hint(), keys: '⌘K' }));
 		await expect
 			.element(screen.getByRole('button', { name: m.draft_settings(), exact: true }))
 			.toHaveAttribute('title', m.key_hint({ label: m.draft_settings_hint(), keys: '⌘,' }));
@@ -1520,7 +1517,7 @@ describe('下書きのボタン', () => {
 
 	it('前と次で、カーソルの行にかかわらず履歴を移り、入力欄にフォーカスを戻す。移る先がなければ押せない', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copyWithButton(screen, 'git status');
 		await copyWithButton(screen, 'git diff');
 		// カーソルは最終行（2行目）にあり、↑ キーなら行を移るだけの位置
@@ -1545,7 +1542,7 @@ describe('下書きのボタン', () => {
 	it('設定でオフにすると、上下どちらのボタンも出さない', async () => {
 		settings.current = { ...view(), showTextWindowButtons: false };
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		await expect.element(textarea).toHaveValue('');
@@ -1560,7 +1557,7 @@ describe('下書きのボタン', () => {
 				: Promise.resolve(undefined)
 		);
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 
 		await copyButton(screen).click();
@@ -1571,7 +1568,7 @@ describe('下書きのボタン', () => {
 
 	it('Tab と Shift+Tab では、ボタンにフォーカスを移さない', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await copyWithButton(screen, 'git status');
 		await expect.element(olderButton(screen)).toBeVisible();
 		const buttons = screen.getByRole('button').elements();
@@ -1607,22 +1604,22 @@ describe('キー操作', () => {
 	it('設定で変えたキーでコピーし、元のキーではコピーしない', async () => {
 		settings.current = {
 			...view(),
-			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, copy: 'CommandOrControl+KeyJ', snippets: '' }
+			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, copy: 'CommandOrControl+KeyK', snippets: '' }
 		};
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		expect(invoked).not.toHaveBeenCalledWith('commit', expect.anything());
 
-		await userEvent.keyboard('{Meta>}j{/Meta}');
+		await userEvent.keyboard('{Meta>}k{/Meta}');
 		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('commit', { text: 'git status' }));
 	});
 
 	it('前の履歴・次の履歴のキーは、カーソルの行にかかわらず移る', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		await expect.element(textarea).toHaveValue('');
@@ -1639,7 +1636,7 @@ describe('キー操作', () => {
 	it('送信先の一覧を開くキーで一覧を出し、もう一度押すと閉じる', async () => {
 		settings.current = { ...view(), devices: [device] };
 		const screen = await render(Page);
-		await screen.getByRole('textbox').click();
+		await draftField(screen).click();
 
 		await userEvent.keyboard('{Meta>}l{/Meta}');
 		const list = screen.getByRole('dialog', { name: m.draft_send_targets_list() });
@@ -1647,12 +1644,12 @@ describe('キー操作', () => {
 
 		await userEvent.keyboard('{Meta>}l{/Meta}');
 		await expect.element(list).not.toBeInTheDocument();
-		await expect.element(screen.getByRole('textbox')).toHaveFocus();
+		await expect.element(draftField(screen)).toHaveFocus();
 	});
 
 	it('届いた下書きがなければ、差し込むキーと捨てるキーでは何もせず、既定の動作も止める', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('draft');
 
 		for (const init of [
@@ -1670,7 +1667,7 @@ describe('キー操作', () => {
 	it('読み込み直すキー（F5・Ctrl+R）は、入力欄でも一覧でも既定の動作を止め、下書きを残す', async () => {
 		settings.current = view('windows');
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('draft');
 		const reloadKeys = [
 			{ code: 'F5', key: 'F5' },
@@ -1686,8 +1683,8 @@ describe('キー操作', () => {
 
 		for (const init of reloadKeys) expect(press(textarea.element(), init), init.key).toBe(true);
 		await textarea.click();
-		await userEvent.keyboard('{Control>}j{/Control}');
-		const search = screen.getByRole('combobox');
+		await userEvent.keyboard('{Control>}k{/Control}');
+		const search = snippetSearch(screen);
 		await expect.element(search).toHaveFocus();
 		for (const init of reloadKeys) expect(press(search.element(), init), init.key).toBe(true);
 
@@ -1697,9 +1694,9 @@ describe('キー操作', () => {
 	it('一覧を開いている間も、ほかの操作のキーの既定の動作を止める', async () => {
 		settings.current = { ...view(), devices: [device] };
 		const screen = await render(Page);
-		await screen.getByRole('textbox').click();
-		await userEvent.keyboard('{Meta>}j{/Meta}');
-		const search = screen.getByRole('combobox');
+		await draftField(screen).click();
+		await userEvent.keyboard('{Meta>}k{/Meta}');
+		const search = snippetSearch(screen);
 		await expect.element(search).toHaveFocus();
 
 		// 送信先の一覧を開くキー。定型文の一覧の中では、一覧の操作でも閉じるキーでもない
@@ -1719,7 +1716,7 @@ describe('キー操作', () => {
 
 	it('余白をクリックして入力欄からフォーカスが外れても、Esc で隠し、操作のキーでコピーする', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 		(document.activeElement as HTMLElement).blur();
 		expect(document.activeElement).toBe(document.body);
@@ -1733,7 +1730,7 @@ describe('キー操作', () => {
 
 	it('デバイスが見つかっていなければ、送信先の一覧を開くキーでは何もしない', async () => {
 		const screen = await render(Page);
-		await screen.getByRole('textbox').click();
+		await draftField(screen).click();
 
 		await userEvent.keyboard('{Meta>}l{/Meta}');
 
@@ -1744,7 +1741,7 @@ describe('キー操作', () => {
 	it('届いた下書きを、差し込むキーで差し込み、捨てるキーで捨てる', async () => {
 		settings.current = { ...view(), devices: [device] };
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('draft ');
 
 		pending.push({ from: 'Mac', text: 'hello' }, { from: 'Mac', text: 'bye' });
@@ -1762,13 +1759,20 @@ describe('キー操作', () => {
 	});
 });
 
-describe('アクション', () => {
+describe('宛先へ出す', () => {
 	const business = ai('ビジネス向け', '丁寧な文に書き直してください。');
-	const fix = ai('', '誤字を直してください。\n意味は変えないでください。');
+	const fix = ai('', '誤字を直してください。');
 
+	type RunArgs = {
+		request: number;
+		text: string;
+		line: string;
+		output: ActionOutput;
+		encoding: ActionEncoding;
+	};
 	/** 返事を後から返せる run_action の呼び出し */
 	let actionRuns: {
-		args: { request: number; text: string; action: Action };
+		args: RunArgs;
 		resolve: (text: string) => void;
 		reject: (error: unknown) => void;
 	}[];
@@ -1781,30 +1785,24 @@ describe('アクション', () => {
 			if (command === 'begin_action') return Promise.resolve(nextRequest++);
 			if (command === 'run_action') {
 				return new Promise((resolve, reject) =>
-					actionRuns.push({
-						args: args as { request: number; text: string; action: Action },
-						resolve,
-						reject
-					})
+					actionRuns.push({ args: args as RunArgs, resolve, reject })
 				);
 			}
-			return Promise.resolve(command === 'commit' ? true : undefined);
+			return Promise.resolve(command === 'commit' || command === 'send_draft' ? true : undefined);
 		});
 		settings.current = {
 			...view(),
 			aiService: 'gemini',
 			aiConsent: 'gemini',
-			actions: [business, fix]
+			snippets: [business, fix]
 		};
 	});
 
-	type Screen = Awaited<ReturnType<typeof render>>;
-
-	/** 入力欄に書き、範囲を選んでから Cmd+K でアクションの一覧を出す */
+	/** 入力欄に書き、範囲を選んでから Cmd+K で定型文の一覧を出す */
 	const openAt = (screen: Screen, value: string, start = 0, end = start) =>
-		openListAt(screen, 'k', value, start, end);
+		openListAt(screen, value, start, end);
 
-	/** アクションを選び、run_action が呼ばれるまで待つ */
+	/** 定型文を選び、run_action が呼ばれるまで待つ */
 	async function pick(index = 0) {
 		for (let i = 0; i < index; i++) await userEvent.keyboard('{ArrowDown}');
 		await userEvent.keyboard('{Enter}');
@@ -1812,56 +1810,115 @@ describe('アクション', () => {
 		return actionRuns[0];
 	}
 
-	it('アクションが1件もなく AI サービスが「使わない」でも、ボタンを出し、キーで一覧を出して、足し方を案内する', async () => {
-		settings.current = { ...view(), actions: [] };
+	it('1行目が @sh のテキストは、送るキーで2行目から下を渡して実行し、結果でテキスト全体を置き換えて、出す前のテキストを履歴に積む', async () => {
+		// つないだデバイスが無くても、1行目が `@ai`・`@sh` なら送るボタンを出し、キーも効く
+		settings.current = view();
 		const screen = await render(Page);
-		await screen.getByRole('textbox').fill('あいう');
-
-		expect(screen.getByRole('button', { name: m.draft_actions() }).elements()).toHaveLength(1);
-		await userEvent.keyboard('{Meta>}k{/Meta}');
-
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
-		expect(screen.getByRole('option').elements()).toHaveLength(0);
+		const textarea = draftField(screen);
+		await textarea.fill('@sh sort\nb\na');
 		await expect
-			.element(screen.getByText(m.actions_empty({ settings: '⌘,' }), { exact: false }))
-			.toBeInTheDocument();
-		expect(commandsCalled()).not.toContain('begin_action');
+			.element(screen.getByRole('button', { name: m.draft_send(), exact: true }))
+			.toBeVisible();
+
+		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
+		await vi.waitFor(() => expect(actionRuns).toHaveLength(1));
+		expect(actionRuns[0].args).toEqual({
+			request: 1,
+			text: 'b\na',
+			line: '@sh sort',
+			output: 'replace',
+			encoding: 'utf-8'
+		});
+		actionRuns[0].resolve('a\nb');
+
+		await expect.element(textarea).toHaveValue('a\nb');
+		expect(commandsCalled()).not.toContain('send_draft');
+		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
+		await userEvent.keyboard('{ArrowUp}');
+		await expect.element(textarea).toHaveValue('@sh sort\nb\na');
 	});
 
-	it('アクションのボタンを押すと一覧を出す', async () => {
-		const screen = await render(Page);
-		await screen.getByRole('textbox').fill('あいう');
-
-		await screen.getByRole('button', { name: m.draft_actions() }).click();
-
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
-		const options = screen.getByRole('option');
-		expect(options.elements()).toHaveLength(2);
-		await expect.element(options.nth(0)).toMatchTextContent('ビジネス向け');
-		// 名前が空のアクションは、指示文の最初の行を名前の代わりに出す
-		await expect.element(options.nth(1)).toMatchTextContent('誤字を直してください。');
-	});
-
-	it('スイッチを切ったアクションは、一覧に出さない', async () => {
+	it('1行目がデバイスの名前のテキストは、送るキーで2行目から下をそのデバイスへ送る', async () => {
 		settings.current = {
-			...settings.current!,
-			actions: [business, { ...commandAction('大文字に', 'tr a-z A-Z'), enabled: false }]
+			...view(),
+			devices: [
+				{ name: 'Mac', publicKey: 'ab12', address: '', sendTo: true },
+				{ name: 'AERO-13BE', publicKey: 'ef34', address: '', sendTo: false }
+			]
 		};
 		const screen = await render(Page);
-		await openAt(screen, 'abc');
+		const textarea = draftField(screen);
+		await textarea.fill('@AERO-13BE\nあとで見る\nhttps://example.com');
 
-		const options = screen.getByRole('option');
-		expect(options.elements()).toHaveLength(1);
-		await expect.element(options.nth(0)).toMatchTextContent('ビジネス向け');
+		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
+
+		await expect.element(textarea).toHaveValue('');
+		expect(callsOf(invoked, 'send_draft')).toEqual([
+			['send_draft', { text: 'あとで見る\nhttps://example.com', targets: ['ef34'] }]
+		]);
+		expect(commandsCalled()).not.toContain('run_action');
 	});
 
-	it('AI サービスが「使わない」でも、AI のアクションもコマンドのアクションも一覧に出し、見出しの下にコマンドの行を添える', async () => {
-		const upper = commandAction('大文字に', 'tr a-z A-Z');
+	it('1行目で @ を打つと宛先の候補を出し、Esc では候補だけを閉じ、Tab で選んだ候補を1行目に入れる', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		const candidates = screen.getByRole('listbox', { name: m.draft_address_list() });
+		await textarea.click();
+
+		await userEvent.keyboard('@');
+		await expect.element(candidates).toBeVisible();
+		expect(candidates.getByRole('option').elements()).toHaveLength(2);
+
+		await userEvent.keyboard('{Escape}');
+		await expect.element(candidates).not.toBeInTheDocument();
+		expect(commandsCalled()).not.toContain('dismiss');
+
+		// 続けて打つと、また候補を出す
+		await userEvent.keyboard('s');
+		await expect.element(candidates.getByRole('option')).toMatchTextContent('@sh');
+		await userEvent.keyboard('{Tab}');
+
+		await expect.element(textarea).toHaveValue('@sh ');
+		await expect.element(textarea).toHaveFocus();
+		await expect.element(candidates).not.toBeInTheDocument();
+	});
+
+	it('一覧で、1行だけで宛先から始まる定型文を選ぶと実行し、ほかの定型文を選ぶと挿入する。AI サービスが「使わない」でも一覧に出す', async () => {
+		const upper = newSnippet('大文字に', '@sh tr a-z A-Z');
+		const greeting = newSnippet('挨拶', 'お疲れさまです。');
 		settings.current = {
 			...settings.current!,
 			aiService: 'none',
 			aiConsent: null,
-			actions: [business, upper]
+			snippets: [business, upper, greeting]
+		};
+		const screen = await render(Page);
+		const textarea = await openAt(screen, 'abc');
+		// 3件と、テキストを定型文に登録する項目
+		expect(screen.getByRole('option').elements()).toHaveLength(4);
+
+		const call = await pick(1);
+		expect(call.args).toEqual({
+			request: 1,
+			text: 'abc',
+			line: '@sh tr a-z A-Z',
+			output: 'replace',
+			encoding: 'utf-8'
+		});
+		call.resolve('ABC');
+		await expect.element(textarea).toHaveValue('ABC');
+
+		await userEvent.keyboard('{Meta>}k{/Meta}');
+		await expect.element(snippetSearch(screen)).toHaveFocus();
+		await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+		await expect.element(textarea).toHaveValue('ABCお疲れさまです。');
+		expect(actionRuns).toHaveLength(1);
+	});
+
+	it('切った定型文は、一覧に出さない', async () => {
+		settings.current = {
+			...settings.current!,
+			snippets: [business, { ...newSnippet('大文字に', '@sh tr a-z A-Z'), enabled: false }]
 		};
 		const screen = await render(Page);
 		await openAt(screen, 'abc');
@@ -1869,29 +1926,17 @@ describe('アクション', () => {
 		const options = screen.getByRole('option');
 		expect(options.elements()).toHaveLength(2);
 		await expect.element(options.nth(0)).toMatchTextContent('ビジネス向け');
-		await expect.element(options.nth(1)).toMatchTextContent('大文字に');
-		await expect.element(options.nth(1)).toMatchTextContent('tr a-z A-Z');
-		// 打つと、打った行をその場で実行する項目を先頭に出す
-		await screen.getByRole('combobox').fill('大');
-		expect(screen.getByRole('option').elements()).toHaveLength(2);
-		await expect
-			.element(screen.getByRole('option').nth(0))
-			.toMatchTextContent(m.actions_free_input());
-		await screen.getByRole('combobox').fill('');
-
-		const call = await pick(1);
-		expect(call.args.action).toEqual(upper);
-		call.resolve('ABC');
-		await expect.element(screen.getByRole('textbox')).toHaveValue('ABC');
+		// 残りは、テキストを定型文に登録する項目
+		await expect.element(options.nth(1)).toMatchTextContent(m.snippets_register_draft());
 	});
 
-	it('AI が使えない状態で AI のアクションを選ぶと、失敗の帯で AI を使える状態にするよう知らせ、入力欄は元のまま', async () => {
+	it('AI が使えない状態で @ai の定型文を選ぶと、失敗の帯で AI を使える状態にするよう知らせ、入力欄は元のまま', async () => {
 		settings.current = { ...settings.current!, aiService: 'none', aiConsent: null };
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいう');
 
 		const call = await pick();
-		expect(call.args.action).toEqual(business);
+		expect(call.args.line).toBe(business.body);
 		call.reject({ code: 'action.disabled', detail: 'AI is not set up' });
 
 		await expect
@@ -1900,16 +1945,7 @@ describe('アクション', () => {
 		await expect.element(textarea).toHaveValue('あいう');
 	});
 
-	it('AI のアクションも、見出しの下に `@ai` の行を添える', async () => {
-		const screen = await render(Page);
-		await openAt(screen, 'あいう');
-
-		const option = screen.getByRole('option').nth(0);
-		await expect.element(option).toMatchTextContent('ビジネス向け');
-		await expect.element(option).toMatchTextContent(business.command);
-	});
-
-	it('Cmd+K で一覧を出し、アクションを選ぶと全体を送り、届いたら差し替えて前の文を履歴に積む', async () => {
+	it('Cmd+K で一覧を出し、宛先で始まる定型文を選ぶと全体を送り、届いたら差し替えて前の文を履歴に積む', async () => {
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'えーと、明日なんですけど');
 
@@ -1917,7 +1953,9 @@ describe('アクション', () => {
 		expect(call.args).toEqual({
 			request: 1,
 			text: 'えーと、明日なんですけど',
-			action: business
+			line: business.body,
+			output: 'replace',
+			encoding: 'utf-8'
 		});
 		call.resolve('明日の件でご相談です。');
 
@@ -1936,7 +1974,7 @@ describe('アクション', () => {
 
 		const call = await pick(1);
 		expect(call.args.text).toBe('いう');
-		expect(call.args.action).toEqual(fix);
+		expect(call.args.line).toBe(fix.body);
 		call.resolve('イウ');
 
 		await expect.element(textarea).toHaveValue('あイウえお');
@@ -1954,33 +1992,6 @@ describe('アクション', () => {
 		await expect.element(textarea).toHaveValue('アイウ\n\nえお');
 	});
 
-	it('絞り込みに打つと、一覧の先頭に打った行で実行する項目を出し、選ぶと打った行を置き換えで実行して状態の行にも出す', async () => {
-		const screen = await render(Page);
-		await openAt(screen, 'あいう');
-
-		await screen.getByRole('combobox').fill('@ai 関西弁に');
-		const options = screen.getByRole('option');
-		expect(options.elements()).toHaveLength(1);
-		await expect.element(options.nth(0)).toMatchTextContent(m.actions_free_input());
-		await expect.element(options.nth(0)).toMatchTextContent('@ai 関西弁に');
-		// 当たるアクションがないことも出す
-		await expect.element(screen.getByText(m.actions_no_match())).toBeInTheDocument();
-
-		const call = await pick();
-		expect(call.args.action).toEqual({
-			id: '',
-			name: '',
-			command: '@ai 関西弁に',
-			output: 'replace',
-			encoding: 'utf-8',
-			enabled: true,
-			sync: true
-		});
-		await expect
-			.element(screen.getByText(m.draft_running_action({ action: '@ai 関西弁に' })))
-			.toBeInTheDocument();
-	});
-
 	it('実行する文が空でも実行する', async () => {
 		const screen = await render(Page);
 		await openAt(screen, '  \n');
@@ -1993,22 +2004,13 @@ describe('アクション', () => {
 	it('出し方が「挿入」なら、範囲を選んでいればその後ろに、なければカーソルの位置に結果を入れる', async () => {
 		settings.current = {
 			...settings.current!,
-			actions: [
-				{
-					id: 'date',
-					name: '日付',
-					command: 'date',
-					output: 'insert',
-					encoding: 'utf-8',
-					enabled: true,
-					sync: true
-				}
-			]
+			snippets: [{ ...newSnippet('日付', '@sh date'), output: 'insert' }]
 		};
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいうえお', 1, 3);
 		const call = await pick();
 		expect(call.args.text).toBe('いう');
+		expect(call.args.output).toBe('insert');
 		call.resolve('[結果]');
 		await expect.element(textarea).toHaveValue('あいう[結果]えお');
 
@@ -2023,17 +2025,7 @@ describe('アクション', () => {
 	it('出し方が「出さない」なら、下書きを変えず、実行したことを知らせる', async () => {
 		settings.current = {
 			...settings.current!,
-			actions: [
-				{
-					id: 'record',
-					name: '記録',
-					command: 'cat >> ~/log.txt',
-					output: 'none',
-					encoding: 'utf-8',
-					enabled: true,
-					sync: true
-				}
-			]
+			snippets: [{ ...newSnippet('記録', '@sh cat >> ~/log.txt'), output: 'none' }]
 		};
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいう');
@@ -2060,11 +2052,11 @@ describe('アクション', () => {
 			.element(screen.getByRole('button', { name: m.draft_copy(), exact: false }))
 			.toBeDisabled();
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
-		await userEvent.keyboard('{Meta>}j{/Meta}');
+		await userEvent.keyboard('{Meta>}k{/Meta}');
 		await tick();
 
 		expect(commandsCalled()).not.toContain('commit');
-		expect(screen.getByRole('combobox').elements()).toHaveLength(0);
+		expect(snippetSearch(screen).elements()).toHaveLength(0);
 	});
 
 	it('Esc で取り消し、元の文のまま編集できる状態に戻す。隠さず、遅れて届いた結果は入れない', async () => {
@@ -2127,7 +2119,7 @@ describe('アクション', () => {
 
 		actionRuns = [];
 		await userEvent.keyboard('{Meta>}k{/Meta}');
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
+		await expect.element(snippetSearch(screen)).toHaveFocus();
 		await pick();
 
 		await expect.element(screen.getByText(m.action_failed())).not.toBeInTheDocument();
@@ -2195,7 +2187,7 @@ describe('アクション', () => {
 		await openAt(screen, 'あいう');
 		const first = await pick();
 		first.resolve('アイウ');
-		await expect.element(screen.getByRole('textbox')).toHaveValue('アイウ');
+		await expect.element(draftField(screen)).toHaveValue('アイウ');
 		expect(commandsCalled()).not.toContain('notify_action_finished');
 
 		actionRuns = [];
@@ -2244,7 +2236,7 @@ describe('アクション', () => {
 
 	it('履歴から呼び出して書き換えていない文を実行したら、履歴に積まず、たどるのをやめる', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 		await textarea.fill('git status');
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		await expect.element(textarea).toHaveValue('');
@@ -2254,7 +2246,7 @@ describe('アクション', () => {
 		await expect.element(textarea).toHaveValue('git status');
 
 		await userEvent.keyboard('{Meta>}k{/Meta}');
-		await expect.element(screen.getByRole('combobox')).toHaveFocus();
+		await expect.element(snippetSearch(screen)).toHaveFocus();
 		(await pick()).resolve('Git Status');
 		await expect.element(textarea).toHaveValue('Git Status');
 
@@ -2281,11 +2273,7 @@ describe('アクション', () => {
 			if (command === 'begin_action') return Promise.resolve(nextRequest++);
 			if (command === 'run_action') {
 				return new Promise((resolve, reject) =>
-					actionRuns.push({
-						args: args as { request: number; text: string; action: Action },
-						resolve,
-						reject
-					})
+					actionRuns.push({ args: args as RunArgs, resolve, reject })
 				);
 			}
 			return Promise.resolve(undefined);
@@ -2317,7 +2305,7 @@ describe('書きかけのあるなしを知らせる', () => {
 	it('Mac では、空かどうかが変わったときだけ知らせる', async () => {
 		settings.current = view('macos');
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox');
+		const textarea = draftField(screen);
 
 		await vi.waitFor(() => expect(reported()).toEqual([false]));
 		await textarea.fill('書きかけ');
@@ -2331,7 +2319,7 @@ describe('書きかけのあるなしを知らせる', () => {
 		settings.current = view('windows');
 		const screen = await render(Page);
 
-		await screen.getByRole('textbox').fill('書きかけ');
+		await draftField(screen).fill('書きかけ');
 		await tick();
 		expect(reported()).toEqual([]);
 	});
@@ -2381,7 +2369,7 @@ describe('作業フォルダー', () => {
 
 	it('キーで、今のフォルダーを選んだ状態の欄を出し、打ったパスで Enter を押すと移って入力欄に戻る', async () => {
 		const screen = await render(Page);
-		const textarea = screen.getByRole('textbox', { name: m.draft_label() });
+		const textarea = draftField(screen);
 		await textarea.fill('あいう');
 		await userEvent.keyboard('{Meta>}d{/Meta}');
 
@@ -2507,7 +2495,7 @@ describe('作業フォルダー', () => {
 		await button.click();
 		await expect.element(screen.getByRole('menu')).toBeInTheDocument();
 		await userEvent.keyboard('{Escape}');
-		await expect.element(screen.getByRole('textbox', { name: m.draft_label() })).toHaveFocus();
+		await expect.element(draftField(screen)).toHaveFocus();
 
 		// 移ると最近のフォルダーの順が入れ替わる。並べ直しても、入力欄にフォーカスを戻す
 		await button.click();
@@ -2526,7 +2514,7 @@ describe('作業フォルダー', () => {
 		const workButton = screen.getByRole('button', { name: m.folder_button({ path: '~/work' }) });
 		await expect.element(workButton).toBeInTheDocument();
 		await expect.element(screen.getByRole('menu')).not.toBeInTheDocument();
-		await expect.element(screen.getByRole('textbox', { name: m.draft_label() })).toHaveFocus();
+		await expect.element(draftField(screen)).toHaveFocus();
 
 		await workButton.click();
 		await screen.getByRole('menuitem', { name: m.folder_menu_pick() }).click();

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-	aiInstruction,
-	hasDelayedExpansionChars,
-	isRunnable,
-	splitActionTarget
-} from './action-target';
+import { hasDelayedExpansionChars, splitActionTarget } from './action-target';
 
 describe('splitActionTarget', () => {
 	it('前の空行と、後ろの空白と改行を分ける', () => {
@@ -40,37 +35,16 @@ describe('splitActionTarget', () => {
 	});
 });
 
-describe('aiInstruction', () => {
-	it('行頭の @ai の後ろを指示文にする', () => {
-		expect(aiInstruction('@ai 丁寧に: {{t}}')).toBe('丁寧に: {{t}}');
-		expect(aiInstruction('  @ai\t訳して | sort ')).toBe('訳して | sort');
-		expect(aiInstruction('@ai')).toBe('');
-	});
-
-	it('行頭でない @ai や、続きのある語は AI の行ではない', () => {
-		expect(aiInstruction('@aix')).toBeNull();
-		expect(aiInstruction('echo @ai')).toBeNull();
-	});
-});
-
-describe('isRunnable', () => {
-	it('空の行と、指示文が空の @ai の行は実行しない', () => {
-		expect(isRunnable('  ')).toBe(false);
-		expect(isRunnable('@ai  ')).toBe(false);
-		expect(isRunnable('@ai 訳して')).toBe(true);
-		expect(isRunnable('date')).toBe(true);
-	});
-});
-
 describe('hasDelayedExpansionChars', () => {
-	it('{{t}} のあるシェルの行に ! か ^ があれば知らせる', () => {
-		expect(hasDelayedExpansionChars('echo {{t}}!')).toBe(true);
-		expect(hasDelayedExpansionChars('echo {{t}} ^& more')).toBe(true);
+	it('{{t}} のある @sh の行に ! か ^ があれば知らせる', () => {
+		expect(hasDelayedExpansionChars('@sh echo {{t}}!')).toBe(true);
+		expect(hasDelayedExpansionChars('@sh echo {{t}} ^& more')).toBe(true);
 	});
 
-	it('{{t}} の無い行、! も ^ も無い行、@ai の行では知らせない', () => {
-		expect(hasDelayedExpansionChars('echo a^b!')).toBe(false);
-		expect(hasDelayedExpansionChars('echo {{t}}')).toBe(false);
+	it('{{t}} の無い行、! も ^ も無い行、@ai の行、宛先の無い文では知らせない', () => {
+		expect(hasDelayedExpansionChars('@sh echo a^b!')).toBe(false);
+		expect(hasDelayedExpansionChars('@sh echo {{t}}')).toBe(false);
 		expect(hasDelayedExpansionChars('@ai 訳して! {{t}}')).toBe(false);
+		expect(hasDelayedExpansionChars('echo {{t}}!')).toBe(false);
 	});
 });

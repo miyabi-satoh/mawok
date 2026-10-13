@@ -17,7 +17,7 @@
 
 技術の説明:
 
-- [アクションの実行](docs/actions.md)
+- [宛先へ出す（@ai・@sh・デバイス）と定型文](docs/actions.md)
 - [同じ LAN の自分のデバイスへ送る](docs/lan.md)
 - [設定ファイル](docs/config.md)
 - [設定と履歴の同期](docs/sync.md)

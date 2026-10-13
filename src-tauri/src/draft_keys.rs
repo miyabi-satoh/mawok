@@ -16,7 +16,6 @@ pub enum DraftAction {
     Send,
     Settings,
     Snippets,
-    Actions,
     HistoryOlder,
     HistoryNewer,
     SendTargets,
@@ -26,12 +25,11 @@ pub enum DraftAction {
 }
 
 impl DraftAction {
-    pub const ALL: [DraftAction; 11] = [
+    pub const ALL: [DraftAction; 10] = [
         DraftAction::Copy,
         DraftAction::Send,
         DraftAction::Settings,
         DraftAction::Snippets,
-        DraftAction::Actions,
         DraftAction::HistoryOlder,
         DraftAction::HistoryNewer,
         DraftAction::SendTargets,
@@ -47,7 +45,6 @@ impl DraftAction {
             DraftAction::Send => "send",
             DraftAction::Settings => "settings",
             DraftAction::Snippets => "snippets",
-            DraftAction::Actions => "actions",
             DraftAction::HistoryOlder => "history_older",
             DraftAction::HistoryNewer => "history_newer",
             DraftAction::SendTargets => "send_targets",
@@ -64,8 +61,7 @@ impl DraftAction {
             DraftAction::Send => "CommandOrControl+Shift+Enter",
             // Comma は JIS 配列でも US 配列でも同じ位置にある
             DraftAction::Settings => "CommandOrControl+Comma",
-            DraftAction::Snippets => "CommandOrControl+KeyJ",
-            DraftAction::Actions => "CommandOrControl+KeyK",
+            DraftAction::Snippets => "CommandOrControl+KeyK",
             DraftAction::HistoryOlder => "CommandOrControl+Alt+ArrowUp",
             DraftAction::HistoryNewer => "CommandOrControl+Alt+ArrowDown",
             DraftAction::SendTargets => "CommandOrControl+KeyL",
@@ -88,7 +84,6 @@ pub struct DraftKeys {
     pub send: String,
     pub settings: String,
     pub snippets: String,
-    pub actions: String,
     pub history_older: String,
     pub history_newer: String,
     pub send_targets: String,
@@ -105,7 +100,6 @@ impl Default for DraftKeys {
             send: key(DraftAction::Send),
             settings: key(DraftAction::Settings),
             snippets: key(DraftAction::Snippets),
-            actions: key(DraftAction::Actions),
             history_older: key(DraftAction::HistoryOlder),
             history_newer: key(DraftAction::HistoryNewer),
             send_targets: key(DraftAction::SendTargets),
@@ -123,7 +117,6 @@ impl DraftKeys {
             DraftAction::Send => &self.send,
             DraftAction::Settings => &self.settings,
             DraftAction::Snippets => &self.snippets,
-            DraftAction::Actions => &self.actions,
             DraftAction::HistoryOlder => &self.history_older,
             DraftAction::HistoryNewer => &self.history_newer,
             DraftAction::SendTargets => &self.send_targets,
@@ -139,7 +132,6 @@ impl DraftKeys {
             DraftAction::Send => &mut self.send,
             DraftAction::Settings => &mut self.settings,
             DraftAction::Snippets => &mut self.snippets,
-            DraftAction::Actions => &mut self.actions,
             DraftAction::HistoryOlder => &mut self.history_older,
             DraftAction::HistoryNewer => &mut self.history_newer,
             DraftAction::SendTargets => &mut self.send_targets,
@@ -739,7 +731,7 @@ mod tests {
         );
         assert_eq!(
             check(&keys, "", DraftAction::Copy, "CommandOrControl+KeyK", MAC),
-            Err(Rejection::Action(DraftAction::Actions))
+            Err(Rejection::Action(DraftAction::Snippets))
         );
         // 同じ操作に今のキーを選び直すのはよい
         assert_eq!(

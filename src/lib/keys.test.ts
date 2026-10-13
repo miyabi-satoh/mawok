@@ -147,10 +147,10 @@ describe('draftActionFor', () => {
 	});
 
 	it('Windows では Ctrl で同じ操作になり、Mac の ⌘ に当たる Win キーでは呼ばない', () => {
-		expect(draftActionFor(press('KeyJ', { ctrl: true }), DEFAULT_DRAFT_KEYS, 'windows')).toBe(
+		expect(draftActionFor(press('KeyK', { ctrl: true }), DEFAULT_DRAFT_KEYS, 'windows')).toBe(
 			'snippets'
 		);
-		expect(draftActionFor(press('KeyJ', { meta: true }), DEFAULT_DRAFT_KEYS, 'windows')).toBeNull();
+		expect(draftActionFor(press('KeyK', { meta: true }), DEFAULT_DRAFT_KEYS, 'windows')).toBeNull();
 	});
 
 	it('Mac の ⌃ は ⌘ と別のキーとして扱う（⌃K は行末まで消す操作）', () => {

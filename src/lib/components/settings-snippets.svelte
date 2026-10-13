@@ -20,9 +20,12 @@
 	import { mawokRemainingText } from '$lib/mawok-account';
 	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
-	import type { ActionsEditor } from '$lib/actions-editor.svelte';
+	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
 	import { ENCODINGS, OUTPUTS } from '$lib/action-options';
-	import { aiInstruction, hasDelayedExpansionChars, TEXT_MARK } from '$lib/action-target';
+	import { hasDelayedExpansionChars, TEXT_MARK } from '$lib/action-target';
+	import { rowAddressee } from '$lib/addressee';
+	import { formatKeys } from '$lib/keys';
+	import { firstLine } from '$lib/snippets';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { Switch } from '$lib/components/ui/switch';
 	import { focusFirstField } from '$lib/focus-field';
@@ -32,9 +35,9 @@
 	import type { ActionEncoding, ActionOutput, AiService, SettingsView } from '$lib/settings.svelte';
 
 	/**
-	 * 設定画面の「アクション」の分類。
+	 * 設定画面の「定型文」の分類。定型文の並びと、宛先 `@ai` が使う AI サービス。
 	 * 設定画面は、この分類を開いたときだけ描く。キーがあるかの確認はこの分類を開いたときに行う。
-	 * アクションとモデルの編集中の内容は、分類を移っても消えないよう、設定画面の本体が持つ
+	 * 定型文とモデルの編集中の内容は、分類を移っても消えないよう、設定画面の本体が持つ
 	 */
 	let {
 		view,
@@ -43,7 +46,7 @@
 		onopenaccount
 	}: {
 		view: SettingsView;
-		editor: ActionsEditor;
+		editor: SnippetsEditor;
 		mawokAccountStatus: AccountStatus | null | undefined;
 		onopenaccount: () => void;
 	} = $props();
@@ -161,144 +164,150 @@
 	}
 </script>
 
-<!-- 画面の題名と同じ見出しをカードに重ねず、説明は題名のすぐ下に一度だけ置く。よく触るアクションの並びを先に出す -->
+<!-- 画面の題名と同じ見出しをカードに重ねず、説明は題名のすぐ下に一度だけ置く。よく触る定型文の並びを先に出す -->
 <div class="flex flex-col gap-5">
 	<div class="flex flex-col gap-3">
-		<p id="actions-description" class="settings-lead">
-			{m.settings_actions_description({ mark: TEXT_MARK })}
+		<p id="snippets-description" class="settings-lead">
+			{view.textWindowKeys.snippets
+				? m.settings_snippets_description({
+						key: formatKeys(view.textWindowKeys.snippets, view.platform),
+						mark: TEXT_MARK
+					})
+				: m.settings_snippets_description_no_key({ mark: TEXT_MARK })}
 		</p>
-		{#if view.proAvailable && (view.syncKinds.actions || view.syncKinds.settings)}
+		{#if view.proAvailable && (view.syncKinds.snippets || view.syncKinds.settings)}
 			<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />
 		{/if}
-		{#if view.proAvailable && !view.syncKinds.actions}
-			<SettingsSyncNote text={m.settings_sync_actions_off()} />
+		{#if view.proAvailable && !view.syncKinds.snippets}
+			<SettingsSyncNote text={m.settings_sync_snippets_off()} />
 		{/if}
 		<SettingsSection>
 			<SettingsRow>
-				{#if showsFilter(editor.actions.rows.length, editor.filter)}
-					<ListFilter label={m.settings_actions_filter()} bind:value={editor.filter} />
+				{#if showsFilter(editor.snippets.rows.length, editor.filter)}
+					<ListFilter label={m.settings_snippets_filter()} bind:value={editor.filter} />
 				{/if}
 				<ReorderableRows
-					list={editor.actions}
+					list={editor.snippets}
 					expanded={editor.expanded}
-					nameLabel={m.settings_actions_name()}
-					preview={(row) => row.command}
-					monoPreview
+					nameLabel={m.settings_snippets_name()}
+					preview={(row) => firstLine(row.body)}
 					dimmed={(row) => !row.enabled}
 					query={editor.filter}
-					searchText={(row) => [row.name, row.command]}
+					searchText={(row) => [row.name, row.body]}
 				>
 					{#snippet trailing(row)}
-						{#if view.proAvailable && view.syncKinds.actions}
+						{#if view.proAvailable && view.syncKinds.snippets}
 							<SyncToggle
 								pressed={row.sync}
-								name={row.name || row.command}
+								name={row.name || firstLine(row.body)}
 								onchange={(sync) => {
 									row.sync = sync;
-									editor.actions.save();
+									editor.snippets.save();
 								}}
 							/>
 						{/if}
-						<Switch
-							aria-label={row.name || row.command
-								? m.settings_actions_enabled({ name: row.name || row.command })
-								: m.settings_actions_enabled_unnamed()}
-							bind:checked={
-								() => row.enabled,
-								(enabled) => {
-									row.enabled = enabled;
-									editor.actions.save();
-								}
-							}
-						/>
-					{/snippet}
-					{#snippet body(row)}
-						<div class="flex flex-col gap-1.5">
-							<span id="action-{row.key}-body" class="text-xs text-muted-foreground">
-								{m.settings_actions_command()}
-							</span>
-							<!--
-								`@ai` の指示文は長くなりがちなので、折り返して見える複数行の欄にする。コマンドは1行なので、Enter では改行を入れない
-							-->
-							<Textarea
-								class="min-h-16 font-mono text-sm"
-								onkeydown={(event) => {
-									if (event.key === 'Enter' && !isImeKey(event)) event.preventDefault();
-								}}
-								autocomplete="off"
-								autocapitalize="off"
-								spellcheck={false}
-								aria-labelledby="action-{row.key}-body"
-								aria-describedby={view.platform === 'windows' &&
-								hasDelayedExpansionChars(row.command)
-									? `actions-description action-${row.key}-special`
-									: 'actions-description'}
-								bind:value={
-									() => row.command,
-									(command) => {
-										row.command = command ?? '';
-										editor.actions.save();
+						<!-- 一覧から外すスイッチは、選ぶと出す定型文にだけ出す。挿入する文は、消さずに外したい場面が少ない -->
+						{#if rowAddressee(row.body, view.devices) || !row.enabled}
+							<Switch
+								aria-label={row.name || firstLine(row.body)
+									? m.settings_snippets_enabled({ name: row.name || firstLine(row.body) })
+									: m.settings_snippets_enabled_unnamed()}
+								bind:checked={
+									() => row.enabled,
+									(enabled) => {
+										row.enabled = enabled;
+										editor.snippets.save();
 									}
 								}
 							/>
-							{#if view.platform === 'windows' && hasDelayedExpansionChars(row.command)}
-								<p id="action-{row.key}-special" class="text-xs leading-snug text-muted-foreground">
-									{m.settings_actions_command_special_chars({ mark: TEXT_MARK })}
+						{/if}
+					{/snippet}
+					{#snippet body(row)}
+						{@const addressee = rowAddressee(row.body, view.devices)}
+						<div class="flex flex-col gap-1.5">
+							<span id="snippet-{row.key}-body" class="text-xs text-muted-foreground">
+								{m.settings_snippets_body()}
+							</span>
+							<Textarea
+								class="min-h-16 text-sm"
+								autocomplete="off"
+								autocapitalize="off"
+								spellcheck={false}
+								aria-labelledby="snippet-{row.key}-body"
+								aria-describedby={view.platform === 'windows' && hasDelayedExpansionChars(row.body)
+									? `snippets-description snippet-${row.key}-special`
+									: 'snippets-description'}
+								bind:value={
+									() => row.body,
+									(body) => {
+										row.body = body ?? '';
+										editor.snippets.save();
+									}
+								}
+							/>
+							{#if view.platform === 'windows' && hasDelayedExpansionChars(row.body)}
+								<p
+									id="snippet-{row.key}-special"
+									class="text-xs leading-snug text-muted-foreground"
+								>
+									{m.settings_snippets_special_chars({ mark: TEXT_MARK })}
 								</p>
 							{/if}
 						</div>
-						<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-							<Field.Title
-								id="action-{row.key}-output"
-								class="text-xs font-normal text-muted-foreground"
-							>
-								{m.settings_actions_output()}
-							</Field.Title>
-							<ToggleGroup.Root
-								type="single"
-								variant="outline"
-								size="sm"
-								aria-labelledby="action-{row.key}-output"
-								bind:value={
-									() => row.output,
-									(output) => {
-										if (!output || output === row.output) return;
-										row.output = output as ActionOutput;
-										editor.actions.save();
-									}
-								}
-							>
-								{#each OUTPUTS as { value, name } (value)}
-									<ToggleGroup.Item {value}>{name()}</ToggleGroup.Item>
-								{/each}
-							</ToggleGroup.Root>
-						</Field.Field>
-						<!-- 文字コードはコマンドの標準入力と標準出力にだけ効くので、`@ai` の行では出さない -->
-						{#if aiInstruction(row.command) === null}
+						<!-- 結果の出し方は `@ai`・`@sh` の行にだけ、文字コードは `@sh` の標準入力と標準出力にだけ効くので、効く行でだけ出す -->
+						{#if addressee?.kind === 'run'}
 							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 								<Field.Title
-									id="action-{row.key}-encoding"
+									id="snippet-{row.key}-output"
 									class="text-xs font-normal text-muted-foreground"
 								>
-									{m.settings_actions_encoding()}
+									{m.settings_snippets_output()}
 								</Field.Title>
-								<NativeSelect.Root
+								<ToggleGroup.Root
+									type="single"
+									variant="outline"
 									size="sm"
-									aria-labelledby="action-{row.key}-encoding"
+									aria-labelledby="snippet-{row.key}-output"
 									bind:value={
-										() => row.encoding,
-										(encoding) => {
-											if (!encoding || encoding === row.encoding) return;
-											row.encoding = encoding as ActionEncoding;
-											editor.actions.save();
+										() => row.output,
+										(output) => {
+											if (!output || output === row.output) return;
+											row.output = output as ActionOutput;
+											editor.snippets.save();
 										}
 									}
 								>
-									{#each ENCODINGS as { value, name } (value)}
-										<NativeSelect.Option {value}>{name}</NativeSelect.Option>
+									{#each OUTPUTS as { value, name } (value)}
+										<ToggleGroup.Item {value}>{name()}</ToggleGroup.Item>
 									{/each}
-								</NativeSelect.Root>
+								</ToggleGroup.Root>
 							</Field.Field>
+							{#if !addressee.ai}
+								<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+									<Field.Title
+										id="snippet-{row.key}-encoding"
+										class="text-xs font-normal text-muted-foreground"
+									>
+										{m.settings_snippets_encoding()}
+									</Field.Title>
+									<NativeSelect.Root
+										size="sm"
+										aria-labelledby="snippet-{row.key}-encoding"
+										bind:value={
+											() => row.encoding,
+											(encoding) => {
+												if (!encoding || encoding === row.encoding) return;
+												row.encoding = encoding as ActionEncoding;
+												editor.snippets.save();
+											}
+										}
+									>
+										{#each ENCODINGS as { value, name } (value)}
+											<NativeSelect.Option {value}>{name}</NativeSelect.Option>
+										{/each}
+									</NativeSelect.Root>
+								</Field.Field>
+							{/if}
 						{/if}
 					{/snippet}
 				</ReorderableRows>
@@ -306,13 +315,13 @@
 					<Button
 						variant="outline"
 						size="sm"
-						onclick={() => focusFirstField(`row-${editor.addAction()}`)}
+						onclick={() => focusFirstField(`row-${editor.addSnippet()}`)}
 					>
 						<PlusIcon data-icon="inline-start" />
-						{m.settings_actions_add()}
+						{m.settings_snippets_add()}
 					</Button>
-					<Button variant="outline" size="sm" onclick={() => editor.addDefaultActions()}>
-						{m.settings_actions_add_defaults()}
+					<Button variant="outline" size="sm" onclick={() => editor.addDefaultSnippets()}>
+						{m.settings_snippets_add_defaults()}
 					</Button>
 				</div>
 			</SettingsRow>
@@ -356,7 +365,7 @@
 							<Field.Title>
 								{view.mawokAccountSignedIn
 									? mawokRemainingText(mawokAccountStatus)
-									: m.settings_actions_mawok_sign_in()}
+									: m.settings_ai_mawok_sign_in()}
 							</Field.Title>
 							<Button variant="outline" onclick={onopenaccount}>
 								{m.settings_account_open()}

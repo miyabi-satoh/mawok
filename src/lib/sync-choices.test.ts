@@ -4,7 +4,8 @@ import type { SyncConflict } from '$lib/bindings/SyncConflict';
 import type { SyncValue } from '$lib/bindings/SyncValue';
 import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { m } from '$lib/paraglide/messages';
-import type { Action, Replacement, Snippet } from '$lib/settings.svelte';
+import type { Replacement, Snippet } from '$lib/settings.svelte';
+import { newSnippet } from '$lib/snippets';
 import { DEFAULT_DRAFT_KEYS } from '$lib/test-support/settings-view';
 import { choiceText, fromDifference, restoreChangeText, sideName } from './sync-choices';
 
@@ -33,20 +34,10 @@ const replacement: Replacement = {
 	sync: true
 };
 const snippet: Snippet = {
-	id: 'b',
-	name: '挨拶',
-	body: 'お世話になっております。\n佐藤です。',
-	sync: true
+	...newSnippet('挨拶', 'お世話になっております。\n佐藤です。'),
+	id: 'b'
 };
-const action: Action = {
-	id: 'c',
-	name: '英訳',
-	command: '@ai 英語に訳す',
-	output: 'replace',
-	encoding: 'utf-8',
-	enabled: true,
-	sync: true
-};
+const addressed: Snippet = { ...newSnippet('英訳', '@ai 英語に訳す'), id: 'c' };
 
 /**
  * 同期する設定の項目（docs/sync.md「同期する単位」）ごとの、名前と値の言い方。
@@ -192,7 +183,7 @@ describe('choiceText', () => {
 	it('同期する設定の項目を、どれも見ている', () => {
 		// SyncValue の種類のうち、行と「削除」を除いたもの。足したら、上の表にも足す
 		const types: Record<
-			Exclude<SyncValue['type'], 'replacement' | 'snippet' | 'action' | 'deleted' | 'order'>,
+			Exclude<SyncValue['type'], 'replacement' | 'snippet' | 'deleted' | 'order'>,
 			true
 		> = {
 			language: true,
@@ -266,25 +257,32 @@ describe('choiceText', () => {
 		});
 	});
 
-	it('アクションは、名前とコマンドに、違っている項目だけを添える', () => {
-		const theirs: Action = { ...action, output: 'insert', encoding: 'shift_jis', enabled: false };
-		expect(text({ type: 'action', value: action }, { type: 'action', value: theirs })).toEqual({
-			label: m.sync_choice_row_action({ name: '英訳' }),
-			thisDevice: [
-				'英訳',
-				'@ai 英語に訳す',
-				pair(m.settings_actions_output(), m.settings_actions_output_replace()),
-				pair(m.settings_actions_encoding(), 'UTF-8'),
-				pair(m.settings_actions_enabled_unnamed(), m.sync_choice_on())
-			].join('\n'),
-			otherDevice: [
-				'英訳',
-				'@ai 英語に訳す',
-				pair(m.settings_actions_output(), m.settings_actions_output_insert()),
-				pair(m.settings_actions_encoding(), 'Shift_JIS'),
-				pair(m.settings_actions_enabled_unnamed(), m.sync_choice_off())
-			].join('\n')
-		});
+	it('定型文は、名前と本文に、違っている項目だけを添える', () => {
+		const theirs: Snippet = {
+			...addressed,
+			output: 'insert',
+			encoding: 'shift_jis',
+			enabled: false
+		};
+		expect(text({ type: 'snippet', value: addressed }, { type: 'snippet', value: theirs })).toEqual(
+			{
+				label: m.sync_choice_row_snippet({ name: '英訳' }),
+				thisDevice: [
+					'英訳',
+					'@ai 英語に訳す',
+					pair(m.settings_snippets_output(), m.settings_actions_output_replace()),
+					pair(m.settings_snippets_encoding(), 'UTF-8'),
+					pair(m.settings_snippets_enabled_unnamed(), m.sync_choice_on())
+				].join('\n'),
+				otherDevice: [
+					'英訳',
+					'@ai 英語に訳す',
+					pair(m.settings_snippets_output(), m.settings_actions_output_insert()),
+					pair(m.settings_snippets_encoding(), 'Shift_JIS'),
+					pair(m.settings_snippets_enabled_unnamed(), m.sync_choice_off())
+				].join('\n')
+			}
+		);
 	});
 });
 

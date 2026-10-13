@@ -1,9 +1,13 @@
+import { CONSTANTS } from '$lib/bindings/constants';
 import { matchesFilter } from '$lib/list-filter';
+import type { Snippet } from '$lib/settings.svelte';
 
-/**
- * 一覧で選ぶ、名前と本文の組。定型文（本文）とアクション（コマンドの行を本文として渡す）で使う。
- * 一覧の出し方と絞り込みは同じにする
- */
+/** 新しく足す定型文の1件。結果の出し方・文字コード・有効かは、設定ファイルで省いたときと同じ既定にする */
+export function newSnippet(name: string, body: string): Snippet {
+	return { ...CONSTANTS.NEW_SNIPPET, name, body };
+}
+
+/** 一覧で選ぶ、名前と本文の組 */
 export type NamedText = {
 	name: string;
 	body: string;
@@ -25,7 +29,7 @@ export function snippetPreview(snippet: NamedText): string {
 }
 
 /**
- * 一覧に出す定型文（やアクション）。本文が空のものは差し込むもの（実行するコマンド）がないので除く。
+ * 一覧に出す定型文。本文が空のものは差し込むものがないので除く。
  * 打った文字列が名前か本文に含まれるものだけを、登録した順のまま残す（matchesFilter）
  */
 export function filterSnippets<T extends NamedText>(snippets: T[], query: string): T[] {
