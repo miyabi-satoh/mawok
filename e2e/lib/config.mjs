@@ -46,6 +46,12 @@ const HISTORY_PATH = path.join(APP_DATA_DIRS.local, 'history.json');
 // window-state プラグインが、下書きと設定ウィンドウの位置と大きさを記録するファイル。位置や大きさを変えるテストが
 // ユーザーの記録を書き換えるので、config.toml と一緒に控えて戻す
 export const WINDOW_STATE_PATH = path.join(CONFIG_DIR, '.window-state.json');
+// 機の同期の記録（食い違い・Pro の状態）。残っていると、テストが起動するアプリがその機の同期の状態で動き、
+// トレイに「どちらの設定を使うか選ぶ…」が出るなどして結果が機ごとに変わるので、控えてから外し、終わったら戻す
+const SYNC_RECORD_PATHS = Object.freeze({
+	proState: path.join(CONFIG_DIR, 'pro-state.json'),
+	syncState: path.join(CONFIG_DIR, 'sync-state.json')
+});
 
 // テストが落ちた・Ctrl+C で中断された場合でも、常用の config.toml を壊れたまま残さないための
 // 退避ファイル。テストプロセスの外 (e2e/ 直下) に置き、次回実行時に残骸があれば先に復元する
@@ -320,12 +326,17 @@ async function backupConfigText() {
 	const config = await readOptionalText(CONFIG_PATH);
 	const history = await readOptionalText(HISTORY_PATH);
 	const windowState = await readOptionalText(WINDOW_STATE_PATH);
+	const syncRecords = {
+		proState: await readOptionalText(SYNC_RECORD_PATHS.proState),
+		syncState: await readOptionalText(SYNC_RECORD_PATHS.syncState)
+	};
 	const record = {
 		savedAt: new Date().toISOString(),
 		existed: config.existed,
 		text: config.text,
 		history,
-		windowState
+		windowState,
+		syncRecords
 	};
 	await writeJsonAtomic(BACKUP_PATH, record);
 	return record;
@@ -347,13 +358,20 @@ function isValidBackupRecord(record) {
 		typeof record.savedAt === 'string' &&
 		// .window-state.json も控えるようになる前の記録には windowState がない
 		(record.windowState === undefined || isValidFileRecord(record.windowState)) &&
-		(record.history === undefined || isValidFileRecord(record.history))
+		(record.history === undefined || isValidFileRecord(record.history)) &&
+		(record.syncRecords === undefined ||
+			(isValidFileRecord(record.syncRecords.proState) &&
+				isValidFileRecord(record.syncRecords.syncState)))
 	);
 }
 
 /** 記録を書き戻し (または、元々なければ削除し)、バックアップファイルを消す (正常終了時の後始末) */
-async function restoreAndClearBackup({ existed, text, history, windowState }) {
+async function restoreAndClearBackup({ existed, text, history, windowState, syncRecords }) {
 	await restoreOptionalText(CONFIG_PATH, { existed, text });
+	if (syncRecords) {
+		await restoreOptionalText(SYNC_RECORD_PATHS.proState, syncRecords.proState);
+		await restoreOptionalText(SYNC_RECORD_PATHS.syncState, syncRecords.syncState);
+	}
 	if (history) await restoreOptionalText(HISTORY_PATH, history);
 	if (windowState) await restoreOptionalText(WINDOW_STATE_PATH, windowState);
 	await fs.rm(BACKUP_PATH, { force: true });
@@ -362,6 +380,11 @@ async function restoreAndClearBackup({ existed, text, history, windowState }) {
 /** config.toml に中身をそのまま書く (壊れた TOML を試すとき用)。beginTestConfig で控えを取ってから呼ぶこと */
 export async function writeConfigText(text) {
 	await fs.writeFile(CONFIG_PATH, text, 'utf8');
+}
+
+/** 同期の記録を外し、その機の同期の状態がテストに入らないようにする。控えは backupConfigText が取る */
+async function removeSyncRecords() {
+	await Promise.all(Object.values(SYNC_RECORD_PATHS).map((file) => fs.rm(file, { force: true })));
 }
 
 /** E2E のテスト間で下書きの履歴が混ざらないように消す */
@@ -472,6 +495,7 @@ export function registerCrashRecovery(lockToken) {
  */
 export async function beginMissingConfig() {
 	const original = await backupConfigText();
+	await removeSyncRecords();
 	await fs.rm(CONFIG_PATH, { force: true });
 	return {
 		restore: () => restoreAndClearBackup(original)
@@ -520,6 +544,7 @@ export async function historyEntryCount() {
  */
 export async function beginTestConfig(overrides) {
 	const original = await backupConfigText();
+	await removeSyncRecords();
 	await clearHistory();
 	const base = original.existed ? renameKeys(parseToml(original.text), toCamelCase) : {};
 	// ホットキーと下書きウィンドウのキーは、ユーザーが変えていても既定のキーで回す
