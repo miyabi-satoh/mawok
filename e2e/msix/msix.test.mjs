@@ -24,13 +24,12 @@ import { describeForegroundWindow, getMawokProcessId, stopPowerShell } from '../
 import { closeLeftoverTrayMenu, closeTrayMenu, openTrayMenu, readTrayMenu } from '../lib/tray.mjs';
 import { waitFor } from '../lib/wait.mjs';
 import {
-	OFFLINE_ENV,
 	PAGE,
 	STARTUP_TASK_STATE,
 	addPackage,
 	appUserModelId,
 	backupLocalCache,
-	beginOfflinePro,
+	beginSharedKey,
 	builtMsixPath,
 	clearLocalCacheBackup,
 	clearOriginalRecord,
@@ -53,7 +52,7 @@ import {
 	readStartupTaskState,
 	readToastTitles,
 	recoverHeldAppDataIfAny,
-	recoverOfflineProIfAny,
+	recoverSharedKeyIfAny,
 	redirectedDataDirs,
 	removePackage,
 	restoreLocalCache,
@@ -92,9 +91,9 @@ before(async () => {
 			if (!touched) return;
 			stopMawokSync();
 			try {
-				recoverOfflineProIfAny();
+				recoverSharedKeyIfAny();
 			} catch (error) {
-				console.error('[msix] 中断時に、仮の Pro の状態を片付けられませんでした:', error);
+				console.error('[msix] 中断時に、仮の共有の鍵を片付けられませんでした:', error);
 			}
 			try {
 				recoverHeldAppDataIfAny();
@@ -130,7 +129,7 @@ before(async () => {
 	await stopMawok();
 	await recoverStaleBackupIfAny();
 	recoverHeldAppDataIfAny();
-	recoverOfflineProIfAny();
+	recoverSharedKeyIfAny();
 	if (!recorded) {
 		// 外すと LocalCache が消えるので、元の版の分を先に写す。前の回の記録があるときは、そのときに写してある。
 		// 写したかどうか ('copied'・'empty') を記録に残し、後始末はそれを見て戻す (控えのフォルダーがあるかでは決めない。
@@ -232,14 +231,14 @@ describe('EXE 版のファイルがある環境', () => {
 	let config;
 	/** 起動する前のログの位置。前の起動のログを読まないため */
 	let logMark;
-	/** 待ち受けを始めさせるための、仮の Pro の状態。この機でサインインしていれば置かず、null */
-	let offlinePro;
+	/** 待ち受けを始めさせるための、仮の共有の鍵。この機にアカウントの資格情報が前からあれば置かず、null */
+	let sharedKey;
 
 	before(async () => {
 		config = await beginTestConfig({ language: 'ja', autostart: false });
-		offlinePro = await beginOfflinePro();
+		sharedKey = await beginSharedKey();
 		logMark = markLog(LOG_FILE);
-		await launchInPackage(pkg, CDP_PORT, offlinePro ? OFFLINE_ENV : {});
+		await launchInPackage(pkg, CDP_PORT);
 	});
 
 	after(async () => {
@@ -248,7 +247,7 @@ describe('EXE 版のファイルがある環境', () => {
 			await stopMawok();
 		} finally {
 			try {
-				offlinePro?.restore();
+				sharedKey?.restore();
 			} finally {
 				await config?.restore();
 			}
@@ -279,13 +278,12 @@ describe('EXE 版のファイルがある環境', () => {
 				`${protocol} の受信をすべてのネットワークで許す規則がありません: ${JSON.stringify(rules)}`
 			);
 		}
-		if (!offlinePro) {
+		if (!sharedKey) {
 			t.skip(
-				'この機で Mawok のアカウントにサインインしているので、待ち受けを始めさせる仮の Pro の状態を置けません (規則だけを見ました)'
+				'この機にアカウントの資格情報が前からあるので、待ち受けを始めさせる仮の共有の鍵を置けません (規則だけを見ました)'
 			);
 			return;
 		}
-		// 窓口へつながらないと分かってから始まるので、起動から数秒かかる
 		await waitFor(
 			() => readLogSince(LOG_FILE, logMark),
 			(text) => text.includes('lan: listening on tcp'),
