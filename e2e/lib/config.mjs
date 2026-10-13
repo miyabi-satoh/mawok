@@ -18,7 +18,7 @@ import {
 	writeJsonAtomic
 } from './files.mjs';
 
-// 自動の確認は、プロファイル `e2e` で起動する (setup.mjs の startTauriDriver が MAWOK_PROFILE を渡す。src-tauri/src/profile.rs)。
+// 自動の確認は、プロファイル `e2e` で起動する (tauri-driver.mjs の startTauriDriver が MAWOK_PROFILE を渡す。src-tauri/src/profile.rs)。
 // 設定・履歴・ログのフォルダーは識別子の後ろに `.e2e` が付き、常用の Mawok のものとは別になる。
 // src-tauri/src/lib.rs の app_config_dir() は Tauri (dirs crate 経由の SHGetKnownFolderPath) が
 // 決める場所で、環境変数とは厳密には別経路。ただし通常 %APPDATA% とほぼ一致するので、

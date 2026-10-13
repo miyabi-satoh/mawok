@@ -1,6 +1,7 @@
 //! 常用の Mawok と、設定・履歴・ログ・資格情報の置き場を分けて起動するためのプロファイル。
 //! 自動の確認と開発版が、その機でサインインしているアカウントで同期しないようにする（docs/platform.md「プロファイル」）。
 
+use std::env::VarError;
 use std::sync::OnceLock;
 
 /// プロファイルの名前を渡す環境変数
@@ -8,6 +9,8 @@ pub const ENV: &str = "MAWOK_PROFILE";
 
 /// 開発版（デバッグビルド）の既定のプロファイル
 const DEV: &str = "dev";
+
+const INVALID: &str = "must be 1-32 characters of a-z, 0-9 and '-'";
 
 /// フォルダー名と資格情報の service に入るので、どの OS でもそのまま使える文字に限る
 fn valid(name: &str) -> bool {
@@ -25,26 +28,34 @@ fn with_profile(base: &str, profile: Option<&str>) -> String {
     }
 }
 
+/// 環境変数の値とビルドの種類から、プロファイルを決める。名前として使えない値は、理由を返す
+fn resolve(value: Result<String, VarError>, debug: bool) -> Result<Option<String>, String> {
+    let name = match value {
+        Ok(name) => name,
+        // 開発版は、何も付けなくても常用の設定と資格情報に触れない
+        Err(VarError::NotPresent) if debug => DEV.to_string(),
+        Err(VarError::NotPresent) => return Ok(None),
+        Err(VarError::NotUnicode(_)) => return Err(INVALID.to_string()),
+    };
+    // 空にすると、開発版でも常用の置き場を使う
+    if name.is_empty() {
+        Ok(None)
+    } else if valid(&name) {
+        Ok(Some(name))
+    } else {
+        Err(INVALID.to_string())
+    }
+}
+
 fn current() -> Option<&'static str> {
     static PROFILE: OnceLock<Option<String>> = OnceLock::new();
     PROFILE
         .get_or_init(|| {
-            let name = match std::env::var(ENV) {
-                Ok(name) => name,
-                // 開発版は、何も付けなくても常用の設定と資格情報に触れない
-                Err(_) if cfg!(debug_assertions) => DEV.to_string(),
-                Err(_) => return None,
-            };
-            // 空にすると、開発版でも常用の置き場を使う
-            if name.is_empty() {
-                None
-            } else if valid(&name) {
-                Some(name)
-            } else {
+            resolve(std::env::var(ENV), cfg!(debug_assertions)).unwrap_or_else(|error| {
                 // ログの置き場が決まる前なので、標準エラーに出す。常用の置き場で黙って動くと、分けたつもりの起動が常用の設定を書き換える
-                eprintln!("{ENV} must be 1-32 characters of a-z, 0-9 and '-'");
+                eprintln!("{ENV} {error}");
                 std::process::exit(2);
-            }
+            })
         })
         .as_deref()
 }
@@ -65,6 +76,23 @@ mod tests {
         for name in ["", "E2E", "a.b", "a/b", "a b", &"a".repeat(33)] {
             assert!(!valid(name), "{name:?}");
         }
+    }
+
+    #[test]
+    fn the_profile_comes_from_the_variable_and_a_debug_build_defaults_to_dev() {
+        let set = |value: &str| Ok(value.to_string());
+        assert_eq!(resolve(set("e2e"), false), Ok(Some("e2e".to_string())));
+        assert_eq!(resolve(Err(VarError::NotPresent), false), Ok(None));
+        assert_eq!(
+            resolve(Err(VarError::NotPresent), true),
+            Ok(Some("dev".to_string()))
+        );
+        // 空の値は、開発版でも常用の置き場
+        assert_eq!(resolve(set(""), true), Ok(None));
+        // 使えない値を、付けなかったことにして常用の置き場で動かさない
+        assert!(resolve(set("a/b"), false).is_err());
+        let not_unicode = VarError::NotUnicode(std::ffi::OsString::new());
+        assert!(resolve(Err(not_unicode), false).is_err());
     }
 
     #[test]

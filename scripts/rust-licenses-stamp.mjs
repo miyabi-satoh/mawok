@@ -25,11 +25,13 @@ const INPUTS = [
 
 /** 今の入力と結果から取った印。結果がまだ無ければ `null` */
 export function computeStamp() {
-	const texts = readdirSync(TEXTS_DIR)
-		.sort()
-		.map((name) => join(TEXTS_DIR, name));
 	const hash = createHash('sha256');
 	try {
+		// 差し替えの本文は .txt だけ。.DS_Store のような手元にだけあるファイルで、印が機ごとに変わらないようにする
+		const texts = readdirSync(TEXTS_DIR)
+			.filter((name) => name.endsWith('.txt'))
+			.sort()
+			.map((name) => join(TEXTS_DIR, name));
 		for (const file of [...INPUTS, ...texts, OUTPUT]) {
 			// checkout の設定で改行が CRLF になっていても、同じ印になるようにする
 			hash.update(readFileSync(file, 'utf8').replaceAll('\r\n', '\n'));

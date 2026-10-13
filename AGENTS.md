@@ -16,7 +16,7 @@
 
 ### OS で分けるコード
 
-- OS ごとの作りは `#[cfg(windows)]`・`#[cfg(target_os = "macos")]` で分ける。片方の OS でしか使わない変数や import は、もう片方で使われないものになり、その OS の clippy で落ちる。分けたコードを変えたら、両方の OS で `just ci` を通す（CI が PR ごとに両方で流す）。
+- OS ごとの作りは `#[cfg(windows)]`・`#[cfg(target_os = "macos")]` で分ける。片方の OS でしか使わない変数や import は、もう片方で使われないものになり、その OS の clippy で落ちる。分けたコードを変えたら、両方の OS で検査を通す（CI が PR ごとに、macOS は `just ci`、Windows は窓口とサイトを除いた `just ci-app` を流す）。
 
 ### 文言
 
