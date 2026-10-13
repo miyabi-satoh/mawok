@@ -1154,6 +1154,7 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	// ログイン項目の登録を、利用者の状態に戻す。初めての起動を試すと登録され、ログイン時の起動の確認は登録を外すので、
 	// オフならオフの設定で一度起動して外し、オンなら設定ファイルの無い初めての起動で登録する
 	// (設定がオンで登録が無いと、起動しても登録せず、設定をオフにそろえるため。src-tauri/src/lib.rs の autostart_at_launch)
+	await fs.mkdir(DATA_DIR, { recursive: true });
 	if (state.autostartOn) await fs.rm(CONFIG_PATH, { force: true });
 	else await fs.writeFile(CONFIG_PATH, 'autostart = false\n');
 	// 起動できなくても (プロファイルを見ない版を指していたなど)、控えたファイルとクリップボードは戻す
