@@ -31,7 +31,7 @@
 
 - [Tauri 2 の前提環境](https://v2.tauri.app/start/prerequisites/)（Rust と、OS ごとのビルドツール）
 - Node.js と pnpm
-- [cargo-about](https://github.com/EmbarkStudios/cargo-about)（`cargo install --locked cargo-about@0.9.2 --features cli`。`just ci` の中でライセンス表示を作り直すのに使う）
+- [cargo-about](https://github.com/EmbarkStudios/cargo-about)（`cargo install --locked cargo-about@0.9.2 --features cli`。依存を変えたときに、ライセンス表示を作り直すのに使う）
 - [just](https://github.com/casey/just) と [lefthook](https://github.com/evilmartians/lefthook)
 
 ```sh
@@ -47,7 +47,7 @@ pnpm exec playwright install chromium   # 画面の部品テストで使うブ�
 just dev        # 開発版を起動する（起動時にはウィンドウを出さないので、ホットキーで表示する）
 just fmt        # Rust（cargo fmt）と画面側（Prettier）をまとめて整形する
 just ci         # CI と同じチェック一式（整形の確認・lint・型チェック・ライセンス表示が最新か・テスト・画面との境目の生成物が最新か）
-just licenses   # Rust の依存のライセンス表示を作り直す（依存を変えたとき。要: cargo-about）
+just licenses   # Rust の依存のライセンス表示を作り直す（依存や Cargo.toml を変えたとき。要: cargo-about。結果と印 src-tauri/rust-licenses.stamp をコミットする）
 ```
 
 開発版では、ログイン時の自動起動を登録しません。

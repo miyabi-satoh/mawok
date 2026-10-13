@@ -34,10 +34,15 @@ fmt:
     pnpm run format
     cd account-server && pnpm run format
 
-# CI (.github/workflows/ci.yml) が PR ごとに macOS と Windows で流す
+# CI (.github/workflows/ci.yml) が PR ごとに macOS で流す
 [doc('CI と同じ検査をまとめて流す (整形・lint・型検査・生成物・テスト)')]
 [group('検査')]
-ci: fmt-check lint check licenses-check pinned-deps-check test bindings-check account-server-check site-check
+ci: ci-app account-server-check site-check
+
+# 窓口と紹介のサイトは OS によらない中身なので、CI は Windows ではこちらだけを流す
+[doc('アプリの検査だけを流す (ci から窓口と紹介のサイトを除いたもの)')]
+[group('検査')]
+ci-app: fmt-check lint check licenses-check pinned-deps-check test bindings-check
 
 [doc('Rust の整形の崩れを見る (書き換えない)')]
 [group('検査')]
@@ -75,11 +80,12 @@ bindings-check:
 pinned-deps-check:
     node scripts/check-pinned-deps.mjs
 
-# 依存を変えたら `just licenses` の結果をコミットする
+# 依存を変えたら `just licenses` の結果をコミットする。入力 (依存・数え方の設定・作る手順) と結果が
+# 前に作ったときのままなら、作り直さずに通す (scripts/rust-licenses-stamp.mjs)
 [doc('Rust の依存のライセンス表示が最新か見る')]
 [group('検査')]
-licenses-check: licenses
-    node scripts/check-generated.mjs licenses static/third-party-licenses/rust.json
+licenses-check:
+    node scripts/check-rust-licenses.mjs
 
 # 初めてのときは先に `cd account-server && pnpm install`
 [doc('窓口 (account-server/) を検査する (整形・生成した型・型検査・テスト)')]

@@ -7,9 +7,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { buildLicenseDisplay } from './license-display.mjs';
+import { computeStamp, OUTPUT, STAMP } from './rust-licenses-stamp.mjs';
 
 const MANIFEST = 'src-tauri/Cargo.toml';
-const OUTPUT = 'static/third-party-licenses/rust.json';
 const TEXTS_DIR = 'src-tauri/license-texts';
 const ABOUT_CONFIG = 'src-tauri/about.toml';
 
@@ -127,6 +127,8 @@ const display = buildLicenseDisplay(
 
 mkdirSync(dirname(OUTPUT), { recursive: true });
 writeFileSync(OUTPUT, JSON.stringify(display, null, '\t') + '\n');
+// 次の検査が、入力と結果が変わっていなければ作り直しを飛ばせるよう、印を残す
+writeFileSync(STAMP, computeStamp() + '\n');
 
 /**
  * about.toml の `targets` のどれかで、実際にリンクされるクレート (`名前@版`)。

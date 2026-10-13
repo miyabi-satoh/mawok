@@ -1,6 +1,6 @@
 name: CI
 
-# PR ごとに `just ci` を流し、通ることを main へのマージの条件にする (ブランチの保護の必須のチェック)。
+# PR ごとに `just ci` (Windows では、OS によらない検査を除いた `just ci-app`) を流し、通ることを main へのマージの条件にする (ブランチの保護の必須のチェック)。
 # スカッシュマージ後の main への push では流さない。pull_request は main の先端とのマージ結果に対して走り、
 # マージの前に main へ追いつくことも保護で求めるので、同じ内容をもう一度確かめても情報が増えない。
 on:
@@ -97,6 +97,7 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: pnpm exec playwright install chromium
 
+      # 窓口と紹介のサイトは OS によらない中身 (Cloudflare の Worker と Astro) なので、片方の OS でだけ見る
       - name: Run CI checks
         if: steps.scope.outputs.run == 'true'
-        run: just ci
+        run: just ${{ runner.os == 'Windows' && 'ci-app' || 'ci' }}
