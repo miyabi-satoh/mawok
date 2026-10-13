@@ -14,7 +14,8 @@ import {
 	setJapanese,
 	showDraftAndWaitVisible,
 	typeIntoDraft,
-	waitAlert
+	waitAlert,
+	waitSettingsWindow
 } from '../lib/app.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
 import { beginTestConfig } from '../lib/config.mjs';
@@ -95,6 +96,44 @@ test.describe('AI を使えないとき', () => {
 		const draft = await readDraft(client);
 		assert.equal(draft.value, 'abc', '入力欄の中身は変わらないはず');
 		assert.equal(draft.focused, true, '入力欄にフォーカスがあるはず');
+	});
+
+	test('失敗の帯の「AI の設定を開く」で、設定ウィンドウが閉じていても、別の分類で開いていても「AI」で開く', async () => {
+		const [draftHandle] = await client.getWindowHandles();
+		const selectedCategory = () =>
+			client.execute(
+				() => document.querySelector('[role="tab"][aria-selected="true"]')?.dataset.value ?? null
+			);
+		/** @ai の定型文を選んで失敗の帯を出し、「AI の設定を開く」を押す */
+		async function failAndOpenAiSettings() {
+			await showDraftAndWaitVisible();
+			await typeIntoDraft(client, 'abc');
+			await openPaletteWithKey();
+			await clickSnippetOption(client, BUSINESS.name);
+			await waitAlert(client, '失敗の帯');
+			await client.$('button=AI の設定を開く').click();
+		}
+
+		// 設定ウィンドウが閉じているとき
+		await failAndOpenAiSettings();
+		const { settingsHandle } = await waitSettingsWindow(client, draftHandle);
+		await client.switchToWindow(settingsHandle);
+		await waitFor(selectedCategory, (value) => value === 'ai', {
+			label: '閉じていた設定ウィンドウが「AI」で開く'
+		});
+
+		// 別の分類で開いているとき
+		await client.$('[role="tab"][data-value="general"]').click();
+		await waitFor(selectedCategory, (value) => value === 'general', {
+			label: '「一般」に切り替える'
+		});
+		await client.switchToWindow(draftHandle);
+		await failAndOpenAiSettings();
+		await waitSettingsWindow(client, draftHandle);
+		await client.switchToWindow(settingsHandle);
+		await waitFor(selectedCategory, (value) => value === 'ai', {
+			label: '開いていた設定ウィンドウが「AI」に切り替わる'
+		});
 	});
 
 	test('1行目に @ai と書いて送るキーで出しても、元の文のまま AI を使える状態にするよう促す帯が出る', async () => {
