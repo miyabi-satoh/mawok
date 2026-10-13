@@ -41,6 +41,14 @@ const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', PROFI
 const OPEN_APP = ['--env', `${PROFILE_ENV}=${PROFILE}`, APP_BUNDLE];
 const CONFIG_PATH = path.join(DATA_DIR, 'config.toml');
 const HISTORY_PATH = path.join(DATA_DIR, 'history.json');
+const REGULAR_CONFIG_PATH = path.join(
+	os.homedir(),
+	'Library',
+	'Application Support',
+	APP_IDENTIFIER,
+	'config.toml'
+);
+const REGULAR_LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', APP_IDENTIFIER, 'Mawok.log');
 const LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', PROFILE_IDENTIFIER, 'Mawok.log');
 // 設定・履歴・位置の記録。テストが書き換えるので、まとめて控えて戻す
 const HELD_FILES = ['config.toml', 'history.json', '.window-state.json'];
@@ -904,7 +912,13 @@ async function launchMawok({ regular = false } = {}) {
 		{ timeout: 20_000, interval: 300, label: 'Mawok の起動 (メニューバーのアイコン)' }
 	);
 	// プロファイルを知らない前の版は、常用の置き場で動いてアカウントと同期する。動かす前に止める
-	if (!regular && readLogSince(LOG_PATH, mark) === '') {
+	if (regular) return;
+	const sawProfile = await waitFor(() => readLogSince(LOG_PATH, mark) !== '', Boolean, {
+		timeout: 5_000,
+		interval: 200,
+		label: 'プロファイルのログ'
+	}).catch(() => false);
+	if (!sawProfile) {
 		await quitMawok();
 		throw new Error(
 			`${APP_BUNDLE} が ${PROFILE_ENV} を見ていません。just bundle した版を入れ直すか、MAWOK_APP で指してください`
@@ -1032,15 +1046,18 @@ export function draftWindowLayer() {
  * ほかのアプリからは読めない (SMAppService の mainAppService は、呼んだアプリ自身のもの) ので、これで見分ける
  */
 async function readAutostartOn() {
-	const config = await readTextIfExists(CONFIG_PATH);
+	// ログイン項目は OS の上で1つで、プロファイルでは分かれない。利用者の状態は、常用の設定と常用の起動で読む
+	const config = await readTextIfExists(REGULAR_CONFIG_PATH);
 	// 設定ファイルが無いと初めての起動になり、起動すると登録してしまうので、起動せずに効いていないとみなす
 	// (戻すときに登録を外す。利用者が次に起動したときは初めての起動になり、そこで登録される)
 	if (config === null) return false;
 	if (/^autostart\s*=\s*false\s*$/m.test(config)) return false;
-	const log = watchLog();
-	await launchMawok();
+	const mark = markLog(REGULAR_LOG_PATH);
+	await launchMawok({ regular: true });
 	await quitMawok();
-	return !log().includes('launch at login was turned off outside Mawok');
+	return !readLogSince(REGULAR_LOG_PATH, mark).includes(
+		'launch at login was turned off outside Mawok'
+	);
 }
 
 /**
@@ -1139,7 +1156,10 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	// (設定がオンで登録が無いと、起動しても登録せず、設定をオフにそろえるため。src-tauri/src/lib.rs の autostart_at_launch)
 	if (state.autostartOn) await fs.rm(CONFIG_PATH, { force: true });
 	else await fs.writeFile(CONFIG_PATH, 'autostart = false\n');
-	await launchMawok();
+	// 起動できなくても (プロファイルを見ない版を指していたなど)、控えたファイルとクリップボードは戻す
+	await launchMawok().catch((error) =>
+		console.warn(`ログイン項目を戻せませんでした: ${error.message}`)
+	);
 	await quitMawok();
 	for (const name of HELD_FILES) {
 		const target = path.join(DATA_DIR, name);
