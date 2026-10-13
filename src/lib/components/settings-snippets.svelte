@@ -223,6 +223,11 @@
 					{/snippet}
 					{#snippet body(row)}
 						{@const addressee = rowAddressee(row.body, view.devices)}
+						<!-- 挿入するだけの定型文（複数行の文）は実行しないので、cmd の注意を出さない -->
+						{@const special =
+							view.platform === 'windows' &&
+							addressee?.kind === 'run' &&
+							hasDelayedExpansionChars(row.body)}
 						<div class="flex flex-col gap-1.5">
 							<span id="snippet-{row.key}-body" class="text-xs text-muted-foreground">
 								{m.settings_snippets_body()}
@@ -233,7 +238,7 @@
 								autocapitalize="off"
 								spellcheck={false}
 								aria-labelledby="snippet-{row.key}-body"
-								aria-describedby={view.platform === 'windows' && hasDelayedExpansionChars(row.body)
+								aria-describedby={special
 									? `snippets-description snippet-${row.key}-special`
 									: 'snippets-description'}
 								bind:value={
@@ -244,7 +249,7 @@
 									}
 								}
 							/>
-							{#if view.platform === 'windows' && hasDelayedExpansionChars(row.body)}
+							{#if special}
 								<p
 									id="snippet-{row.key}-special"
 									class="text-xs leading-snug text-muted-foreground"

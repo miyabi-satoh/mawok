@@ -1859,6 +1859,16 @@ describe('宛先へ出す', () => {
 		expect(commandsCalled()).not.toContain('run_action');
 	});
 
+	it('つないだデバイスが無いときに @all を送るキーで出すと、送らずに知らせる', async () => {
+		const screen = await render(Page);
+		await draftField(screen).fill('@all\nあとで見る');
+
+		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
+
+		await expect.element(screen.getByText(m.draft_address_no_device())).toBeVisible();
+		expect(commandsCalled()).not.toContain('send_draft');
+	});
+
 	it('1行目で @ を打つと宛先の候補を出し、Esc では候補だけを閉じ、Tab で選んだ候補を1行目に入れる', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);

@@ -34,7 +34,7 @@ Save text you use often, and instructions that send the text to AI or a command,
 2. Type to filter, then press Enter to pick one.
 
 - An ordinary snippet is inserted at the cursor.
-- A one-line snippet that starts with `@ai`, `@sh`, or a device name sends the text to that addressee (see the next section, "Write an addressee and send"). If you have a selection, it is used; otherwise, all of the text is used. The result appears in the text box. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`} to undo it.
+- A one-line snippet that starts with `@ai`, `@sh`, `@all`, or a device name sends the text to that addressee (see the next section, "Write an addressee and send"). With `@ai` and `@sh`, a selection is used if you have one; otherwise, all of the text is used. The result appears in the text box. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`} to undo it. `@all` and a device name send all of the text even if you have a selection.
 
 At first, "Translate to English" (`@ai`) and "Sort lines" (`@sh sort`) are included. Translating requires AI service setup (see "Use AI").
 

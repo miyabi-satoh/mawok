@@ -1040,29 +1040,24 @@ fn parse(text: &str) -> Result<Parsed, String> {
     reader.read_ai_models(&mut config.ai_models);
     // 項目がなければ既定の定型文。空の並び（`snippets = []`）は、利用者が全部消したものとして空のまま。
     // 並びでない値（`snippets = "…"` など）は、既定の定型文に戻す
-    let read_optional_rows = |reader: &mut Reader, key: &str| -> Option<Vec<LegacyAction>> {
+    fn read_optional_rows<T: Row>(reader: &mut Reader, key: &str) -> Option<Vec<T>> {
         if !reader.table.contains_key(key) {
             return None;
         }
         let mut rows = Vec::new();
         let before = reader.repaired.len();
-        if key == key::SNIPPETS {
-            let mut snippets: Vec<Snippet> = Vec::new();
-            reader.read_rows(key, &mut snippets);
-            rows = snippets.into_iter().map(LegacyAction).collect();
-        } else {
-            reader.read_rows(key, &mut rows);
-        }
+        reader.read_rows(key, &mut rows);
         let not_rows = reader.repaired[before..].iter().any(|name| name == key);
         (!not_rows).then_some(rows)
-    };
+    }
     let migrated = reader.table.contains_key(legacy::ACTIONS)
         || reader.table.contains_key(legacy::SYNC_ACTIONS);
-    let snippets = read_optional_rows(&mut reader, key::SNIPPETS);
+    let snippets: Option<Vec<Snippet>> = read_optional_rows(&mut reader, key::SNIPPETS);
     // アクションが別の並びだったころの設定ファイルは、アクションを定型文の後ろへ移す。
     // アクションの同期だけを切っていたら、移した行を同期しない行にする。定型文の同期まで切ると、
     // 切っていなかった定型文が黙って揃わなくなり、切らないと、切っていたアクションを移した拍子に窓口へ出す
-    let mut legacy_actions = read_optional_rows(&mut reader, legacy::ACTIONS);
+    let mut legacy_actions: Option<Vec<LegacyAction>> =
+        read_optional_rows(&mut reader, legacy::ACTIONS);
     let mut legacy_sync_actions = true;
     reader.read_bool(legacy::SYNC_ACTIONS, &mut legacy_sync_actions);
     if !legacy_sync_actions {
@@ -1074,9 +1069,8 @@ fn parse(text: &str) -> Result<Parsed, String> {
         config.snippets = Some(
             snippets
                 .into_iter()
-                .chain(legacy_actions)
                 .flatten()
-                .map(|row| row.0)
+                .chain(legacy_actions.into_iter().flatten().map(|row| row.0))
                 .collect(),
         );
     }

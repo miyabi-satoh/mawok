@@ -745,8 +745,8 @@
 
 	// 1行目の宛先が指す先。宛先でなければ null（docs/actions.md「宛先」）
 	const addressee = $derived(resolveAddressee(splitFirstLine(text).line, devices));
-	// 送るキーとボタンが使えるか。つないだデバイスが無くても、1行目が `@ai`・`@sh` なら出せる
-	const canSend = $derived(hasDevice || addressee?.kind === 'run');
+	// 送るキーとボタンが使えるか。つないだデバイスが無くても、1行目が宛先なら使える（`@all` は、デバイスが無いと知らせる）
+	const canSend = $derived(hasDevice || addressee !== null);
 
 	/**
 	 * 1行目の宛先へ出す。`@ai`・`@sh` なら2行目から下を中身にして実行し、結果でテキスト全体を置き換える。
@@ -999,7 +999,8 @@
 				return true;
 			case 'send':
 				if (!canSend) return false;
-				send();
+				// 送っている間と実行している間は、ボタンと同じく受けない。送っている最中のテキストの1行目を実行しないため
+				if (!busy) send();
 				return true;
 			case 'settings':
 				// 設定を開く間、下書きは Rust 側で隠れる。コピーはしないので書きかけは残り、設定を閉じると出し直される。
