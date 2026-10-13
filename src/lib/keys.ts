@@ -43,7 +43,6 @@ export const DRAFT_ACTIONS_IN_SETTINGS = [
 	'settings',
 	'snippets',
 	'changeFolder',
-	'run',
 	'copy'
 ] as const satisfies readonly GeneratedDraftAction[];
 
@@ -82,7 +81,6 @@ export function toDraftKey(event: KeyCombo, platform: Platform): string | null {
 export function draftActionLabel(action: DraftAction): string {
 	return {
 		copy: m.settings_key_copy,
-		run: m.settings_key_run,
 		settings: m.settings_key_settings,
 		snippets: m.settings_key_snippets,
 		historyOlder: m.settings_key_historyOlder,

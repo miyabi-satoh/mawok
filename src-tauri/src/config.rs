@@ -351,7 +351,6 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
         differs: |config, defaults| config.hotkey != defaults.hotkey,
     },
     ModifiedSetting::DraftKey(DraftAction::Copy),
-    ModifiedSetting::DraftKey(DraftAction::Run),
     ModifiedSetting::DraftKey(DraftAction::Settings),
     ModifiedSetting::DraftKey(DraftAction::Snippets),
     ModifiedSetting::DraftKey(DraftAction::HistoryOlder),
@@ -2170,7 +2169,7 @@ autostart = false
 
 [text_window_keys]
 copy = "CommandOrControl+KeyK"
-send = 1
+history_older = 1
 settings = "CommandOrControl+Alt+KeyK"
 "#,
         );
@@ -2179,11 +2178,17 @@ settings = "CommandOrControl+Alt+KeyK"
         assert_eq!(config.text_window_keys.copy, "CommandOrControl+KeyK");
         // 定型文の一覧の既定のキー（Cmd+K）は、書いたコピーのキーに譲り、知らせない
         assert_eq!(config.text_window_keys.snippets, "");
-        assert_eq!(config.text_window_keys.run, DraftKeys::default().run);
+        assert_eq!(
+            config.text_window_keys.history_older,
+            DraftKeys::default().history_older
+        );
         assert_eq!(config.text_window_keys.settings, "");
         assert_eq!(
             error,
-            repaired(&["text_window_keys.send", "text_window_keys.settings"])
+            repaired(&[
+                "text_window_keys.history_older",
+                "text_window_keys.settings"
+            ])
         );
 
         // text_window_keys のない設定ファイルで、ホットキーが既定のキーと重なっても知らせない
@@ -3259,14 +3264,14 @@ replacements = [
             "[text_window_keys]\n# 自分の癖\ncopy = \"CommandOrControl+KeyJ\"\n",
         );
         save_change(&path, |config| {
-            config.text_window_keys.run = String::new();
+            config.text_window_keys.snippets = String::new();
         });
         let text = fs::read_to_string(&path).unwrap();
         assert!(
             text.contains("# 自分の癖\ncopy = \"CommandOrControl+KeyJ\""),
             "{text}"
         );
-        assert!(text.contains("send = \"\""), "{text}");
+        assert!(text.contains("snippets = \"\""), "{text}");
 
         // 既定のキーに戻した操作は書かない。すべて戻せば表ごと消える
         save_change(&path, |config| {
@@ -3767,12 +3772,12 @@ command = "sort"
 
     #[test]
     fn ignores_items_of_features_that_no_longer_exist() {
-        // この版に無い項目（デバイスの send_to、text_window_keys の send_targets など）は読み捨て、修復の知らせにしない
+        // この版に無い項目（デバイスの send_to、text_window_keys の send・send_targets など）は読み捨て、修復の知らせにしない
         let path = temp_path("paired-devices");
         write(
             &path,
             "[[devices]]\nname = \"Mac\"\npublic_key = \"ab\"\naddress = \"192.168.0.10\"\nsend_to = false\n\n\
-             [text_window_keys]\nsend_targets = \"CommandOrControl+KeyL\"\ninsert_received = 1\n",
+             [text_window_keys]\nsend = \"CommandOrControl+KeyJ\"\nsend_targets = \"CommandOrControl+KeyL\"\ninsert_received = 1\n",
         );
         let (config, error) = load_or_create(&path);
         assert_eq!(error, None);

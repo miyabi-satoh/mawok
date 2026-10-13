@@ -5,7 +5,6 @@ import { newSnippet } from '$lib/snippets';
 /** Rust 側の既定のキー（src-tauri/src/draft_keys.rs）の写し */
 export const DEFAULT_DRAFT_KEYS: DraftKeys = {
 	copy: 'CommandOrControl+Enter',
-	run: 'CommandOrControl+Shift+Enter',
 	settings: 'CommandOrControl+Comma',
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',

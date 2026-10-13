@@ -42,7 +42,7 @@ Add snippets under "Snippets" in Settings. You can also save the text you are wr
 
 ## Write an addressee and run
 
-Write an addressee on the first line of the text, then press {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} or select the "Run" button. The lines below the first are what the addressee receives.
+Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} or select the "Run" button. When the first line is an addressee, the key runs it instead of copying. The lines below the first are what the addressee receives.
 
 | First line | What it does |
 | --- | --- |
@@ -112,14 +112,13 @@ To go back to settings from before sync changed them, select "Restore settings f
 | Action | Key |
 | --- | --- |
 | Bring up the text window (copy and close if it is in front) | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} |
-| Copy and close | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
+| Copy and close (run when the first line is `@ai` or `@sh`) | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
 | Close without copying | `Esc` |
 | Show text you copied earlier (↑ at the start of the text box, ↓ at the end) | `↑` / `↓` |
 | Previous / next in history (wherever the cursor is) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
 | Open the snippet list | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
 | Go to folder | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
 | Cancel a run (while it is running) | `Esc` |
-| Run (when the first line is `@ai` or `@sh`) | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
 | Open Settings | {macos:`Cmd+,`}{windows:`Ctrl+,`} |
 
 You can change the keys under "Keyboard" in Settings.

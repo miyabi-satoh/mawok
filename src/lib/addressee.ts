@@ -43,6 +43,14 @@ export function resolveAddressee(line: string): Addressee | null {
 	return null;
 }
 
+/**
+ * テキストの1行目の宛先が指す先。宛先でなければ null。コピーのキーとボタンは、宛先があれば、コピーせずに宛先へ出す
+ * （docs/actions.md「テキストウィンドウに書いて出す」）
+ */
+export function textAddressee(text: string): Addressee | null {
+	return resolveAddressee(splitFirstLine(text).line);
+}
+
 /** 実行するものがあるか。`@ai`・`@sh` だけで後ろが空の行は実行しない */
 export function isRunnable(line: string): boolean {
 	return (aiInstruction(line) ?? shCommand(line) ?? '') !== '';

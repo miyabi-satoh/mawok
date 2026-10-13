@@ -9,6 +9,7 @@ import {
 	rowAddressee,
 	shCommand,
 	splitFirstLine,
+	textAddressee,
 	typedAddress
 } from './addressee';
 
@@ -62,6 +63,25 @@ describe('resolveAddressee', () => {
 		expect(resolveAddressee('@MacBook Air')).toBeNull();
 		expect(resolveAddressee('@tanaka ありがとう')).toBeNull();
 		expect(resolveAddressee('ふつうの文')).toBeNull();
+	});
+});
+
+describe('textAddressee', () => {
+	it('1行目が @ai・@sh のテキストは、その宛先を返す（コピーのキーで実行する）', () => {
+		expect(textAddressee('@sh sort\nb\na')).toEqual({ ai: false, line: '@sh sort' });
+		expect(textAddressee('@AI 訳して')).toEqual({ ai: true, line: '@AI 訳して' });
+		// 後ろが空でも宛先。実行するものが無いことは、押したときに知らせる
+		expect(textAddressee('@sh')).toEqual({ ai: false, line: '@sh' });
+	});
+
+	it('1行目が宛先でないテキストは null（コピーのキーでコピーする）', () => {
+		expect(textAddressee('')).toBeNull();
+		expect(textAddressee('ふつうの文')).toBeNull();
+		expect(textAddressee('@tanaka ありがとう')).toBeNull();
+		expect(textAddressee('@shell ls')).toBeNull();
+		// 宛先を読むのは1行目だけ
+		expect(textAddressee('メモ\n@sh sort')).toBeNull();
+		expect(textAddressee('\n@ai 訳して')).toBeNull();
 	});
 });
 

@@ -42,7 +42,7 @@ Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、�
 
 ## 宛先を書いて出す
 
-テキストの1行目に宛先を書き、{macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} か「実行」ボタンで出します。2行目から下が、宛先に渡す中身です。
+テキストの1行目に宛先を書き、{macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} か「実行」ボタンで出します。1行目が宛先のときは、コピーの代わりに実行します。2行目から下が、宛先に渡す中身です。
 
 | 1行目 | すること |
 | --- | --- |
@@ -112,14 +112,13 @@ Pro では、同じアカウントのデバイスの間で、設定と履歴が�
 | 操作 | キー |
 | --- | --- |
 | テキストウィンドウを出す（前面にあればコピーして閉じる） | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} |
-| コピーして閉じる | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
+| コピーして閉じる（1行目が `@ai`・`@sh` のときは実行） | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} |
 | コピーせずに閉じる | `Esc` |
 | 前にコピーしたテキストを出す（入力欄の先頭で ↑、末尾で ↓） | `↑` / `↓` |
 | 前の履歴・次の履歴（カーソルの行にかかわらず） | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
 | 定型文の一覧を開く | {macos:`Cmd+K`}{windows:`Ctrl+K`} |
 | フォルダーへ移動 | {macos:`Cmd+D`}{windows:`Ctrl+D`} |
 | 実行を取り消す（実行している間） | `Esc` |
-| 実行（1行目が `@ai`・`@sh` のとき） | {macos:`Cmd+Shift+Enter`}{windows:`Ctrl+Shift+Enter`} |
 | 設定を開く | {macos:`Cmd+,`}{windows:`Ctrl+,`} |
 
 キーは設定の「キー操作」で変えられます。

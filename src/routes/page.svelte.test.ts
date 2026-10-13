@@ -1178,16 +1178,16 @@ describe('キー操作', () => {
 		await expect.element(textarea).toHaveValue('one\ntwo');
 	});
 
-	it('今は使えない操作のキー（1行目が宛先でないときの実行）では何もせず、既定の動作も止める', async () => {
+	it('今は使えない操作のキー（履歴が無いときの前の履歴）では何もせず、既定の動作も止める', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('draft');
 
 		const event = new KeyboardEvent('keydown', {
-			code: 'Enter',
-			key: 'Enter',
+			code: 'ArrowUp',
+			key: 'ArrowUp',
 			metaKey: true,
-			shiftKey: true,
+			altKey: true,
 			bubbles: true,
 			cancelable: true
 		});
@@ -1314,17 +1314,20 @@ describe('宛先へ出す', () => {
 		return actionRuns[0];
 	}
 
-	it('1行目が @sh のテキストは、実行のキーで2行目から下を渡して実行し、結果でテキスト全体を置き換えて、出す前のテキストを履歴に積む', async () => {
+	it('1行目が @sh のテキストは、コピーのキーで、コピーせずに2行目から下を渡して実行し、結果でテキスト全体を置き換えて、出す前のテキストを履歴に積む', async () => {
 		settings.current = view();
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('@sh sort\nb\na');
+		// コピーのボタンは、実行の表示に変わる
 		await expect
-			.element(screen.getByRole('button', { name: m.draft_run(), exact: true }))
+			.element(screen.getByRole('button', { name: m.draft_run(), exact: false }))
 			.toBeVisible();
+		expect(screen.getByRole('button', { name: m.draft_copy(), exact: false }).query()).toBeNull();
 
-		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
+		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		await vi.waitFor(() => expect(actionRuns).toHaveLength(1));
+		expect(commandsCalled()).not.toContain('commit');
 		expect(actionRuns[0].args).toEqual({
 			request: 1,
 			text: 'b\na',
@@ -1340,17 +1343,18 @@ describe('宛先へ出す', () => {
 		await expect.element(textarea).toHaveValue('@sh sort\nb\na');
 	});
 
-	it('1行目が @ai・@sh でないテキストでは、実行のボタンを出さず、実行のキーでも何もしない', async () => {
+	it('1行目が @ai・@sh でないテキストでは、ボタンはコピーの表示のままで、コピーのキーでコピーする', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('@all\nあとで見る');
+		expect(screen.getByRole('button', { name: m.draft_run(), exact: false }).query()).toBeNull();
 
-		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
+		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 
-		expect(screen.getByRole('button', { name: m.draft_run(), exact: true }).query()).toBeNull();
-		await expect.element(textarea).toHaveValue('@all\nあとで見る');
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('commit', { text: '@all\nあとで見る' })
+		);
 		expect(commandsCalled()).not.toContain('begin_action');
-		expect(commandsCalled()).not.toContain('commit');
 	});
 
 	it('1行目で @ を打つと宛先の候補を出し、Esc では候補だけを閉じ、Tab で選んだ候補を1行目に入れる', async () => {

@@ -3725,11 +3725,6 @@ mod tests {
         let value = config_items(&config)[&text_window_keys_item()].clone();
         assert_eq!(value["history_older"], json!("Alt+KeyP"));
         assert!(value.get("change_folder").is_none(), "{value}");
-        // 実行のキーは、設定ファイルと同じく `send` の名前で書く
-        assert_eq!(
-            value["send"],
-            json!(DraftKeys::default().get(DraftAction::Run))
-        );
 
         let mut received = Config::default();
         assert!(apply_value(&mut received, &text_window_keys_item(), &value));
@@ -3749,6 +3744,7 @@ mod tests {
         // 知らない操作のキーは読み捨て、知っている操作のキーだけを入れる
         let value = json!({
             "copy": "Alt+KeyP",
+            "send": "CommandOrControl+KeyJ",
             "send_targets": "CommandOrControl+KeyL",
             "insert_received": "CommandOrControl+KeyI",
             "discard_received": "",
@@ -3761,6 +3757,12 @@ mod tests {
             received
                 .text_window_keys
                 .action_for("CommandOrControl+KeyL"),
+            None
+        );
+        assert_eq!(
+            received
+                .text_window_keys
+                .action_for("CommandOrControl+KeyJ"),
             None
         );
     }

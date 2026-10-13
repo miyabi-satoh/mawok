@@ -137,13 +137,13 @@ describe('draftActionFor', () => {
 		keyCode: ime.keyCode ?? 0
 	});
 
-	it('Mac では ⌘Enter でコピー、⌘⇧Enter で実行', () => {
+	it('Mac では ⌘Enter でコピー。Shift を足したキーは別のキーとして扱う', () => {
 		expect(draftActionFor(press('Enter', { meta: true }), DEFAULT_DRAFT_KEYS, 'macos')).toBe(
 			'copy'
 		);
 		expect(
 			draftActionFor(press('Enter', { meta: true, shift: true }), DEFAULT_DRAFT_KEYS, 'macos')
-		).toBe('run');
+		).toBeNull();
 	});
 
 	it('Windows では Ctrl で同じ操作になり、Mac の ⌘ に当たる Win キーでは呼ばない', () => {

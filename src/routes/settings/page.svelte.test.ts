@@ -1341,11 +1341,11 @@ describe('設定画面のキー操作', () => {
 	it('記録中だけ既定に戻すと外すを表示し、操作できる', async () => {
 		settings.current = {
 			...view(),
-			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, run: 'CommandOrControl+KeyJ', snippets: '' }
+			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, copy: 'CommandOrControl+KeyJ', snippets: '' }
 		};
 		const screen = await renderAt(m.settings_category_keys);
 
-		await changeButton(screen, m.settings_key_run).click();
+		await changeButton(screen, m.settings_key_copy).click();
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_key_reset_action() }))
 			.toBeVisible();
@@ -1356,7 +1356,7 @@ describe('設定画面のキー操作', () => {
 		await changeButton(screen, m.settings_key_settings).click();
 		await screen.getByRole('button', { name: m.settings_key_clear_action() }).click();
 
-		expect(invoked).toHaveBeenCalledWith('reset_draft_key', { action: 'run' });
+		expect(invoked).toHaveBeenCalledWith('reset_draft_key', { action: 'copy' });
 		expect(invoked).toHaveBeenCalledWith('set_draft_key', { action: 'settings', key: '' });
 	});
 

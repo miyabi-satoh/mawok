@@ -57,9 +57,9 @@
 		completedAddress,
 		isRunnable,
 		matchingAddresses,
-		resolveAddressee,
 		rowAddressee,
 		splitFirstLine,
+		textAddressee,
 		typedAddress,
 		type AddressCandidate
 	} from '$lib/addressee';
@@ -758,8 +758,8 @@
 		return true;
 	}
 
-	// 1行目の宛先が指す先。宛先でなければ null（docs/actions.md「宛先」）。実行のキーとボタンは、宛先があるときだけ使える
-	const addressee = $derived(resolveAddressee(splitFirstLine(text).line));
+	// 1行目の宛先が指す先。宛先でなければ null。宛先があれば、コピーのキーとボタンは、コピーせずに宛先へ出す
+	const addressee = $derived(textAddressee(text));
 
 	/** 1行目の宛先（`@ai`・`@sh`）へ出す。2行目から下を中身にして実行し、結果でテキスト全体を置き換える */
 	function runAddressed() {
@@ -868,16 +868,16 @@
 		onKeydown(event);
 	}
 
-	/** キーに割り当てた操作を呼ぶ。今は使えない操作（1行目が宛先でないときの実行）なら何もせず false を返す */
+	/** コピーのキーとボタン。1行目が宛先なら、コピーせずに宛先へ出す。そうでなければ、コピーして隠す */
+	function commitOrRun() {
+		return addressee ? runAddressed() : commit();
+	}
+
+	/** キーに割り当てた操作を呼ぶ。今は使えない操作なら何もせず false を返す */
 	function runAction(action: DraftAction): boolean {
 		switch (action) {
 			case 'copy':
-				commit();
-				return true;
-			case 'run':
-				if (!addressee) return false;
-				// 実行している間は、ボタンと同じく受けない
-				if (!busy) runAddressed();
+				commitOrRun();
 				return true;
 			case 'settings':
 				// 設定を開く間、下書きは Rust 側で隠れる。コピーはしないので書きかけは残り、設定を閉じると出し直される。
@@ -1160,8 +1160,8 @@
 	{/if}
 	{#if showButtons && keys && platform}
 		<!--
-			下の並び。左に今のフォルダー、右に実行・コピー。キーを添えるのはコピーだけで、ほかは狭い窓に文字を詰め込まないよう、
-			マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
+			下の並び。左に今のフォルダー、右にコピー（1行目が宛先のときは実行）。キーを添えるのはこのボタンだけで、
+			ほかは狭い窓に文字を詰め込まないよう、マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
 		-->
 		<div class="@container flex items-center gap-1">
 			{#if folderMenu}
@@ -1174,30 +1174,24 @@
 					onclose={() => textarea?.focus()}
 				/>
 			{/if}
-			{#if addressee}
-				<!-- 1行目が `@ai`・`@sh` のときだけ出す -->
-				<Button
-					tabindex={-1}
-					variant="outline"
-					size="sm"
-					class="ml-auto"
-					title={keyHint(m.draft_run_hint(), keys.run, platform)}
-					disabled={busy}
-					onclick={runAddressed}
-				>
-					<PlayIcon data-icon="inline-start" />
-					{m.draft_run()}
-				</Button>
-			{/if}
-			<!-- 変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピーする -->
+			<!--
+				1行目が `@ai`・`@sh` のときは、同じボタンとキーが実行になる。押す前に気づけるよう、名前を変えてアイコンを添える。
+				変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピー（実行）する
+			-->
 			<Button
 				tabindex={-1}
 				size="sm"
-				class={addressee ? '' : 'ml-auto'}
-				disabled={running !== null}
-				onclick={commit}
+				class="ml-auto"
+				title={addressee ? m.draft_run_hint() : undefined}
+				disabled={busy}
+				onclick={commitOrRun}
 			>
-				{m.draft_copy()}
+				{#if addressee}
+					<PlayIcon data-icon="inline-start" />
+					{m.draft_run()}
+				{:else}
+					{m.draft_copy()}
+				{/if}
 				{#if keys.copy}
 					<KeyCaps key={keys.copy} {platform} />
 				{/if}
