@@ -68,8 +68,15 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 				group: m.settings_char_width(),
 				item: m.settings_char_width_punctuation()
 			});
-		case 'char_widths':
-			return m.settings_char_width();
+		case 'alphabet_width':
+		case 'digit_width':
+		case 'space_width':
+		case 'symbol_width':
+		case 'katakana_width':
+			return m.sync_choice_label_sub({
+				group: m.settings_char_width(),
+				item: CHAR_WIDTH_KINDS.find(({ kind }) => `${kind}_width` === value.type)?.label() ?? ''
+			});
 		case 'exclude_from_clipboard_history':
 			return m.settings_exclude_history();
 		case 'text_font_size':
@@ -197,12 +204,12 @@ function valueText(value: SyncValue, other: SyncValue, platform: Platform): stri
 			return String(value.value);
 		case 'punctuation_style':
 			return optionName(PUNCTUATION_STYLES, value.value);
-		case 'char_widths': {
-			const theirs = sameType(value, other)?.value;
-			return differing(CHAR_WIDTH_KINDS, ({ kind }) => theirs?.[kind] === value.value[kind])
-				.map(({ kind, label }) => pair(label(), optionName(WIDTH_STYLES, value.value[kind])))
-				.join('\n');
-		}
+		case 'alphabet_width':
+		case 'digit_width':
+		case 'space_width':
+		case 'symbol_width':
+		case 'katakana_width':
+			return optionName(WIDTH_STYLES, value.value);
 		case 'text_color_light':
 			return value.value || DEFAULT_TEXT_COLORS.light;
 		case 'text_color_dark':

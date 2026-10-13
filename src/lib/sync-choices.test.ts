@@ -18,13 +18,22 @@ const text = (thisDevice: SyncValue, otherDevice: SyncValue, platform = 'macos' 
 
 const pair = (label: string, value: string) => m.sync_choice_pair({ label, value });
 
-const widths = {
-	alphabet: 'keep',
-	digit: 'keep',
-	space: 'keep',
-	symbol: 'keep',
-	katakana: 'keep'
-} as const;
+/** 「文字を揃える」の1行。名前は、まとまりと行のラベル */
+const widthRow = (
+	type: string,
+	mine: string,
+	theirs: string,
+	item: string,
+	thisDevice: string,
+	otherDevice: string
+): [string, unknown, unknown, string, string, string] => [
+	type,
+	mine,
+	theirs,
+	m.sync_choice_label_sub({ group: m.settings_char_width(), item }),
+	thisDevice,
+	otherDevice
+];
 
 const replacement: Replacement = {
 	id: 'a',
@@ -90,20 +99,46 @@ const SETTINGS: [string, unknown, unknown, string, string, string][] = [
 		'、。',
 		m.settings_char_width_keep()
 	],
-	[
-		'char_widths',
-		{ ...widths, alphabet: 'half', katakana: 'full' },
-		{ ...widths, alphabet: 'full' },
-		m.settings_char_width(),
-		[
-			pair(m.settings_char_width_alphabet(), m.settings_char_width_half()),
-			pair(m.settings_char_width_katakana(), m.settings_char_width_full())
-		].join('\n'),
-		[
-			pair(m.settings_char_width_alphabet(), m.settings_char_width_full()),
-			pair(m.settings_char_width_katakana(), m.settings_char_width_keep())
-		].join('\n')
-	],
+	widthRow(
+		'alphabet_width',
+		'half',
+		'full',
+		m.settings_char_width_alphabet(),
+		m.settings_char_width_half(),
+		m.settings_char_width_full()
+	),
+	widthRow(
+		'digit_width',
+		'keep',
+		'half',
+		m.settings_char_width_digit(),
+		m.settings_char_width_keep(),
+		m.settings_char_width_half()
+	),
+	widthRow(
+		'space_width',
+		'full',
+		'keep',
+		m.settings_char_width_space(),
+		m.settings_char_width_full(),
+		m.settings_char_width_keep()
+	),
+	widthRow(
+		'symbol_width',
+		'half',
+		'keep',
+		m.settings_char_width_symbol(),
+		m.settings_char_width_half(),
+		m.settings_char_width_keep()
+	),
+	widthRow(
+		'katakana_width',
+		'full',
+		'keep',
+		m.settings_char_width_katakana(),
+		m.settings_char_width_full(),
+		m.settings_char_width_keep()
+	),
 	[
 		'exclude_from_clipboard_history',
 		true,
@@ -194,7 +229,11 @@ describe('choiceText', () => {
 			text_history_size: true,
 			trim_trailing_whitespace: true,
 			punctuation_style: true,
-			char_widths: true,
+			alphabet_width: true,
+			digit_width: true,
+			space_width: true,
+			symbol_width: true,
+			katakana_width: true,
 			exclude_from_clipboard_history: true,
 			text_font_size: true,
 			text_color_light: true,

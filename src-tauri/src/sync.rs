@@ -26,7 +26,7 @@ use crate::{
     history_store::{self, History},
     i18n::Lang,
     shared_key,
-    text::{CharWidths, PunctuationStyle, Replacement},
+    text::{KatakanaWidth, PunctuationStyle, Replacement, WidthStyle},
 };
 
 pub const STATE_FILE_NAME: &str = "sync-state.json";
@@ -537,7 +537,11 @@ pub const SYNCABLE_SETTING_NAMES: &[&str] = &[
     "text_history_size",
     "trim_trailing_whitespace",
     "punctuation_style",
-    "char_widths",
+    "alphabet_width",
+    "digit_width",
+    "space_width",
+    "symbol_width",
+    "katakana_width",
     "exclude_from_clipboard_history",
     "text_font_family",
     "text_font_size",
@@ -654,7 +658,11 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
             "text_history_size" => json(config.text_history_size),
             "trim_trailing_whitespace" => json(config.trim_trailing_whitespace),
             "punctuation_style" => json(config.punctuation_style),
-            "char_widths" => json(config.char_widths),
+            "alphabet_width" => json(config.char_widths.alphabet),
+            "digit_width" => json(config.char_widths.digit),
+            "space_width" => json(config.char_widths.space),
+            "symbol_width" => json(config.char_widths.symbol),
+            "katakana_width" => json(config.char_widths.katakana),
             "exclude_from_clipboard_history" => json(config.exclude_from_clipboard_history),
             "text_font_family" => json(config.text_font_family.clone()),
             "text_font_size" => json(config.text_font_size),
@@ -735,9 +743,22 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
             &mut config.punctuation_style,
             parse::<PunctuationStyle>(value),
         ),
-        Some(Kind::Setting("char_widths")) => {
-            set_if(&mut config.char_widths, parse::<CharWidths>(value))
+        Some(Kind::Setting("alphabet_width")) => {
+            set_if(&mut config.char_widths.alphabet, parse::<WidthStyle>(value))
         }
+        Some(Kind::Setting("digit_width")) => {
+            set_if(&mut config.char_widths.digit, parse::<WidthStyle>(value))
+        }
+        Some(Kind::Setting("space_width")) => {
+            set_if(&mut config.char_widths.space, parse::<WidthStyle>(value))
+        }
+        Some(Kind::Setting("symbol_width")) => {
+            set_if(&mut config.char_widths.symbol, parse::<WidthStyle>(value))
+        }
+        Some(Kind::Setting("katakana_width")) => set_if(
+            &mut config.char_widths.katakana,
+            parse::<KatakanaWidth>(value),
+        ),
         Some(Kind::Setting("exclude_from_clipboard_history")) => {
             set_if(&mut config.exclude_from_clipboard_history, parse(value))
         }
@@ -1567,7 +1588,11 @@ pub enum SyncValue {
     TextHistorySize(u16),
     TrimTrailingWhitespace(bool),
     PunctuationStyle(PunctuationStyle),
-    CharWidths(CharWidths),
+    AlphabetWidth(WidthStyle),
+    DigitWidth(WidthStyle),
+    SpaceWidth(WidthStyle),
+    SymbolWidth(WidthStyle),
+    KatakanaWidth(KatakanaWidth),
     ExcludeFromClipboardHistory(bool),
     TextFontSize(u16),
     TextColorLight(String),
@@ -1808,7 +1833,11 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
                 SyncValue::TrimTrailingWhitespace(config.trim_trailing_whitespace)
             }
             "punctuation_style" => SyncValue::PunctuationStyle(config.punctuation_style),
-            "char_widths" => SyncValue::CharWidths(config.char_widths),
+            "alphabet_width" => SyncValue::AlphabetWidth(config.char_widths.alphabet),
+            "digit_width" => SyncValue::DigitWidth(config.char_widths.digit),
+            "space_width" => SyncValue::SpaceWidth(config.char_widths.space),
+            "symbol_width" => SyncValue::SymbolWidth(config.char_widths.symbol),
+            "katakana_width" => SyncValue::KatakanaWidth(config.char_widths.katakana),
             "exclude_from_clipboard_history" => {
                 SyncValue::ExcludeFromClipboardHistory(config.exclude_from_clipboard_history)
             }
@@ -3387,10 +3416,161 @@ mod tests {
         let items = [
             remote("history", "s_theme", 2, json!("dark")),
             remote(SETTINGS, "x_future", 3, json!(true)),
+            // 文字を揃える設定を、種類ごとでなく1項目に置いた形
+            remote(
+                SETTINGS,
+                "s_char_widths",
+                3,
+                json!({ "alphabet": "full", "digit": "half", "space": "keep", "symbol": "keep", "katakana": "full" }),
+            ),
         ];
-        let result = reconcile(&local, Some(recorded(&local)), &items, "key", 3);
+        let mut state = recorded(&local);
+        state.items.insert(
+            "settings\0s_char_widths".to_string(),
+            Seen {
+                seq: 1,
+                hash: hash_plain(&json!({})),
+            },
+        );
+        let result = reconcile(&local, Some(state), &items, "key", 3);
         assert_eq!(result.config, local);
         assert!(result.state.ignored.is_empty());
+        assert!(result.writes.is_empty());
+    }
+
+    fn widths(alphabet: WidthStyle, digit: WidthStyle, space: WidthStyle) -> Config {
+        let mut config = Config::default();
+        config.char_widths.alphabet = alphabet;
+        config.char_widths.digit = digit;
+        config.char_widths.space = space;
+        config
+    }
+
+    fn written_ids(result: &Reconcile) -> Vec<&str> {
+        result
+            .writes
+            .iter()
+            .map(|write| write.key.id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn char_widths_are_read_and_written_one_kind_at_a_time() {
+        let base = Config::default();
+        let local = widths(WidthStyle::Full, WidthStyle::Keep, WidthStyle::Keep);
+        let result = reconcile(
+            &local,
+            Some(recorded(&base)),
+            &[
+                remote(SETTINGS, "s_digit_width", 2, json!("half")),
+                remote(SETTINGS, "s_katakana_width", 3, json!("full")),
+            ],
+            "key",
+            3,
+        );
+        let mut expected = widths(WidthStyle::Full, WidthStyle::Half, WidthStyle::Keep);
+        expected.char_widths.katakana = KatakanaWidth::Full;
+        assert_eq!(result.config, expected);
+        assert!(result.state.conflicts.is_empty());
+        assert_eq!(written_ids(&result), ["s_alphabet_width"]);
+        assert_eq!(result.writes[0].plain, Some(json!("full")));
+    }
+
+    #[test]
+    fn the_first_sync_takes_each_char_width_kind_that_the_server_has() {
+        let local = widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Keep);
+        let result = reconcile(
+            &local,
+            None,
+            &[remote(SETTINGS, "s_digit_width", 1, json!("half"))],
+            "key",
+            1,
+        );
+        assert_eq!(
+            result.config,
+            widths(WidthStyle::Full, WidthStyle::Half, WidthStyle::Keep)
+        );
+        let written = written_ids(&result);
+        assert!(written.contains(&"s_alphabet_width"));
+        assert!(!written.contains(&"s_digit_width"));
+    }
+
+    #[test]
+    fn a_char_width_conflict_stops_only_that_kind() {
+        let base = Config::default();
+        let local = widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Keep);
+        let items = [
+            remote(SETTINGS, "s_alphabet_width", 2, json!("half")),
+            remote(SETTINGS, "s_space_width", 3, json!("half")),
+        ];
+        let result = reconcile(&local, Some(recorded(&base)), &items, "key", 3);
+        assert_eq!(
+            result.config,
+            widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Half)
+        );
+        assert_eq!(
+            result.state.conflicts.iter().collect::<Vec<_>>(),
+            ["settings\0s_alphabet_width"]
+        );
+        assert_eq!(written_ids(&result), ["s_digit_width"]);
+        assert_eq!(
+            conflicts(&result.config, &result.state, &items),
+            [SyncConflict {
+                id: "s_alphabet_width".to_string(),
+                seq: 2,
+                this_device: SyncValue::AlphabetWidth(WidthStyle::Full),
+                other_device: SyncValue::AlphabetWidth(WidthStyle::Half),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_excluded_char_width_kind_is_neither_read_nor_written() {
+        let base = Config::default();
+        let mut local = widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Keep);
+        local.sync_excluded_settings = vec!["digit_width".to_string()];
+        let result = reconcile(
+            &local,
+            Some(recorded(&base)),
+            &[
+                remote(SETTINGS, "s_digit_width", 2, json!("half")),
+                remote(SETTINGS, "s_space_width", 3, json!("half")),
+            ],
+            "key",
+            3,
+        );
+        assert_eq!(result.config.char_widths.digit, WidthStyle::Full);
+        assert_eq!(result.config.char_widths.space, WidthStyle::Half);
+        assert!(result.state.conflicts.is_empty());
+        assert_eq!(written_ids(&result), ["s_alphabet_width"]);
+    }
+
+    #[test]
+    fn unknown_char_width_values_are_not_applied_or_written_back() {
+        let local = Config::default();
+        for (id, value) in [
+            ("s_alphabet_width", json!("wide")),
+            // カタカナは半角に揃えない
+            ("s_katakana_width", json!("half")),
+            ("s_digit_width", json!({ "digit": "half" })),
+        ] {
+            let result = reconcile(
+                &local,
+                Some(recorded(&local)),
+                &[remote(SETTINGS, id, 2, value)],
+                "key",
+                2,
+            );
+            assert_eq!(result.config, local, "{id}");
+            assert!(
+                result
+                    .state
+                    .ignored
+                    .contains_key(&format!("settings\0{id}")),
+                "{id}"
+            );
+            assert!(result.writes.is_empty(), "{id}");
+        }
     }
 
     #[test]
@@ -3405,12 +3585,12 @@ mod tests {
             text_history_size: 42,
             trim_trailing_whitespace: false,
             punctuation_style: PunctuationStyle::Comma,
-            char_widths: CharWidths {
-                alphabet: crate::text::WidthStyle::Full,
-                digit: crate::text::WidthStyle::Half,
-                space: crate::text::WidthStyle::Full,
-                symbol: crate::text::WidthStyle::Half,
-                katakana: crate::text::KatakanaWidth::Full,
+            char_widths: crate::text::CharWidths {
+                alphabet: WidthStyle::Full,
+                digit: WidthStyle::Half,
+                space: WidthStyle::Full,
+                symbol: WidthStyle::Half,
+                katakana: KatakanaWidth::Full,
             },
             exclude_from_clipboard_history: false,
             hotkey: "Alt+KeyX".into(),
@@ -6797,8 +6977,8 @@ mod tests {
             theme: Theme::Dark,
             autostart: false,
             language: Language::En,
-            sync_excluded_settings: vec!["theme".to_string()],
-            ..Config::default()
+            sync_excluded_settings: vec!["theme".to_string(), "digit_width".to_string()],
+            ..widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Keep)
         };
         let backup = Config {
             theme: Theme::Light,
@@ -6808,6 +6988,10 @@ mod tests {
         };
         let restored = restore_config(&current, &backup);
         assert_eq!(restored.config.theme, Theme::Dark);
+        assert_eq!(
+            restored.config.char_widths,
+            widths(WidthStyle::Keep, WidthStyle::Full, WidthStyle::Keep).char_widths
+        );
         assert_eq!(restored.config.language, Language::Ja);
         assert!(!restored.config.autostart);
         assert!(restored.rejected.is_empty());
@@ -6816,7 +7000,7 @@ mod tests {
                 .iter()
                 .map(|change| change.id.as_str())
                 .collect::<Vec<_>>(),
-            ["s_language"]
+            ["s_alphabet_width", "s_language"]
         );
     }
 

@@ -989,10 +989,7 @@
 							m.settings_exclude_history_description()
 						)}
 						<SettingsRow modified={modifiedName(view, 'char_width')}>
-							<div class="flex items-center gap-1">
-								<Field.Title>{m.settings_char_width()}</Field.Title>
-								{@render syncSetting('char_widths', m.settings_char_width())}
-							</div>
+							<Field.Title>{m.settings_char_width()}</Field.Title>
 							<Field.Description class="leading-snug">
 								{m.settings_char_width_description()}
 							</Field.Description>
@@ -1022,7 +1019,10 @@
 							</Field.Field>
 							{#each CHAR_WIDTH_KINDS as row (row.kind)}
 								<Field.Field orientation="horizontal" class="flex-wrap justify-between">
-									<span id="char-width-{row.kind}" class="text-sm">{row.label()}</span>
+									<div class="flex items-center gap-1">
+										<span id="char-width-{row.kind}" class="text-sm">{row.label()}</span>
+										{@render syncSetting(`${row.kind}_width`, row.label())}
+									</div>
 									<ToggleGroup.Root
 										type="single"
 										variant="outline"

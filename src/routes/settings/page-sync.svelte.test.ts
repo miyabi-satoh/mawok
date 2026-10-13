@@ -166,6 +166,38 @@ describe('設定画面の同期', () => {
 			.toHaveAttribute('aria-pressed', 'false');
 	});
 
+	it('「文字を揃える」は行ごとに雲の印を出し、押した行だけを外す', async () => {
+		settings.current = settingsView({ proAvailable: true });
+		const screen = await renderAt(m.settings_category_copy);
+		for (const name of [
+			m.settings_char_width_punctuation(),
+			m.settings_char_width_alphabet(),
+			m.settings_char_width_digit(),
+			m.settings_char_width_space(),
+			m.settings_char_width_symbol(),
+			m.settings_char_width_katakana()
+		]) {
+			await expect
+				.element(screen.getByRole('button', { name: m.settings_sync_item({ name }) }))
+				.toBeVisible();
+		}
+		await expect
+			.element(
+				screen.getByRole('button', {
+					name: m.settings_sync_item({ name: m.settings_char_width() })
+				})
+			)
+			.not.toBeInTheDocument();
+		await screen
+			.getByRole('button', {
+				name: m.settings_sync_item({ name: m.settings_char_width_digit() })
+			})
+			.click();
+		expect(callsOf(invoked, 'set_sync_excluded_setting')).toEqual([
+			['set_sync_excluded_setting', { name: 'digit_width', sync: false }]
+		]);
+	});
+
 	it('設定の同期がオフ、または Pro でなければ、設定の雲の印を出さない', async () => {
 		settings.current = settingsView({
 			proAvailable: true,

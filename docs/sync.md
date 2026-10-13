@@ -38,7 +38,8 @@ Pro の Mawok は、同じアカウントにサインインして同じ共有の
 
 設定の項目は次のとおり。
 
-- どのデバイスでも同じ値にする項目: `language`・`theme`・`text_window_always_on_top`・`hide_text_window_on_blur`・`show_text_window_buttons`・`text_history_size`・`trim_trailing_whitespace`・`punctuation_style`・`char_widths`・`exclude_from_clipboard_history`・`text_font_family`・`text_font_size`・`text_color_light`・`text_color_dark`・`input_guidance`・`ai_service`・`ai_models`。
+- どのデバイスでも同じ値にする項目: `language`・`theme`・`text_window_always_on_top`・`hide_text_window_on_blur`・`show_text_window_buttons`・`text_history_size`・`trim_trailing_whitespace`・`punctuation_style`・`alphabet_width`・`digit_width`・`space_width`・`symbol_width`・`katakana_width`・`exclude_from_clipboard_history`・`text_font_family`・`text_font_size`・`text_color_light`・`text_color_dark`・`input_guidance`・`ai_service`・`ai_models`。
+  - 全角・半角を揃える設定は、まとめた1項目にせず、文字の種類ごとの項目にする。設定の画面の1行を、同期する・外す・食い違いを選ぶ1単位に揃えるため。
 - OS ごとに分ける項目: `hotkey`・`text_window_keys`。id の後ろに `_macos` か `_windows` を付け（`s_hotkey_macos` など）、自分の OS の項目だけを読み書きする。キーの名前が OS で違うため。`text_font_family` は分けない。font-family の並びで、その OS に無い書体は次の候補に落ちるため（VS Code の `editor.fontFamily` も OS をまたいで同期する）。
 - 同期しない項目: `autostart`・`devices`・`ai_consent`・`sync_settings`・`sync_keys`・`sync_replacements`・`sync_snippets`・`sync_history`・`sync_excluded_settings`・`yielded_draft_keys`。AI サービスのキー（OS の資格情報管理）、アカウントと Pro の状態、ウィンドウの位置も同期しない。デバイスに固有か、デバイスごとに本人が決めるものであるため。
 
