@@ -473,10 +473,15 @@ public static class MawokE2eCredential {
             Marshal.FreeHGlobal(credential.CredentialBlob);
         }
     }
-    // 無ければ null
+    // 無ければ null。読めなかったときは例外にする (無いものとして扱うと、利用者の資格情報を仮の鍵で上書きする)
     public static string Read(string target) {
         IntPtr pointer;
-        if (!CredRead(target, 1, 0, out pointer)) return null;
+        if (!CredRead(target, 1, 0, out pointer)) {
+            int error = Marshal.GetLastWin32Error();
+            // 1168 は ERROR_NOT_FOUND
+            if (error == 1168) return null;
+            throw new System.ComponentModel.Win32Exception(error);
+        }
         try {
             CREDENTIAL credential = (CREDENTIAL)Marshal.PtrToStructure(pointer, typeof(CREDENTIAL));
             byte[] blob = new byte[credential.CredentialBlobSize];
