@@ -54,7 +54,7 @@ Write an addressee on the first line of the text, then press {macos:`Cmd+Shift+E
 - Type `@` at the start of the first line to see addressee suggestions. Press `Tab` or `Enter` to enter one.
 - If the first line is not an addressee, all of the text is sent to the devices checked as send targets (see "Send to other devices").
 - The text you sent stays in the history, so you can bring it back and edit it.
-- A command receives the lines below the first on standard input and returns its standard output as the result. To pass them as an argument, write `{{t}}`.{macos:}{windows: On Windows, commands run in cmd.}
+- A command receives the lines below the first on standard input and returns its standard output as the result.{macos:}{windows: On Windows, commands run in cmd.}
 ::: macos
 - If a command is not found, write its full path.
 :::

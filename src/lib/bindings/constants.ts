@@ -11,7 +11,6 @@ export const CONSTANTS = {
 	AI_PREFIX: "@ai",
 	SH_PREFIX: "@sh",
 	ALL_DEVICES: "@all",
-	TEXT_MARK: "{{t}}",
 	NEW_SNIPPET: {"id":"","name":"","body":"","output":"replace","encoding":"utf-8","enabled":true,"sync":true},
 	SYNCABLE_SETTINGS: ["language", "theme", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "trim_trailing_whitespace", "punctuation_style", "char_widths", "exclude_from_clipboard_history", "text_font_family", "text_font_size", "text_color_light", "text_color_dark", "input_guidance", "ai_service", "ai_models"],
 	MODIFIED_SETTINGS: ["hotkey", "text_window_keys.copy", "text_window_keys.send", "text_window_keys.settings", "text_window_keys.snippets", "text_window_keys.historyOlder", "text_window_keys.historyNewer", "text_window_keys.sendTargets", "text_window_keys.insertReceived", "text_window_keys.discardReceived", "text_window_keys.changeFolder", "autostart", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "language", "theme", "text_font", "text_color", "input_guidance", "trim_trailing_whitespace", "exclude_from_clipboard_history", "char_width", "ai_service", "ai_models", "sync_settings", "sync_keys", "sync_replacements", "sync_snippets", "sync_history"]

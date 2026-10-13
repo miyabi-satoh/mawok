@@ -22,7 +22,7 @@ const devices = [device('MacBook Air', 'ab12cd'), device('AERO-13BE', 'ef34gh')]
 
 describe('aiInstruction・shCommand', () => {
 	it('行頭の宛先の後ろを、指示文・コマンドにする', () => {
-		expect(aiInstruction('@ai 丁寧に: {{t}}')).toBe('丁寧に: {{t}}');
+		expect(aiInstruction('@ai 丁寧に: 敬語で')).toBe('丁寧に: 敬語で');
 		expect(aiInstruction('  @ai\t訳して | sort ')).toBe('訳して | sort');
 		expect(aiInstruction('@ai')).toBe('');
 		expect(shCommand('@sh sort | uniq')).toBe('sort | uniq');

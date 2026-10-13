@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::actions::{ActionError, Failure, TEXT_MARK};
+use crate::actions::{ActionError, Failure};
 
 /// AI のアクションに使う AI サービス。足すときは、ここに名前・既定のモデル・資格情報の名前・送る処理を足す
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -153,15 +153,9 @@ impl Prompt {
         }
     }
 
-    /// 指示文に `{{t}}` があれば、実行する文に置き換えた指示文だけを送る。無ければ、指示文を system に、実行する文を利用者の発言にする。
+    /// 指示文を system に、実行する文を利用者の発言にする。
     /// 実行する文が空なら、指示文だけを利用者の発言として送る
     pub fn new(instruction: &str, text: &str) -> Self {
-        if instruction.contains(TEXT_MARK) {
-            return Self {
-                system: None,
-                user: instruction.replace(TEXT_MARK, text),
-            };
-        }
         if text.is_empty() {
             return Self {
                 system: None,
@@ -554,7 +548,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn puts_the_text_into_the_instruction_or_after_it() {
+    fn puts_the_text_after_the_instruction() {
         assert_eq!(
             Prompt::new("指示", "下書き"),
             Prompt {
@@ -562,11 +556,12 @@ mod tests {
                 user: "下書き".into()
             }
         );
+        // 指示文の中の `{{t}}` は、ただの文字
         assert_eq!(
-            Prompt::new("「{{t}}」を{{t}}の順に", "文"),
+            Prompt::new("「{{t}}」を訳して", "文"),
             Prompt {
-                system: None,
-                user: "「文」を文の順に".into()
+                system: Some("「{{t}}」を訳して".into()),
+                user: "文".into()
             }
         );
         assert_eq!(

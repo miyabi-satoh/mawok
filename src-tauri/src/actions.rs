@@ -15,8 +15,6 @@ pub const SH_PREFIX: &str = "@sh";
 /// つないだすべてのデバイスへ送る宛先。宛先を照らすのは画面なので、Rust 側では画面へ書き出すだけ（bindings.rs）
 #[cfg(test)]
 pub const ALL_DEVICES: &str = "@all";
-/// コマンドの行や指示文の中で、実行する文に置き換える印
-pub const TEXT_MARK: &str = "{{t}}";
 /// 言語を替えても同じ既定の翻訳アクションを見分けるための ID。
 const DEFAULT_TRANSLATE_ACTION_ID: &str = "6b6a77e6d4f846f2a8bbf953fbd0e0d3";
 /// 言語を替えても同じ既定の並べ替えアクションを見分けるための ID。
@@ -162,8 +160,6 @@ pub enum Failure {
     CommandNotFound,
     /// コマンドが 0 以外の終了コードで終わったか、シグナルで止まった
     CommandFailed,
-    /// 実行する文が大きすぎるか NUL を含み、行の `{{t}}` に埋め込めない（command.rs の embeddable）
-    TextNotEmbeddable,
     /// コマンドの行に改行がある。Windows の cmd は最初の改行より後ろを黙って捨てるので、実行しない（command.rs の run）
     #[cfg_attr(not(windows), allow(dead_code))]
     MultilineCommand,
@@ -201,7 +197,6 @@ impl Failure {
             Self::FolderMissing => "action.folder_missing",
             Self::CommandNotFound => "action.command_not_found",
             Self::CommandFailed => "action.command_failed",
-            Self::TextNotEmbeddable => "action.text_not_embeddable",
             Self::MultilineCommand => "action.multiline_command",
             Self::EmptyOutput => "action.empty_output",
             Self::OutputTooLarge => "action.output_too_large",
@@ -286,7 +281,7 @@ mod tests {
 
     #[test]
     fn reads_the_ai_prefix_only_at_the_head_of_the_line() {
-        assert_eq!(ai_instruction("@ai 丁寧に: {{t}}"), Some("丁寧に: {{t}}"));
+        assert_eq!(ai_instruction("@ai 丁寧に: 敬語で"), Some("丁寧に: 敬語で"));
         assert_eq!(
             ai_instruction("  @ai\t訳して | sort "),
             Some("訳して | sort")

@@ -32,7 +32,6 @@ export const CONSTANTS = {{\n\
 \tAI_PREFIX: {:?},\n\
 \tSH_PREFIX: {:?},\n\
 \tALL_DEVICES: {:?},\n\
-\tTEXT_MARK: {:?},\n\
 \tNEW_SNIPPET: {},\n\
 \tSYNCABLE_SETTINGS: {:?},\n\
 \tMODIFIED_SETTINGS: {:?}\n\
@@ -65,7 +64,6 @@ export const EVENTS = {{\n\
         actions::AI_PREFIX,
         actions::SH_PREFIX,
         actions::ALL_DEVICES,
-        actions::TEXT_MARK,
         new_snippet,
         sync::SYNCABLE_SETTING_NAMES,
         config::modified_setting_names(),

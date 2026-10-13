@@ -3389,7 +3389,7 @@ mistral = "mistral-large"
 [[snippets]]
 id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 name = "敬語"
-body = "@ai 丁寧に: {{t}}"
+body = "@ai 丁寧に"
 output = "insert"
 
 [[snippets]]
@@ -3428,7 +3428,7 @@ encoding = "cp932"
                 Snippet {
                     id: item_id('a'),
                     name: "敬語".to_string(),
-                    body: "@ai 丁寧に: {{t}}".to_string(),
+                    body: "@ai 丁寧に".to_string(),
                     output: ActionOutput::Insert,
                     encoding: ActionEncoding::Utf8,
                     enabled: true,

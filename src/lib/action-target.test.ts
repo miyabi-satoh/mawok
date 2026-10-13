@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasDelayedExpansionChars, splitActionTarget } from './action-target';
+import { splitActionTarget } from './action-target';
 
 describe('splitActionTarget', () => {
 	it('前の空行と、後ろの空白と改行を分ける', () => {
@@ -32,19 +32,5 @@ describe('splitActionTarget', () => {
 			body: 'foo\n    bar',
 			trailing: ''
 		});
-	});
-});
-
-describe('hasDelayedExpansionChars', () => {
-	it('{{t}} のある @sh の行に ! か ^ があれば知らせる', () => {
-		expect(hasDelayedExpansionChars('@sh echo {{t}}!')).toBe(true);
-		expect(hasDelayedExpansionChars('@sh echo {{t}} ^& more')).toBe(true);
-	});
-
-	it('{{t}} の無い行、! も ^ も無い行、@ai の行、宛先の無い文では知らせない', () => {
-		expect(hasDelayedExpansionChars('@sh echo a^b!')).toBe(false);
-		expect(hasDelayedExpansionChars('@sh echo {{t}}')).toBe(false);
-		expect(hasDelayedExpansionChars('@ai 訳して! {{t}}')).toBe(false);
-		expect(hasDelayedExpansionChars('echo {{t}}!')).toBe(false);
 	});
 });

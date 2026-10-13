@@ -13,7 +13,6 @@
 	import { m } from '$lib/paraglide/messages';
 	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
 	import { ENCODINGS, OUTPUTS } from '$lib/action-options';
-	import { hasDelayedExpansionChars, TEXT_MARK } from '$lib/action-target';
 	import { rowAddressee } from '$lib/addressee';
 	import { formatKeys } from '$lib/keys';
 	import { firstLine } from '$lib/snippets';
@@ -87,11 +86,6 @@
 					{/snippet}
 					{#snippet body(row)}
 						{@const addressee = rowAddressee(row.body, view.devices)}
-						<!-- 挿入するだけの定型文（複数行の文）は実行しないので、cmd の注意を出さない -->
-						{@const special =
-							view.platform === 'windows' &&
-							addressee?.kind === 'run' &&
-							hasDelayedExpansionChars(row.body)}
 						<div class="flex flex-col gap-1.5">
 							<span id="snippet-{row.key}-body" class="text-xs text-muted-foreground">
 								{m.settings_snippets_body()}
@@ -102,9 +96,7 @@
 								autocapitalize="off"
 								spellcheck={false}
 								aria-labelledby="snippet-{row.key}-body"
-								aria-describedby={special
-									? `snippets-description snippet-${row.key}-special`
-									: 'snippets-description'}
+								aria-describedby="snippets-description"
 								bind:value={
 									() => row.body,
 									(body) => {
@@ -113,14 +105,6 @@
 									}
 								}
 							/>
-							{#if special}
-								<p
-									id="snippet-{row.key}-special"
-									class="text-xs leading-snug text-muted-foreground"
-								>
-									{m.settings_snippets_special_chars({ mark: TEXT_MARK })}
-								</p>
-							{/if}
 						</div>
 						<!-- 結果の出し方は `@ai`・`@sh` の行にだけ、文字コードは `@sh` の標準入力と標準出力にだけ効くので、効く行でだけ出す -->
 						{#if addressee?.kind === 'run'}

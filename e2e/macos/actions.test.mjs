@@ -55,7 +55,7 @@ const ACTIONS = [
 	action('missing', 'mawok-no-such-command'),
 	action('fail', 'echo oops >&2; exit 3'),
 	action('silent', 'cat >/dev/null'),
-	action('args', "printf '[%s]' {{t}}"),
+	action('whole', `printf '[%s]' "$(cat)"`),
 	action('insert', `printf '${INSERTED}'`, 'insert'),
 	action('record', `cat >> '${APPEND_FILE}'`, 'none'),
 	action('quitwait', `${QUIT_SLEEP}; cat`)
@@ -168,10 +168,10 @@ test.describe('macOS: コマンドの定型文', () => {
 		await clearAndHideDraft();
 	});
 
-	test('下書きの全体が、記号も改行もそのまま1つの引数で渡る (28.)', async () => {
+	test('下書きの全体が、記号も改行もそのまま標準入力で渡る (28.)', async () => {
 		const text = 'a "b" \\ c; echo x\n$HOME %PATH% !x!';
 		await showDraftWith(text, { paste: true });
-		await runAction('args');
+		await runAction('whole');
 		await waitDraftValue(`[${text}]`);
 		await clearAndHideDraft();
 	});

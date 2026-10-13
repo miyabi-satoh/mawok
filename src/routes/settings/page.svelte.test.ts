@@ -1997,10 +1997,8 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		expect(saved.every((snippets) => snippets.length === 1)).toBe(true);
 	});
 
-	it('説明は、一覧を出すキーを入れて並びの上に一度だけ出し、Windows の ! と ^ の注意は {{t}} のある @sh の行にだけ出す', async () => {
-		// 注意を出す行と出さない行を1つずつ。どの行に出すかの決まりは hasDelayedExpansionChars の単体テストで見る
-		const snippets = [newSnippet('', '@sh echo {{t}}!'), newSnippet('', '@sh echo {{t}}')];
-		const special = m.settings_snippets_special_chars({ mark: '{{t}}' });
+	it('説明は、一覧を出すキーを入れて並びの上に一度だけ出す', async () => {
+		const snippets = [newSnippet('', '@sh sort'), newSnippet('', '@sh date')];
 		const description = m.settings_snippets_description({ key: 'Ctrl+K' });
 
 		settings.current = { ...view(), platform: 'windows', snippets };
@@ -2010,9 +2008,8 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		expect(screen.getByText(description).all()).toHaveLength(1);
 		const fields = screen.getByLabelText(m.settings_snippets_body()).all();
 		expect(fields).toHaveLength(2);
-		await expect.element(fields[0]).toHaveAccessibleDescription(`${description} ${special}`);
+		await expect.element(fields[0]).toHaveAccessibleDescription(description);
 		await expect.element(fields[1]).toHaveAccessibleDescription(description);
-		expect(screen.getByText(special).all()).toHaveLength(1);
 		screen.unmount();
 
 		settings.current = { ...view(), platform: 'macos', snippets };
@@ -2021,8 +2018,6 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		await expect
 			.element(mac.getByText(m.settings_snippets_description({ key: '⌘K' })))
 			.toBeVisible();
-		await expect.element(mac.getByLabelText(m.settings_snippets_body()).first()).toBeVisible();
-		expect(mac.getByText(special).all()).toHaveLength(0);
 	});
 
 	it('@sh の行でだけ文字コードを、@ai・@sh の行でだけ結果の出し方を出し、選んだ出し方と文字コードを保存する', async () => {
