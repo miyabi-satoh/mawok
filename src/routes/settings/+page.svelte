@@ -640,9 +640,6 @@
 				{/if}
 				<Tabs.Content value="general">
 					<div class="flex flex-col gap-5">
-						{#if view.proAvailable && view.syncKinds.settings}
-							<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />
-						{/if}
 						<SettingsSection title={m.settings_section_startup()}>
 							<SettingsRow modified={modifiedName(view, 'autostart')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
@@ -843,9 +840,6 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="draft">
-					{#if view.proAvailable && view.syncKinds.settings}
-						<SettingsSyncNote class="mb-3 px-1" text={m.settings_sync_description()} />
-					{/if}
 					<SettingsSection>
 						<SettingsRow modified={modifiedName(view, 'text_font')}>
 							<div class="flex items-center gap-1">
@@ -977,9 +971,6 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="copy">
-					{#if view.proAvailable && (view.syncKinds.settings || view.syncKinds.replacements)}
-						<SettingsSyncNote class="mb-3 px-1" text={m.settings_sync_description()} />
-					{/if}
 					<SettingsSection>
 						{@render switchRow(
 							'trim_trailing_whitespace',

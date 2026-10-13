@@ -39,9 +39,6 @@
 					})
 				: m.settings_snippets_description_no_key()}
 		</p>
-		{#if view.proAvailable && (view.syncKinds.snippets || view.syncKinds.settings)}
-			<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />
-		{/if}
 		{#if view.proAvailable && !view.syncKinds.snippets}
 			<SettingsSyncNote text={m.settings_sync_snippets_off()} />
 		{/if}
