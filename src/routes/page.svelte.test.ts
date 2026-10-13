@@ -981,7 +981,7 @@ describe('定型文', () => {
 	});
 });
 
-describe('見つけた同じアカウントのデバイスへ送る', () => {
+describe('追加済みのデバイスへ送る', () => {
 	const device = { name: 'Mac', publicKey: 'ab', address: '', sendTo: true };
 
 	/** Rust 側に溜まっている、届いた下書き（take_received_drafts で渡す） */
@@ -1000,7 +1000,7 @@ describe('見つけた同じアカウントのデバイスへ送る', () => {
 		settings.current = { ...view(), devices: [device] };
 	});
 
-	/** 同じアカウントのデバイスから下書きが届く。Rust 側に溜めてから、画面に知らせる */
+	/** 追加済みのデバイスから下書きが届く。Rust 側に溜めてから、画面に知らせる */
 	function receive(...drafts: { from: string; text: string }[]) {
 		pending.push(...drafts);
 		emit(EVENTS.DRAFT_RECEIVED);

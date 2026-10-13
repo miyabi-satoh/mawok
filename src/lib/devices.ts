@@ -12,7 +12,7 @@ export function unbrokenAtHyphens(name: string): string {
 const KEY_PREFIX_LENGTH = 4;
 
 /**
- * 見つけた同じアカウントのデバイスの表示名。名前はコンピューター名なので、同じ名前のデバイスが2台以上あるときだけ、
+ * 追加済みのデバイスの表示名。名前はコンピューター名なので、同じ名前のデバイスが2台以上あるときだけ、
  * 名前の後ろに公開鍵の先頭4文字を添えて見分ける（docs/lan.md「同じ LAN の自分のデバイスへ送る」）
  */
 export function deviceLabels(devices: Device[]): Map<string, string> {

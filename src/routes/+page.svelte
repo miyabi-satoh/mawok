@@ -75,7 +75,7 @@
 	// 入力欄の上下に操作のボタンを出すか
 	const showButtons = $derived(settings.current?.showTextWindowButtons ?? true);
 
-	// 同じアカウントのデバイスが見つかっているときだけ、送るキーとボタンを使える。
+	// 追加済みのデバイスがあるときだけ、送るキーとボタンを使える。
 	const devices = $derived(settings.current?.devices ?? []);
 	const hasDevice = $derived(devices.length > 0);
 	const deviceNames = $derived(deviceLabels(devices));
@@ -198,7 +198,7 @@
 	}
 	// 残高が尽きたときだけ、料金ページを開く操作を帯に添える。帯の文から決めるので、ほかの失敗で文が変わればボタンも消える
 	const noCredit = $derived(error === m.action_error_no_credit());
-	// 同じアカウントのデバイスへ送っている最中か。つないで送り終えるまで数秒かかることがあり、その間は書き換えさせない
+	// 追加済みのデバイスへ送っている最中か。つないで送り終えるまで数秒かかることがあり、その間は書き換えさせない
 	let sending = $state(false);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	/** 画面の描き直し（一覧が閉じる、入力欄が編集できる状態に戻る）を待ってから、入力欄にフォーカスを移す */
@@ -653,7 +653,7 @@
 		return hideWith('commit', m.copy_failed());
 	}
 
-	/** 同じアカウントのデバイスの下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
+	/** 追加済みのデバイスの下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
 	function send() {
 		// 送信先にチェックしたデバイスがなければ、送らずに一覧を開いて選んでもらう
 		if (!devices.some((device) => device.sendTo)) {
