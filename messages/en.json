@@ -14,6 +14,7 @@
 	"draft_history_newer_hint": "Go back to newer text (↓ at the end of the text box)",
 	"draft_guidance_write": "Write here and press {copy} to copy it and go back to your app, ready to paste.",
 	"draft_guidance_write_no_copy": "Write here and copy it to go back to your app, ready to paste.",
+	"draft_guidance_address": "Start the first line with @ to send it to AI or a command.",
 	"draft_guidance_summon": "Bring this back anytime with {hotkey}.",
 	"draft_guidance_change": "Change or remove this hint in Settings ({settings}).",
 	"draft_guidance_change_no_settings": "Change or remove this hint in Settings.",

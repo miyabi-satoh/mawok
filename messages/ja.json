@@ -14,6 +14,7 @@
 	"draft_history_newer_hint": "新しい方のテキストに戻る（入力欄の末尾で ↓）",
 	"draft_guidance_write": "ここに書いて {copy} を押すと、コピーして元のアプリに戻ります。あとは貼るだけです。",
 	"draft_guidance_write_no_copy": "ここに書いてコピーすると、元のアプリに戻ります。あとは貼るだけです。",
+	"draft_guidance_address": "1 行目を @ で始めると、AI やコマンドに通せます。",
 	"draft_guidance_summon": "{hotkey} でいつでも呼び出せます。",
 	"draft_guidance_change": "この案内は設定（{settings}）で変えたり消したりできます。",
 	"draft_guidance_change_no_settings": "この案内は設定で変えたり消したりできます。",
