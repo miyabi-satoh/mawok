@@ -28,6 +28,11 @@ describe('aiInstruction・shCommand', () => {
 		expect(shCommand('@sh sort | uniq')).toBe('sort | uniq');
 	});
 
+	it('宛先の大文字と小文字は区別しない', () => {
+		expect(aiInstruction('@AI 訳して')).toBe('訳して');
+		expect(shCommand('@Sh ls')).toBe('ls');
+	});
+
 	it('行頭でない宛先や、続きのある語は宛先ではない', () => {
 		expect(aiInstruction('@aix')).toBeNull();
 		expect(aiInstruction('echo @ai')).toBeNull();
@@ -104,8 +109,21 @@ describe('resolveAddressee', () => {
 		});
 	});
 
-	it('大文字と小文字だけが違う名前のデバイスが2台あるときは、どちらとも決めない', () => {
-		expect(resolveAddressee('@mac', [device('Mac', 'ab12cd'), device('mac', 'ef34gh')])).toBeNull();
+	it('大文字と小文字だけが違う名前のデバイスが2台あるときも、公開鍵の先頭を添えた名前で受ける', () => {
+		const cased = [device('Mac', 'ab12cd'), device('mac', 'ef34gh')];
+
+		expect(resolveAddressee('@mac', cased)).toBeNull();
+		expect(addressCandidates(cased).map((candidate) => candidate.address)).toEqual([
+			'@ai',
+			'@sh',
+			'@all',
+			'@Mac (ab12)',
+			'@mac (ef34)'
+		]);
+		expect(resolveAddressee('@mac (ef34)', cased)).toEqual({
+			kind: 'devices',
+			publicKeys: ['ef34gh']
+		});
 	});
 
 	it('同じ名前のデバイスと、宛先の語と同じ名前のデバイスは、公開鍵の先頭を添えた名前で受ける', () => {

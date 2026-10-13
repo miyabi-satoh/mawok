@@ -27,9 +27,15 @@ fn ai_line(instruction: &str) -> String {
     format!("{AI_PREFIX} {}", instruction.trim())
 }
 
-/// 行頭が宛先 `prefix` なら、その後ろ（前後の空白を除く）を返す。宛先の直後は空白か行の終わりに限る（`@aix` は `@ai` の行ではない）
+/// 行頭が宛先 `prefix` なら、その後ろ（前後の空白を除く）を返す。宛先の直後は空白か行の終わりに限る（`@aix` は `@ai` の行ではない）。
+/// 大文字と小文字は区別しない。デバイスの宛先と `@all` が区別しないので、`@AI` だけがふつうの文としてデバイスへ送られないようにする
 fn addressed<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
-    let rest = line.trim_start().strip_prefix(prefix)?;
+    let head = line.trim_start();
+    let word = head.get(..prefix.len())?;
+    if !word.eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    let rest = &head[prefix.len()..];
     (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
 }
 
@@ -44,13 +50,18 @@ pub fn sh_command(line: &str) -> Option<&str> {
 }
 
 /// アクションが別の並びだったころのコマンドの行を、宛先で始まる定型文の本文にする。`@ai` の行はそのまま、ほかはシェルの行だったので `@sh` を付ける。
-/// 複数行の指示文は1行につなぐ。選ぶと出す定型文は本文が1行のものだけなので、つながないと、挿入するだけの定型文に変わる
+/// 複数行の指示文は、改行の所だけを空白にして1行につなぐ。選ぶと出す定型文は本文が1行のものだけなので、つながないと、挿入するだけの定型文に変わる
 pub fn legacy_action_body(command: &str) -> String {
     // コマンドを書いていなかった行は、一覧に出ない空の定型文のままにする
     if command.trim().is_empty() {
         command.to_string()
     } else if ai_instruction(command).is_some() {
-        command.split_whitespace().collect::<Vec<_>>().join(" ")
+        command
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
         format!("{SH_PREFIX} {command}")
     }
@@ -281,7 +292,9 @@ mod tests {
             Some("訳して | sort")
         );
         assert_eq!(ai_instruction("@ai"), Some(""));
+        assert_eq!(ai_instruction("@AI 訳して"), Some("訳して"));
         assert_eq!(ai_instruction("@aix"), None);
+        assert_eq!(ai_instruction("@あ"), None);
         assert_eq!(ai_instruction("echo @ai"), None);
         assert_eq!(ai_line(" 訳して "), "@ai 訳して");
     }
@@ -290,6 +303,7 @@ mod tests {
     fn reads_the_sh_prefix_only_at_the_head_of_the_line() {
         assert_eq!(sh_command("@sh sort | uniq"), Some("sort | uniq"));
         assert_eq!(sh_command("@sh"), Some(""));
+        assert_eq!(sh_command("@Sh ls"), Some("ls"));
         assert_eq!(sh_command("@shell ls"), None);
         assert_eq!(sh_command("sort"), None);
     }
@@ -299,8 +313,8 @@ mod tests {
         assert_eq!(legacy_action_body("sort"), "@sh sort");
         assert_eq!(legacy_action_body("@ai 訳して"), "@ai 訳して");
         assert_eq!(
-            legacy_action_body("@ai 丁寧に直して。\n直した文だけを返して。"),
-            "@ai 丁寧に直して。 直した文だけを返して。"
+            legacy_action_body("@ai 丁寧に直して。\n  例: \"a  b\"\n\n直した文だけを返して。"),
+            "@ai 丁寧に直して。 例: \"a  b\" 直した文だけを返して。"
         );
         assert_eq!(legacy_action_body(""), "");
     }

@@ -1227,9 +1227,9 @@
 			readonly={busy}
 			placeholder={guidance || undefined}
 			aria-label={m.draft_label()}
-			role="combobox"
+			role={addressMatches.length > 0 ? 'combobox' : undefined}
 			aria-autocomplete="list"
-			aria-expanded={addressMatches.length > 0}
+			aria-expanded={addressMatches.length > 0 ? true : undefined}
 			aria-controls={addressMatches.length > 0 ? addressListId : undefined}
 			aria-activedescendant={addressMatches.length > 0
 				? `${addressListId}-${activeAddress}`

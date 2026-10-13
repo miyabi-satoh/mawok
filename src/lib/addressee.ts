@@ -1,5 +1,5 @@
 import { CONSTANTS } from '$lib/bindings/constants';
-import { deviceLabels, keyedDeviceName } from '$lib/devices';
+import { keyedDeviceName } from '$lib/devices';
 import type { Device } from '$lib/settings.svelte';
 
 /** 残りを指示文として AI サービスへ送る宛先 */
@@ -10,12 +10,12 @@ const SH = CONSTANTS.SH_PREFIX;
 const ALL = CONSTANTS.ALL_DEVICES;
 
 /**
- * 行頭が宛先 `prefix` なら、その後ろ（前後の空白を除く）を返す。宛先の直後は空白か行の終わりに限る
- * （src-tauri/src/actions.rs の addressed と揃える）
+ * 行頭が宛先 `prefix` なら、その後ろ（前後の空白を除く）を返す。宛先の直後は空白か行の終わりに限る。
+ * 大文字と小文字は区別しない（src-tauri/src/actions.rs の addressed と揃える）
  */
 function addressed(line: string, prefix: string): string | null {
 	const head = line.trimStart();
-	if (!head.startsWith(prefix)) return null;
+	if (head.slice(0, prefix.length).toLowerCase() !== prefix) return null;
 	const rest = head.slice(prefix.length);
 	return rest === '' || /^\s/.test(rest) ? rest.trim() : null;
 }
@@ -45,21 +45,26 @@ export function splitFirstLine(text: string): { line: string; rest: string } {
 }
 
 /**
- * 宛先に書くデバイスの名前（公開鍵ごと）。表示の名前を使い、`@ai`・`@sh`・`@all` として読まれてしまう名前には、
- * 同じ名前が重なったときと同じく公開鍵の先頭を添える
+ * 宛先に書くデバイスの名前（公開鍵ごと）。`@ai`・`@sh`・`@all` として読まれてしまう名前と、
+ * ほかのデバイスと重なる名前には、公開鍵の先頭を添える。
+ * 宛先は大文字と小文字を区別せずに受けるので、どちらも小文字にして見る
  */
 function deviceAddresses(devices: Device[]): Map<string, string> {
 	const reserved = (name: string) => {
-		// 宛先は大文字と小文字を区別せずに受けるので、小文字にして見る
-		const line = `@${name.toLowerCase()}`;
+		const line = `@${name}`;
 		return aiInstruction(line) !== null || shCommand(line) !== null || line === ALL;
 	};
-	const labels = deviceLabels(devices);
+	const counts = new Map<string, number>();
+	for (const device of devices) {
+		const name = device.name.toLowerCase();
+		counts.set(name, (counts.get(name) ?? 0) + 1);
+	}
 	return new Map(
-		devices.map((device) => [
-			device.publicKey,
-			`@${reserved(device.name) ? keyedDeviceName(device) : labels.get(device.publicKey)}`
-		])
+		devices.map((device) => {
+			const name = device.name.toLowerCase();
+			const keyed = reserved(name) || (counts.get(name) ?? 0) > 1;
+			return [device.publicKey, `@${keyed ? keyedDeviceName(device) : device.name}`];
+		})
 	);
 }
 
@@ -68,15 +73,13 @@ function deviceAddresses(devices: Device[]): Map<string, string> {
  * デバイスの名前は、候補から入る名前そのままだけを受ける（大文字と小文字は区別しない）。途中までの名前では送らない
  */
 export function resolveAddressee(line: string, devices: Device[]): Addressee | null {
+	const name = line.trim().toLowerCase();
+	// デバイスを先に見る。`Sh Phone (ab12)` のように、公開鍵の先頭を添えた名前が `@sh` の行としても読めるため
+	const match = [...deviceAddresses(devices)].find(([, address]) => address.toLowerCase() === name);
+	if (match) return { kind: 'devices', publicKeys: [match[0]] };
 	if (aiInstruction(line) !== null) return { kind: 'run', ai: true, line };
 	if (shCommand(line) !== null) return { kind: 'run', ai: false, line };
-	const name = line.trim().toLowerCase();
-	if (name === ALL) return { kind: 'devices', publicKeys: devices.map((d) => d.publicKey) };
-	// 大文字と小文字だけが違う名前のデバイスが2台あるときは、どちらとも決めない
-	const matches = [...deviceAddresses(devices)].filter(
-		([, address]) => address.toLowerCase() === name
-	);
-	return matches.length === 1 ? { kind: 'devices', publicKeys: [matches[0][0]] } : null;
+	return name === ALL ? { kind: 'devices', publicKeys: devices.map((d) => d.publicKey) } : null;
 }
 
 /** 実行するものがあるか。`@ai`・`@sh` だけで後ろが空の行は実行しない */
