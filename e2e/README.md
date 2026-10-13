@@ -81,6 +81,7 @@ just msix-check msix        # msix/msix.test.mjs だけ
   前後でバックアップ・復元する (`lib/config.mjs`)。落ちても壊れた設定が残らないよう、必ず
   `test.after` (ファイル単位の後処理) で復元すること。
   同じフォルダーの `.window-state.json` (テキストウィンドウと設定ウィンドウの位置と大きさの記録) も、同じ控えに入れて一緒に戻す。
+  同じフォルダーの同期の記録 (`sync-state.json`・`pro-state.json`) も控えてから外し、一緒に戻す。残っていると、その機の同期の食い違いなどがテストに入り、トレイに「どちらの設定を使うか選ぶ…」が出るなど結果が機ごとに変わる。
   設定ファイルを壊すテストがアプリに作らせた `config.broken-….toml` は、テストの前からあったものを残して消す (`tests/config-file.test.mjs`)。
 - **ウィンドウの大きさは、下限を見るときだけドラッグで変える**: `SetWindowPos` は最小の大きさを通り抜けて小さくなるので、最小の大きさは右下の角を本物のドラッグで縮めて見る (`lib/input.mjs` の `dragBottomRightCorner`)。位置と大きさの記憶を見るときは、`SetWindowPos` で動かす (`lib/window.mjs`)。
 - **中断したときに残るファイルは、次の実行が片付ける**: 実行中は `e2e/.e2e.lock` (同時に2つ
