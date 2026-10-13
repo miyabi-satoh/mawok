@@ -2028,7 +2028,7 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		const screen = await renderAt(m.settings_category_snippets);
 		await screen.getByRole('button', { name: m.settings_snippets_add() }).click();
 		const body = screen.getByLabelText(m.settings_snippets_body());
-		const output = screen.getByRole('radio', { name: m.settings_actions_output_none() });
+		const output = screen.getByRole('radio', { name: m.settings_snippets_output_none() });
 		const encoding = screen.getByRole('combobox', { name: m.settings_snippets_encoding() });
 
 		// どの行が出すものかの決まりは rowAddressee の単体テストで見る

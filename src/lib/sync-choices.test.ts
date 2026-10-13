@@ -270,14 +270,14 @@ describe('choiceText', () => {
 				thisDevice: [
 					'英訳',
 					'@ai 英語に訳す',
-					pair(m.settings_snippets_output(), m.settings_actions_output_replace()),
+					pair(m.settings_snippets_output(), m.settings_snippets_output_replace()),
 					pair(m.settings_snippets_encoding(), 'UTF-8'),
 					pair(m.settings_snippets_enabled_unnamed(), m.sync_choice_on())
 				].join('\n'),
 				otherDevice: [
 					'英訳',
 					'@ai 英語に訳す',
-					pair(m.settings_snippets_output(), m.settings_actions_output_insert()),
+					pair(m.settings_snippets_output(), m.settings_snippets_output_insert()),
 					pair(m.settings_snippets_encoding(), 'Shift_JIS'),
 					pair(m.settings_snippets_enabled_unnamed(), m.sync_choice_off())
 				].join('\n')

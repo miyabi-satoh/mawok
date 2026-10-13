@@ -18,7 +18,7 @@
 	import { filterSnippets, snippetLabel, snippetPreview, type NamedText } from '$lib/snippets';
 
 	/**
-	 * 名前と本文の組を選ぶ一覧。定型文の一覧とアクションの一覧で使い、出し方・絞り込み・選び方・閉じ方を揃える
+	 * 名前と本文の組を選ぶ一覧（定型文の一覧）
 	 */
 	type Props = {
 		items: T[];
