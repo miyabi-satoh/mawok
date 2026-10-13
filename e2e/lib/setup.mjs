@@ -100,10 +100,14 @@ export function createSuite() {
 			// プロファイルを見ない版 (ビルドが古い) は、常用の置き場で動いてアカウントと同期する。
 			// プロファイルの置き場にログが書かれなければ、何も試さずに止める
 			try {
-				await waitFor(async () => readLogSince(LOG_PATH, mark), (log) => log !== '', {
-					timeout: 10_000,
-					label: 'プロファイルのログの書き込み'
-				});
+				await waitFor(
+					async () => readLogSince(LOG_PATH, mark),
+					(log) => log !== '',
+					{
+						timeout: 10_000,
+						label: 'プロファイルのログの書き込み'
+					}
+				);
 			} catch {
 				await closeClient(client).catch(() => {});
 				throw new Error(
