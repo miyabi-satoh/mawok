@@ -27,7 +27,7 @@ import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { expectStays, waitFor } from '../lib/wait.mjs';
 
 // 定型文。絞り込みと差し込む位置は部品テストで見ているので、ここでは実際の WebView での
-// キー (本物の入力の Ctrl+J・Enter・Esc・Ctrl+Z)、IME、ほかのアプリに移ったときを見る。
+// キー (本物の入力の Ctrl+K・Enter・Esc・Ctrl+Z)、IME、ほかのアプリに移ったときを見る。
 // 定型文は設定画面ではなく config.toml で登録する (設定画面の表の操作は部品テストで見ている)。
 // IME で絞り込む名前はひらがなにする。漢字だと変換の結果しだいで絞り込みに当たらなくなるため
 
@@ -37,6 +37,9 @@ const SNIPPETS = [
 	{ name: 'かくにん', body: BODY },
 	{ name: '', body: 'git status' }
 ];
+// 設定へ書いた行にアプリが足す、結果の出し方・文字コード・スイッチの既定値
+const ROW_DEFAULTS = { enabled: true, encoding: 'utf-8', output: 'replace' };
+const withDefaults = (row) => ({ ...ROW_DEFAULTS, ...row });
 
 /** 下書きを出して「あいう」と書き、「い」と「う」の間にカーソルを置く */
 async function prepareDraft(client) {
@@ -54,11 +57,14 @@ function expectPaletteStaysOpen(client, label) {
 }
 
 async function openPalette(client) {
-	await sendKeySequence([[VK.CONTROL, VK.J]]);
+	// 一覧の行の上にポインターがあると、キーで選んだ行がポインターの下の行へ戻される（pointermove で選ぶため）。
+	// 一覧の外へ寄せてから開く
+	await client.action('pointer').move({ x: 1, y: 1 }).perform();
+	await sendKeySequence([[VK.CONTROL, VK.K]]);
 	return waitFor(
 		() => readSnippetPalette(client),
 		(palette) => palette.open && palette.inputFocused,
-		{ label: 'Ctrl+J で一覧が出て、絞り込みの欄にフォーカスがある' }
+		{ label: 'Ctrl+K で一覧が出て、絞り込みの欄にフォーカスがある' }
 	);
 }
 
@@ -99,7 +105,7 @@ test.describe('定型文', () => {
 		}
 	});
 
-	test('Ctrl+J で一覧が出て絞り込みの欄にフォーカスがあり、名前のない定型文は本文で出る', async () => {
+	test('Ctrl+K で一覧が出て絞り込みの欄にフォーカスがあり、名前のない定型文は本文で出る', async () => {
 		await prepareDraft(client);
 		const palette = await openPalette(client);
 		// 末尾は「テキストを定型文に登録」
@@ -164,7 +170,14 @@ test.describe('定型文', () => {
 		try {
 			await prepareDraft(client);
 			await openPalette(client);
-			await sendKeySequence([[VK.DOWN], [VK.DOWN], [VK.ENTER]]);
+			// 選びが末尾に移ったのを見てから Enter を押す（続けて送ると、Enter が移る前の行を選ぶことがある）
+			await sendKeySequence([[VK.DOWN], [VK.DOWN]]);
+			await waitFor(
+				() => readSnippetPalette(client),
+				(palette) => palette.selected === palette.options.length - 1,
+				{ label: '末尾の「テキストを定型文に登録」が選ばれている' }
+			);
+			await sendKeySequence([[VK.ENTER]]);
 			const { draft } = await waitFor(
 				async () => ({ palette: await readSnippetPalette(client), draft: await readDraft(client) }),
 				({ palette, draft }) => !palette.open && draft.focused,
@@ -174,10 +187,10 @@ test.describe('定型文', () => {
 			assert.equal(draft.selectionStart, 2, 'カーソルは一覧を出したときの位置のまま');
 
 			const settings = await invokeApp(client, 'get_settings');
-			assert.deepEqual(withoutSyncFields(settings.snippets), [
-				...SNIPPETS,
-				{ name: '', body: 'あいう' }
-			]);
+			assert.deepEqual(
+				withoutSyncFields(settings.snippets),
+				[...SNIPPETS, { name: '', body: 'あいう' }].map(withDefaults)
+			);
 			const palette = await openPalette(client);
 			assert.equal(palette.options[2], 'あいう', JSON.stringify(palette.options));
 		} finally {
@@ -216,7 +229,7 @@ test.describe('定型文', () => {
 		);
 	});
 
-	test('Ctrl+J で一覧が出るだけで、WebView2 のほかの画面は開かない', async () => {
+	test('Ctrl+K で一覧が出るだけで、WebView2 のほかの画面は開かない', async () => {
 		await prepareDraft(client);
 		const draftHwnd = await getDraftWindowHandle();
 		// WebView2 の中に出る画面 (ダウンロードの一覧など) はトップレベルのウィンドウを作らないことがあるので、子ウィンドウまで比べる
@@ -295,10 +308,13 @@ test.describe('定型文', () => {
 				(current) => current.snippets[0]?.name === `${SNIPPETS[0].name}X`,
 				{ label: '名前を直した定型文の保存' }
 			);
-			assert.deepEqual(withoutSyncFields(settings.snippets).at(-1), {
-				name: 'ねぎらい',
-				body: 'おつかれさま'
-			});
+			assert.deepEqual(
+				withoutSyncFields(settings.snippets).at(-1),
+				withDefaults({
+					name: 'ねぎらい',
+					body: 'おつかれさま'
+				})
+			);
 			assert.equal(settings.snippets.length, SNIPPETS.length + 1);
 			assert.equal((await rowButtons()).length, SNIPPETS.length + 1, '足した行は画面にも残るはず');
 

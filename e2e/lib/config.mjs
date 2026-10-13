@@ -117,8 +117,7 @@ const DEFAULT_DRAFT_KEYS = {
 	copy: 'CommandOrControl+Enter',
 	send: 'CommandOrControl+Shift+Enter',
 	settings: 'CommandOrControl+Comma',
-	snippets: 'CommandOrControl+KeyJ',
-	actions: 'CommandOrControl+KeyK',
+	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
 	sendTargets: 'CommandOrControl+KeyL',
@@ -527,6 +526,9 @@ export async function beginTestConfig(overrides) {
 	// (テストは Ctrl+Shift+Space や Ctrl+Enter などを押す前提)。変えるテストは overrides で渡す
 	const testConfig = {
 		...base,
+		// 旧版の項目。残っていると、アプリが読み込みで定型文へ移して、テストの定型文に行が増える
+		actions: null,
+		syncActions: null,
 		autostart: false,
 		hotkey: DEFAULT_HOTKEY,
 		textWindowKeys: null,

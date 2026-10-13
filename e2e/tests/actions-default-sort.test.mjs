@@ -8,7 +8,7 @@ import {
 	openSettingsFromDraft,
 	readAlert,
 	readDraft,
-	runAction,
+	runSnippet,
 	setDraftValue,
 	setJapanese,
 	showDraftAndWaitVisible,
@@ -18,8 +18,8 @@ import {
 import { beginTestConfig } from '../lib/config.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
-// 既定のアクションの「行を並べ替え」(Windows では sort を Shift_JIS で読み書きする)。
-// 既定のアクションはコマンドの行が裸の `sort` なので、PATH で最初に当たる sort が動く。開発機の PATH では Git や uutils の sort が
+// 既定の定型文の「行を並べ替え」(Windows では sort を Shift_JIS で読み書きする)。
+// 既定の定型文は本文が `@sh sort` で、コマンドが裸の `sort` なので、PATH で最初に当たる sort が動く。開発機の PATH では Git や uutils の sort が
 // 先に当たることがあり、利用者の環境 (Explorer から起動したアプリはレジストリの PATH で、System32 が先) と結果が変わる。
 // ここでは System32 を PATH の先頭に置き、E2E のアプリ (tauri-driver から起動し、この PATH を引き継ぐ) でも Windows の sort を当てる
 const SYSTEM32 = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
@@ -29,7 +29,7 @@ const suite = createSuite();
 
 const SORT = '行を並べ替え';
 
-test.describe('既定のアクションの「行を並べ替え」', () => {
+test.describe('既定の定型文の「行を並べ替え」', () => {
 	let testConfig;
 	let client;
 
@@ -41,8 +41,8 @@ test.describe('既定のアクションの「行を並べ替え」', () => {
 			textWindowAlwaysOnTop: true,
 			aiService: 'none',
 			aiConsent: null,
-			// アクションの項目を書かず、既定のアクションで回す
-			actions: null
+			// 定型文の項目を書かず、既定の定型文で回す
+			snippets: null
 		});
 	});
 	test.after(async () => {
@@ -66,7 +66,7 @@ test.describe('既定のアクションの「行を並べ替え」', () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'x');
 		await setDraftValue(client, lines.join('\n'));
-		await runAction(client, SORT);
+		await runSnippet(client, SORT);
 		const result = await waitFor(
 			async () => (await readDraft(client)).value,
 			(value) => value !== lines.join('\n'),
@@ -89,18 +89,18 @@ test.describe('既定のアクションの「行を並べ替え」', () => {
 			await showDraftAndWaitVisible();
 			await typeIntoDraft(client, 'x');
 			await setDraftValue(client, text);
-			await runAction(client, SORT);
+			await runSnippet(client, SORT);
 			const alert = await waitAlert(client, '表せない文字の帯');
 			assert.ok(alert.includes('文字コードで表せない文字'), alert);
 			assert.equal((await readDraft(client)).value, text);
 		});
 	}
 
-	test('設定のアクションの行を開くと、コマンドの行にだけ文字コードの選択が出て、sort は Shift_JIS になっている', async () => {
+	test('設定の定型文の行を開くと、@sh の行にだけ文字コードの選択が出て、sort は Shift_JIS になっている', async () => {
 		await showDraftAndWaitVisible();
 		const draftHandle = await openSettingsFromDraft(client);
 		try {
-			await client.$('button[role="tab"]*=アクション').click();
+			await client.$('button[role="tab"]*=定型文').click();
 			const panel = await client.$('[role="tabpanel"]:not([hidden])');
 			await panel.$('button=追加').waitForDisplayed({ timeout: 5000 });
 			await expandAllRows(client, panel);
@@ -110,7 +110,7 @@ test.describe('既定のアクションの「行を並べ替え」', () => {
 					['英訳', '行を並べ替え'].includes(input.value)
 				);
 				return names.map((input) => {
-					// 名前の欄から上へたどり、コマンドの欄 (textarea) を含む最初の要素を行とみなす
+					// 名前の欄から上へたどり、本文の欄 (textarea) を含む最初の要素を行とみなす
 					let row = input.parentElement;
 					while (row && !row.querySelector('textarea')) row = row.parentElement;
 					const select = row?.querySelector('select');
@@ -125,7 +125,7 @@ test.describe('既定のアクションの「行を並べ替え」', () => {
 			console.log('設定の行:', JSON.stringify(rows));
 			const sort = rows.find((row) => row.name === '行を並べ替え');
 			const translate = rows.find((row) => row.name === '英訳');
-			assert.equal(sort?.command, 'sort');
+			assert.equal(sort?.command, '@sh sort');
 			assert.equal(sort?.encoding, 'shift_jis');
 			assert.deepEqual(sort?.options, [
 				'UTF-8',

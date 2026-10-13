@@ -69,6 +69,9 @@ const TEST_CONFIG = {
 	snippets: [
 		{ name: 'かくにん', body: '一つずつ質問してください。\n以上です。' },
 		{ name: '', body: 'git status' },
+		// 選ぶと宛先へ出す行 (一覧に並ぶ。設定では、結果の出し方と @sh の文字コードが出る)
+		{ name: '英訳', body: '@ai 英語に訳してください。', output: 'replace' },
+		{ name: '行を並べ替え', body: '@sh sort', output: 'replace', encoding: 'shift_jis' },
 		{
 			name: 'とても長い名前の定型文で、一覧の幅に収まりきらないときの見え方を確かめるためのもの',
 			body: '本文も長めにしておきます。'.repeat(8)
@@ -83,8 +86,6 @@ const TEST_CONFIG = {
 			sendTo: true
 		}
 	],
-	// 開発機の利用者のアクションに左右されないよう、既定の2件 (@ai の行とコマンドの行) で撮る
-	actions: null,
 	aiService: 'gemini',
 	aiConsent: 'gemini'
 };
@@ -274,7 +275,7 @@ test.describe('描かれ方', () => {
 
 	test('下書き: 定型文の一覧', async () => {
 		await focusDraft(client);
-		await openPaletteWith(client, VK.J);
+		await openPaletteWith(client, VK.K);
 		await inspectDraft(client, 'snippets', { overlays: ['[role="dialog"]'] });
 	});
 
@@ -284,7 +285,7 @@ test.describe('描かれ方', () => {
 			prepare: async () => {
 				if (!(await readPaletteOpen(client))) {
 					await focusDraft(client);
-					await openPaletteWith(client, VK.J);
+					await openPaletteWith(client, VK.K);
 				}
 				const options = await client.$$('[role="dialog"] [role="option"]');
 				await options[options.length - 1].click();
@@ -298,12 +299,6 @@ test.describe('描かれ方', () => {
 				);
 			}
 		});
-	});
-
-	test('下書き: アクション一覧', async () => {
-		await focusDraft(client);
-		await openPaletteWith(client, VK.K);
-		await inspectDraft(client, 'actions', { overlays: ['[role="dialog"]'] });
 	});
 
 	test('下書き: 送信先の一覧', async () => {
@@ -363,12 +358,12 @@ test.describe('描かれ方', () => {
 			}
 		}
 
-		// アクションの行を開いた状態。コマンドの行には文字コードの選択が出る
-		await client.$('[role="tab"][data-value="actions"]').click();
-		const actionsPanel = await client.$('[role="tabpanel"]:not([hidden])');
-		await expandAllRows(client, actionsPanel);
+		// 宛先の行を開いた状態。@sh の行には文字コードの選択が出る
+		await client.$('[role="tab"][data-value="snippets"]').click();
+		const snippetsPanel = await client.$('[role="tabpanel"]:not([hidden])');
+		await expandAllRows(client, snippetsPanel);
 		try {
-			await inspect(client, 'settings-actions-open', {
+			await inspect(client, 'settings-snippets-open', {
 				hwnd: settingsHwnd,
 				minSize: SETTINGS_MIN_SIZE,
 				// 狭い幅では文字コードの選択が下に隠れるので、そこまで送ってから撮る
