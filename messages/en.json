@@ -369,7 +369,6 @@
 	"draft_address_ai": "Ask AI",
 	"draft_address_sh": "Run a command",
 	"draft_address_all": "Send to all devices",
-	"draft_address_device": "Send to this device",
 	"draft_run": "Run",
 	"draft_address_empty": "Write an instruction or a command after the addressee.",
 	"draft_address_no_text": "Write the text to send below the first line.",

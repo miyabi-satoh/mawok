@@ -768,7 +768,8 @@
 			if (rest.trim() === '' && addressee.publicKeys.length > 0) {
 				return showError(m.send_failed(), m.draft_address_no_text());
 			}
-			return sendTo(addressee.publicKeys, rest);
+			// 宛先の行との間を空けて書いた空行は、届いた先の先頭に残さない
+			return sendTo(addressee.publicKeys, rest.replace(/^(?:[ \t]*\r?\n)+/, ''));
 		}
 		// 送信先にチェックしたデバイスがなければ、送らずに一覧を開いて選んでもらう
 		if (!devices.some((device) => device.sendTo)) {

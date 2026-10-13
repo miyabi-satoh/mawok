@@ -369,7 +369,6 @@
 	"draft_address_ai": "AI に頼む",
 	"draft_address_sh": "コマンドを実行する",
 	"draft_address_all": "すべてのデバイスへ送る",
-	"draft_address_device": "このデバイスへ送る",
 	"draft_run": "実行",
 	"draft_address_empty": "宛先の後ろに、指示かコマンドを書いてください。",
 	"draft_address_no_text": "2行目から下に、送るテキストを書いてください。",

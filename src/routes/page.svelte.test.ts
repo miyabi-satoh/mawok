@@ -1838,7 +1838,7 @@ describe('宛先へ出す', () => {
 		await expect.element(textarea).toHaveValue('@sh sort\nb\na');
 	});
 
-	it('1行目がデバイスの名前のテキストは、送るキーで2行目から下をそのデバイスへ送る', async () => {
+	it('1行目がデバイスの名前のテキストは、送るキーで2行目から下（前の空行を除く）をそのデバイスへ送る', async () => {
 		settings.current = {
 			...view(),
 			devices: [
@@ -1848,7 +1848,7 @@ describe('宛先へ出す', () => {
 		};
 		const screen = await render(Page);
 		const textarea = draftField(screen);
-		await textarea.fill('@AERO-13BE\nあとで見る\nhttps://example.com');
+		await textarea.fill('@AERO-13BE\n\nあとで見る\nhttps://example.com');
 
 		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
 
