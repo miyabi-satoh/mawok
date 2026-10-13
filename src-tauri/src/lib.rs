@@ -200,6 +200,8 @@ struct AppState {
     sync_debounce: debounce::Debounce,
     /// 同期の記録にある、利用者が選ぶのを待っている食い違いの数（docs/sync.md「食い違い」）
     sync_conflicts: AtomicUsize,
+    /// テキストウィンドウを出したことをきっかけに、最後に同期を頼んだ時刻
+    synced_on_show: Mutex<Option<Instant>>,
     /// トレイから食い違いを選ぶ画面を頼まれた。設定ウィンドウが、開いたときに受け取る
     sync_choice_requested: AtomicBool,
     /// テキストウィンドウから AI の設定を頼まれた。設定ウィンドウが、開いたときに受け取る
@@ -554,6 +556,7 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
         // 出せていないのに記録を寝かせると、隠れたまま戻せなくなる
         return false;
     }
+    request_sync_on_show(app);
     if capture_return_target {
         // 自分で出したものは、設定を閉じたときに出し直す対象ではない
         app.state::<DraftState>()
@@ -1660,6 +1663,22 @@ fn schedule_sync_after_change(app: &AppHandle) {
     let debounce = &app.state::<AppState>().sync_debounce;
     let app = app.clone();
     debounce.trigger(Duration::from_secs(3), move || request_sync(&app));
+}
+
+/// テキストウィンドウを出すたびに窓口へ問い合わせないための間隔。出して隠すのを続けて繰り返しても、窓口の回数の上限に届かない長さにする
+const SYNC_ON_SHOW_INTERVAL: Duration = Duration::from_secs(10);
+
+/// テキストウィンドウを出したときに同期する。ほかのデバイスで覚えた履歴を、出してすぐたどれるようにするため（docs/sync.md「いつ同期するか」）
+fn request_sync_on_show(app: &AppHandle) {
+    {
+        let state = app.state::<AppState>();
+        let mut last = state.synced_on_show.lock().unwrap();
+        if last.is_some_and(|at| at.elapsed() < SYNC_ON_SHOW_INTERVAL) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    request_sync(app);
 }
 
 /// 同期は1つだけ走らせ、実行中に届いたきっかけは終わった後の1回へまとめる。
@@ -4910,6 +4929,7 @@ pub fn run() {
                 sync_schedule: Mutex::new(SyncSchedule::default()),
                 sync_debounce: debounce::Debounce::default(),
                 sync_conflicts: AtomicUsize::new(sync_conflicts),
+                synced_on_show: Mutex::new(None),
                 sync_choice_requested: AtomicBool::new(false),
                 ai_settings_requested: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
