@@ -164,7 +164,12 @@ pub fn delete_token() -> Result<(), String> {
     match read {
         Ok(credentials) => write_locked(&with_token(credentials, None)),
         // 読めない項目は、鍵ごと消す。残すと、サインアウトできない
-        Err(_) => secrets::delete(CREDENTIAL_USER),
+        Err(error) => {
+            warn!(
+                "couldn't read the credentials, the shared key is deleted with the token: {error}"
+            );
+            secrets::delete(CREDENTIAL_USER)
+        }
     }
 }
 

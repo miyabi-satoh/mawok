@@ -242,6 +242,14 @@ impl AppState {
             .filter(|pro| pro.available_at(pro::now()))
     }
 
+    /// Pro の同期で、窓口が覚えている鍵と手元の鍵が揃っているか。Pro を使えない間は None
+    fn sync_key_status(&self) -> shared_key::Status {
+        if !self.pro_available() {
+            return shared_key::Status::None;
+        }
+        *self.shared_key_status.lock().unwrap()
+    }
+
     fn pro_available(&self) -> bool {
         self.pro_state
             .lock()
@@ -422,11 +430,7 @@ fn settings_view(state: &AppState) -> SettingsView {
         devices: config.devices,
         device_name: state.device_name.clone(),
         pro_available,
-        shared_key_status: if pro_available {
-            *state.shared_key_status.lock().unwrap()
-        } else {
-            shared_key::Status::None
-        },
+        shared_key_status: state.sync_key_status(),
         mawok_account_signed_in: state.mawok_account_signed_in.load(Ordering::Relaxed),
         punctuation_style: config.punctuation_style,
         char_widths: config.char_widths,
@@ -2963,6 +2967,9 @@ async fn reset_shared_key(app: AppHandle) -> Result<(), String> {
     if pro_account_tag(&app).is_none() {
         run_blocking(shared_key::clear).await??;
         *app.state::<AppState>().shared_key.lock().unwrap() = None;
+        // Pro が切れた後に残っている、前の鍵について決めた状態も消す
+        *app.state::<AppState>().shared_key_id.lock().unwrap() = None;
+        *app.state::<AppState>().shared_key_status.lock().unwrap() = shared_key::Status::None;
         forget_devices(&app);
         app.state::<Arc<lan::Lan>>().refresh();
         apply_config(&app);
@@ -3725,7 +3732,10 @@ impl lan::Host for AppHandle {
             return None;
         }
         let id = state.shared_key_id.lock().unwrap().clone();
-        id
+        // 窓口とまだ照らせていない（起動の直後、つながらない）間は、手元の鍵を同期の鍵とみなす。
+        // 照らせないうちに、同期している鍵を別の組の鍵で置き換えないため
+        let local = *state.shared_key.lock().unwrap();
+        id.or_else(|| local.as_ref().map(shared_key::key_id))
     }
 
     fn receive_shared_key(&self, key: [u8; 32]) -> bool {
@@ -3756,14 +3766,8 @@ impl lan::Host for AppHandle {
     }
 }
 
-/// Pro の同期で、窓口が覚えている鍵と手元の鍵が揃っているか。Pro を使えない間は None
 fn sync_key_status(app: &AppHandle) -> shared_key::Status {
-    let state = app.state::<AppState>();
-    if !state.pro_available() {
-        return shared_key::Status::None;
-    }
-    let status = *state.shared_key_status.lock().unwrap();
-    status
+    app.state::<AppState>().sync_key_status()
 }
 
 /// Pro のデバイスが共有の鍵を受け取ったら、窓口の鍵と照らし直す（窓口にまだ鍵が無ければ、この鍵を登録する）。
