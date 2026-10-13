@@ -102,6 +102,8 @@ pub enum Failure {
     Refused,
     /// このデバイスの共有の鍵が、窓口が覚えている鍵と違うか、まだ無い。同期しているデバイスから受け取り直す
     NeedsPairing,
+    /// Pro のデバイスで、窓口と照らした共有の鍵がまだ無い（起動の直後、窓口へつながらない）
+    NotReady,
     /// 受け取った共有の鍵が、窓口が覚えている鍵と違う
     KeyMismatch,
     TooLong,
@@ -122,6 +124,7 @@ impl Failure {
             Self::Unreachable => "lan.unreachable",
             Self::Refused => "lan.refused",
             Self::NeedsPairing => "lan.needs_pairing",
+            Self::NotReady => "lan.not_ready",
             Self::KeyMismatch => "lan.key_mismatch",
             Self::TooLong => "lan.too_long",
             Self::BadCode => "lan.bad_code",
@@ -183,7 +186,7 @@ pub trait Host: Send + Sync + 'static {
     fn on_received(&self, from: &[u8], text: String) -> bool;
     /// このデバイスが持つ共有の鍵。
     fn shared_key(&self) -> Option<[u8; 32]>;
-    /// 確認コードを表示した側が渡す共有の鍵。まだ無ければ作って置く。置けなければ None。
+    /// 確認コードを表示した側が渡す共有の鍵。まだ無ければ作って置く。置けないとき、Pro で窓口と照らした鍵がまだ無いときは None。
     fn shared_key_or_new(&self) -> Option<[u8; 32]>;
     /// Pro の同期で、窓口が覚えている鍵とこのデバイスの鍵がどうなっているか。Pro でなければ None。
     fn sync_key_status(&self) -> crate::shared_key::Status;
@@ -1313,6 +1316,13 @@ impl Lan {
                 "the shared key of this device does not match the account server",
             ));
         }
+        // Pro のデバイスは、窓口と照らすまで鍵を作らない（Host::shared_key_or_new）。渡す鍵が無いので、コードを出さない
+        if self.host.pro_account_tag().is_some() && self.host.shared_key().is_none() {
+            return Err(LanError::new(
+                Failure::NotReady,
+                "the shared key has not been checked with the account server yet",
+            ));
+        }
         let offer = self
             .make_pairing_offer(automatic, false, None)
             .fail_as(Failure::Internal)?
@@ -1825,6 +1835,7 @@ mod tests {
             Failure::Unreachable,
             Failure::Refused,
             Failure::NeedsPairing,
+            Failure::NotReady,
             Failure::KeyMismatch,
             Failure::TooLong,
             Failure::BadCode,

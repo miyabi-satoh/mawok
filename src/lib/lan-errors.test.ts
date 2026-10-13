@@ -8,6 +8,7 @@ describe('lanErrorMessage', () => {
 		expect(lanErrorMessage('lan.wrong_code')).toBe(m.lan_error_wrong_code());
 		expect(lanErrorMessage('lan.internal')).toBe(m.lan_error_internal());
 		expect(lanErrorMessage('lan.needs_pairing')).toBe(m.lan_error_needs_pairing());
+		expect(lanErrorMessage('lan.not_ready')).toBe(m.lan_error_not_ready());
 		expect(lanErrorMessage('lan.key_mismatch')).toBe(m.lan_error_key_mismatch());
 	});
 

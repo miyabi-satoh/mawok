@@ -2699,7 +2699,10 @@ async fn restore_local_shared_key(app: &AppHandle) {
 }
 
 fn use_unverified_shared_key(app: &AppHandle, local: Option<[u8; 32]>) {
-    *app.state::<AppState>().shared_key.lock().unwrap() = local;
+    // 読んだ後に、確認コードの表示で鍵が作られていることがある。無かったという結果では、手元の鍵を消さない
+    if local.is_some() {
+        *app.state::<AppState>().shared_key.lock().unwrap() = local;
+    }
     set_shared_key_status(app, shared_key::offline_status(local.as_ref()));
 }
 
@@ -2778,7 +2781,7 @@ async fn refresh_shared_key(
         None => match shared_key::generate() {
             Ok(key) => key,
             Err(error) => {
-                warn!("couldn't generate an shared key: {error}");
+                warn!("couldn't generate a shared key: {error}");
                 set_shared_key_status(app, shared_key::Status::None);
                 return;
             }
@@ -3683,13 +3686,17 @@ impl lan::Host for AppHandle {
         if let Some(key) = *state.shared_key.lock().unwrap() {
             return Some(key);
         }
+        if state.pro_available() {
+            // Pro のデバイスの鍵は、窓口と照らして決める（refresh_shared_key）。照らす前にここで作ると、
+            // 窓口が覚えている鍵と違う鍵を相手に渡してしまう
+            return None;
+        }
         let key = shared_key::generate()
             .and_then(|key| shared_key::store(&key).map(|()| key))
             .inspect_err(|error| warn!("couldn't make a shared key: {error}"))
             .ok()?;
         *state.shared_key.lock().unwrap() = Some(key);
         apply_config(self);
-        check_new_shared_key_for_sync(self);
         Some(key)
     }
 
@@ -3726,16 +3733,12 @@ impl lan::Host for AppHandle {
             set_shared_key_status(self, shared_key::Status::Ready);
             request_sync(self);
         } else {
-            app_lan_refresh(self);
+            // 窓口と照らすまで、前の鍵について決めた状態で同期しない
+            set_shared_key_status(self, shared_key::Status::None);
             check_new_shared_key_for_sync(self);
         }
         true
     }
-}
-
-fn app_lan_refresh(app: &AppHandle) {
-    app.state::<Arc<lan::Lan>>().refresh();
-    apply_config(app);
 }
 
 /// Pro の同期で、窓口が覚えている鍵と手元の鍵が揃っているか。Pro を使えない間は None
@@ -3748,7 +3751,7 @@ fn sync_key_status(app: &AppHandle) -> shared_key::Status {
     status
 }
 
-/// Pro のデバイスが共有の鍵を新しく持ったら、窓口の鍵と照らし直す（窓口にまだ鍵が無ければ、この鍵を登録する）。
+/// Pro のデバイスが共有の鍵を受け取ったら、窓口の鍵と照らし直す（窓口にまだ鍵が無ければ、この鍵を登録する）。
 fn check_new_shared_key_for_sync(app: &AppHandle) {
     if pro_account_tag(app).is_none() {
         return;

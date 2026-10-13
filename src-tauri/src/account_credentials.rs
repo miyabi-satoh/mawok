@@ -130,7 +130,14 @@ pub fn read_key() -> Result<Option<String>, ReadError> {
 /// 前の中身が読めないときは、読まずに置き換える（読めない項目が残っていてもサインインできるようにするため）
 pub fn write_token(token: &str) -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    let key = read_locked().ok().and_then(|credentials| credentials.key);
+    let key = match read_locked() {
+        Ok(credentials) => credentials.key,
+        Err(ReadError::NotFound) => None,
+        Err(ReadError::Unreadable(error)) => {
+            warn!("couldn't read the previous credentials, the shared key is dropped: {error}");
+            None
+        }
+    };
     write_locked(&Credentials {
         token: Some(token.to_string()),
         key,
