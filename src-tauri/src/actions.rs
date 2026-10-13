@@ -43,11 +43,14 @@ pub fn sh_command(line: &str) -> Option<&str> {
     addressed(line, SH_PREFIX)
 }
 
-/// アクションが別の並びだったころのコマンドの行を、宛先で始まる定型文の本文にする。`@ai` の行はそのまま、ほかはシェルの行だったので `@sh` を付ける
+/// アクションが別の並びだったころのコマンドの行を、宛先で始まる定型文の本文にする。`@ai` の行はそのまま、ほかはシェルの行だったので `@sh` を付ける。
+/// 複数行の指示文は1行につなぐ。選ぶと出す定型文は本文が1行のものだけなので、つながないと、挿入するだけの定型文に変わる
 pub fn legacy_action_body(command: &str) -> String {
     // コマンドを書いていなかった行は、一覧に出ない空の定型文のままにする
-    if command.trim().is_empty() || ai_instruction(command).is_some() {
+    if command.trim().is_empty() {
         command.to_string()
+    } else if ai_instruction(command).is_some() {
+        command.split_whitespace().collect::<Vec<_>>().join(" ")
     } else {
         format!("{SH_PREFIX} {command}")
     }
@@ -295,6 +298,10 @@ mod tests {
     fn turns_a_command_line_from_the_separate_action_list_into_an_addressed_body() {
         assert_eq!(legacy_action_body("sort"), "@sh sort");
         assert_eq!(legacy_action_body("@ai 訳して"), "@ai 訳して");
+        assert_eq!(
+            legacy_action_body("@ai 丁寧に直して。\n直した文だけを返して。"),
+            "@ai 丁寧に直して。 直した文だけを返して。"
+        );
         assert_eq!(legacy_action_body(""), "");
     }
 }

@@ -1811,13 +1811,13 @@ describe('宛先へ出す', () => {
 	}
 
 	it('1行目が @sh のテキストは、送るキーで2行目から下を渡して実行し、結果でテキスト全体を置き換えて、出す前のテキストを履歴に積む', async () => {
-		// つないだデバイスが無くても、1行目が `@ai`・`@sh` なら送るボタンを出し、キーも効く
+		// つないだデバイスが無くても、1行目が `@ai`・`@sh` なら送るボタンを「実行」の名前で出し、キーも効く
 		settings.current = view();
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('@sh sort\nb\na');
 		await expect
-			.element(screen.getByRole('button', { name: m.draft_send(), exact: true }))
+			.element(screen.getByRole('button', { name: m.draft_run(), exact: true }))
 			.toBeVisible();
 
 		await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');

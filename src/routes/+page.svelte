@@ -35,7 +35,14 @@
 	} from '$lib/history.svelte';
 	import { caretLine } from '$lib/caret-line';
 	import { clamp } from '$lib/clamp';
-	import { draftActionFor, formatKeys, isDismissKey, keyHint, type DraftAction } from '$lib/keys';
+	import {
+		draftActionFor,
+		formatKeys,
+		isDismissKey,
+		isImeKey,
+		keyHint,
+		type DraftAction
+	} from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
 	import type { ReceivedDraft } from '$lib/bindings/ReceivedDraft';
@@ -701,7 +708,7 @@
 	});
 	$effect(() => {
 		// 候補が変わったら、先頭から選び直す
-		void addressMatches.length;
+		void addressMatches.map((match) => match.address).join('\n');
 		activeAddress = 0;
 	});
 
@@ -718,7 +725,8 @@
 	/** 宛先の候補が出ている間のキー。受けたら true */
 	function onAddressKeydown(event: KeyboardEvent): boolean {
 		if (addressMatches.length === 0) return false;
-		if (event.altKey || event.ctrlKey || event.metaKey) return false;
+		// 変換を確定する Enter は、候補を選ぶキーにしない
+		if (isImeKey(event) || event.altKey || event.ctrlKey || event.metaKey) return false;
 		const last = addressMatches.length - 1;
 		if (event.key === 'ArrowDown') {
 			activeAddress = activeAddress >= last ? 0 : activeAddress + 1;
@@ -737,10 +745,8 @@
 
 	// 1行目の宛先が指す先。宛先でなければ null（docs/actions.md「宛先」）
 	const addressee = $derived(resolveAddressee(splitFirstLine(text).line, devices));
-	// 送るキーとボタンが使えるか。つないだデバイスが無くても、1行目が実行できる `@ai`・`@sh` なら出せる
-	const canSend = $derived(
-		hasDevice || (addressee?.kind === 'run' && isRunnable(splitFirstLine(text).line))
-	);
+	// 送るキーとボタンが使えるか。つないだデバイスが無くても、1行目が `@ai`・`@sh` なら出せる
+	const canSend = $derived(hasDevice || addressee?.kind === 'run');
 
 	/**
 	 * 1行目の宛先へ出す。`@ai`・`@sh` なら2行目から下を中身にして実行し、結果でテキスト全体を置き換える。
@@ -749,7 +755,7 @@
 	function send() {
 		const { line, rest } = splitFirstLine(text);
 		if (addressee?.kind === 'run') {
-			if (!isRunnable(line)) return;
+			if (!isRunnable(line)) return showError(m.action_failed(), m.draft_address_empty());
 			// 出した時点のテキストを、呼び戻して直せるよう履歴に覚える。失敗したときや、結果を出さないときにも残すため、始める前に積む
 			if (!draftHistory.isBrowsing && draftHistory.record(text)) saveDraftHistory();
 			return runLine(
@@ -758,7 +764,12 @@
 				{ target: rest, start: 0, end: text.length, caret: text.length, whole: true }
 			);
 		}
-		if (addressee) return sendTo(addressee.publicKeys, rest);
+		if (addressee) {
+			if (rest.trim() === '' && addressee.publicKeys.length > 0) {
+				return showError(m.send_failed(), m.draft_address_no_text());
+			}
+			return sendTo(addressee.publicKeys, rest);
+		}
 		// 送信先にチェックしたデバイスがなければ、送らずに一覧を開いて選んでもらう
 		if (!devices.some((device) => device.sendTo)) {
 			targetsOpen = hasDevice;
@@ -767,12 +778,9 @@
 		return hideWith('send_draft', m.send_failed());
 	}
 
-	/** 宛先のデバイスへ送って隠す。`payload` を渡さなければテキスト全体を送る。つないだデバイスが無い `@all` は、送信先の一覧を開く */
+	/** 宛先のデバイスへ送って隠す。`payload` を渡さなければテキスト全体を送る。つないだデバイスが無い `@all` は、送らずに知らせる */
 	function sendTo(publicKeys: string[], payload?: string) {
-		if (publicKeys.length === 0) {
-			targetsOpen = hasDevice;
-			return;
-		}
+		if (publicKeys.length === 0) return showError(m.send_failed(), m.draft_address_no_device());
 		return hideWith('send_draft', m.send_failed(), publicKeys, payload);
 	}
 
@@ -1319,7 +1327,12 @@
 						onclick={send}
 					>
 						<SendIcon data-icon="inline-start" />
-						{sending ? m.draft_sending() : m.draft_send()}
+						<!-- 1行目が `@ai`・`@sh` のときは、送るのでなくこの機で実行するので、ボタンの名前で知らせる -->
+						{sending
+							? m.draft_sending()
+							: addressee?.kind === 'run'
+								? m.draft_run()
+								: m.draft_send()}
 					</Button>
 					<!-- 送信先の一覧は、つないだデバイスがあるときだけ開ける -->
 					{#if hasDevice}

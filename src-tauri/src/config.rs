@@ -1060,11 +1060,16 @@ fn parse(text: &str) -> Result<Parsed, String> {
         || reader.table.contains_key(legacy::SYNC_ACTIONS);
     let snippets = read_optional_rows(&mut reader, key::SNIPPETS);
     // アクションが別の並びだったころの設定ファイルは、アクションを定型文の後ろへ移す。
-    // 同期は、どちらかを切っていたら切ったままにする。切っていた種類を、移した拍子に窓口へ出さないため
-    let legacy_actions = read_optional_rows(&mut reader, legacy::ACTIONS);
+    // アクションの同期だけを切っていたら、移した行を同期しない行にする。定型文の同期まで切ると、
+    // 切っていなかった定型文が黙って揃わなくなり、切らないと、切っていたアクションを移した拍子に窓口へ出す
+    let mut legacy_actions = read_optional_rows(&mut reader, legacy::ACTIONS);
     let mut legacy_sync_actions = true;
     reader.read_bool(legacy::SYNC_ACTIONS, &mut legacy_sync_actions);
-    config.sync_snippets &= legacy_sync_actions;
+    if !legacy_sync_actions {
+        for row in legacy_actions.iter_mut().flatten() {
+            row.0.sync = false;
+        }
+    }
     if snippets.is_some() || legacy_actions.is_some() {
         config.snippets = Some(
             snippets
@@ -1706,6 +1711,9 @@ pub fn load_or_create(path: &Path) -> (Config, Option<LoadProblem>) {
                 repaired_item_ids,
                 migrated,
             }) => {
+                // 型の合わない項目があったファイルは、移した定型文を書き戻さない。書き戻すと、読めなかった元の値を写しも取らずに消す。
+                // 次に保存するときに、写しを取ってから書く（save_with_backup）
+                let migrated = migrated && repaired.is_empty();
                 if migrated || repaired_item_ids {
                     if let Err(error) = save_repaired_rows(path, &text, &config, migrated) {
                         log::warn!("couldn't save repaired rows: {error}");
@@ -3627,18 +3635,37 @@ body = "以上です。"
     }
 
     #[test]
-    fn keeps_sync_off_when_either_separate_kind_was_off() {
-        // 切っていた種類を、移した拍子に窓口へ出さない
+    fn keeps_rows_out_of_sync_when_only_the_separate_action_kind_was_off() {
+        // 切っていたアクションを、移した拍子に窓口へ出さない。切っていなかった定型文の同期は、そのままにする
         let path = temp_path("legacy-sync-actions");
-        for (toml, expected) in [
-            ("sync_actions = false\n", false),
-            ("sync_actions = true\n", true),
-            ("sync_snippets = false\nsync_actions = true\n", false),
+        let rows = r#"
+[[snippets]]
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+body = "以上です。"
+
+[[actions]]
+id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+command = "sort"
+"#;
+        for (flags, kind, synced) in [
+            ("sync_actions = false\n", true, [true, false]),
+            ("sync_actions = true\n", true, [true, true]),
+            (
+                "sync_snippets = false\nsync_actions = true\n",
+                false,
+                [true, true],
+            ),
         ] {
-            write(&path, toml);
+            write(&path, &format!("{flags}{rows}"));
             let (config, problem) = load_or_create(&path);
-            assert_eq!(problem, None, "{toml}");
-            assert_eq!(config.sync_snippets, expected, "{toml}");
+            assert_eq!(problem, None, "{flags}");
+            assert_eq!(config.sync_snippets, kind, "{flags}");
+            let snippets = config.snippets.expect("the rows are read");
+            assert_eq!(
+                snippets.iter().map(|row| row.sync).collect::<Vec<_>>(),
+                synced,
+                "{flags}"
+            );
         }
     }
 
@@ -3675,7 +3702,7 @@ command = "sort"
         let (config, problem) = load_or_create(&path);
         assert_eq!(problem, None);
         assert_eq!(snippet_bodies(&config), ["以上です。", "@sh sort"]);
-        assert!(!config.sync_snippets);
+        assert!(config.sync_snippets);
 
         let text = fs::read_to_string(&path).unwrap();
         let document: DocumentMut = text.parse().unwrap();
@@ -3686,7 +3713,7 @@ command = "sort"
             text.starts_with("# 自分用のメモ\ntheme = \"dark\"\n"),
             "{text}"
         );
-        assert!(text.contains("sync_snippets = false"), "{text}");
+        assert!(!text.contains("sync_snippets"), "{text}");
         assert!(text.contains("body = \"@sh sort\""), "{text}");
 
         // 書き直した後は、読んでも行が増えず、ファイルも変わらない

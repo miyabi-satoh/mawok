@@ -78,7 +78,7 @@
 	"settings_modified": "Changed from the default",
 	"settings_sync_description": "Items with the cloud mark turned off aren't synced to your other devices.",
 	"settings_sync_item": "Sync “{name}”",
-	"settings_snippets_description": "Press {key} in the text window to pick a snippet. A one-line snippet that starts with @ai, @sh, @all, or a device name sends the text to that addressee when picked. Other snippets are inserted. In @ai and @sh lines, {mark} is replaced with the text.",
+	"settings_snippets_description": "Press {key} in the text window to pick a snippet. A one-line snippet that starts with @ai, @sh, or a device name sends the text to that addressee when picked.",
 	"settings_snippets_add": "Add",
 	"settings_snippets_name": "Snippet name",
 	"settings_snippets_body": "Snippet text",
@@ -187,7 +187,7 @@
 	"draft_history_older_hint_key": "Show earlier text you copied ({keys}, or ↑ at the start of the text box)",
 	"draft_history_newer_hint_key": "Go back to newer text ({keys}, or ↓ at the end of the text box)",
 	"snippets_empty_no_key": "No snippets yet. Add them under Snippets in Settings.",
-	"settings_snippets_description_no_key": "Pick a snippet from the list in the text window. A one-line snippet that starts with @ai, @sh, @all, or a device name sends the text to that addressee when picked. Other snippets are inserted. In @ai and @sh lines, {mark} is replaced with the text.",
+	"settings_snippets_description_no_key": "Pick a snippet from the list in the text window. A one-line snippet that starts with @ai, @sh, or a device name sends the text to that addressee when picked.",
 	"settings_category_keys": "Keyboard",
 	"settings_keys_recording_description": "Include a modifier key. Press Esc to cancel.",
 	"settings_key_copy": "Copy and close",
@@ -369,5 +369,9 @@
 	"draft_address_ai": "Ask AI",
 	"draft_address_sh": "Run a command",
 	"draft_address_all": "Send to all devices",
-	"draft_address_device": "Send to this device"
+	"draft_address_device": "Send to this device",
+	"draft_run": "Run",
+	"draft_address_empty": "Write an instruction or a command after the addressee.",
+	"draft_address_no_text": "Write the text to send below the first line.",
+	"draft_address_no_device": "There is no device to send to. Add one under Devices in Settings."
 }

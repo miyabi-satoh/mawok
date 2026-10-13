@@ -2000,7 +2000,7 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		// 注意を出す行と出さない行を1つずつ。どの行に出すかの決まりは hasDelayedExpansionChars の単体テストで見る
 		const snippets = [newSnippet('', '@sh echo {{t}}!'), newSnippet('', '@sh echo {{t}}')];
 		const special = m.settings_snippets_special_chars({ mark: '{{t}}' });
-		const description = m.settings_snippets_description({ key: 'Ctrl+K', mark: '{{t}}' });
+		const description = m.settings_snippets_description({ key: 'Ctrl+K' });
 
 		settings.current = { ...view(), platform: 'windows', snippets };
 		const screen = await renderAt(m.settings_category_snippets);
@@ -2018,7 +2018,7 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		const mac = await renderAt(m.settings_category_snippets);
 		await openRows(mac);
 		await expect
-			.element(mac.getByText(m.settings_snippets_description({ key: '⌘K', mark: '{{t}}' })))
+			.element(mac.getByText(m.settings_snippets_description({ key: '⌘K' })))
 			.toBeVisible();
 		await expect.element(mac.getByLabelText(m.settings_snippets_body()).first()).toBeVisible();
 		expect(mac.getByText(special).all()).toHaveLength(0);

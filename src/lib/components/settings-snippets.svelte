@@ -170,10 +170,9 @@
 		<p id="snippets-description" class="settings-lead">
 			{view.textWindowKeys.snippets
 				? m.settings_snippets_description({
-						key: formatKeys(view.textWindowKeys.snippets, view.platform),
-						mark: TEXT_MARK
+						key: formatKeys(view.textWindowKeys.snippets, view.platform)
 					})
-				: m.settings_snippets_description_no_key({ mark: TEXT_MARK })}
+				: m.settings_snippets_description_no_key()}
 		</p>
 		{#if view.proAvailable && (view.syncKinds.snippets || view.syncKinds.settings)}
 			<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />

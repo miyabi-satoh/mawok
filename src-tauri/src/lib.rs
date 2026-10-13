@@ -1440,12 +1440,11 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
         .lock()
         .unwrap()
         .snippets
-        .as_deref()
-        .is_some_and(|snippets| {
-            snippets
-                .iter()
-                .any(|existing| existing.body == snippet.body)
-        });
+        .clone()
+        // 既定の定型文のままなら、この後に書き出す既定の定型文と比べる
+        .unwrap_or_else(|| actions::default_snippets(lang))
+        .iter()
+        .any(|existing| existing.body == snippet.body);
     if exists {
         info!("add snippet: already registered");
         return Ok(false);

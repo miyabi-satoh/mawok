@@ -50,8 +50,9 @@ export function splitFirstLine(text: string): { line: string; rest: string } {
  */
 function deviceAddresses(devices: Device[]): Map<string, string> {
 	const reserved = (name: string) => {
-		const line = `@${name}`;
-		return aiInstruction(line) !== null || shCommand(line) !== null || line.toLowerCase() === ALL;
+		// 宛先は大文字と小文字を区別せずに受けるので、小文字にして見る
+		const line = `@${name.toLowerCase()}`;
+		return aiInstruction(line) !== null || shCommand(line) !== null || line === ALL;
 	};
 	const labels = deviceLabels(devices);
 	return new Map(
@@ -71,10 +72,11 @@ export function resolveAddressee(line: string, devices: Device[]): Addressee | n
 	if (shCommand(line) !== null) return { kind: 'run', ai: false, line };
 	const name = line.trim().toLowerCase();
 	if (name === ALL) return { kind: 'devices', publicKeys: devices.map((d) => d.publicKey) };
-	for (const [publicKey, address] of deviceAddresses(devices)) {
-		if (address.toLowerCase() === name) return { kind: 'devices', publicKeys: [publicKey] };
-	}
-	return null;
+	// 大文字と小文字だけが違う名前のデバイスが2台あるときは、どちらとも決めない
+	const matches = [...deviceAddresses(devices)].filter(
+		([, address]) => address.toLowerCase() === name
+	);
+	return matches.length === 1 ? { kind: 'devices', publicKeys: [matches[0][0]] } : null;
 }
 
 /** 実行するものがあるか。`@ai`・`@sh` だけで後ろが空の行は実行しない */

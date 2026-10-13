@@ -90,6 +90,24 @@ describe('resolveAddressee', () => {
 		expect(resolveAddressee('ふつうの文', devices)).toBeNull();
 	});
 
+	it('宛先の語と大文字・小文字だけが違う名前のデバイスも、公開鍵の先頭を添えた名前で受ける', () => {
+		const shell = [device('Sh Phone', 'ab12cd')];
+
+		expect(resolveAddressee('@sh phone', shell)).toEqual({
+			kind: 'run',
+			ai: false,
+			line: '@sh phone'
+		});
+		expect(resolveAddressee('@Sh Phone (ab12)', shell)).toEqual({
+			kind: 'devices',
+			publicKeys: ['ab12cd']
+		});
+	});
+
+	it('大文字と小文字だけが違う名前のデバイスが2台あるときは、どちらとも決めない', () => {
+		expect(resolveAddressee('@mac', [device('Mac', 'ab12cd'), device('mac', 'ef34gh')])).toBeNull();
+	});
+
 	it('同じ名前のデバイスと、宛先の語と同じ名前のデバイスは、公開鍵の先頭を添えた名前で受ける', () => {
 		const same = [device('Mac', 'ab12cd'), device('Mac', 'ef34gh'), device('all', '1234ab')];
 
