@@ -242,9 +242,11 @@ test.describe('macOS: コマンドの定型文', () => {
 		await openSettings('定型文', '既定の定型文を追加');
 		await pressInSettings('AXButton', '追加');
 		const BODY = '定型文の本文';
+		// 設定の分類の切り替えも AXRadioButton なので、結果の出し方の名前だけを拾う
+		const OUTPUTS = ['置換', '挿入', '出さない'];
 		const radios = async () =>
 			(await windowElements(SETTINGS_TITLE))
-				.filter(({ role }) => role === 'AXRadioButton')
+				.filter(({ role, name }) => role === 'AXRadioButton' && OUTPUTS.includes(name))
 				.map(({ name }) => name);
 		const bodyValue = async () =>
 			(await windowElements(SETTINGS_TITLE)).findLast(
@@ -258,7 +260,7 @@ test.describe('macOS: コマンドの定型文', () => {
 		await setClipboard('@sh echo hi');
 		await keystroke('v', ['command down']);
 		await waitFor(bodyValue, (value) => value === '@sh echo hi', { label: '入れた本文' });
-		await waitFor(radios, (names) => names.join() === '置換,挿入,出さない', {
+		await waitFor(radios, (names) => names.join() === OUTPUTS.join(), {
 			label: '結果の出し方の選択'
 		});
 		await closeSettings();
