@@ -52,7 +52,7 @@ async function changeSettings(next: SettingsView) {
 	await tick();
 }
 
-describe('設定画面の定型文の AI サービス選択', () => {
+describe('設定画面の AI サービス選択', () => {
 	beforeEach(() => {
 		invoked.mockClear();
 		pending = [];
@@ -63,7 +63,7 @@ describe('設定画面の定型文の AI サービス選択', () => {
 	});
 
 	it('サービスを替えると、選んだサービスのモデルを表示する', async () => {
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		settings.current = { ...view('anthropic'), aiModels: { anthropic: 'anthropic-model' } };
 		await expect
@@ -84,7 +84,7 @@ describe('設定画面の定型文の AI サービス選択', () => {
 			...view('gemini'),
 			aiConsent: 'gemini'
 		};
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 		await waitPending('has_ai_key');
 		take('has_ai_key').resolve(true);
 		await expect
@@ -123,7 +123,7 @@ describe('設定画面の定型文の AI サービス選択', () => {
 			return command === 'has_ai_key' ? Promise.resolve(hasKey) : Promise.resolve(undefined);
 		});
 		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_delete() }).click();
 
@@ -144,7 +144,7 @@ describe('設定画面の定型文の AI サービス選択', () => {
 			return Promise.resolve(undefined);
 		});
 		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();
 		await screen.getByLabelText(m.settings_ai_key_input()).fill('secret-key');
@@ -163,7 +163,7 @@ describe('設定画面の定型文の AI サービス選択', () => {
 			return command === 'has_ai_key' ? Promise.resolve(false) : Promise.resolve(undefined);
 		});
 		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();
 		await screen.getByLabelText(m.settings_ai_key_input()).fill('secret-key');

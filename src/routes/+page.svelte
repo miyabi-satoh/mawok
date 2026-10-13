@@ -55,7 +55,7 @@
 		ReplacementPreview,
 		type ReplacementMatch
 	} from '$lib/replacement-preview.svelte';
-	import { actionErrorMessage } from '$lib/action-errors';
+	import { actionErrorMessage, needsAiSettings } from '$lib/action-errors';
 	import { splitActionTarget } from '$lib/action-target';
 	import {
 		addressCandidates,
@@ -215,9 +215,12 @@
 	let error = $state('');
 	// エラーの帯の見出し。コピーと送るで分ける
 	let errorTitle = $state('');
-	function showError(title: string, message: string) {
+	// 設定の「AI」で直す失敗か。帯に、その分類を開く操作を添える
+	let errorNeedsAiSettings = $state(false);
+	function showError(title: string, message: string, { aiSettings = false } = {}) {
 		errorTitle = title;
 		error = message;
+		errorNeedsAiSettings = aiSettings;
 	}
 	// 残高が尽きたときだけ、料金ページを開く操作を帯に添える。帯の文から決めるので、ほかの失敗で文が変わればボタンも消える
 	const noCredit = $derived(error === m.action_error_no_credit());
@@ -601,7 +604,9 @@
 			if (running !== session) return;
 			running = null;
 			if (errorCode(e) !== 'action.cancelled') {
-				showError(m.action_failed(), actionErrorMessage(e) ?? errorCode(e));
+				showError(m.action_failed(), actionErrorMessage(e) ?? errorCode(e), {
+					aiSettings: needsAiSettings(e)
+				});
 				if (!draftVisible) notifyFinished(m.action_notify_failed({ action: label }));
 			}
 			await focusDraft();
@@ -1415,6 +1420,17 @@
 						onclick={() => invoke('open_mawok_buy_page')}
 					>
 						{m.settings_mawok_buy()}
+					</Button>
+				</div>
+			{:else if errorNeedsAiSettings}
+				<div class="col-start-2 pt-1">
+					<Button
+						tabindex={-1}
+						variant="outline"
+						size="sm"
+						onclick={() => invoke('open_ai_settings')}
+					>
+						{m.action_open_ai_settings()}
 					</Button>
 				</div>
 			{/if}

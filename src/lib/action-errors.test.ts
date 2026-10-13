@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { m } from '$lib/paraglide/messages';
-import { actionErrorMessage } from './action-errors';
+import { actionErrorMessage, needsAiSettings } from './action-errors';
 
 describe('actionErrorMessage', () => {
 	it('アクションの失敗の符号を、何をすればよいかの案内にする', () => {
@@ -42,5 +42,25 @@ describe('actionErrorMessage', () => {
 			actionErrorMessage({ code: 'action.command_not_found', detail: 'not found', exitCode: 127 })
 		).toBe(`${m.action_error_command_not_found()}\nnot found`);
 		expect(actionErrorMessage('action.empty_output')).toBe(m.action_error_empty_output());
+	});
+});
+
+describe('needsAiSettings', () => {
+	it('設定の「AI」で直す失敗だけを選ぶ', () => {
+		for (const code of [
+			'action.disabled',
+			'action.no_key',
+			'action.key_unreadable',
+			'action.invalid_key',
+			'action.rejected',
+			'action.model_not_found'
+		]) {
+			expect(needsAiSettings({ code, detail: null }), code).toBe(true);
+		}
+		// サインインと残高は「アカウント」、ネットワークやコマンドの失敗は設定では直らない
+		for (const code of ['action.sign_in_required', 'action.no_credit', 'action.network']) {
+			expect(needsAiSettings({ code, detail: null }), code).toBe(false);
+		}
+		expect(needsAiSettings('action.command_failed')).toBe(false);
 	});
 });

@@ -13,6 +13,7 @@
 	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import { errorCode } from '$lib/errors';
 	import SyncToggle from '$lib/components/sync-toggle.svelte';
+	import SettingsAi from '$lib/components/settings-ai.svelte';
 	import SettingsSnippets from '$lib/components/settings-snippets.svelte';
 	import SettingsDevices from '$lib/components/settings-devices.svelte';
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
@@ -125,6 +126,16 @@
 	function openAccount() {
 		category = 'account';
 	}
+
+	// テキストウィンドウのエラーの帯から頼まれたら、「AI」に移る。設定ウィンドウを作る前の頼みは、
+	// イベントでは届かないので、載せたときに Rust 側に尋ねる
+	$effect(() => {
+		const show = async () => {
+			if (await invoke<boolean>('take_ai_settings_request').catch(() => false)) category = 'ai';
+		};
+		void show();
+		return onEvent(EVENTS.AI_SETTINGS_REQUESTED, show);
+	});
 
 	function openDevices() {
 		category = 'devices';
@@ -1125,9 +1136,14 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="snippets">
-					<!-- 開いたときだけ描く。キーがあるかの確認でキーチェーンの許可を求められうるため -->
 					{#if category === 'snippets'}
-						<SettingsSnippets
+						<SettingsSnippets {view} editor={snippetsEditor} />
+					{/if}
+				</Tabs.Content>
+				<Tabs.Content value="ai">
+					<!-- 開いたときだけ描く。キーがあるかの確認でキーチェーンの許可を求められうるため -->
+					{#if category === 'ai'}
+						<SettingsAi
 							{view}
 							editor={snippetsEditor}
 							{mawokAccountStatus}

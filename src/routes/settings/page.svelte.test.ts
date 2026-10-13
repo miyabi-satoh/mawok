@@ -170,6 +170,7 @@ describe('既定の値から変えた設定の印', () => {
 			m.settings_category_draft,
 			m.settings_category_copy,
 			m.settings_category_snippets,
+			m.settings_category_ai,
 			m.settings_category_account
 		]) {
 			await screen.getByRole('tab', { name: category() }).click();
@@ -1769,7 +1770,7 @@ describe('設定画面のデバイス', () => {
 	});
 });
 
-describe('設定画面の定型文の AI サービス', () => {
+describe('設定画面の AI サービス', () => {
 	let responses: Record<string, unknown>;
 
 	beforeEach(() => {
@@ -1781,13 +1782,13 @@ describe('設定画面の定型文の AI サービス', () => {
 		);
 	});
 
-	it('設定画面を開いただけではキーを確かめず、定型文の分類を開くと確かめる', async () => {
+	it('設定画面を開いただけではキーを確かめず、「AI」の分類を開くと確かめる', async () => {
 		settings.current = { ...view(), aiService: 'gemini' };
 		const screen = await render(Page);
 		await tick();
 		expect(invoked).not.toHaveBeenCalledWith('has_ai_key', undefined);
 
-		await screen.getByRole('tab', { name: m.settings_category_snippets() }).click();
+		await screen.getByRole('tab', { name: m.settings_category_ai() }).click();
 
 		await expect
 			.element(screen.getByText(m.settings_ai_key_absent(), { exact: true }))
@@ -1796,7 +1797,7 @@ describe('設定画面の定型文の AI サービス', () => {
 	});
 
 	it('AI サービスの選択肢を「使わない」から表示し、選んだサービスの説明を出す', async () => {
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		const service = screen.getByRole('combobox', { name: m.settings_ai_service() });
 		await expect.element(service).toHaveValue('none');
@@ -1811,7 +1812,7 @@ describe('設定画面の定型文の AI サービス', () => {
 	});
 
 	it('「使わない」ではキーとモデルを隠し、サービスを選ぶと表示する', async () => {
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		await expect
 			.element(screen.getByText(m.settings_ai_key(), { exact: true }))
@@ -1844,7 +1845,7 @@ describe('設定画面の定型文の AI サービス', () => {
 				? Promise.resolve(responses[command])
 				: Promise.resolve(savedRows(command, args));
 		});
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();
 		await screen.getByLabelText(m.settings_ai_key_input()).fill('secret-key');
@@ -1874,7 +1875,7 @@ describe('設定画面の定型文の AI サービス', () => {
 	it('キーがあり了解の記録が無ければ、分類を開いたときに了解を求める', async () => {
 		settings.current = { ...view(), aiService: 'gemini', aiConsent: null };
 		responses.has_ai_key = true;
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		const dialog = screen.getByRole('alertdialog');
 		await expect.element(dialog).toHaveFocus();
@@ -1901,7 +1902,7 @@ describe('設定画面の定型文の AI サービス', () => {
 				? Promise.resolve(responses[command])
 				: Promise.resolve(savedRows(command, args));
 		});
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		await expect.element(screen.getByLabelText(m.settings_ai_model())).toHaveValue('custom-model');
 		await screen.getByRole('button', { name: m.settings_ai_key_replace() }).click();
@@ -1913,7 +1914,7 @@ describe('設定画面の定型文の AI サービス', () => {
 	it('了解を出している間に「使わない」を選ぶと、了解を送らずに閉じる', async () => {
 		settings.current = { ...view(), aiService: 'gemini' };
 		responses.has_ai_key = true;
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 
 		await expect.element(screen.getByRole('alertdialog')).toBeVisible();
 		settings.current = view();
@@ -1923,7 +1924,7 @@ describe('設定画面の定型文の AI サービス', () => {
 
 	it('モデルは既定のときも既定のモデルを欄に出し、打つと保存し、空にすると既定に戻す', async () => {
 		settings.current = { ...view(), aiService: 'gemini' };
-		const screen = await renderAt(m.settings_category_snippets);
+		const screen = await renderAt(m.settings_category_ai);
 		const model = screen.getByLabelText(m.settings_ai_model());
 
 		await expect.element(model).toHaveValue('gemini-3.5-flash-lite');

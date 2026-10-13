@@ -2144,6 +2144,15 @@ describe('宛先へ出す', () => {
 		expect(callsOf(invoked, 'open_mawok_buy_page')).toHaveLength(1);
 	});
 
+	it('AI を使える状態でないときは、帯から設定の「AI」を開ける', async () => {
+		const screen = await render(Page);
+		await openAt(screen, 'あいう');
+		(await pick()).reject({ code: 'action.disabled', detail: null });
+
+		await screen.getByRole('button', { name: m.action_open_ai_settings() }).click();
+		expect(callsOf(invoked, 'open_ai_settings')).toHaveLength(1);
+	});
+
 	it('失敗の帯は、コピーが成功したら消える', async () => {
 		const screen = await render(Page);
 		await openAt(screen, 'あいう');

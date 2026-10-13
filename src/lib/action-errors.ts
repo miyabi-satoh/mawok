@@ -55,6 +55,21 @@ function commandFailedMessage(error: unknown): string {
 	return code === null ? m.action_error_command_killed() : m.action_error_command_failed({ code });
 }
 
+/** 設定の「AI」で直す失敗。エラーの帯に、その分類を開く操作を添える */
+const AI_SETTINGS_CODES = new Set([
+	'action.disabled',
+	'action.no_key',
+	'action.key_unreadable',
+	'action.invalid_key',
+	'action.rejected',
+	'action.model_not_found'
+]);
+
+/** 設定の「AI」で直す失敗か */
+export function needsAiSettings(error: unknown): boolean {
+	return AI_SETTINGS_CODES.has(errorCode(error));
+}
+
 /**
  * アクションの失敗の符号なら、画面に出す案内にする。符号でなければ null（呼ぶ側が受け取った文字列をそのまま扱う）。
  * detail（利用者自身の下書きの断片を含みうるが、本人の画面に返すだけなので構わない）があれば添える。

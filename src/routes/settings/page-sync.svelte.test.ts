@@ -200,7 +200,8 @@ describe('設定画面の同期', () => {
 		for (const label of [
 			m.settings_category_draft(),
 			m.settings_category_copy(),
-			m.settings_category_snippets()
+			m.settings_category_snippets(),
+			m.settings_category_ai()
 		]) {
 			await screen.getByRole('tab', { name: label }).click();
 			collect();

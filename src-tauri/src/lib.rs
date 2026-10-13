@@ -212,6 +212,8 @@ struct AppState {
     sync_conflicts: AtomicUsize,
     /// トレイから食い違いを選ぶ画面を頼まれた。設定ウィンドウが、開いたときに受け取る
     sync_choice_requested: AtomicBool,
+    /// テキストウィンドウから AI の設定を頼まれた。設定ウィンドウが、開いたときに受け取る
+    ai_settings_requested: AtomicBool,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -1380,6 +1382,23 @@ fn set_draft_guidance(app: AppHandle, guidance: Option<String>) -> Result<(), St
 #[tauri::command]
 fn open_settings_window(app: AppHandle) {
     open_settings(&app);
+}
+
+/// 下書きウィンドウの AI のエラーの帯から、設定ウィンドウを「AI」で開く。
+/// 開いている設定ウィンドウにはイベントで、これから作る設定ウィンドウには目印で伝える
+#[tauri::command]
+fn open_ai_settings(app: AppHandle) {
+    app.state::<AppState>()
+        .ai_settings_requested
+        .store(true, Ordering::SeqCst);
+    open_settings(&app);
+    let _ = app.emit_to(SETTINGS_WINDOW, events::AI_SETTINGS_REQUESTED, ());
+}
+
+/// 設定ウィンドウが、「AI」で開くよう頼まれていたかを受け取る。受け取ったら頼みは消える
+#[tauri::command]
+fn take_ai_settings_request(state: tauri::State<'_, AppState>) -> bool {
+    state.ai_settings_requested.swap(false, Ordering::SeqCst)
 }
 
 /// 下書きウィンドウの設定のキー（既定は Cmd+, / Ctrl+,）で、設定ウィンドウを開閉する。
@@ -4978,6 +4997,8 @@ pub fn run() {
             sync_conflicts,
             resolve_sync_conflicts,
             take_sync_choice_request,
+            open_ai_settings,
+            take_ai_settings_request,
             open_settings_window,
             toggle_settings_window,
             close_settings_window,
@@ -5235,6 +5256,7 @@ pub fn run() {
                 sync_debounce: debounce::Debounce::default(),
                 sync_conflicts: AtomicUsize::new(sync_conflicts),
                 sync_choice_requested: AtomicBool::new(false),
+                ai_settings_requested: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]
