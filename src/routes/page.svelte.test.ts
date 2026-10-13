@@ -1185,20 +1185,6 @@ describe('見つけた同じアカウントのデバイスへ送る', () => {
 		await expect.element(textarea).toHaveValue('git status');
 	});
 
-	it('このデバイスが Pro でなければ、送信先の一覧に案内を出す', async () => {
-		settings.current = { ...view(), devices: [device] };
-		invoked.mockImplementation((command) => {
-			if (command === 'probe_devices') return Promise.reject('lan.pro_required');
-			return Promise.resolve(undefined);
-		});
-		const screen = await render(Page);
-
-		await screen.getByRole('button', { name: m.draft_send_targets() }).click();
-
-		await expect.element(screen.getByText(m.lan_error_pro_required())).toBeVisible();
-		expect(callsOf(invoked, 'probe_devices')).toHaveLength(1);
-	});
-
 	it('一部のデバイスに届かなかったら、隠さずに届かなかったデバイスの名前を出す', async () => {
 		const windows = { name: 'Windows', publicKey: 'cd', address: '', sendTo: true };
 		settings.current = { ...view(), devices: [device, windows] };

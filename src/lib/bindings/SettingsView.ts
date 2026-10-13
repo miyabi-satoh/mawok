@@ -62,7 +62,7 @@ textHistorySize: number, trimTrailingWhitespace: boolean, replacements: Array<Re
  */
 snippets: Array<Snippet>, 
 /**
- * 同じアカウントで見つけた自分のデバイス。見つけた順
+ * 確認コードで追加した自分のデバイス。見つけた順
  */
 devices: Array<Device>, 
 /**
@@ -70,9 +70,13 @@ devices: Array<Device>,
  */
 deviceName: string, 
 /**
- * デバイスの間の送受信を使える Pro か
+ * 同期を使える Pro か
  */
-proAvailable: boolean, sharedKeyStatus: Status, 
+proAvailable: boolean, 
+/**
+ * 同期で、窓口が覚えている鍵とこのデバイスの共有の鍵が揃っているか。Pro でなければ None
+ */
+sharedKeyStatus: Status, 
 /**
  * Mawok のアカウントトークンを資格情報管理から読めたか
  */

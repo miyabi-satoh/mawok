@@ -26,17 +26,15 @@
 		view,
 		open,
 		call,
-		lanCall,
-		onopenaccount
+		lanCall
 	}: {
 		view: SettingsView;
 		open: boolean;
 		call: Call;
 		lanCall: Call;
-		onopenaccount: () => void;
 	} = $props();
 
-	const panel = $derived(devicesPanel(view.proAvailable, view.sharedKeyStatus));
+	const panel = $derived(devicesPanel(view.sharedKeyStatus, view.devices.length));
 
 	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分のデバイスへ送る」） */
 	let pairingCode = $state('');
@@ -140,7 +138,7 @@
 	});
 </script>
 
-<!-- 鍵を作り直す操作。鍵を待つ状態では、ほかのデバイスを使えない人向けの出口として案内する。 -->
+<!-- 接続を解除する操作。同期の鍵を受け取り直す状態では、ほかのデバイスを使えない人向けの出口として案内する。 -->
 {#snippet resetKeyRow(restarts: boolean, title: string, start: string, description?: string)}
 	<SettingsRow>
 		<Field.Field orientation="horizontal" class="min-h-8">
@@ -155,67 +153,39 @@
 	</SettingsRow>
 {/snippet}
 
+<!-- 題名を左、操作を右、説明を下に置く（「デバイスを追加」と同じ） -->
+{#snippet joinRow(description: string)}
+	<SettingsRow>
+		<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+			<Field.Title>{m.settings_devices_join_title()}</Field.Title>
+			<div class="flex gap-2">
+				<Input
+					class="w-32 font-mono text-sm"
+					inputmode="numeric"
+					autocomplete="off"
+					maxlength={6}
+					aria-label={m.settings_devices_join()}
+					bind:value={joinCode}
+				/>
+				<Button variant="outline" disabled={joining || joinCode.length !== 6} onclick={joinPairing}>
+					{joining ? m.settings_devices_joining() : m.settings_devices_join_submit()}
+				</Button>
+			</div>
+		</Field.Field>
+		<Field.Description class="leading-snug">{description}</Field.Description>
+	</SettingsRow>
+{/snippet}
+
 <SettingsSection>
-	{#if panel === 'pro'}
-		<SettingsRow>
-			<Field.Description class="leading-snug">
-				{view.mawokAccountSignedIn
-					? m.settings_devices_pro_description()
-					: m.settings_devices_pro_sign_in()}
-			</Field.Description>
-			{#if view.mawokAccountSignedIn}
-				<Button
-					variant="outline"
-					size="sm"
-					class="w-fit"
-					onclick={() => call('open_mawok_pro_page')}
-				>
-					{m.settings_mawok_pro_pricing()}
-				</Button>
-			{:else}
-				<Button variant="outline" size="sm" class="w-fit" onclick={onopenaccount}>
-					{m.settings_account_open()}
-				</Button>
-			{/if}
-		</SettingsRow>
-	{:else if panel === 'none'}
-		<SettingsRow>
-			<Field.Description class="leading-snug">{m.settings_devices_not_ready()}</Field.Description>
-		</SettingsRow>
-	{:else if panel === 'needsPairing'}
-		<!-- 鍵を持つ状態の「デバイスを追加」と同じく、題名を左、操作を右、説明を下に置く -->
-		<SettingsRow>
-			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-				<Field.Title>{m.settings_devices_join_title()}</Field.Title>
-				<div class="flex gap-2">
-					<Input
-						class="w-32 font-mono text-sm"
-						inputmode="numeric"
-						autocomplete="off"
-						maxlength={6}
-						aria-label={m.settings_devices_join()}
-						bind:value={joinCode}
-					/>
-					<Button
-						variant="outline"
-						disabled={joining || joinCode.length !== 6}
-						onclick={joinPairing}
-					>
-						{joining ? m.settings_devices_joining() : m.settings_devices_join_submit()}
-					</Button>
-				</div>
-			</Field.Field>
-			<Field.Description class="leading-snug">
-				{m.settings_devices_needs_pairing()}
-			</Field.Description>
-		</SettingsRow>
+	{#if panel === 'needsPairing'}
+		{@render joinRow(m.settings_devices_needs_pairing())}
 		{@render resetKeyRow(
 			true,
 			m.settings_devices_restart(),
 			m.settings_devices_restart_start(),
 			m.settings_devices_restart_description()
 		)}
-	{:else if panel === 'ready'}
+	{:else}
 		<SettingsRow>
 			<Field.Title>{m.settings_devices_list_title()}</Field.Title>
 			{#if view.devices.length > 0}
@@ -270,11 +240,15 @@
 					: m.settings_devices_offer_description()}
 			</Field.Description>
 		</SettingsRow>
-		{@render resetKeyRow(
-			false,
-			m.settings_devices_reset_key(),
-			m.settings_devices_reset_key_start()
-		)}
+		{#if panel === 'start'}
+			{@render joinRow(m.settings_devices_join_description())}
+		{:else}
+			{@render resetKeyRow(
+				false,
+				m.settings_devices_reset_key(),
+				m.settings_devices_reset_key_start()
+			)}
+		{/if}
 	{/if}
 </SettingsSection>
 

@@ -1,4 +1,4 @@
-//! 同じ LAN の同じアカウントのデバイスへ、下書きを送る（docs/lan.md「同じ LAN の自分のデバイスへ送る」）。
+//! 同じ LAN の、確認コードで追加した自分のデバイスへ、下書きを送る（docs/lan.md「同じ LAN の自分のデバイスへ送る」）。
 //! 相手は UDP のブロードキャストの名乗りで見つける。mDNS は、無線の端末どうしのマルチキャストを中継しないアクセスポイントで届かないため使わない。
 //! ペアリングは、片方に出す 6 桁のコードから SPAKE2 で鍵を作り、それを事前共有鍵にした Noise の XXpsk2 で共有の鍵を渡す。
 //! コードをそのまま鍵にしないのは、やり取りを盗み見た相手に総当たりで当てられるため。
@@ -36,7 +36,7 @@ const TCP_PORT: u16 = 47626;
 /// 名乗りを送り合う UDP のポート
 const UDP_PORT: u16 = 47625;
 /// 名乗りの先頭の印。形を変えたら数字を上げる
-const HELLO: &str = "mawok3";
+const HELLO: &str = "mawok4";
 /// 名乗りの間隔。コードを出している間は、相手がすぐ見つけられるよう短くする
 const HELLO_INTERVAL: Duration = Duration::from_secs(3);
 const OFFER_HELLO_INTERVAL: Duration = Duration::from_secs(1);
@@ -83,10 +83,6 @@ const KIND_SEND: u8 = 2;
 const KIND_PING: u8 = 3;
 /// 受け取った側が、最後まで受け取れたことを返す印
 const ACK: &[u8] = b"ok";
-/// 本文の前に、同じ Pro のアカウントかを確かめ終えたことを返す。
-const READY: &[u8] = b"ready";
-const REJECT_PRO_REQUIRED: &[u8] = b"pro_required";
-const REJECT_ACCOUNT_MISMATCH: &[u8] = b"account_mismatch";
 const REJECT_KEY_MISMATCH: &[u8] = b"key_mismatch";
 pub const ACCOUNT_TAG_LEN: usize = 32;
 
@@ -95,7 +91,7 @@ type Result<T> = std::result::Result<T, String>;
 /// 組み合わせと送信の失敗の種類。画面は符号から、何をすればよいかの案内を出す（src/lib/lan-errors.ts）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Failure {
-    /// 同じアカウントで見つけたデバイスがない
+    /// 追加したデバイスがない
     NoDevice,
     /// 見つけたデバイスはあるが、送信先に選んだデバイスがない
     NoTarget,
@@ -104,14 +100,8 @@ pub enum Failure {
     Unreachable,
     /// つながったが、相手が受け取らなかった
     Refused,
-    /// このデバイスで Pro を使えない
-    ProRequired,
-    /// Pro だが、まだ共有の鍵を受け取っていない
+    /// このデバイスの共有の鍵が、窓口が覚えている鍵と違うか、まだ無い。同期しているデバイスから受け取り直す
     NeedsPairing,
-    /// 相手のデバイスで Pro を使えない
-    ReceiverProRequired,
-    /// 相手が別の Mawok アカウントに結ばれている
-    AccountMismatch,
     /// 受け取った共有の鍵が、窓口が覚えている鍵と違う
     KeyMismatch,
     TooLong,
@@ -131,10 +121,7 @@ impl Failure {
             Self::NoTarget => "lan.no_target",
             Self::Unreachable => "lan.unreachable",
             Self::Refused => "lan.refused",
-            Self::ProRequired => "lan.pro_required",
             Self::NeedsPairing => "lan.needs_pairing",
-            Self::ReceiverProRequired => "lan.receiver_pro_required",
-            Self::AccountMismatch => "lan.account_mismatch",
             Self::KeyMismatch => "lan.key_mismatch",
             Self::TooLong => "lan.too_long",
             Self::BadCode => "lan.bad_code",
@@ -192,17 +179,21 @@ pub trait Host: Send + Sync + 'static {
     fn on_pairing_code_ended(&self);
     /// 新しいコードを出した。設定画面は、取り逃がしたときだけ pairing_offer を読み直す。
     fn on_pairing_code_offered(&self, offer: PairingOffer);
-    /// 同じアカウントのデバイスから下書きが届いた。受け入れたら true。
+    /// 追加済みのデバイスから下書きが届いた。受け入れたら true。
     fn on_received(&self, from: &[u8], text: String) -> bool;
-    /// このデバイスで使える Pro のアカウントの印。無ければ、相手の下書きは受け取らない。
-    fn pro_account_tag(&self) -> Option<[u8; ACCOUNT_TAG_LEN]>;
-    /// 資格情報管理にある共有の鍵。Pro が失効していても、相手へ pro_required を返すために読む。
+    /// このデバイスが持つ共有の鍵。
     fn shared_key(&self) -> Option<[u8; 32]>;
-    /// 窓口から読んだ鍵の見分け。鍵を受け取る側だけが照らす。
-    fn shared_key_id(&self) -> Option<String>;
+    /// 確認コードを表示した側が渡す共有の鍵。まだ無ければ作って置く。置けなければ None。
+    fn shared_key_or_new(&self) -> Option<[u8; 32]>;
+    /// Pro の同期で、窓口が覚えている鍵とこのデバイスの鍵がどうなっているか。Pro でなければ None。
+    fn sync_key_status(&self) -> crate::shared_key::Status;
+    /// 同期の鍵を受け取り直すデバイスと、渡せるデバイスが、同じアカウントかを照らす印。Pro でなければ無い。
+    fn pro_account_tag(&self) -> Option<[u8; ACCOUNT_TAG_LEN]>;
+    /// Pro のデバイスが受け取ってよい鍵の見分け（窓口が覚えている値）。確認コードを入力した側だけが照らす。
+    fn expected_key_id(&self) -> Option<String>;
     /// ペアリングで受け取った鍵を置く。置けたときだけ ACK を返す。
     fn receive_shared_key(&self, key: [u8; 32]) -> bool;
-    /// 同じアカウントのデバイスを見つけた。
+    /// 握手が通ったデバイスを見つけた。
     fn on_device_found(&self, peer: Peer, address: IpAddr) -> bool;
     /// 握手が通ったデバイスの場所。名前が分からない場合も、既存の一覧の場所は直せる。
     fn on_device_address_seen(&self, public_key: &[u8], address: IpAddr);
@@ -435,14 +426,14 @@ struct OfferFailure {
     wrong_code: bool,
 }
 
-/// コードを出した側の組み合わせ
+/// コードを出した側の組み合わせ。`shared_key` は、確認コードが合っていた後にだけ呼ぶ
+/// （違うコードを試されただけで、鍵を作らないため）
 fn pair_as_offerer(
     stream: &mut (impl Read + Write),
     code: &str,
     key: &DeviceKey,
     name: &str,
-    account_tag: &[u8; ACCOUNT_TAG_LEN],
-    shared_key: &[u8; 32],
+    shared_key: impl FnOnce() -> Option<[u8; 32]>,
 ) -> std::result::Result<Peer, OfferFailure> {
     let handshake = (|| -> Result<_> {
         let psk = spake2_key(stream, code)?;
@@ -463,18 +454,15 @@ fn pair_as_offerer(
         wrong_code: true,
     })?;
     (|| -> Result<()> {
-        transport_write(&mut transport, account_tag, stream)?;
+        let shared_key = shared_key().ok_or("this device has no shared key to hand over")?;
+        transport_write(&mut transport, &shared_key, stream)?;
         match transport_read(&mut transport, stream)?.as_slice() {
-            READY => {}
-            REJECT_PRO_REQUIRED => return Err("the joining device is not Pro".to_string()),
-            REJECT_ACCOUNT_MISMATCH => return Err("the devices use different accounts".to_string()),
-            _ => return Err("the joining device refused".to_string()),
+            ACK => Ok(()),
+            REJECT_KEY_MISMATCH => {
+                Err("the joining device syncs with another shared key".to_string())
+            }
+            _ => Err("the joining device did not store the shared key".to_string()),
         }
-        transport_write(&mut transport, shared_key, stream)?;
-        if transport_read(&mut transport, stream)? != ACK {
-            return Err("the joining device did not store the shared key".to_string());
-        }
-        Ok(())
     })()
     .map_err(|message| OfferFailure {
         message,
@@ -486,8 +474,6 @@ fn pair_as_offerer(
 /// コードを入れた側の組み合わせの失敗
 #[derive(Debug)]
 enum JoinFailure {
-    /// 相手が別のアカウントのデバイスだった
-    AccountMismatch,
     /// 受け取った共有の鍵が、窓口の鍵の印と合わない
     KeyMismatch,
     /// コードが違う（鍵が合わずに握手が通らない）か、相手でコードが使えなくなっている。中身はログに残す
@@ -503,10 +489,6 @@ impl From<String> for JoinFailure {
 impl From<JoinFailure> for LanError {
     fn from(failure: JoinFailure) -> Self {
         match failure {
-            JoinFailure::AccountMismatch => Self::new(
-                Failure::AccountMismatch,
-                "the devices use different accounts",
-            ),
             JoinFailure::KeyMismatch => Self::new(
                 Failure::KeyMismatch,
                 "the shared key does not match the account server",
@@ -525,7 +507,6 @@ fn pair_as_joiner(
     code: &str,
     key: &DeviceKey,
     name: &str,
-    account_tag: &[u8; ACCOUNT_TAG_LEN],
     expected_key_id: Option<&str>,
     accept_key: impl FnOnce([u8; 32]) -> bool,
 ) -> std::result::Result<Peer, JoinFailure> {
@@ -540,12 +521,6 @@ fn pair_as_joiner(
     handshake_write(&mut noise, name.as_bytes(), stream)?;
     let peer = remote_peer(&noise, &remote_name)?;
     let mut transport = into_transport(noise)?;
-    let remote_tag = transport_read(&mut transport, stream)?;
-    if remote_tag.as_slice() != account_tag {
-        transport_write(&mut transport, REJECT_ACCOUNT_MISMATCH, stream)?;
-        return Err(JoinFailure::AccountMismatch);
-    }
-    transport_write(&mut transport, READY, stream)?;
     let received = transport_read(&mut transport, stream)?;
     let key: [u8; 32] = received
         .try_into()
@@ -561,7 +536,7 @@ fn pair_as_joiner(
     Ok(peer)
 }
 
-/// 送る側の握手。共通の共有の鍵を持つ相手だけが通る。
+/// 送る側の握手。同じ共有の鍵を持つ相手だけが通る。
 fn handshake_as_sender(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
@@ -579,7 +554,7 @@ fn handshake_as_sender(
     into_transport(noise)
 }
 
-/// 受ける側の握手。公開鍵をまだ覚えていなくても、共通の鍵を持つ相手なら通す。
+/// 受ける側の握手。公開鍵をまだ覚えていなくても、同じ共有の鍵を持つ相手なら通す。
 fn handshake_as_receiver(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
@@ -616,24 +591,6 @@ fn send_text(
     }
     let mut transport =
         handshake_as_sender(stream, key, remote_public, psk).fail_as(Failure::Refused)?;
-    match transport_read(&mut transport, stream)
-        .fail_as(Failure::Refused)?
-        .as_slice()
-    {
-        READY => {}
-        REJECT_PRO_REQUIRED => {
-            return Err(LanError::new(
-                Failure::ReceiverProRequired,
-                "the receiving device is not Pro",
-            ))
-        }
-        _ => {
-            return Err(LanError::new(
-                Failure::Refused,
-                "the receiving device refused",
-            ))
-        }
-    }
     // 1通に入りきらない分は分けて送り、空の1通で終わりを伝える
     for chunk in text.as_bytes().chunks(NOISE_MAX - TAG_LEN) {
         transport_write(&mut transport, chunk, stream).fail_as(Failure::Refused)?;
@@ -645,21 +602,15 @@ fn send_text(
     Ok(())
 }
 
-/// 下書きを受け取る。握手を通った同じアカウントのデバイスからだけ、中身を受け取る。
+/// 下書きを受け取る。握手を通った（同じ共有の鍵を持つ）デバイスからだけ、中身を受け取る。
 /// 受け取り終えたら `deliver` に渡し、受け入れられた（true）ときだけ相手に受け取れたと返す。送ってきた相手の公開鍵を返す
 fn receive_text(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
     psk: &[u8; 32],
-    pro_available: bool,
     deliver: impl FnOnce(&[u8], String) -> bool,
 ) -> Result<Vec<u8>> {
     let (mut transport, remote) = handshake_as_receiver(stream, key, psk)?;
-    if !pro_available {
-        transport_write(&mut transport, REJECT_PRO_REQUIRED, stream)?;
-        return Err("this device is not Pro".to_string());
-    }
-    transport_write(&mut transport, READY, stream)?;
     let mut bytes = Vec::new();
     loop {
         let chunk = transport_read(&mut transport, stream)?;
@@ -680,30 +631,15 @@ fn receive_text(
     Ok(remote)
 }
 
-/// 生存確認も送信と同じ Pro・アカウントの判定を通す。送信先の一覧が、実際に送れるデバイスだけを選べるようにする。
+/// 生存確認。握手が通れば、相手は同じ共有の鍵を持っていて、送れる。相手が名乗った名前を返す
 fn probe_peer(
     stream: &mut (impl Read + Write),
     key: &DeviceKey,
     remote_public: &[u8],
     psk: &[u8; 32],
-) -> std::result::Result<(), LanError> {
-    let mut transport =
-        handshake_as_sender(stream, key, remote_public, psk).fail_as(Failure::Unreachable)?;
-    let _name = transport_read(&mut transport, stream).fail_as(Failure::Unreachable)?;
-    match transport_read(&mut transport, stream)
-        .fail_as(Failure::Unreachable)?
-        .as_slice()
-    {
-        READY => Ok(()),
-        REJECT_PRO_REQUIRED => Err(LanError::new(
-            Failure::ReceiverProRequired,
-            "the receiving device is not Pro",
-        )),
-        _ => Err(LanError::new(
-            Failure::Unreachable,
-            "the receiving device refused",
-        )),
-    }
+) -> Result<Vec<u8>> {
+    let mut transport = handshake_as_sender(stream, key, remote_public, psk)?;
+    transport_read(&mut transport, stream)
 }
 
 /// 名乗りを送る先。各インターフェースのサブネットのブロードキャストと 255.255.255.255
@@ -820,16 +756,16 @@ fn discovery_is_rejected(source: DiscoverySource, rejected_at: Option<Instant>) 
         && rejected_at.is_some_and(|at| at.elapsed() < REJECTED_DISCOVERY_TTL)
 }
 
+/// 同期の鍵を受け取り直すデバイスが、設定の「デバイス」を開いている間だけ、渡せるデバイスを呼ぶ。
 fn should_want_pairing(
     devices_open: bool,
     pro_available: bool,
-    has_shared_key: bool,
-    has_shared_key_id: bool,
+    status: crate::shared_key::Status,
 ) -> bool {
-    devices_open && pro_available && !has_shared_key && has_shared_key_id
+    devices_open && pro_available && status == crate::shared_key::Status::NeedsPairing
 }
 
-/// 待ち受けと名乗り。Pro で同じ共有の鍵を持つか、ペアリングの途中だけ動かし、使わない人には OS の許可を求めない
+/// 待ち受けと名乗り。共有の鍵を持つか、ペアリングの途中だけ動かし、使わない人には OS の許可を求めない
 pub struct Lan {
     key_path: PathBuf,
     /// 初めて要るときに読む（作る）。使わない人のために鍵のファイルを作らない
@@ -848,7 +784,7 @@ pub struct Lan {
     pairing: AtomicBool,
     devices_open: AtomicBool,
     wanted: Mutex<Option<Instant>>,
-    /// 同じアカウントのデバイスを、名乗りや受け取りで最後に見た場所（公開鍵ごと）
+    /// 握手が通ったデバイスを、名乗りや受け取りで最後に見た場所（公開鍵ごと）
     seen: Mutex<HashMap<Vec<u8>, IpAddr>>,
     /// UDP の名乗りだけを根拠に失敗した相手へ、しばらく握手を試さない。
     rejected: Mutex<HashMap<Vec<u8>, Instant>>,
@@ -912,8 +848,6 @@ impl Lan {
             self.host.on_pairing_code_ended();
         }
         if open
-            && self.host.pro_account_tag().is_some()
-            && self.host.shared_key().is_some()
             && self
                 .wanted
                 .lock()
@@ -931,8 +865,7 @@ impl Lan {
         should_want_pairing(
             self.devices_open.load(Ordering::Relaxed),
             self.host.pro_account_tag().is_some(),
-            self.host.shared_key().is_some(),
-            self.host.shared_key_id().is_some(),
+            self.host.sync_key_status(),
         )
     }
 
@@ -940,7 +873,7 @@ impl Lan {
         self.offering()
             || self.pairing.load(Ordering::Relaxed)
             || self.wants_pairing()
-            || (self.host.pro_account_tag().is_some() && self.host.shared_key().is_some())
+            || self.host.shared_key().is_some()
     }
 
     /// 要るなら動かし、要らなくなったら止める。鍵や発見したデバイスが変わったら呼ぶ。動いているかを返す
@@ -1045,7 +978,6 @@ impl Lan {
                     stream,
                     &key,
                     &crate::shared_key::lan_psk(&shared_key),
-                    self.host.pro_account_tag().is_some(),
                     |remote, text| self.host.on_received(remote, text),
                 )?;
                 info!("lan: received a draft");
@@ -1054,26 +986,11 @@ impl Lan {
             }
             KIND_PING => {
                 let shared_key = self.host.shared_key().ok_or("no shared key")?;
-                let (mut transport, from) = handshake_as_receiver(
-                    stream,
-                    &key,
-                    &crate::shared_key::lan_psk(&shared_key),
-                )?;
+                let (mut transport, from) =
+                    handshake_as_receiver(stream, &key, &crate::shared_key::lan_psk(&shared_key))?;
                 transport_write(&mut transport, self.name.as_bytes(), stream)?;
-                let reply = if self.host.pro_account_tag().is_some() {
-                    READY
-                } else {
-                    REJECT_PRO_REQUIRED
-                };
-                transport_write(&mut transport, reply, stream)?;
-                match reply {
-                    READY => {
-                        self.start_discovery(from, ip, DiscoverySource::Authenticated);
-                        Ok(())
-                    }
-                    REJECT_PRO_REQUIRED => Err("this device is not Pro".to_string()),
-                    _ => unreachable!(),
-                }
+                self.start_discovery(from, ip, DiscoverySource::Authenticated);
+                Ok(())
             }
             other => Err(format!("unknown request {other}")),
         }
@@ -1093,21 +1010,14 @@ impl Lan {
             self.replace_or_end(offer.automatic, false, stops);
             return Err("pairing code expired".to_string());
         }
-        let (Some(account_tag), Some(shared_key)) =
-            (self.host.pro_account_tag(), self.host.shared_key())
-        else {
-            // 鍵を渡せないデバイスは、次のコードも出さない
+        if self.host.sync_key_status() == crate::shared_key::Status::NeedsPairing {
+            // コードを出した後に、このデバイスの鍵が窓口の鍵と合わなくなった。渡せないので、次のコードも出さない
             self.host.on_pairing_code_ended();
             return Err("this device is not ready to pair".to_string());
-        };
-        let result = pair_as_offerer(
-            stream,
-            &offer.code,
-            key,
-            &self.name,
-            &account_tag,
-            &shared_key,
-        );
+        }
+        let result = pair_as_offerer(stream, &offer.code, key, &self.name, || {
+            self.host.shared_key_or_new()
+        });
         let peer = match result {
             Ok(peer) => {
                 self.host.on_pairing_code_ended();
@@ -1222,9 +1132,7 @@ impl Lan {
                     let _ = self.start_pairing(true);
                 }
             }
-            Hello::Device(_) | Hello::Offer(_)
-                if self.host.pro_account_tag().is_some() && self.host.shared_key().is_some() =>
-            {
+            Hello::Device(_) | Hello::Offer(_) if self.host.shared_key().is_some() => {
                 self.start_discovery(key, ip, DiscoverySource::Announcement);
             }
             _ => {}
@@ -1238,7 +1146,7 @@ impl Lan {
         ip: IpAddr,
         source: DiscoverySource,
     ) {
-        if self.host.pro_account_tag().is_none() || self.host.shared_key().is_none() {
+        if self.host.shared_key().is_none() {
             return;
         }
         let mut seen = self.seen.lock().unwrap();
@@ -1281,16 +1189,12 @@ impl Lan {
         let result = (|| {
             let key = self.key()?;
             let mut stream = connect_for(ip, KIND_PING).map_err(|error| error.detail)?;
-            let mut transport = handshake_as_sender(
+            let name = probe_peer(
                 &mut stream,
                 &key,
                 &remote_public,
                 &crate::shared_key::lan_psk(&shared_key),
             )?;
-            let name = transport_read(&mut transport, &mut stream)?;
-            if transport_read(&mut transport, &mut stream)?.as_slice() != READY {
-                return Err("the device is not Pro".to_string());
-            }
             Ok::<_, String>(remote_peer_name(&remote_public, &name))
         })();
         match result {
@@ -1399,16 +1303,14 @@ impl Lan {
         self: &Arc<Self>,
         automatic: bool,
     ) -> std::result::Result<PairingOffer, LanError> {
-        if self.host.pro_account_tag().is_none() {
-            return Err(LanError::new(
-                Failure::ProRequired,
-                "this device is not ready to pair",
-            ));
-        }
-        if self.host.shared_key().is_none() {
+        let status = self.host.sync_key_status();
+        // 自動で出すのは、同期の鍵を受け取り直すデバイスへ渡すとき。窓口の鍵と揃っていなければ、渡しても相手が断る
+        if status == crate::shared_key::Status::NeedsPairing
+            || (automatic && status != crate::shared_key::Status::Ready)
+        {
             return Err(LanError::new(
                 Failure::NeedsPairing,
-                "this device does not have an shared key",
+                "the shared key of this device does not match the account server",
             ));
         }
         let offer = self
@@ -1452,18 +1354,6 @@ impl Lan {
 
     /// 相手に出ているコードを入れて組み合わせる。コードを出している相手を名乗りで探すので、終わるまで数秒かかる
     pub fn join_pairing(self: &Arc<Self>, code: &str) -> std::result::Result<(), LanError> {
-        if self.host.pro_account_tag().is_none() {
-            return Err(LanError::new(
-                Failure::ProRequired,
-                "this device is not waiting for an shared key",
-            ));
-        }
-        if self.host.shared_key().is_some() || self.host.shared_key_id().is_none() {
-            return Err(LanError::new(
-                Failure::Internal,
-                "this device is not waiting for an shared key",
-            ));
-        }
         let code: String = code.chars().filter(char::is_ascii_digit).collect();
         if code.len() != 6 {
             return Err(LanError::new(Failure::BadCode, "the code must be 6 digits"));
@@ -1476,26 +1366,22 @@ impl Lan {
             self.pairing.store(false, Ordering::Relaxed);
             return Err(LanError::new(Failure::Internal, "couldn't start listening"));
         }
-        let result =
-            self.find_offer()
-                .fail_as(Failure::Unreachable)
-                .and_then(|ip| {
-                    let mut stream = connect_for(ip, KIND_PAIR)?;
-                    let account_tag = self.host.pro_account_tag().ok_or_else(|| {
-                        LanError::new(Failure::ProRequired, "this device is not Pro")
-                    })?;
-                    pair_as_joiner(
-                        &mut stream,
-                        &code,
-                        &key,
-                        &self.name,
-                        &account_tag,
-                        self.host.shared_key_id().as_deref(),
-                        |shared_key| self.host.receive_shared_key(shared_key),
-                    )
-                    .map_err(LanError::from)
-                    .map(|peer| (peer, ip))
-                });
+        let result = self
+            .find_offer()
+            .fail_as(Failure::Unreachable)
+            .and_then(|ip| {
+                let mut stream = connect_for(ip, KIND_PAIR)?;
+                pair_as_joiner(
+                    &mut stream,
+                    &code,
+                    &key,
+                    &self.name,
+                    self.host.expected_key_id().as_deref(),
+                    |shared_key| self.host.receive_shared_key(shared_key),
+                )
+                .map_err(LanError::from)
+                .map(|peer| (peer, ip))
+            });
         match result {
             Ok((peer, ip)) => {
                 info!("lan: paired");
@@ -1534,12 +1420,12 @@ impl Lan {
         }
     }
 
-    /// 同じアカウントで見つけたデバイスへ下書きを送る。名乗りで見た場所がなければ、覚えていた場所へ送る。送れた場所を返す
+    /// 追加済みのデバイスへ下書きを送る。名乗りで見た場所がなければ、覚えていた場所へ送る。送れた場所を返す
     pub fn send(
         &self,
         remote_public: &[u8],
         saved: Option<IpAddr>,
-        shared_key: Option<[u8; 32]>,
+        shared_key: &[u8; 32],
         text: &str,
     ) -> std::result::Result<IpAddr, LanError> {
         // 送れない長さなら、相手につなぐ前にやめる
@@ -1549,8 +1435,6 @@ impl Lan {
                 "the draft is too long to send",
             ));
         }
-        let shared_key = shared_key
-            .ok_or_else(|| LanError::new(Failure::ProRequired, "this device is not Pro"))?;
         let key = self.key().fail_as(Failure::Internal)?;
         let ip = self.locate(remote_public, saved)?;
         let mut stream = connect_for(ip, KIND_SEND)?;
@@ -1559,23 +1443,21 @@ impl Lan {
             &mut stream,
             &key,
             remote_public,
-            &crate::shared_key::lan_psk(&shared_key),
+            &crate::shared_key::lan_psk(shared_key),
             text,
         )?;
         self.remember_peer_address(remote_public, ip);
         Ok(ip)
     }
 
-    /// 同じアカウントで見つけたデバイスが動いていて、つながるかを確かめる（握手まで）。つながった場所を返す。
+    /// 追加済みのデバイスが動いていて、つながるかを確かめる（握手まで）。つながった場所を返す。
     /// 握手が通らなかったときも、送れないので、つながらないとみなす
     pub fn probe(
         &self,
         remote_public: &[u8],
         saved: Option<IpAddr>,
-        shared_key: Option<[u8; 32]>,
+        shared_key: &[u8; 32],
     ) -> std::result::Result<IpAddr, LanError> {
-        let shared_key = shared_key
-            .ok_or_else(|| LanError::new(Failure::ProRequired, "this device is not Pro"))?;
         let key = self.key().fail_as(Failure::Internal)?;
         let ip = self.locate(remote_public, saved)?;
         let mut stream = connect_for(ip, KIND_PING)?;
@@ -1583,8 +1465,9 @@ impl Lan {
             &mut stream,
             &key,
             remote_public,
-            &crate::shared_key::lan_psk(&shared_key),
-        )?;
+            &crate::shared_key::lan_psk(shared_key),
+        )
+        .fail_as(Failure::Unreachable)?;
         self.remember_peer_address(remote_public, ip);
         Ok(ip)
     }
@@ -1594,7 +1477,7 @@ impl Lan {
         self.host.on_device_address_seen(remote_public, ip);
     }
 
-    /// 同じアカウントで見つけたデバイスの場所。名乗りで見た場所がなければ、覚えていた場所
+    /// 追加済みのデバイスの場所。名乗りで見た場所がなければ、覚えていた場所
     fn locate(
         &self,
         remote_public: &[u8],
@@ -1620,7 +1503,7 @@ mod tests {
     use super::*;
 
     const ACCOUNT_TAG: [u8; ACCOUNT_TAG_LEN] = [7; ACCOUNT_TAG_LEN];
-    const ACCOUNT_KEY: [u8; 32] = [9; 32];
+    const SHARED_KEY: [u8; 32] = [9; 32];
     const LAN_PSK: [u8; 32] = [3; 32];
 
     struct TestHost;
@@ -1639,11 +1522,19 @@ mod tests {
         }
 
         fn shared_key(&self) -> Option<[u8; 32]> {
-            Some(ACCOUNT_KEY)
+            Some(SHARED_KEY)
         }
 
-        fn shared_key_id(&self) -> Option<String> {
-            Some(crate::shared_key::key_id(&ACCOUNT_KEY))
+        fn shared_key_or_new(&self) -> Option<[u8; 32]> {
+            Some(SHARED_KEY)
+        }
+
+        fn sync_key_status(&self) -> crate::shared_key::Status {
+            crate::shared_key::Status::Ready
+        }
+
+        fn expected_key_id(&self) -> Option<String> {
+            Some(crate::shared_key::key_id(&SHARED_KEY))
         }
 
         fn receive_shared_key(&self, _: [u8; 32]) -> bool {
@@ -1681,11 +1572,19 @@ mod tests {
         }
 
         fn shared_key(&self) -> Option<[u8; 32]> {
-            Some(ACCOUNT_KEY)
+            Some(SHARED_KEY)
         }
 
-        fn shared_key_id(&self) -> Option<String> {
-            Some(crate::shared_key::key_id(&ACCOUNT_KEY))
+        fn shared_key_or_new(&self) -> Option<[u8; 32]> {
+            Some(SHARED_KEY)
+        }
+
+        fn sync_key_status(&self) -> crate::shared_key::Status {
+            crate::shared_key::Status::Ready
+        }
+
+        fn expected_key_id(&self) -> Option<String> {
+            Some(crate::shared_key::key_id(&SHARED_KEY))
         }
 
         fn receive_shared_key(&self, _: [u8; 32]) -> bool {
@@ -1728,14 +1627,9 @@ mod tests {
         let (mut client, mut server) = connected();
         let offerer_key = offerer.clone();
         let offered = thread::spawn(move || {
-            pair_as_offerer(
-                &mut server,
-                "123456",
-                &offerer_key,
-                "Mac",
-                &ACCOUNT_TAG,
-                &ACCOUNT_KEY,
-            )
+            pair_as_offerer(&mut server, "123456", &offerer_key, "Mac", || {
+                Some(SHARED_KEY)
+            })
         });
 
         let joined = pair_as_joiner(
@@ -1743,9 +1637,8 @@ mod tests {
             "123456",
             &joiner,
             "desk-pc",
-            &ACCOUNT_TAG,
             None,
-            |received_key| received_key == ACCOUNT_KEY,
+            |received_key| received_key == SHARED_KEY,
         )
         .unwrap();
 
@@ -1770,25 +1663,13 @@ mod tests {
         let (offerer, joiner) = (generate_key().unwrap(), generate_key().unwrap());
         let (mut client, mut server) = connected();
         let offered = thread::spawn(move || {
-            pair_as_offerer(
-                &mut server,
-                "123456",
-                &offerer,
-                "Mac",
-                &ACCOUNT_TAG,
-                &ACCOUNT_KEY,
-            )
+            // 違うコードを試されただけでは、渡す鍵を求めない（鍵を作らない）
+            pair_as_offerer(&mut server, "123456", &offerer, "Mac", || {
+                panic!("a wrong code must not ask for the shared key")
+            })
         });
 
-        let joined = pair_as_joiner(
-            &mut client,
-            "654321",
-            &joiner,
-            "desk-pc",
-            &ACCOUNT_TAG,
-            None,
-            |_| true,
-        );
+        let joined = pair_as_joiner(&mut client, "654321", &joiner, "desk-pc", None, |_| true);
         // 実際の接続と同じく、失敗したら切る
         drop(client);
 
@@ -1797,32 +1678,18 @@ mod tests {
     }
 
     #[test]
-    fn does_not_transfer_the_key_to_another_account() {
+    fn fails_without_a_wrong_code_when_the_offerer_has_no_key_to_hand_over() {
         let (offerer, joiner) = (generate_key().unwrap(), generate_key().unwrap());
         let (mut client, mut server) = connected();
-        let offered = thread::spawn(move || {
-            pair_as_offerer(
-                &mut server,
-                "123456",
-                &offerer,
-                "Mac",
-                &ACCOUNT_TAG,
-                &ACCOUNT_KEY,
-            )
+        let offered =
+            thread::spawn(move || pair_as_offerer(&mut server, "123456", &offerer, "Mac", || None));
+        let joined = pair_as_joiner(&mut client, "123456", &joiner, "desk-pc", None, |_| {
+            panic!("no key was handed over")
         });
-        let joined = pair_as_joiner(
-            &mut client,
-            "123456",
-            &joiner,
-            "desk-pc",
-            &[8; ACCOUNT_TAG_LEN],
-            None,
-            |_| panic!("a different account must not receive a key"),
-        );
-        assert!(matches!(joined.unwrap_err(), JoinFailure::AccountMismatch));
-        let failure = offered.join().unwrap().unwrap_err();
-        assert!(failure.message.contains("different accounts"));
-        assert!(!failure.wrong_code);
+        drop(client);
+
+        assert!(joined.is_err());
+        assert!(!offered.join().unwrap().unwrap_err().wrong_code);
     }
 
     #[test]
@@ -1830,27 +1697,19 @@ mod tests {
         let (offerer, joiner) = (generate_key().unwrap(), generate_key().unwrap());
         let (mut client, mut server) = connected();
         let offered = thread::spawn(move || {
-            pair_as_offerer(
-                &mut server,
-                "123456",
-                &offerer,
-                "Mac",
-                &ACCOUNT_TAG,
-                &ACCOUNT_KEY,
-            )
+            pair_as_offerer(&mut server, "123456", &offerer, "Mac", || Some(SHARED_KEY))
         });
         let joined = pair_as_joiner(
             &mut client,
             "123456",
             &joiner,
             "desk-pc",
-            &ACCOUNT_TAG,
             Some("00"),
             |_| panic!("a mismatched key must not be stored"),
         );
         assert!(matches!(joined.unwrap_err(), JoinFailure::KeyMismatch));
         let failure = offered.join().unwrap().unwrap_err();
-        assert!(failure.message.contains("did not store"));
+        assert!(failure.message.contains("another shared key"));
         assert!(!failure.wrong_code);
     }
 
@@ -1861,7 +1720,7 @@ mod tests {
         let receiver_key = receiver.clone();
         let received = thread::spawn(move || {
             let mut delivered = None;
-            let from = receive_text(&mut server, &receiver_key, &LAN_PSK, true, |_, text| {
+            let from = receive_text(&mut server, &receiver_key, &LAN_PSK, |_, text| {
                 delivered = Some(text);
                 true
             });
@@ -1909,9 +1768,8 @@ mod tests {
         let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
         let (mut client, mut server) = connected();
         let receiver_public = receiver.public.clone();
-        let received = thread::spawn(move || {
-            receive_text(&mut server, &receiver, &LAN_PSK, true, |_, _| true)
-        });
+        let received =
+            thread::spawn(move || receive_text(&mut server, &receiver, &LAN_PSK, |_, _| true));
 
         let sent = send_text(&mut client, &sender, &receiver_public, &[4; 32], "secret");
 
@@ -1928,7 +1786,7 @@ mod tests {
         let counted = Arc::clone(&deliveries);
         // 握手のときは組み合わせてあり、受け取り終えて渡すときには解除されていて受け入れられない
         let received = thread::spawn(move || {
-            receive_text(&mut server, &receiver, &LAN_PSK, true, |_, _| {
+            receive_text(&mut server, &receiver, &LAN_PSK, |_, _| {
                 counted.fetch_add(1, Ordering::Relaxed);
                 false
             })
@@ -1948,8 +1806,8 @@ mod tests {
         let (mut client, mut server) = connected();
         let receiver_public = receiver.public.clone();
         let received = thread::spawn(move || {
-            receive_text(&mut server, &receiver, &LAN_PSK, true, |_, _| {
-                panic!("a mismatched account must not deliver text")
+            receive_text(&mut server, &receiver, &LAN_PSK, |_, _| {
+                panic!("a mismatched key must not deliver text")
             })
         });
 
@@ -1960,33 +1818,13 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_sender_when_the_receiver_is_not_pro() {
-        let (sender, receiver) = (generate_key().unwrap(), generate_key().unwrap());
-        let (mut client, mut server) = connected();
-        let receiver_public = receiver.public.clone();
-        let received = thread::spawn(move || {
-            receive_text(&mut server, &receiver, &LAN_PSK, false, |_, _| {
-                panic!("a non-Pro receiver must not deliver text")
-            })
-        });
-
-        let sent = send_text(&mut client, &sender, &receiver_public, &LAN_PSK, "secret");
-
-        assert_eq!(sent.unwrap_err().failure, Failure::ReceiverProRequired);
-        assert!(received.join().unwrap().is_err());
-    }
-
-    #[test]
     fn failure_codes_are_distinct() {
         let failures = [
             Failure::NoDevice,
             Failure::NoTarget,
             Failure::Unreachable,
             Failure::Refused,
-            Failure::ProRequired,
             Failure::NeedsPairing,
-            Failure::ReceiverProRequired,
-            Failure::AccountMismatch,
             Failure::KeyMismatch,
             Failure::TooLong,
             Failure::BadCode,
@@ -2008,10 +1846,10 @@ mod tests {
         assert_eq!(read_hello(hello_message(&hello).as_bytes()), Some(hello));
         let offer = Hello::Offer(key.to_vec());
         assert_eq!(read_hello(hello_message(&offer).as_bytes()), Some(offer));
-        assert_eq!(read_hello(b"mawok3 hello 00"), None);
+        assert_eq!(read_hello(b"mawok4 hello 00"), None);
         assert_eq!(
             read_hello(
-                b"mawok2 hello 0000000000000000000000000000000000000000000000000000000000000000"
+                b"mawok3 hello 0000000000000000000000000000000000000000000000000000000000000000"
             ),
             None
         );
@@ -2035,11 +1873,12 @@ mod tests {
 
     #[test]
     fn wants_pairing_only_while_the_needs_pairing_page_is_open() {
-        assert!(should_want_pairing(true, true, false, true));
-        assert!(!should_want_pairing(false, true, false, true));
-        assert!(!should_want_pairing(true, false, false, true));
-        assert!(!should_want_pairing(true, true, true, true));
-        assert!(!should_want_pairing(true, true, false, false));
+        use crate::shared_key::Status;
+        assert!(should_want_pairing(true, true, Status::NeedsPairing));
+        assert!(!should_want_pairing(false, true, Status::NeedsPairing));
+        assert!(!should_want_pairing(true, false, Status::NeedsPairing));
+        assert!(!should_want_pairing(true, true, Status::Ready));
+        assert!(!should_want_pairing(true, true, Status::None));
     }
 
     #[test]

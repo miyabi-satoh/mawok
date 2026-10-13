@@ -10,6 +10,6 @@ export type AccountStatus = { email: string,
  */
 remainingPercent: number, 
 /**
- * LAN で同じアカウントかを見分けるための、窓口のランダムなアカウントID
+ * 同期の鍵を受け渡すデバイスが同じアカウントかを見分けるための、窓口のランダムなアカウントID
  */
 accountId: string, pro: ProStatus, };

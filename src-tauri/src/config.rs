@@ -196,7 +196,7 @@ impl Default for Action {
     }
 }
 
-/// 同じアカウントで見つけた自分のデバイス（docs/lan.md「同じ LAN の自分のデバイスへ送る」）
+/// 確認コードで追加した自分のデバイス（docs/lan.md「同じ LAN の自分のデバイスへ送る」）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -279,7 +279,7 @@ pub struct Config {
     pub text_color_light: String,
     /// 下書きの入力欄の文字色（ダーク）。小文字の #rrggbb。空なら標準の文字色
     pub text_color_dark: String,
-    /// 同じアカウントで見つけた自分のデバイス
+    /// 確認コードで追加した自分のデバイス
     pub devices: Vec<Device>,
     /// 下書きの入力欄に出す案内。None なら既定の案内（画面側で今の言語とホットキーから作る）、空文字なら出さない。
     /// 既定のままのときは、設定ファイルに書かない

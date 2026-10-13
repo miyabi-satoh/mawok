@@ -18,13 +18,14 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    account, shared_key, actions,
+    account, actions,
     ai::AiService,
     atomic_file,
     config::{self, valid_item_id, Action, Config, Language, Snippet, SyncRow, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     history_store::{self, History},
     i18n::Lang,
+    shared_key,
     text::{CharWidths, PunctuationStyle, Replacement},
 };
 

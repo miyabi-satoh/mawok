@@ -38,7 +38,7 @@ impl State {
                 .is_some_and(|until| now <= until.saturating_add(GRACE_SECONDS))
     }
 
-    /// LAN へはアカウントIDをそのまま流さず、同じアカウントでだけ同じになる固定長の印にする。
+    /// 同期の鍵を受け渡す相手を探す名乗りに、アカウントIDをそのまま流さず、同じアカウントでだけ同じになる固定長の印にする。
     pub fn account_tag(&self) -> [u8; lan::ACCOUNT_TAG_LEN] {
         Sha256::digest(self.account_id.as_bytes()).into()
     }

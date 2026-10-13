@@ -90,7 +90,7 @@ pub struct AccountStatus {
     pub email: String,
     /// 残りの割合（切り上げ。使い切ったときだけ 0）
     pub remaining_percent: u32,
-    /// LAN で同じアカウントかを見分けるための、窓口のランダムなアカウントID
+    /// 同期の鍵を受け渡すデバイスが同じアカウントかを見分けるための、窓口のランダムなアカウントID
     pub account_id: String,
     pub pro: ProStatus,
 }

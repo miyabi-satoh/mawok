@@ -1,4 +1,5 @@
-//! Mawok のアカウントのトークンと鍵を、1つの資格情報の項目に置く。
+//! Mawok のアカウントのトークンと共有の鍵を、1つの資格情報の項目に置く。
+//! どちらか片方だけのこともある（サインインせずにデバイスを追加した、鍵を持たずにサインインしている）。
 
 use std::sync::Mutex;
 
@@ -17,7 +18,8 @@ static ACCESS: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Credentials {
-    token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     key: Option<String>,
 }
@@ -27,7 +29,12 @@ fn to_json(credentials: &Credentials) -> String {
 }
 
 fn from_json(value: &str) -> Result<Credentials, String> {
-    serde_json::from_str(value).map_err(|error| error.to_string())
+    let credentials: Credentials =
+        serde_json::from_str(value).map_err(|error| error.to_string())?;
+    if credentials.token.is_none() && credentials.key.is_none() {
+        return Err("the credentials have neither a token nor a key".to_string());
+    }
+    Ok(credentials)
 }
 
 fn with_key(mut credentials: Credentials, key: Option<&str>) -> Credentials {
@@ -35,7 +42,33 @@ fn with_key(mut credentials: Credentials, key: Option<&str>) -> Credentials {
     credentials
 }
 
+fn with_token(mut credentials: Credentials, token: Option<&str>) -> Credentials {
+    credentials.token = token.map(str::to_string);
+    credentials
+}
+
+/// 項目が無いときは、空の中身として読む。
+fn read_or_empty_locked() -> Result<Credentials, String> {
+    match read_locked() {
+        Ok(credentials) => Ok(credentials),
+        Err(ReadError::NotFound) => Ok(Credentials {
+            token: None,
+            key: None,
+        }),
+        Err(ReadError::Unreadable(error)) => Err(error),
+    }
+}
+
+/// トークンも鍵も無くなったら、項目ごと消す。
+fn write_locked(credentials: &Credentials) -> Result<(), String> {
+    if credentials.token.is_none() && credentials.key.is_none() {
+        return secrets::delete(CREDENTIAL_USER);
+    }
+    secrets::write(CREDENTIAL_USER, &to_json(credentials))
+}
+
 /// 項目の有無だけを確かめる。前のトークンだけがある間も、読む入口で移し替えられるように見つける。
+/// 鍵だけの項目でも true なので、サインインしているかは `has_token` で確かめる
 pub fn exists() -> Result<bool, String> {
     if secrets::exists(CREDENTIAL_USER)? {
         return Ok(true);
@@ -63,7 +96,10 @@ fn migrate_locked() -> Result<Credentials, ReadError> {
         Err(ReadError::NotFound) => None,
         Err(error) => return Err(error),
     };
-    let credentials = Credentials { token, key };
+    let credentials = Credentials {
+        token: Some(token),
+        key,
+    };
     secrets::write(CREDENTIAL_USER, &to_json(&credentials)).map_err(ReadError::Unreadable)?;
     // 新しい項目に書けていれば、値は読める。前の項目を消せなくても、読み取りは失敗にしない
     for user in [LEGACY_TOKEN_USER, LEGACY_KEY_USER] {
@@ -76,7 +112,13 @@ fn migrate_locked() -> Result<Credentials, ReadError> {
 
 pub fn read_token() -> Result<String, ReadError> {
     let _access = ACCESS.lock().unwrap();
-    Ok(read_locked()?.token)
+    read_locked()?.token.ok_or(ReadError::NotFound)
+}
+
+/// サインインしているか（トークンがあるか）。
+pub fn has_token() -> Result<bool, String> {
+    let _access = ACCESS.lock().unwrap();
+    Ok(read_or_empty_locked()?.token.is_some())
 }
 
 pub fn read_key() -> Result<Option<String>, ReadError> {
@@ -84,44 +126,39 @@ pub fn read_key() -> Result<Option<String>, ReadError> {
     Ok(read_locked()?.key)
 }
 
-/// サインインで受け取ったトークンを置く。前の中身は読まずに置き換える。
-/// 鍵はサインインの前に消してあり（lib.rs の save_mawok_token）、読めない項目が残っていてもサインインできるようにするため
+/// サインインで受け取ったトークンを置く。共有の鍵は残す。
+/// 前の中身が読めないときは、読まずに置き換える（読めない項目が残っていてもサインインできるようにするため）
 pub fn write_token(token: &str) -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    secrets::write(
-        CREDENTIAL_USER,
-        &to_json(&Credentials {
-            token: token.to_string(),
-            key: None,
-        }),
-    )
+    let key = read_locked().ok().and_then(|credentials| credentials.key);
+    write_locked(&Credentials {
+        token: Some(token.to_string()),
+        key,
+    })
 }
 
 pub fn write_key(key: &str) -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    let credentials = read_locked().map_err(|error| match error {
-        ReadError::NotFound => "the account token is missing".to_string(),
-        ReadError::Unreadable(error) => error,
-    })?;
-    secrets::write(CREDENTIAL_USER, &to_json(&with_key(credentials, Some(key))))
+    write_locked(&with_key(read_or_empty_locked()?, Some(key)))
 }
 
 pub fn clear_key() -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    let credentials = match read_locked() {
-        Ok(credentials) => credentials,
-        Err(ReadError::NotFound) => return Ok(()),
-        Err(ReadError::Unreadable(error)) => return Err(error),
-    };
-    secrets::write(CREDENTIAL_USER, &to_json(&with_key(credentials, None)))
+    write_locked(&with_key(read_or_empty_locked()?, None))
 }
 
-pub fn delete() -> Result<(), String> {
+/// サインアウトする。共有の鍵は残す（デバイスの間の送受信は、サインインしていなくても使うため）。
+pub fn delete_token() -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
+    let read = read_or_empty_locked();
     // 前の項目を先に消す。残ったまま新しい項目だけを消すと、次に読むときに前のトークンが移されて、サインインした状態に戻る
     secrets::delete(LEGACY_TOKEN_USER)?;
     secrets::delete(LEGACY_KEY_USER)?;
-    secrets::delete(CREDENTIAL_USER)
+    match read {
+        Ok(credentials) => write_locked(&with_token(credentials, None)),
+        // 読めない項目は、鍵ごと消す。残すと、サインアウトできない
+        Err(_) => secrets::delete(CREDENTIAL_USER),
+    }
 }
 
 #[cfg(test)]
@@ -131,7 +168,7 @@ mod tests {
     #[test]
     fn formats_a_token_without_a_key() {
         let credentials = Credentials {
-            token: "token".to_string(),
+            token: Some("token".to_string()),
             key: None,
         };
         let value = to_json(&credentials);
@@ -142,7 +179,7 @@ mod tests {
     #[test]
     fn formats_a_token_and_key() {
         let credentials = Credentials {
-            token: "token".to_string(),
+            token: Some("token".to_string()),
             key: Some("key".to_string()),
         };
         let value = to_json(&credentials);
@@ -165,7 +202,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_value_without_a_token() {
-        assert!(from_json(r#"{"key":"key"}"#).is_err());
+    fn keeps_the_key_without_a_token() {
+        let credentials = from_json(r#"{"token":"token","key":"key"}"#).unwrap();
+        let value = to_json(&with_token(credentials, None));
+        assert_eq!(value, r#"{"key":"key"}"#);
+        assert_eq!(from_json(&value).unwrap().token, None);
+    }
+
+    #[test]
+    fn rejects_a_value_with_neither_a_token_nor_a_key() {
+        assert!(from_json("{}").is_err());
     }
 }
