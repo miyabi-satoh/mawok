@@ -32,7 +32,8 @@ import { expectStays, waitFor } from './wait.mjs';
 
 const execFileAsync = promisify(execFile);
 
-const APP_BUNDLE = process.env.MAWOK_APP ?? '/Applications/Mawok.app';
+const REGULAR_APP = '/Applications/Mawok.app';
+const APP_BUNDLE = process.env.MAWOK_APP ?? REGULAR_APP;
 const PROCESS_NAME = 'mawok';
 
 const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', PROFILE_IDENTIFIER);
@@ -889,7 +890,7 @@ async function launchMawok({ regular = false } = {}) {
 	// 終了した直後は、LaunchServices がまだ前のプロセスを抱えていて -609 で失敗することがあるので、少し置いてやり直す
 	await waitFor(
 		() =>
-			execFileAsync('open', regular ? [APP_BUNDLE] : OPEN_APP).then(
+			execFileAsync('open', regular ? [REGULAR_APP] : OPEN_APP).then(
 				() => true,
 				() => false
 			),
@@ -1040,6 +1041,15 @@ async function readAutostartOn() {
 	await launchMawok();
 	await quitMawok();
 	return !log().includes('launch at login was turned off outside Mawok');
+}
+
+/**
+ * 画面がロックされていれば、始める前に落とす。ロックの間はウィンドウが出ず、どの確認も時間切れで落ちるので、原因が分からない
+ */
+export async function assertScreenUnlocked() {
+	const { stdout } = await execFileAsync('ioreg', ['-n', 'Root', '-d1', '-a']);
+	if (/<key>CGSSessionScreenIsLocked<\/key>\s*<true\/>/.test(stdout))
+		throw new Error('画面がロックされています。ロックを解いてから回してください');
 }
 
 /**

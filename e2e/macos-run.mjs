@@ -21,8 +21,10 @@ try {
 	process.exit(2);
 }
 
-const { assertPermissions, restoreUserState } = await import('./lib/macos.mjs');
+const { assertPermissions, assertScreenUnlocked, restoreUserState } =
+	await import('./lib/macos.mjs');
 try {
+	await assertScreenUnlocked();
 	// 戻すときも、利用者の状態に合わせて Mawok を起動し直し、メニューバーのアイコンをアクセシビリティで待つ
 	await assertPermissions({ screenCapture: !options.flags.has('--restore') });
 } catch (error) {
