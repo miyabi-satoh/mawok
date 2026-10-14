@@ -97,7 +97,7 @@ With Pro, your settings and history stay the same across the devices on your acc
 
 The device you added receives the same settings and history.
 
-To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. Right after copying, it may not have arrived yet. Wait a few seconds and show the text window again.
+To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. Right after copying, it may not have arrived yet. Wait a moment and show the text window again.
 
 - Synced: settings, keyboard shortcuts, replacements, snippets, and history. Turn each kind on or off under "Account" in Settings.
 - Kept per device: launch at login and API keys for AI services. The hotkey and keyboard shortcuts sync only between {macos:Macs}{windows:Windows devices}.
