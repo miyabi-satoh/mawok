@@ -5,9 +5,13 @@ import {
 	expandAllRows,
 	hideDraft,
 	invokeApp,
+	readAlert,
+	runDraft,
+	setDraftValue,
 	setJapanese,
 	showDraftAndWaitVisible,
 	typeIntoDraft,
+	waitAlert,
 	waitDraftHidden,
 	waitForWindowCount,
 	waitSettingsWindow
@@ -42,7 +46,7 @@ import { waitFor } from '../lib/wait.mjs';
 // 状態を作るのに要る設定は config.toml で入れる。
 // アクションは一覧を開いて撮るだけで、選ばない。この機の資格情報管理に本物のキーがあれば、選んだ時点で
 // AI サービスへ送ってしまうため (画面の invoke は差し替えられず、送る手前で止める口もない)。
-// 同じ理由で、アクションに失敗したときの知らせは撮らない
+// 同じ理由で、アクションの失敗は撮らない。失敗の帯は、送らずに出せる「宛先の後ろが空」で撮る
 
 const suite = createSuite();
 
@@ -287,6 +291,20 @@ test.describe('描かれ方', () => {
 					(text) => text !== '',
 					{ label: '登録の知らせが出る' }
 				);
+			}
+		});
+	});
+
+	test('下書き: 失敗の帯 (宛先の後ろが空)', async () => {
+		// @ai だけの行を実行すると、AI へは送らずに帯が出る。表示言語を替えると帯が消えるので、
+		// 出ていなければ出し直す
+		await setDraftValue(client, '@ai');
+		await inspectDraft(client, 'alert', {
+			prepare: async () => {
+				if ((await readAlert(client)) === null) {
+					await runDraft();
+					await waitAlert(client, '宛先の後ろが空の帯');
+				}
 			}
 		});
 	});
