@@ -90,7 +90,7 @@ pub struct AccountStatus {
     pub email: String,
     /// 残りの割合（切り上げ。使い切ったときだけ 0）
     pub remaining_percent: u32,
-    /// 同期の鍵を受け渡すデバイスが同じアカウントかを見分けるための、窓口のランダムなアカウントID
+    /// サインインし直したときに、アカウントが替わったかを見分けるための、窓口のランダムなアカウントID
     pub account_id: String,
     pub pro: ProStatus,
 }
@@ -112,6 +112,8 @@ pub struct ProStatus {
 pub enum AccountError {
     /// トークンが外された（窓口の画面で外した、アカウントを消したなど）。サインインし直す
     SignedOut,
+    /// 窓口が成功でない HTTP の状態を返した（401 を除く）。状態で振り分ける呼び出し元のために持つ
+    Http(u16),
     /// つながらない、または窓口が思わない答えを返した。詳しい中身はログに残す
     Other(String),
 }
@@ -187,7 +189,7 @@ async fn send_signed(
         return Err(AccountError::SignedOut);
     }
     if !response.status().is_success() {
-        return Err(other(format!("HTTP {}", response.status().as_u16())));
+        return Err(AccountError::Http(response.status().as_u16()));
     }
     Ok(response)
 }
@@ -252,31 +254,128 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
     })
 }
 
-/// 同期の最初のページだけを読み、共有の鍵の見分けを得る。
-pub async fn sync_key_id(
-    client: &reqwest::Client,
-    token: &str,
-) -> Result<Option<String>, AccountError> {
-    let request = client.get(format!("{ACCOUNT_URL}/v1/sync?since=0&limit=1"));
-    let response = send_signed(request, token).await?;
-    let body: Value = response.json().await.map_err(other)?;
-    match body.get("key_id") {
+/// 窓口にある同期の鍵の見分けと、同期のパスワードで包んだ鍵（docs/sync.md「同期のパスワード」）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncKey {
+    pub key_id: Option<String>,
+    pub wrapped_key: Option<String>,
+}
+
+fn optional_string(body: &Value, name: &str) -> Result<Option<String>, AccountError> {
+    match body.get(name) {
         Some(Value::Null) | None => Ok(None),
-        Some(Value::String(key_id)) if !key_id.is_empty() => Ok(Some(key_id.clone())),
-        _ => Err(other("the sync answer has an invalid key ID")),
+        Some(Value::String(value)) if !value.is_empty() => Ok(Some(value.clone())),
+        _ => Err(other(format!("the answer has an invalid {name}"))),
     }
 }
 
-/// 鍵を失くしたときの同期の作り直し。鍵の見分けだけを窓口へ渡す。
-pub async fn reset_sync(
+/// 窓口にある同期の鍵を読む。
+pub async fn sync_key(client: &reqwest::Client, token: &str) -> Result<SyncKey, AccountError> {
+    let request = client.get(format!("{ACCOUNT_URL}/v1/sync/key"));
+    let response = send_signed(request, token).await?;
+    let body: Value = response.json().await.map_err(other)?;
+    Ok(SyncKey {
+        key_id: optional_string(&body, "key_id")?,
+        wrapped_key: optional_string(&body, "wrapped_key")?,
+    })
+}
+
+/// 新しい鍵で同期を始める。`replace` が false（同期を開始）なら、窓口にまだ包んだ鍵が無いときだけ始め、
+/// あれば `Ok(false)`（ほかのデバイスがもう始めた）。true（同期をリセット）なら、窓口の前の写しを消して置き換える
+pub async fn start_sync(
     client: &reqwest::Client,
     token: &str,
     key_id: &str,
-) -> Result<(), AccountError> {
+    wrapped_key: &str,
+    replace: bool,
+) -> Result<bool, AccountError> {
+    let path = if replace { "reset" } else { "start" };
     let request = client
-        .post(format!("{ACCOUNT_URL}/v1/sync/reset"))
-        .json(&json!({ "key_id": key_id }));
-    send_signed(request, token).await.map(|_| ())
+        .post(format!("{ACCOUNT_URL}/v1/sync/{path}"))
+        .json(&json!({ "key_id": key_id, "wrapped_key": wrapped_key }));
+    match send_signed(request, token).await {
+        Ok(_) => Ok(true),
+        Err(AccountError::Http(409)) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// 同期のパスワードを変えた、包み直した鍵を置く。窓口の鍵が `key_id` と違えば（ほかのデバイスがリセットした）`Ok(false)`
+pub async fn put_sync_key(
+    client: &reqwest::Client,
+    token: &str,
+    key_id: &str,
+    wrapped_key: &str,
+) -> Result<bool, AccountError> {
+    let request = client
+        .put(format!("{ACCOUNT_URL}/v1/sync/key"))
+        .json(&json!({ "key_id": key_id, "wrapped_key": wrapped_key }));
+    match send_signed(request, token).await {
+        Ok(_) => Ok(true),
+        Err(AccountError::Http(409)) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// 同じアカウントにサインインしているデバイス（docs/account-server.md「Mawok とアカウントを結ぶ」）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+pub struct SignedInDevice {
+    pub id: String,
+    pub name: String,
+    /// 問い合わせたデバイス自身か
+    pub current: bool,
+}
+
+/// 同じアカウントにサインインしているデバイスの一覧
+pub async fn devices(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<Vec<SignedInDevice>, AccountError> {
+    #[derive(serde::Deserialize)]
+    struct Answer {
+        devices: Vec<SignedInDevice>,
+    }
+    let response = send_signed(client.get(format!("{ACCOUNT_URL}/v1/devices")), token).await?;
+    let answer: Answer = response.json().await.map_err(other)?;
+    Ok(answer.devices)
+}
+
+/// `DELETE /v1/devices/:id` の URL。id はパスの1区切りとして入れる（`/` や `..` を含んでも、ほかの入口を指さない）
+fn device_url(id: &str) -> Result<reqwest::Url, AccountError> {
+    let mut url = reqwest::Url::parse(&format!("{ACCOUNT_URL}/v1/devices")).map_err(other)?;
+    url.path_segments_mut()
+        .map_err(|()| other("the account URL can't have a path"))?
+        .push(id);
+    Ok(url)
+}
+
+/// ほかのデバイスをサインアウトさせる（そのデバイスのトークンを外す）
+pub async fn sign_out_device(
+    client: &reqwest::Client,
+    token: &str,
+    id: &str,
+) -> Result<(), AccountError> {
+    send_signed(client.delete(device_url(id)?), token)
+        .await
+        .map(|_| ())
+}
+
+/// 窓口の一覧で見分けるための、このデバイスの名前（コンピューター名）
+pub fn device_name() -> String {
+    #[cfg(target_os = "macos")]
+    let name = std::process::Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok());
+    #[cfg(not(target_os = "macos"))]
+    let name = std::env::var("COMPUTERNAME").ok();
+    name.map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| crate::APP_NAME.to_string())
 }
 
 /// トークンを外す（Mawok でのサインアウト）。外せなくても、手元のトークンは消す（窓口の画面からも外せる）
@@ -450,6 +549,18 @@ mod tests {
         assert_eq!(
             failure(400, r#"{"error":"bad_request"}"#),
             Failure::Unexpected
+        );
+    }
+
+    #[test]
+    fn puts_a_device_id_into_a_single_path_segment() {
+        assert_eq!(
+            device_url("0123abcd").unwrap().as_str(),
+            format!("{ACCOUNT_URL}/v1/devices/0123abcd")
+        );
+        assert_eq!(
+            device_url("../token").unwrap().as_str(),
+            format!("{ACCOUNT_URL}/v1/devices/..%2Ftoken")
         );
     }
 

@@ -2,7 +2,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use crate::{actions, ai, config, draft_keys, events, sync};
+use crate::{actions, ai, config, draft_keys, events, sync, sync_key};
 
 #[test]
 fn writes_constants() {
@@ -33,7 +33,8 @@ export const CONSTANTS = {{\n\
 \tSH_PREFIX: {:?},\n\
 \tNEW_SNIPPET: {},\n\
 \tSYNCABLE_SETTINGS: {:?},\n\
-\tMODIFIED_SETTINGS: {:?}\n\
+\tMODIFIED_SETTINGS: {:?},\n\
+\tMIN_SYNC_PASSWORD_CHARS: {}\n\
 }} as const;\n\n\
 export const EVENTS = {{\n\
 \tSETTINGS_CHANGED: {:?},\n\
@@ -43,8 +44,6 @@ export const EVENTS = {{\n\
 \tSYNC_APPLIED: {:?},\n\
 \tSYNC_CHOICE_REQUESTED: {:?},\n\
 \tAI_SETTINGS_REQUESTED: {:?},\n\
-\tPAIRING_CODE_ENDED: {:?},\n\
-\tPAIRING_CODE_OFFERED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?},\n\
 \tDRAFT_HIDDEN: {:?},\n\
@@ -64,6 +63,7 @@ export const EVENTS = {{\n\
         new_snippet,
         sync::SYNCABLE_SETTING_NAMES,
         config::modified_setting_names(),
+        sync_key::MIN_PASSWORD_CHARS,
         events::SETTINGS_CHANGED,
         events::DRAFT_HISTORY_CLEARED,
         events::DRAFT_HISTORY_SYNCED,
@@ -71,8 +71,6 @@ export const EVENTS = {{\n\
         events::SYNC_APPLIED,
         events::SYNC_CHOICE_REQUESTED,
         events::AI_SETTINGS_REQUESTED,
-        events::PAIRING_CODE_ENDED,
-        events::PAIRING_CODE_OFFERED,
         events::SHOWN,
         events::HIDE_REQUESTED,
         events::DRAFT_HIDDEN,

@@ -110,7 +110,6 @@ const DEFAULT_CONFIG = {
 	textFontSize: 16,
 	textColorLight: '',
 	textColorDark: '',
-	devices: [],
 	aiService: 'none'
 };
 
@@ -134,8 +133,7 @@ function readConfigFromText(text) {
 		...DEFAULT_CONFIG,
 		...file,
 		textWindowKeys: { ...DEFAULT_DRAFT_KEYS, ...file.textWindowKeys },
-		replacements: (file.replacements ?? []).map((row) => ({ enabled: true, ...row })),
-		devices: (file.devices ?? []).map((row) => ({ sendTo: true, ...row }))
+		replacements: (file.replacements ?? []).map((row) => ({ enabled: true, ...row }))
 	};
 }
 

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { APP_VERSION, PROFILE, PROFILE_ENV, PROFILE_IDENTIFIER } from './app-conf.mjs';
 import { APP_DATA_DIRS } from './config.mjs';
 import { readBackupRecordSync, recordPath, writeJsonAtomicSync } from './files.mjs';
-import { describeForegroundWindow, isMawokRunning, powerShellArgs, runPowerShell } from './os.mjs';
+import { describeForegroundWindow, isMawokRunning, runPowerShell } from './os.mjs';
 import { waitFor } from './wait.mjs';
 import { readTaskbarButtons, WINDOW_TYPE } from './window.mjs';
 
@@ -13,7 +13,7 @@ import { readTaskbarButtons, WINDOW_TYPE } from './window.mjs';
 //
 // MSIX 版は tauri-driver で動かせない (パッケージの中の mawok.exe を WebDriver から起動できない) ので、
 // パッケージの中から WebView2 の開発者ツールの口 (CDP) を開けて起動し、画面が呼ぶのと同じコマンドを
-// `window.__TAURI_INTERNALS__.invoke` で送る。結果は OS の側 (レジストリ・エクスプローラー・ファイアウォール・
+// `window.__TAURI_INTERNALS__.invoke` で送る。結果は OS の側 (レジストリ・エクスプローラー・
 // 通知の履歴・タスクバーの画素・ファイル) で読む。
 //
 // ここのスクリプトは、立ち上げたままの PowerShell (`os.mjs` の runPowerShell) の中で動く。`exit` は書かない
@@ -357,41 +357,6 @@ export async function revealAndRead(port, command) {
 }
 
 /**
- * 受信の規則のうち、`program` を指すものの向き・可否・ネットワークの種類・通信の種類
- *
- * @returns {Promise<Array<{ direction: string, action: string, profile: string, protocol: string, enabled: string }>>}
- */
-export async function readFirewallRules(program) {
-	const stdout = await runPowerShell(
-		`
-$rules = @(Get-NetFirewallApplicationFilter -Program $args[0] -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Get-NetFirewallRule | ForEach-Object {
-    $port = $_ | Get-NetFirewallPortFilter
-    @{ direction = [string]$_.Direction; action = [string]$_.Action; profile = [string]$_.Profile; protocol = [string]$port.Protocol; enabled = [string]$_.Enabled }
-})
-ConvertTo-Json -Compress -InputObject $rules
-`,
-		[program]
-	);
-	return JSON.parse(stdout.trim() || '[]');
-}
-
-/**
- * 出ている、ファイアウォールの「Windows セキュリティの重要な警告」の窓のタイトルの一覧。
- * 受信の規則が無いアプリが初めて待ち受けたときに出る
- */
-export async function listFirewallAlertWindows() {
-	const stdout = await runPowerShell(`
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
-$root = [System.Windows.Automation.AutomationElement]::RootElement
-$names = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition) |
-    ForEach-Object { $_.Current.Name } |
-    Where-Object { $_ -like '*セキュリティの重要な警告*' -or $_ -like '*Security Alert*' })
-ConvertTo-Json -Compress -InputObject $names
-`);
-	return JSON.parse(stdout.trim() || '[]');
-}
-
-/**
  * タスクバーの、名前が `name` で始まるボタンを撮り、アイコンがアクセントカラーの下地に載っているかを見る。
  * 下地は、アクセントの色の一覧 (Explorer\\Accent の AccentPalette の8色) のどれかで塗られる
  * (Windows 11 の実機では palette[3])。ボタンの下の4分の1は、動いている印の線 (これもアクセントの色) なので数えない。
@@ -431,131 +396,6 @@ ConvertTo-Json -Compress -InputObject @{ counted = $width * $rows; accent = $acc
 		[x, y, width, height].map(String)
 	);
 	return { name: button.name, width, height, ...JSON.parse(stdout.trim()) };
-}
-
-// 待ち受けを始めさせるための、仮の共有の鍵。待ち受けは、共有の鍵を持つときにだけ始まる (docs/lan.md)。
-// 鍵だけの項目 (トークンが無い = サインインしていない) を資格情報マネージャーに置いて起動する。
-// トークンが無いので窓口へはつながらず、Pro の状態 (pro-state.json) も要らない
-/** account_credentials.rs の項目名 (CREDENTIAL_USER) と、secrets.rs のサービス名 */
-const SHARED_KEY_USER = 'mawok-account';
-const SHARED_KEY_VALUE = JSON.stringify({ key: 'ab'.repeat(32) });
-const credentialTarget = (user) => `${user}.${PROFILE_IDENTIFIER}`;
-
-// 資格情報を、Mawok の読み書き (windows-native-keyring-store) に合わせて UTF-16LE で読み書きする。
-// cmdkey の `/pass:` は二重引用符を含む値 (JSON) を受け取れず、中身も読めないので、CredWrite・CredRead を直接呼ぶ。
-// 型の定義は呼ぶたびに同じ中身で流す (同じ定義の Add-Type は2回目から何もしない)
-const CREDENTIAL_TYPE = `
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public static class MawokE2eCredential {
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    struct CREDENTIAL {
-        public int Flags; public int Type; public string TargetName; public string Comment;
-        public long LastWritten; public int CredentialBlobSize; public IntPtr CredentialBlob;
-        public int Persist; public int AttributeCount; public IntPtr Attributes;
-        public string TargetAlias; public string UserName;
-    }
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool CredWrite(ref CREDENTIAL credential, int flags);
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool CredRead(string target, int type, int flags, out IntPtr credential);
-    [DllImport("advapi32.dll")]
-    static extern void CredFree(IntPtr buffer);
-    public static void Write(string target, string user, string value) {
-        byte[] blob = System.Text.Encoding.Unicode.GetBytes(value);
-        // Type 1 は CRED_TYPE_GENERIC、Persist 3 は CRED_PERSIST_ENTERPRISE (Mawok が書くときと同じ)。
-        // CRED_PERSIST_LOCAL_MACHINE で置いた項目を Mawok が書き換えると、消した数分後に、置いたときの項目がまた現れる
-        CREDENTIAL credential = new CREDENTIAL { Type = 1, TargetName = target, UserName = user, Persist = 3, CredentialBlobSize = blob.Length };
-        credential.CredentialBlob = Marshal.AllocHGlobal(blob.Length);
-        try {
-            Marshal.Copy(blob, 0, credential.CredentialBlob, blob.Length);
-            if (!CredWrite(ref credential, 0)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-        } finally {
-            Marshal.FreeHGlobal(credential.CredentialBlob);
-        }
-    }
-    // 無ければ null。読めなかったときは例外にする (無いものとして扱うと、利用者の資格情報を仮の鍵で上書きする)
-    public static string Read(string target) {
-        IntPtr pointer;
-        if (!CredRead(target, 1, 0, out pointer)) {
-            int error = Marshal.GetLastWin32Error();
-            // 1168 は ERROR_NOT_FOUND
-            if (error == 1168) return null;
-            throw new System.ComponentModel.Win32Exception(error);
-        }
-        try {
-            CREDENTIAL credential = (CREDENTIAL)Marshal.PtrToStructure(pointer, typeof(CREDENTIAL));
-            byte[] blob = new byte[credential.CredentialBlobSize];
-            Marshal.Copy(credential.CredentialBlob, blob, 0, blob.Length);
-            return System.Text.Encoding.Unicode.GetString(blob);
-        } finally {
-            CredFree(pointer);
-        }
-    }
-}
-"@
-`;
-
-async function writeCredential(target, user, value) {
-	await runPowerShell(
-		`${CREDENTIAL_TYPE}\n[MawokE2eCredential]::Write($args[0], $args[1], $args[2])`,
-		[target, user, value]
-	);
-}
-
-/** 無ければ null */
-async function readCredential(target) {
-	const stdout = await runPowerShell(
-		`${CREDENTIAL_TYPE}\n$value = [MawokE2eCredential]::Read($args[0])\nif ($null -ne $value) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($value)) }`,
-		[target]
-	);
-	const encoded = stdout.trim();
-	return encoded ? Buffer.from(encoded, 'base64').toString('utf8') : null;
-}
-
-// 仮の鍵を置いている間の印。中断されて残ったら、中断のシグナルの処理か次の回が片付ける
-const SHARED_KEY_RECORD_PATH = recordPath('.msix-shared-key.json');
-
-/**
- * 仮の鍵を片付ける。置いたままの値のときだけ消す。
- * 中断の後に利用者が確認コードでデバイスを追加していれば、鍵は本物に替わっているので、触らない
- * (印だけ消す)。同期なので、中断のシグナルを受けたときにも呼べる
- */
-function removeSharedKey() {
-	const target = credentialTarget(SHARED_KEY_USER);
-	try {
-		const script = `${CREDENTIAL_TYPE}\n$value = [MawokE2eCredential]::Read('${target}')\nif ($value -ceq '${SHARED_KEY_VALUE}') { 'yes' }`;
-		const remains = execFileSync('powershell', powerShellArgs(script), { encoding: 'utf8' }).trim();
-		if (remains === 'yes') execFileSync('cmdkey', [`/delete:${target}`], { stdio: 'ignore' });
-	} catch {
-		// 読めなかった・消せなかったときは、仮のものか見分けられないので置いたままにする。
-		// 印も残し、次の回の始めにもう一度片付ける (印を消すと、仮の鍵が残ったまま誰も片付けなくなる)
-		return;
-	}
-	fs.rmSync(SHARED_KEY_RECORD_PATH, { force: true });
-}
-
-/**
- * 置いたままの仮の鍵があれば、片付ける。Mawok を止めてから呼ぶ。
- * 同期なので、中断のシグナルを受けたときにも呼べる
- */
-export function recoverSharedKeyIfAny() {
-	if (fs.existsSync(SHARED_KEY_RECORD_PATH)) removeSharedKey();
-}
-
-/**
- * 待ち受けを始めさせる仮の鍵を置く。Mawok を止めた状態で呼ぶ。
- * この機にアカウントの資格情報が前からあれば (サインインしている・デバイスを追加済み)、触らずに null を返す
- *
- * @returns {Promise<{ restore: () => void } | null>}
- */
-export async function beginSharedKey() {
-	const target = credentialTarget(SHARED_KEY_USER);
-	if ((await readCredential(target)) !== null) return null;
-	writeJsonAtomicSync(SHARED_KEY_RECORD_PATH, { savedAt: new Date().toISOString() });
-	await writeCredential(target, SHARED_KEY_USER, SHARED_KEY_VALUE);
-	return { restore: removeSharedKey };
 }
 
 /** パッケージごとの場所 (`%LOCALAPPDATA%\Packages\<ファミリー名>`) */

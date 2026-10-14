@@ -377,3 +377,129 @@ describe('設定画面の同期', () => {
 			.toBeVisible();
 	});
 });
+
+// 決まりの中身（文字数・一致・符号の振り分け）は src/lib/sync-password.test.ts が見る。ここは、状態ごとの出し分けと流れの代表を見る。
+describe('設定画面の同期のパスワード', () => {
+	/** 同期のパスワードのコマンドが返す失敗。無ければ成功する */
+	let failures: Record<string, string>;
+
+	beforeEach(() => {
+		invoked.mockReset();
+		failures = {};
+		invoked.mockImplementation((command) =>
+			command in failures ? Promise.reject(failures[command]) : Promise.resolve(undefined)
+		);
+	});
+
+	function pro(syncKeyStatus: 'notStarted' | 'needsPassword' | 'ready') {
+		settings.current = settingsView({
+			mawokAccountSignedIn: true,
+			proAvailable: true,
+			syncKeyStatus
+		});
+	}
+
+	it('始めていなければ、パスワードを2回入れて同期を開始する', async () => {
+		pro('notStarted');
+		const screen = await renderAt(m.settings_category_account);
+		const form = screen.getByRole('form', { name: m.settings_sync_password_create_title() });
+		await expect.element(form.getByText(m.settings_sync_password_warning())).toBeVisible();
+		await expect
+			.element(screen.getByRole('switch', { name: m.settings_sync_settings() }))
+			.not.toBeInTheDocument();
+		await form.getByLabelText(m.settings_sync_password(), { exact: true }).fill('password1');
+		await form.getByLabelText(m.settings_sync_password_confirm()).fill('password2');
+		await form.getByRole('button', { name: m.settings_sync_start() }).click();
+		await expect.element(form.getByText(m.sync_password_error_mismatch())).toBeVisible();
+		// 欄に戻ったときも、読み上げで間違いが分かる
+		await expect
+			.element(form.getByLabelText(m.settings_sync_password_confirm()))
+			.toHaveAccessibleDescription(m.sync_password_error_mismatch());
+		expect(callsOf(invoked, 'start_sync')).toHaveLength(0);
+
+		await form.getByLabelText(m.settings_sync_password_confirm()).fill('password1');
+		await form.getByRole('button', { name: m.settings_sync_start() }).click();
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('start_sync', { password: 'password1', replace: false })
+		);
+	});
+
+	it('ほかのデバイスで始めていれば、パスワードを入れる。違えば欄の下に出す', async () => {
+		pro('needsPassword');
+		failures.unlock_sync = 'sync.wrong_password';
+		const screen = await renderAt(m.settings_category_account);
+		const form = screen.getByRole('form', { name: m.settings_sync_password_enter_title() });
+		await form.getByLabelText(m.settings_sync_password()).fill('wrong-password');
+		await form.getByRole('button', { name: m.settings_sync_start() }).click();
+		await expect.element(form.getByText(m.sync_password_error_incorrect())).toBeVisible();
+		expect(invoked).toHaveBeenCalledWith('unlock_sync', { password: 'wrong-password' });
+	});
+
+	it('パスワードを忘れたら、確かめてから新しいパスワードで始め直す', async () => {
+		pro('needsPassword');
+		const screen = await renderAt(m.settings_category_account);
+		await screen.getByRole('button', { name: m.settings_sync_password_forgot() }).click();
+		const dialog = screen.getByRole('alertdialog', { name: m.settings_sync_reset_confirm_title() });
+		await dialog.getByRole('button', { name: m.settings_sync_reset_confirm_start() }).click();
+		const form = screen.getByRole('form', { name: m.settings_sync_password_create_title() });
+		await expect.element(form).toBeVisible();
+		// 作るのをやめたら、入れる欄に戻る（窓口の写しは、作り終えるまで消さない）
+		await form.getByRole('button', { name: m.common_cancel() }).click();
+		await expect
+			.element(screen.getByRole('form', { name: m.settings_sync_password_enter_title() }))
+			.toBeVisible();
+		expect(callsOf(invoked, 'start_sync')).toHaveLength(0);
+	});
+
+	it('同期していれば、今のパスワードを確かめて変える', async () => {
+		pro('ready');
+		const screen = await renderAt(m.settings_category_account);
+		await expect
+			.element(screen.getByRole('switch', { name: m.settings_sync_settings() }))
+			.toBeVisible();
+		await screen.getByRole('button', { name: m.settings_sync_password_change() }).click();
+		const form = screen.getByRole('form', { name: m.settings_sync_password_change_title() });
+		await form.getByLabelText(m.settings_sync_password_current()).fill('old-password');
+		await form.getByLabelText(m.settings_sync_password_new(), { exact: true }).fill('new-password');
+		await form.getByLabelText(m.settings_sync_password_new_confirm()).fill('new-password');
+		await form.getByRole('button', { name: m.settings_sync_password_save() }).click();
+		await expect.element(screen.getByText(m.settings_sync_password_changed())).toBeVisible();
+		expect(invoked).toHaveBeenCalledWith('change_sync_password', {
+			current: 'old-password',
+			password: 'new-password'
+		});
+	});
+
+	it('窓口の状態が変わっていたら、エラーを出さずに欄を閉じる', async () => {
+		pro('ready');
+		failures.change_sync_password = 'sync.state_changed';
+		const screen = await renderAt(m.settings_category_account);
+		await screen.getByRole('button', { name: m.settings_sync_password_change() }).click();
+		const form = screen.getByRole('form', { name: m.settings_sync_password_change_title() });
+		await form.getByLabelText(m.settings_sync_password_current()).fill('old-password');
+		await form.getByLabelText(m.settings_sync_password_new(), { exact: true }).fill('new-password');
+		await form.getByLabelText(m.settings_sync_password_new_confirm()).fill('new-password');
+		await form.getByRole('button', { name: m.settings_sync_password_save() }).click();
+		await expect.element(form).not.toBeInTheDocument();
+		expect(screen.getByText('sync.state_changed').query()).toBeNull();
+		expect(screen.getByText(m.settings_sync_password_changed()).query()).toBeNull();
+	});
+
+	it('同期していない状態に移ったら、書きかけの変更の欄を閉じる', async () => {
+		pro('ready');
+		const screen = await renderAt(m.settings_category_account);
+		await screen.getByRole('button', { name: m.settings_sync_password_change() }).click();
+		const form = screen.getByRole('form', { name: m.settings_sync_password_change_title() });
+		await expect.element(form).toBeVisible();
+		// ほかのデバイスのリセットで「入力」へ移り、入れ直して戻る
+		pro('needsPassword');
+		await expect
+			.element(screen.getByRole('form', { name: m.settings_sync_password_enter_title() }))
+			.toBeVisible();
+		pro('ready');
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_sync_password_change() }))
+			.toBeVisible();
+		expect(form.query()).toBeNull();
+	});
+});

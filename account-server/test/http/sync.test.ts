@@ -11,6 +11,15 @@ async function makePro(email: string) {
 	return account;
 }
 
+/** 同期を始める (包んだ鍵を置く)。書けるのは始めた写しだけ。 */
+function start(token: string, key = KEY) {
+	return app('/v1/sync/start', token, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ key_id: key, wrapped_key: 'wrapped' })
+	});
+}
+
 function put(token: string, body: unknown) {
 	return app('/v1/sync', token, {
 		method: 'PUT',
@@ -24,6 +33,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-read@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		expect(
 			await (
 				await put(token, {
@@ -61,6 +71,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-conflict@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		await put(token, {
 			key_id: KEY,
 			items: [{ collection: 'settings', id: 'one', base_seq: null, deleted: false, data: 'AQ==' }]
@@ -91,6 +102,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-hundred@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		const items = Array.from({ length: 100 }, (_, n) => ({
 			collection: 'settings' as const,
 			id: `item-${n}`,
@@ -110,6 +122,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-concurrent@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		const responses = await Promise.all(
 			['left', 'right'].map((id) =>
 				put(token, {
@@ -127,6 +140,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-limits@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		const response = await put(token, {
 			key_id: KEY,
 			items: [
@@ -147,6 +161,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-reset@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		await put(token, {
 			key_id: KEY,
 			items: [{ collection: 'settings', id: 'one', base_seq: null, deleted: false, data: 'AQ==' }]
@@ -156,7 +171,7 @@ describe('sync HTTP', () => {
 				await app('/v1/sync/reset', token, {
 					method: 'POST',
 					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ key_id: 'b'.repeat(16) })
+					body: JSON.stringify({ key_id: 'b'.repeat(16), wrapped_key: 'wrapped-b' })
 				})
 			).json()
 		).toEqual({ seq: 2 });
@@ -168,10 +183,50 @@ describe('sync HTTP', () => {
 		});
 	});
 
+	it('keeps the wrapped key with the key id, and replaces it only for the same key', async () => {
+		const email = 'sync-key@example.com';
+		const { token } = await linkApp(email);
+		await makePro(email);
+		const key = () => app('/v1/sync/key', token).then((r) => r.json());
+		const send = (method: 'POST' | 'PUT', path: string, body: unknown) =>
+			app(path, token, {
+				method,
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+		expect(await key()).toEqual({ key_id: null, wrapped_key: null });
+		// 包んだ鍵の無い始め方は受けない。
+		expect((await send('POST', '/v1/sync/start', { key_id: KEY })).status).toBe(400);
+		expect((await send('POST', '/v1/sync/start', { key_id: KEY, wrapped_key: 'one' })).status).toBe(
+			200
+		);
+		expect(await key()).toEqual({ key_id: KEY, wrapped_key: 'one' });
+		// 始めた後の「同期を開始」は 409。始め直すのはリセットだけ (場合ごとの中身は test/sync.test.ts)。
+		const again = await send('POST', '/v1/sync/start', { key_id: KEY, wrapped_key: 'other' });
+		expect(again.status).toBe(409);
+		expect(await again.json()).toEqual({ error: 'already_started' });
+		expect((await send('PUT', '/v1/sync/key', { key_id: KEY, wrapped_key: 'two' })).status).toBe(
+			204
+		);
+		expect(await key()).toEqual({ key_id: KEY, wrapped_key: 'two' });
+		// ほかのデバイスがリセットした後の、前の鍵の包み直しは置かない。
+		const replaced = await send('PUT', '/v1/sync/key', {
+			key_id: 'b'.repeat(16),
+			wrapped_key: 'three'
+		});
+		expect(replaced.status).toBe(409);
+		expect(await replaced.json()).toEqual({ error: 'key_mismatch' });
+		expect(
+			(await send('PUT', '/v1/sync/key', { key_id: KEY, wrapped_key: 'x'.repeat(1025) })).status
+		).toBe(400);
+		expect(await key()).toEqual({ key_id: KEY, wrapped_key: 'two' });
+	});
+
 	it('ends a rebuild at the account seq so a purged tombstone does not reset it again', async () => {
 		const email = 'sync-next@example.com';
 		const { token } = await linkApp(email);
 		const account = await makePro(email);
+		await start(token);
 		await put(token, {
 			key_id: KEY,
 			items: [
@@ -196,6 +251,7 @@ describe('sync HTTP', () => {
 	it('requires Pro before reading or writing', async () => {
 		const { token } = await linkApp('sync-no-pro@example.com');
 		expect((await app('/v1/sync', token)).status).toBe(403);
+		expect((await app('/v1/sync/key', token)).status).toBe(403);
 		expect(
 			(
 				await put(token, {

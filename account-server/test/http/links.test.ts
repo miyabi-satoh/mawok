@@ -130,4 +130,44 @@ describe('app tokens', () => {
 			'登録しているデバイスはありません'
 		);
 	});
+
+	it('lists the signed-in devices to Mawok and signs another one out', async () => {
+		const email = 'devices@example.com';
+		const first = await linkApp(email);
+		const { verifier, fields } = await newLink('Taro の Windows');
+		const second = await (
+			await exchange(await approve(fields, first.cookie), verifier)
+		).json<{ token: string }>();
+		const list = await (
+			await app('/v1/devices', first.token)
+		).json<{
+			devices: Array<{ id: string; name: string; current: boolean }>;
+		}>();
+		expect(list.devices.map(({ name, current }) => ({ name, current }))).toEqual([
+			{ name: 'mac-mini', current: true },
+			{ name: 'Taro の Windows', current: false }
+		]);
+		const other = list.devices.find((device) => !device.current)!;
+		// ほかのアカウントのトークンでは外せない。
+		const stranger = await linkApp('devices-stranger@example.com');
+		expect(
+			(await app(`/v1/devices/${other.id}`, stranger.token, { method: 'DELETE' })).status
+		).toBe(404);
+		// 自分のトークンはここでは外さない (自分のサインアウトは DELETE /v1/token)。
+		const self = list.devices.find((device) => device.current)!;
+		const refused = await app(`/v1/devices/${self.id}`, first.token, { method: 'DELETE' });
+		expect(refused.status).toBe(400);
+		expect(await refused.json()).toEqual({ error: 'current_device' });
+		expect((await app('/v1/balance', second.token)).status).toBe(200);
+		expect((await app(`/v1/devices/${other.id}`, first.token, { method: 'DELETE' })).status).toBe(
+			204
+		);
+		expect((await app('/v1/balance', second.token)).status).toBe(401);
+		expect((await app(`/v1/devices/${other.id}`, first.token, { method: 'DELETE' })).status).toBe(
+			404
+		);
+		expect(
+			(await (await app('/v1/devices', first.token)).json<{ devices: unknown[] }>()).devices
+		).toHaveLength(1);
+	});
 });

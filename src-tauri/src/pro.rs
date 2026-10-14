@@ -7,9 +7,8 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
-use crate::{account::ProStatus, atomic_file, lan};
+use crate::{account::ProStatus, atomic_file};
 
 pub const STATE_FILE_NAME: &str = "pro-state.json";
 const GRACE_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -36,11 +35,6 @@ impl State {
             && self
                 .until
                 .is_some_and(|until| now <= until.saturating_add(GRACE_SECONDS))
-    }
-
-    /// 同期の鍵を受け渡す相手を探す名乗りに、アカウントIDをそのまま流さず、同じアカウントでだけ同じになる固定長の印にする。
-    pub fn account_tag(&self) -> [u8; lan::ACCOUNT_TAG_LEN] {
-        Sha256::digest(self.account_id.as_bytes()).into()
     }
 }
 
@@ -94,16 +88,5 @@ mod tests {
             active: false,
         };
         assert!(!state.available_at(1_000));
-    }
-
-    #[test]
-    fn hashes_the_account_id_before_sending_it_over_lan() {
-        let state = State {
-            account_id: "account".to_string(),
-            until: None,
-            active: true,
-        };
-        assert_ne!(state.account_tag().as_slice(), state.account_id.as_bytes());
-        assert_eq!(state.account_tag(), state.account_tag());
     }
 }

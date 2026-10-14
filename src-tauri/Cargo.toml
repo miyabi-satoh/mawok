@@ -37,9 +37,6 @@ tauri-plugin-dialog = "~2.7.1"
 sys-locale = "0.3.2"
 log = "0.4.34"
 tauri-plugin-log = "2.9.2"
-spake2 = "0.4.0"
-snow = "0.10.0"
-if-addrs = "0.15.0"
 getrandom = "0.4.3"
 # コマンドのアクションの文字コード（command.rs の encode_input・decode_output）。UTF-16 へ書き出す口は持たないので、そこだけ自前で書く
 encoding_rs = "0.8.41"
@@ -49,7 +46,7 @@ serde_json = "1.0.151"
 # keyring 4.x の既定（v1）は Linux のストアも抱えるので、keyring-core と OS ごとのストア（下の target の依存）を直接使う
 keyring-core = "1.0.0"
 # AI のアクション（ai.rs）で AI サービスを呼ぶ。TLS は rustls にし、暗号の実装は ring を選ぶ（rustls の既定の aws-lc-rs は、Windows のビルドに NASM などが要るため。
-# ring は snow がすでに使っていて、Windows でもビルドできている）。証明書は OS の証明書ストアで確かめる（rustls-platform-verifier）。
+# ring は Windows でもビルドできている）。証明書は OS の証明書ストアで確かめる（rustls-platform-verifier）。
 # プロキシは OS の設定に従う（system-proxy）。HTTP/2 は1回の問い合わせには要らないので入れない
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "system-proxy"] }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
@@ -58,12 +55,14 @@ unicode-segmentation = "1.13.3"
 # コマンドのアクション（command.rs）で、シェルを起動して標準入出力をやり取りする。Mawok のアカウントと結ぶとき、
 # 窓口から戻るブラウザを 127.0.0.1 で待ち受ける（lib.rs の start_mawok_sign_in）。Tauri の依存でもともと入っている
 tokio = { version = "1.53.1", features = ["process", "io-util", "time", "macros", "net", "rt", "sync"] }
-# Mawok のアカウントと結ぶ申し込みの、検証用の値のハッシュ（account.rs の LinkRequest）。snow・spake2 の依存でもともと入っている
+# Mawok のアカウントと結ぶ申し込みの、検証用の値のハッシュ（account.rs の LinkRequest）
 sha2 = "0.10.9"
-# 共有の鍵から、使い道ごとの鍵を導く（shared_key.rs）。spake2 の依存でもともと入っている
+# 同期の鍵から、使い道ごとの鍵を導く（sync_key.rs）
 hkdf = "0.12.4"
-# 同期する項目の暗号 (docs/sync.md「暗号」)。snow が使っている版に揃える
+# 同期する項目の暗号と、同期の鍵を包む暗号 (docs/sync.md「暗号」「同期のパスワード」)
 chacha20poly1305 = "0.10.1"
+# 同期のパスワードから、同期の鍵を包む鍵を作る (sync_key.rs)。PHC 文字列は使わないので password-hash の feature は入れない
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
 base64 = "0.22.1"
 
 
@@ -72,6 +71,13 @@ base64 = "0.22.1"
 # バックトレースのファイル名と行番号は残るので、ログから追う分には困らない
 [profile.dev]
 debug = "line-tables-only"
+
+# 同期のパスワードの Argon2id (64 MiB・3回) は、最適化しないと開発版とテストで数十秒かかる。そこだけ最適化して、配る版と同じくらいの時間にする
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
 
 [profile.release]
 codegen-units = 1

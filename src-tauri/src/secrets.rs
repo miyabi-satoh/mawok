@@ -11,7 +11,7 @@ use keyring_core::{api::CredentialStore, Entry, Error};
 /// 資格情報の service。user に AI サービスごとの名前（`gemini-api-key` など）を入れて、サービスごとに分けて置く
 const SERVICE: &str = "com.amiiby.mawok";
 
-/// プロファイルを分けた起動は、常用のアカウントのトークンと共有の鍵を読まない
+/// プロファイルを分けた起動は、常用のアカウントのトークンと同期の鍵を読まない
 fn service() -> String {
     crate::profile::scoped(SERVICE)
 }

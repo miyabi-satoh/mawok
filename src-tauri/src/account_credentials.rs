@@ -1,5 +1,5 @@
-//! Mawok のアカウントのトークンと共有の鍵を、1つの資格情報の項目に置く。
-//! どちらか片方だけのこともある（サインインせずにデバイスを追加した、鍵を持たずにサインインしている）。
+//! Mawok のアカウントのトークンと同期の鍵（docs/sync.md「同期のパスワード」）を、1つの資格情報の項目に置く。
+//! 鍵はサインインしている間だけ置く。同期を始めていなければ、トークンだけになる。
 
 use std::sync::Mutex;
 
@@ -42,11 +42,6 @@ fn with_key(mut credentials: Credentials, key: Option<&str>) -> Credentials {
     credentials
 }
 
-fn with_token(mut credentials: Credentials, token: Option<&str>) -> Credentials {
-    credentials.token = token.map(str::to_string);
-    credentials
-}
-
 /// 項目が無いときは、空の中身として読む。
 fn read_or_empty_locked() -> Result<Credentials, String> {
     match read_locked() {
@@ -68,7 +63,7 @@ fn write_locked(credentials: &Credentials) -> Result<(), String> {
 }
 
 /// 項目の有無だけを確かめる。前のトークンだけがある間も、読む入口で移し替えられるように見つける。
-/// 鍵だけの項目でも true なので、サインインしているかは `has_token` で確かめる
+/// 鍵だけの項目（サインアウトと鍵の保存が重なったときに残りうる）でも true なので、サインインしているかは `has_token` で確かめる
 pub fn exists() -> Result<bool, String> {
     if secrets::exists(CREDENTIAL_USER)? {
         return Ok(true);
@@ -126,22 +121,20 @@ pub fn read_key() -> Result<Option<String>, ReadError> {
     Ok(read_locked()?.key)
 }
 
-/// サインインで受け取ったトークンを置く。共有の鍵は残す。
-/// 前の中身が読めないときは、読まずに置き換える（読めない項目が残っていてもサインインできるようにするため）
+/// サインインで受け取ったトークンを置く。前の同期の鍵は残さない（別のアカウントの鍵で同期しないよう、サインインしたら
+/// 同期のパスワードを入れ直す）。前の中身は読まずに置き換える（読めない項目が残っていてもサインインできるようにするため）
 pub fn write_token(token: &str) -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    let key = match read_locked() {
-        Ok(credentials) => credentials.key,
-        Err(ReadError::NotFound) => None,
-        Err(ReadError::Unreadable(error)) => {
-            warn!("couldn't read the previous credentials, the shared key is dropped: {error}");
-            None
-        }
-    };
     write_locked(&Credentials {
         token: Some(token.to_string()),
-        key,
+        key: None,
     })
+}
+
+/// 同期の鍵だけを消す（窓口に断られて、置き換える前に鍵が無かったとき）。トークンは残す
+pub fn clear_key() -> Result<(), String> {
+    let _access = ACCESS.lock().unwrap();
+    write_locked(&with_key(read_or_empty_locked()?, None))
 }
 
 pub fn write_key(key: &str) -> Result<(), String> {
@@ -149,28 +142,13 @@ pub fn write_key(key: &str) -> Result<(), String> {
     write_locked(&with_key(read_or_empty_locked()?, Some(key)))
 }
 
-pub fn clear_key() -> Result<(), String> {
-    let _access = ACCESS.lock().unwrap();
-    write_locked(&with_key(read_or_empty_locked()?, None))
-}
-
-/// サインアウトする。共有の鍵は残す（サインインし直したときに、追加済みのデバイスと同じ鍵のまま同期を続けるため）。
+/// サインアウトする。同期の鍵も一緒に消す（サインインし直したら、同期のパスワードを入れ直す）。
 pub fn delete_token() -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    let read = read_or_empty_locked();
     // 前の項目を先に消す。残ったまま新しい項目だけを消すと、次に読むときに前のトークンが移されて、サインインした状態に戻る
     secrets::delete(LEGACY_TOKEN_USER)?;
     secrets::delete(LEGACY_KEY_USER)?;
-    match read {
-        Ok(credentials) => write_locked(&with_token(credentials, None)),
-        // 読めない項目は、鍵ごと消す。残すと、サインアウトできない
-        Err(error) => {
-            warn!(
-                "couldn't read the credentials, the shared key is deleted with the token: {error}"
-            );
-            secrets::delete(CREDENTIAL_USER)
-        }
-    }
+    secrets::delete(CREDENTIAL_USER)
 }
 
 #[cfg(test)]
@@ -211,14 +189,6 @@ mod tests {
     #[test]
     fn rejects_broken_json() {
         assert!(from_json("{").is_err());
-    }
-
-    #[test]
-    fn keeps_the_key_without_a_token() {
-        let credentials = from_json(r#"{"token":"token","key":"key"}"#).unwrap();
-        let value = to_json(&with_token(credentials, None));
-        assert_eq!(value, r#"{"key":"key"}"#);
-        assert_eq!(from_json(&value).unwrap().token, None);
     }
 
     #[test]

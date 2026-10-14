@@ -7,12 +7,21 @@ import {
 	SYNC_TOTAL_BYTES,
 	getSync,
 	putSync,
+	putSyncKey,
 	purgeSync,
+	resetSync,
 	shouldReset
 } from '../src/sync';
 import { newAccount } from './helpers';
 
 const KEY = 'a'.repeat(16);
+
+/** 書けるのは同期を始めた (包んだ鍵を置いた) 写しだけ。 */
+async function startedAccount() {
+	const account = await newAccount();
+	await resetSync(env, account, { key_id: KEY, wrapped_key: 'wrapped' }, false);
+	return account;
+}
 
 describe('sync', () => {
 	it('resets only outside a rebuild when the saved position was purged or is newer than the server', () => {
@@ -25,11 +34,11 @@ describe('sync', () => {
 	});
 
 	it('keeps every D1 statement below the 100 binding limit at 100 items', () => {
-		expect(SYNC_ACCOUNT_UPDATE_SQL.match(/\?/g) ?? []).toHaveLength(10);
+		expect(SYNC_ACCOUNT_UPDATE_SQL.match(/\?/g) ?? []).toHaveLength(9);
 	});
 
 	it('checks an item and the total before writing anything', async () => {
-		const account = await newAccount();
+		const account = await startedAccount();
 		const item = {
 			collection: 'settings' as const,
 			id: 'one',
@@ -43,10 +52,8 @@ describe('sync', () => {
 		});
 		expect((await getSync(env, account, { since: 0, limit: 10, rebuild: false })).seq).toBe(0);
 
-		await env.DB.prepare(
-			'INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes) VALUES (?, ?, 0, 0, ?)'
-		)
-			.bind(account, KEY, SYNC_TOTAL_BYTES)
+		await env.DB.prepare('UPDATE sync_accounts SET bytes = ? WHERE account_id = ?')
+			.bind(SYNC_TOTAL_BYTES, account)
 			.run();
 		expect(
 			await putSync(env, account, {
@@ -57,7 +64,7 @@ describe('sync', () => {
 	});
 
 	it('answers an old base with the current item, a missing one as deleted, and rejects a different key', async () => {
-		const account = await newAccount();
+		const account = await startedAccount();
 		const item = (id: string, base_seq: number | null, data: string) => ({
 			collection: 'settings' as const,
 			id,
@@ -119,5 +126,57 @@ describe('sync', () => {
 			.bind(active, ended, noSubscription)
 			.all<{ account_id: string; purged_seq: number }>();
 		expect(results).toEqual([{ account_id: active, purged_seq: 3 }]);
+	});
+
+	it('refuses writes to a copy that has not started, so a key is never set without its wrapped key', async () => {
+		const account = await newAccount();
+		const item = {
+			collection: 'settings' as const,
+			id: 'one',
+			base_seq: null,
+			deleted: false,
+			data: 'AQ=='
+		};
+		expect(await putSync(env, account, { key_id: KEY, items: [item] })).toEqual({
+			ok: false,
+			error: 'key_mismatch'
+		});
+		// 前の版が置いた、包んだ鍵の無い key_id も同じ。
+		await env.DB.prepare(
+			'INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes) VALUES (?, ?, 0, 0, 0)'
+		)
+			.bind(account, KEY)
+			.run();
+		expect(await putSync(env, account, { key_id: KEY, items: [item] })).toEqual({
+			ok: false,
+			error: 'key_mismatch'
+		});
+		// パスワードの変更 (包み直し) でも、包んだ鍵を付けて始めさせない。
+		expect(await putSyncKey(env, account, { key_id: KEY, wrapped_key: 'wrapped' })).toBe(
+			'key_mismatch'
+		);
+	});
+
+	it('starts only a copy without a wrapped key, and resets one that has it', async () => {
+		const account = await newAccount();
+		const key = (id: string, wrapped_key: string) => ({ key_id: id, wrapped_key });
+		expect(await resetSync(env, account, key(KEY, 'one'), false)).toEqual({ seq: 0 });
+		await putSync(env, account, {
+			key_id: KEY,
+			items: [{ collection: 'settings', id: 'kept', base_seq: null, deleted: false, data: 'AQ==' }]
+		});
+		// 古い状態のデバイスが始めても、ほかのデバイスの始めた同期を消さない。
+		expect(await resetSync(env, account, key('b'.repeat(16), 'two'), false)).toBe(
+			'already_started'
+		);
+		expect(
+			(await getSync(env, account, { since: 0, limit: 10, rebuild: false })).items
+		).toHaveLength(1);
+		expect(await resetSync(env, account, key('b'.repeat(16), 'two'), true)).toEqual({ seq: 2 });
+		expect(await getSync(env, account, { since: 0, limit: 10, rebuild: false })).toMatchObject({
+			key_id: 'b'.repeat(16),
+			items: []
+		});
+		expect(await resetSync(env, account, { key_id: KEY }, true)).toBe('invalid_request');
 	});
 });

@@ -29,7 +29,6 @@ import {
 	addPackage,
 	appUserModelId,
 	backupLocalCache,
-	beginSharedKey,
 	builtMsixPath,
 	clearLocalCacheBackup,
 	clearOriginalRecord,
@@ -43,16 +42,13 @@ import {
 	launchInPackage,
 	launchNormally,
 	listRunningMawokPaths,
-	listFirewallAlertWindows,
 	measureTaskbarIconPlate,
 	packageDataDir,
-	readFirewallRules,
 	readOriginalRecord,
 	readPackage,
 	readStartupTaskState,
 	readToastTitles,
 	recoverHeldAppDataIfAny,
-	recoverSharedKeyIfAny,
 	redirectedDataDirs,
 	removePackage,
 	restoreLocalCache,
@@ -91,11 +87,6 @@ before(async () => {
 			if (!touched) return;
 			stopMawokSync();
 			try {
-				recoverSharedKeyIfAny();
-			} catch (error) {
-				console.error('[msix] 中断時に、仮の共有の鍵を片付けられませんでした:', error);
-			}
-			try {
 				recoverHeldAppDataIfAny();
 			} catch (error) {
 				console.error('[msix] 中断時に、退かしたフォルダーを戻せませんでした:', error);
@@ -129,7 +120,6 @@ before(async () => {
 	await stopMawok();
 	await recoverStaleBackupIfAny();
 	recoverHeldAppDataIfAny();
-	recoverSharedKeyIfAny();
 	if (!recorded) {
 		// 外すと LocalCache が消えるので、元の版の分を先に写す。前の回の記録があるときは、そのときに写してある。
 		// 写したかどうか ('copied'・'empty') を記録に残し、後始末はそれを見て戻す (控えのフォルダーがあるかでは決めない。
@@ -231,12 +221,9 @@ describe('EXE 版のファイルがある環境', () => {
 	let config;
 	/** 起動する前のログの位置。前の起動のログを読まないため */
 	let logMark;
-	/** 待ち受けを始めさせるための、仮の共有の鍵。この機にアカウントの資格情報が前からあれば置かず、null */
-	let sharedKey;
 
 	before(async () => {
 		config = await beginTestConfig({ language: 'ja', autostart: false });
-		sharedKey = await beginSharedKey();
 		logMark = markLog(LOG_FILE);
 		await launchInPackage(pkg, CDP_PORT);
 	});
@@ -246,11 +233,7 @@ describe('EXE 版のファイルがある環境', () => {
 			await closeLeftoverTrayMenu(await getMawokProcessId().catch(() => null));
 			await stopMawok();
 		} finally {
-			try {
-				sharedKey?.restore();
-			} finally {
-				await config?.restore();
-			}
+			await config?.restore();
 		}
 	});
 
@@ -260,38 +243,6 @@ describe('EXE 版のファイルがある環境', () => {
 			(text) => text.includes('packaged (MSIX): true'),
 			{ label: 'ログの packaged (MSIX): true' }
 		);
-	});
-
-	test('ファイアウォール: マニフェストの受信の規則があり、待ち受けても許可のダイアログが出ない', async (t) => {
-		const program = path.join(pkg.installLocation, 'mawok.exe');
-		const rules = await readFirewallRules(program);
-		const inbound = rules.filter((rule) => rule.direction === 'Inbound');
-		for (const protocol of ['TCP', 'UDP']) {
-			assert.ok(
-				inbound.some(
-					(rule) =>
-						rule.protocol === protocol &&
-						rule.action === 'Allow' &&
-						rule.profile === 'Any' &&
-						rule.enabled === 'True'
-				),
-				`${protocol} の受信をすべてのネットワークで許す規則がありません: ${JSON.stringify(rules)}`
-			);
-		}
-		if (!sharedKey) {
-			t.skip(
-				'この機にアカウントの資格情報が前からあるので、待ち受けを始めさせる仮の共有の鍵を置けません (規則だけを見ました)'
-			);
-			return;
-		}
-		await waitFor(
-			() => readLogSince(LOG_FILE, logMark),
-			(text) => text.includes('lan: listening on tcp'),
-			{ label: '待ち受けの開始', timeout: 20000 }
-		);
-		// ダイアログは待ち受けを始めてすぐに出るので、少し見てから確かめる
-		await new Promise((resolve) => setTimeout(resolve, 3000));
-		assert.deepEqual(await listFirewallAlertWindows(), []);
 	});
 
 	test('ログイン時の起動: 設定のオン・オフで StartupTask が有効・無効になる', async () => {

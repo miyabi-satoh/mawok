@@ -74,28 +74,17 @@ From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and p
 
 When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy credits" under "AI" in Settings to open the purchase page in your browser.
 
-## Add a device
-
-To sync settings and history (see the next section, "Sync settings and history") between your own devices, connect them to the same network and add them.
-
-1. On both devices, open "Devices" in Settings.
-2. On one device, select "Show verification code".
-3. On the other device, enter that verification code and select "Connect".
-
-From the third device onward, show a verification code on a device you have already added, and enter it on the new device.
-
-Devices you have added appear automatically under "Added devices" in "Devices" in Settings when they are on the same network. To disconnect all other devices, select "Disconnect" next to "Disconnect all devices" under "Devices" in Settings, then add the devices you still use again.
-
-{macos:If asked to allow access to the local network, allow it.}{windows:If asked to allow access through the firewall, allow it.}
-
 ## Sync settings and history
 
 With Pro, your settings and history stay the same across the devices on your account.
 
-1. Sign in to Mawok under "Account" in Settings. With Pro, syncing starts.
-2. To use another device too, sign in on that device, then add it by following the steps in "Add a device". If you have already added it, syncing starts when you sign in.
+1. Sign in to Mawok under "Account" in Settings.
+2. Under "Create sync password", enter a password twice and select "Start syncing".
+3. Sign in on your other devices too, enter the same password under "Enter sync password", and select "Start syncing".
 
-The device you added receives the same settings and history.
+To change the password, select "Change" next to "Sync password" under "Account" in Settings. You don't need to enter it again on your other devices.
+
+If you forget your password, it can't be recovered. Select "Forgot password?" or "Reset sync..." to start over with a new password. Your sync data on the Mawok server is deleted, but the data on each device is kept. Enter the new password on your other devices.
 
 To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. Right after copying, it may not have arrived yet. Wait a moment and show the text window again.
 
@@ -132,7 +121,6 @@ Settings you've changed from the default show a vertical line at the left edge o
 ## If something does not work
 
 - **The hotkey does not work**: Another app uses the same key. ⚠ appears in the {macos:menu bar}{windows:system tray} menu. Choose a different key under "Keyboard" in Settings.
-- **Cannot add a device**: Check that Mawok is running on the other device and that both devices are on the same network.{macos: Also check that Mawok is enabled in System Settings > Privacy & Security > Local Network.}{windows:}
 ::: macos
 - **"Couldn't read the API key" appears**: After you reinstall the app, you will be asked to allow access to the Keychain. Allow it.
 :::
@@ -183,7 +171,6 @@ Changes you make directly take effect after you restart the app. The file contai
 | `[text_window_keys]`             | The default keys in "Keyboard shortcuts" | Keys in the text window, per action, such as `copy` and `history_older`. An empty string means unassigned |
 | `[[replacements]]`               | None                             | One replacement entry (`from`, `to`, `enabled`)                          |
 | `[[snippets]]`                   | Default snippets for the display language | One snippet (`name`, `body`, `output` [`"replace"`, `"insert"`, `"none"`], `encoding` [`"utf-8"`, `"shift_jis"`, and so on], `enabled`) |
-| `[[devices]]`                    | None                             | Devices you have added                                                    |
 | `ai_service`                     | `"none"`                         | AI service used for AI actions (`@ai`) (`"none"`, `"mawok"`, `"gemini"`, `"anthropic"`, `"openai"`) |
 | `ai_consent`                     | None                             | AI services whose notice about what is sent and how it is handled you accepted |
 | `[ai_models]`                    | Default model for each AI service | AI model, per AI service (`gemini = "…"`, `anthropic = "…"`, and so on)  |
