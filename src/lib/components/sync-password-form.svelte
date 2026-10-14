@@ -8,22 +8,27 @@
 		MIN_SYNC_PASSWORD_CHARS,
 		newPasswordErrors,
 		syncPasswordFailure,
+		syncStateChanged,
 		type SyncPasswordErrors
 	} from '$lib/sync-password';
 
 	/**
 	 * 同期のパスワードの欄（docs/sync.md「同期のパスワード」）。
 	 * create は「同期を開始」と「同期をリセット」、enter はほかのデバイスで始めた同期に加わるとき、change は変えるとき。
-	 * 欄に関わる失敗は欄の下に出し、ほかの失敗は onfailure に渡す（画面のエラーの帯に出す）
+	 * 欄に関わる失敗は欄の下に出し、ほかの失敗は onfailure に渡す（画面のエラーの帯に出す）。
+	 * 窓口の状態が変わっていたら（ほかのデバイスが始めた・リセットした）、oncancel で欄を閉じ、今の状態の欄に任せる。
+	 * replace は create のときだけ使い、窓口の写しを消して始め直す（「同期をリセット」）か
 	 */
 	let {
 		mode,
 		onfailure,
 		ondone,
 		oncancel,
-		onforgot
+		onforgot,
+		replace = false
 	}: {
 		mode: 'create' | 'enter' | 'change';
+		replace?: boolean;
 		onfailure: (error: unknown) => void;
 		ondone?: () => void;
 		oncancel?: () => void;
@@ -56,11 +61,15 @@
 		if (Object.keys(errors).length > 0) return;
 		busy = true;
 		try {
-			if (mode === 'create') await invoke('start_sync', { password });
+			if (mode === 'create') await invoke('start_sync', { password, replace });
 			else if (mode === 'enter') await invoke('unlock_sync', { password });
 			else await invoke('change_sync_password', { current, password });
 		} catch (error) {
 			busy = false;
+			if (syncStateChanged(error)) {
+				oncancel?.();
+				return;
+			}
 			const fieldErrors = syncPasswordFailure(error, mode === 'change' ? 'current' : 'password');
 			if (fieldErrors) errors = fieldErrors;
 			else onfailure(error);

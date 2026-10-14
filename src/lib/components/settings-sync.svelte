@@ -60,6 +60,7 @@
 		<SettingsRow>
 			<SyncPasswordForm
 				mode="create"
+				replace={resetting}
 				{onfailure}
 				ondone={() => (resetting = false)}
 				oncancel={resetting ? () => (resetting = false) : undefined}

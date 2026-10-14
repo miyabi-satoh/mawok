@@ -54,7 +54,11 @@ fn read_or_empty_locked() -> Result<Credentials, String> {
     }
 }
 
+/// トークンも鍵も無くなったら、項目ごと消す。
 fn write_locked(credentials: &Credentials) -> Result<(), String> {
+    if credentials.token.is_none() && credentials.key.is_none() {
+        return secrets::delete(CREDENTIAL_USER);
+    }
     secrets::write(CREDENTIAL_USER, &to_json(credentials))
 }
 
@@ -117,22 +121,20 @@ pub fn read_key() -> Result<Option<String>, ReadError> {
     Ok(read_locked()?.key)
 }
 
-/// サインインで受け取ったトークンを置く。同期の鍵は残す（別のアカウントの鍵なら、窓口と照らしたときに違うと分かる）。
-/// 前の中身が読めないときは、読まずに置き換える（読めない項目が残っていてもサインインできるようにするため）
+/// サインインで受け取ったトークンを置く。前の同期の鍵は残さない（別のアカウントの鍵で同期しないよう、サインインしたら
+/// 同期のパスワードを入れ直す）。前の中身は読まずに置き換える（読めない項目が残っていてもサインインできるようにするため）
 pub fn write_token(token: &str) -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
-    let key = match read_locked() {
-        Ok(credentials) => credentials.key,
-        Err(ReadError::NotFound) => None,
-        Err(ReadError::Unreadable(error)) => {
-            warn!("couldn't read the previous credentials, the sync key is dropped: {error}");
-            None
-        }
-    };
     write_locked(&Credentials {
         token: Some(token.to_string()),
-        key,
+        key: None,
     })
+}
+
+/// 同期の鍵だけを消す（窓口に断られて、置き換える前に鍵が無かったとき）。トークンは残す
+pub fn clear_key() -> Result<(), String> {
+    let _access = ACCESS.lock().unwrap();
+    write_locked(&with_key(read_or_empty_locked()?, None))
 }
 
 pub fn write_key(key: &str) -> Result<(), String> {
@@ -173,6 +175,15 @@ mod tests {
         let value = to_json(&credentials);
         assert_eq!(value, r#"{"token":"token","key":"key"}"#);
         assert_eq!(from_json(&value), Ok(credentials));
+    }
+
+    #[test]
+    fn removes_the_key_without_changing_the_token() {
+        let credentials = from_json(r#"{"token":"token","key":"key"}"#).unwrap();
+        assert_eq!(
+            to_json(&with_key(credentials, None)),
+            r#"{"token":"token"}"#
+        );
     }
 
     #[test]

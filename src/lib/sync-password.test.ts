@@ -4,7 +4,8 @@ import {
 	MIN_SYNC_PASSWORD_CHARS,
 	newPasswordErrors,
 	syncPanel,
-	syncPasswordFailure
+	syncPasswordFailure,
+	syncStateChanged
 } from './sync-password';
 
 const tooShort = () => m.sync_password_error_too_short({ count: MIN_SYNC_PASSWORD_CHARS });
@@ -44,6 +45,12 @@ describe('syncPasswordFailure', () => {
 
 	it('ほかの失敗は欄に出さない', () => {
 		expect(syncPasswordFailure('account.unreachable', 'password')).toBeUndefined();
+		expect(syncPasswordFailure('sync.state_changed', 'password')).toBeUndefined();
+	});
+
+	it('窓口の状態が変わっていたことを、ほかの失敗と見分ける', () => {
+		expect(syncStateChanged('sync.state_changed')).toBe(true);
+		expect(syncStateChanged('account.unreachable')).toBe(false);
 	});
 });
 

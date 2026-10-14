@@ -34,7 +34,7 @@
 4. Mawok は `state` を照らしてから、`POST /v1/links/token` でコードと `verifier` をトークンに替え、ブラウザに結果のページを返す。窓口はコードを照らす前に消し、`verifier` の SHA-256 が `challenge` と合うときだけトークンを渡す。待ち受けを他のプロセスに取られても、`verifier` が無いのでトークンに替えられない（RFC 7636 の PKCE と同じ考え方。窓口と Mawok の間だけの取り決めなので、`challenge` は base64url でなく16進にしている）。
 5. トークンは 32 バイトの乱数で、窓口はハッシュだけを持つ。Mawok は OS の資格情報管理の `mawok-account` の項目の `token` の欄に置く（API キーと同じ置き場）。期限は持たず、Mawok でのサインアウトと、窓口のアカウントの画面・Mawok の設定の「デバイス」（結んだ Mawok の一覧）から失効させる。
 
-結んだ Mawok の一覧は、Mawok からもトークンで読める。`GET /v1/devices` → `{ devices: [{ id, name, current }] }`（`current` は問い合わせた Mawok 自身）。`DELETE /v1/devices/:id` で、同じアカウントのほかの Mawok のトークンを外す。
+結んだ Mawok の一覧は、Mawok からもトークンで読める。`GET /v1/devices` → `{ devices: [{ id, name, current }] }`（`current` は問い合わせた Mawok 自身）。`DELETE /v1/devices/:id` で、同じアカウントのほかの Mawok のトークンを外す。無い id は 404、問い合わせた Mawok 自身は 400 の `current_device`（自身のサインアウトは `DELETE /v1/token`）。どちらも同期と同じ数のアカウントごとの上限を、同期とは別に数える。
 
 - 待ち受けるのは 127.0.0.1 だけ。ほかのアドレスで待ち受けると OS がファイアウォールの許可を求めるが、ループバックでは求めない（Windows の EXE 版・MSIX 版、macOS のアプリケーションファイアウォールで確かめた）。MSIX 版は full trust で動くので、UWP のループバックの制限は当たらない。
 - 公開の https のページから `http://127.0.0.1` へのページそのものの移動は、Chrome・Edge の Local Network Access の制限の対象外（制限するのは fetch・iframe など）。
@@ -86,8 +86,8 @@
 - 消した項目は記録として 90 日置く。古い記録を掃除した後のデバイスには、窓口の写しで組み直すよう知らせる。同期をリセットして新しい鍵で始め直すときも、前の写しを消して同じ組み直しをさせる。
 - 1項目は 256 KiB、アカウント全体は 16 MiB、1回に書くのは 100 項目までにする。暗号文だけでも、窓口の容量と通信量を際限なく使わないため。
 - Pro が終わった写しは 90 日後に消す。サブスクが無いアカウントの写しも消す。
-- Mawok は `GET /v1/sync` で受け取り、`PUT /v1/sync` でまとめて書き、同期を始める・リセットするときだけ `POST /v1/sync/reset` を使う。
-  - 包んだ鍵: `GET /v1/sync/key` → `{ key_id, wrapped_key }`（始めていなければどちらも `null`）。`POST /v1/sync/reset` は `{ key_id, wrapped_key }` を受け、写しを消して新しい鍵で始め直す。`PUT /v1/sync/key` に `{ key_id, wrapped_key }` を送ると、同期のパスワードを変えた包み直しに置き換える。`key_id` が今のものと違えば 409 の `key_mismatch` で置き換えない。窓口は包んだ鍵を読まず、1024 字までの文字列として置く。
+- Mawok は `GET /v1/sync` で受け取り、`PUT /v1/sync` でまとめて書く。同期を始めるときは `POST /v1/sync/start`、リセットするときだけ `POST /v1/sync/reset` を使う。
+  - 包んだ鍵: `GET /v1/sync/key` → `{ key_id, wrapped_key }`（始めていなければどちらも `null`）。`POST /v1/sync/start` と `POST /v1/sync/reset` は `{ key_id, wrapped_key }` を受け、写しを消して新しい鍵で始め直す。start は包んだ鍵がまだ無いときだけ受け、あれば 409 の `already_started` で何も変えない（状態の古いデバイスが、ほかのデバイスの始めた同期を消さないため）。`PUT /v1/sync` は、包んだ鍵の無い写しには `key_mismatch` で書かせない。`PUT /v1/sync/key` に `{ key_id, wrapped_key }` を送ると、同期のパスワードを変えた包み直しに置き換える。`key_id` が今のものと違えば 409 の `key_mismatch` で置き換えない。窓口は包んだ鍵を読まず、1024 字までの文字列として置く。
   - 読む: `GET /v1/sync?since=<seq>&limit=<n>&rebuild=1` → `{ key_id, seq, reset, items: [{ collection, id, seq, deleted, data }], more, next }`。`data` は暗号文の base64 で、消した記録では `null`。1ページは既定 200・上限 500 項目（書く 100 項目とは別の数）。消した記録も返すので、知らない項目の分は読み捨てる。
   - `more` が true なら `since=next` で続きを取る。`since=0` から始めたときと `reset: true` を受けたときは、組み直しの途中なので続きに `rebuild=1` を付ける。`more` が false になったときの `next` を次の `since` にする。
   - 書く: `PUT /v1/sync` に `{ key_id, items: [{ collection, id, base_seq, deleted, data }] }`。`base_seq` は最後に見たその項目の `seq`（新しい項目は `null`）。応答は `{ seq, items: [{ collection, id, seq }] }`。

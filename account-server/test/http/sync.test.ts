@@ -11,6 +11,15 @@ async function makePro(email: string) {
 	return account;
 }
 
+/** 同期を始める (包んだ鍵を置く)。書けるのは始めた写しだけ。 */
+function start(token: string, key = KEY) {
+	return app('/v1/sync/start', token, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ key_id: key, wrapped_key: 'wrapped' })
+	});
+}
+
 function put(token: string, body: unknown) {
 	return app('/v1/sync', token, {
 		method: 'PUT',
@@ -24,6 +33,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-read@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		expect(
 			await (
 				await put(token, {
@@ -61,6 +71,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-conflict@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		await put(token, {
 			key_id: KEY,
 			items: [{ collection: 'settings', id: 'one', base_seq: null, deleted: false, data: 'AQ==' }]
@@ -91,6 +102,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-hundred@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		const items = Array.from({ length: 100 }, (_, n) => ({
 			collection: 'settings' as const,
 			id: `item-${n}`,
@@ -110,6 +122,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-concurrent@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		const responses = await Promise.all(
 			['left', 'right'].map((id) =>
 				put(token, {
@@ -127,6 +140,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-limits@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		const response = await put(token, {
 			key_id: KEY,
 			items: [
@@ -147,6 +161,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-reset@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
+		await start(token);
 		await put(token, {
 			key_id: KEY,
 			items: [{ collection: 'settings', id: 'one', base_seq: null, deleted: false, data: 'AQ==' }]
@@ -181,11 +196,15 @@ describe('sync HTTP', () => {
 			});
 		expect(await key()).toEqual({ key_id: null, wrapped_key: null });
 		// 包んだ鍵の無い始め方は受けない。
-		expect((await send('POST', '/v1/sync/reset', { key_id: KEY })).status).toBe(400);
-		expect((await send('POST', '/v1/sync/reset', { key_id: KEY, wrapped_key: 'one' })).status).toBe(
+		expect((await send('POST', '/v1/sync/start', { key_id: KEY })).status).toBe(400);
+		expect((await send('POST', '/v1/sync/start', { key_id: KEY, wrapped_key: 'one' })).status).toBe(
 			200
 		);
 		expect(await key()).toEqual({ key_id: KEY, wrapped_key: 'one' });
+		// 始めた後の「同期を開始」は 409。始め直すのはリセットだけ (場合ごとの中身は test/sync.test.ts)。
+		const again = await send('POST', '/v1/sync/start', { key_id: KEY, wrapped_key: 'other' });
+		expect(again.status).toBe(409);
+		expect(await again.json()).toEqual({ error: 'already_started' });
 		expect((await send('PUT', '/v1/sync/key', { key_id: KEY, wrapped_key: 'two' })).status).toBe(
 			204
 		);
@@ -207,6 +226,7 @@ describe('sync HTTP', () => {
 		const email = 'sync-next@example.com';
 		const { token } = await linkApp(email);
 		const account = await makePro(email);
+		await start(token);
 		await put(token, {
 			key_id: KEY,
 			items: [

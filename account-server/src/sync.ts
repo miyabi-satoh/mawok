@@ -25,7 +25,13 @@ type StoredItem = {
 	data: ArrayBuffer | null;
 	size: number | null;
 };
-type SyncAccount = { key_id: string | null; seq: number; purged_seq: number; bytes: number };
+type SyncAccount = {
+	key_id: string | null;
+	wrapped: number;
+	seq: number;
+	purged_seq: number;
+	bytes: number;
+};
 type Conflict = {
 	collection: Collection;
 	id: string;
@@ -115,11 +121,11 @@ export async function hasSyncPro(env: Env, accountId: string): Promise<boolean> 
 }
 
 function emptyAccount(): SyncAccount {
-	return { key_id: null, seq: 0, purged_seq: 0, bytes: 0 };
+	return { key_id: null, wrapped: 0, seq: 0, purged_seq: 0, bytes: 0 };
 }
 function accountStatement(env: Env, accountId: string) {
 	return env.DB.prepare(
-		'SELECT key_id, seq, purged_seq, bytes FROM sync_accounts WHERE account_id = ?'
+		'SELECT key_id, wrapped_key IS NOT NULL AS wrapped, seq, purged_seq, bytes FROM sync_accounts WHERE account_id = ?'
 	).bind(accountId);
 }
 
@@ -213,11 +219,12 @@ function conflictsFor(items: SyncItem[], current: Map<string, StoredItem>): Conf
 }
 
 // purge が消す予定の消した記録と同じ要求にほかの項目があっても、一部だけを書かないよう purged_seq も照らす。
+// 包んだ鍵の無い写しには書かせない。同期を始める (resetSync) までは鍵が決まっていないため。
 const accountUnchanged =
-	'account_id = ? AND seq = ? AND bytes = ? AND purged_seq = ? AND (key_id IS NULL OR key_id = ?)';
+	'account_id = ? AND seq = ? AND bytes = ? AND purged_seq = ? AND key_id = ? AND wrapped_key IS NOT NULL';
 const accountMatches = `EXISTS (SELECT 1 FROM sync_accounts WHERE ${accountUnchanged})`;
 /** `json_each` に渡す1個の JSON で全項目を照らし、D1 の束縛100個の上限を超えない。 */
-export const SYNC_ACCOUNT_UPDATE_SQL = `UPDATE sync_accounts SET key_id = coalesce(key_id, ?), seq = seq + ?, bytes = bytes + ?
+export const SYNC_ACCOUNT_UPDATE_SQL = `UPDATE sync_accounts SET seq = seq + ?, bytes = bytes + ?
 	WHERE ${accountUnchanged}
 	AND NOT EXISTS (SELECT 1 FROM json_each(?) wanted WHERE NOT EXISTS (
 		SELECT 1 FROM sync_items WHERE account_id = ?
@@ -244,11 +251,7 @@ async function writeSync(
 	const t = now();
 	const { seq, bytes, purged_seq } = current.account;
 	const accountBindings = [accountId, seq, bytes, purged_seq, key];
-	const statements: D1PreparedStatement[] = [
-		env.DB.prepare(
-			`INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes) VALUES (?, NULL, 0, 0, 0) ON CONFLICT (account_id) DO NOTHING`
-		).bind(accountId)
-	];
+	const statements: D1PreparedStatement[] = [];
 	for (const [index, item] of items.entries()) {
 		const itemSeq = seq + index + 1;
 		const value = data.get(itemKey(item.collection, item.id))!;
@@ -298,7 +301,6 @@ async function writeSync(
 	}));
 	statements.push(
 		env.DB.prepare(SYNC_ACCOUNT_UPDATE_SQL).bind(
-			key,
 			items.length,
 			delta,
 			accountId,
@@ -349,7 +351,8 @@ export async function putSync(env: Env, accountId: string, body: unknown): Promi
 	// 2回とも外れたら、conflicts が空の 409 を返し、アプリに同じ要求を送り直してもらう。
 	for (let attempt = 0; ; attempt++) {
 		const current = await currentSync(env, accountId, items);
-		if (current.account.key_id !== null && current.account.key_id !== request.key_id)
+		// 始めていない (包んだ鍵が無い) 写しも、鍵が違うのと同じに断る。アプリは鍵の状態を確かめ直す。
+		if (current.account.wrapped !== 1 || current.account.key_id !== request.key_id)
 			return { ok: false, error: 'key_mismatch' };
 		const conflicts = conflictsFor(items, current.items);
 		if (conflicts.length > 0 || attempt === 2) return { ok: false, error: 'conflict', conflicts };
@@ -372,21 +375,37 @@ function keyRequest(body: unknown): { key_id: string; wrapped_key: string } | un
 }
 
 /**
- * 新しい鍵で同期を始める (同期を開始・同期をリセット)。前の暗号文と消した記録を一度に外し、
- * 同期のパスワードで包んだ新しい鍵を置く。
+ * 新しい鍵で同期を始める。前の暗号文と消した記録を一度に外し、同期のパスワードで包んだ新しい鍵を置く。
+ * `replace` が false (「同期を開始」) なら、包んだ鍵がまだ無いときだけ始め、あれば何もせずに undefined を返す。
+ * 古い状態のデバイスが、ほかのデバイスの始めた同期を消さないため。true (「同期をリセット」) は、あっても置き換える。
  */
-export async function resetSync(env: Env, accountId: string, body: unknown) {
+export async function resetSync(
+	env: Env,
+	accountId: string,
+	body: unknown,
+	replace: boolean
+): Promise<{ seq: number } | 'invalid_request' | 'already_started'> {
 	const request = keyRequest(body);
-	if (!request) return undefined;
+	if (!request) return 'invalid_request';
+	// 始めていない写しだけを書き換える条件。D1 の batch は1つのトランザクションなので、消すのと置くのが分かれない。
+	const notStarted = replace
+		? ''
+		: 'AND NOT EXISTS (SELECT 1 FROM sync_accounts WHERE account_id = ? AND wrapped_key IS NOT NULL)';
+	const guard = replace ? [] : [accountId];
 	const [, account] = await env.DB.batch([
-		env.DB.prepare('DELETE FROM sync_items WHERE account_id = ?').bind(accountId),
+		env.DB.prepare(`DELETE FROM sync_items WHERE account_id = ? ${notStarted}`).bind(
+			accountId,
+			...guard
+		),
 		env.DB.prepare(
 			`INSERT INTO sync_accounts (account_id, key_id, wrapped_key, seq, purged_seq, bytes) VALUES (?, ?, ?, 0, 0, 0)
 			ON CONFLICT (account_id) DO UPDATE SET key_id = excluded.key_id, wrapped_key = excluded.wrapped_key, bytes = 0,
-			seq = sync_accounts.seq + 1, purged_seq = sync_accounts.seq + 1 RETURNING seq`
+			seq = sync_accounts.seq + 1, purged_seq = sync_accounts.seq + 1
+			${replace ? '' : 'WHERE sync_accounts.wrapped_key IS NULL'} RETURNING seq`
 		).bind(accountId, request.key_id, request.wrapped_key)
 	]);
-	return { seq: (account.results[0] as { seq: number } | undefined)?.seq ?? 0 };
+	const row = account.results[0] as { seq: number } | undefined;
+	return row ? { seq: row.seq } : 'already_started';
 }
 
 /** 同期の鍵の見分けと、包んだ鍵。まだ同期を始めていなければ、どちらも null。 */

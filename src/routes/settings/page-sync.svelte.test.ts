@@ -416,7 +416,7 @@ describe('設定画面の同期のパスワード', () => {
 		await form.getByLabelText(m.settings_sync_password_confirm()).fill('password1');
 		await form.getByRole('button', { name: m.settings_sync_start() }).click();
 		await vi.waitFor(() =>
-			expect(invoked).toHaveBeenCalledWith('start_sync', { password: 'password1' })
+			expect(invoked).toHaveBeenCalledWith('start_sync', { password: 'password1', replace: false })
 		);
 	});
 
@@ -464,5 +464,20 @@ describe('設定画面の同期のパスワード', () => {
 			current: 'old-password',
 			password: 'new-password'
 		});
+	});
+
+	it('窓口の状態が変わっていたら、エラーを出さずに欄を閉じる', async () => {
+		pro('ready');
+		failures.change_sync_password = 'sync.state_changed';
+		const screen = await renderAt(m.settings_category_account);
+		await screen.getByRole('button', { name: m.settings_sync_password_change() }).click();
+		const form = screen.getByRole('form', { name: m.settings_sync_password_change_title() });
+		await form.getByLabelText(m.settings_sync_password_current()).fill('old-password');
+		await form.getByLabelText(m.settings_sync_password_new(), { exact: true }).fill('new-password');
+		await form.getByLabelText(m.settings_sync_password_new_confirm()).fill('new-password');
+		await form.getByRole('button', { name: m.settings_sync_password_save() }).click();
+		await expect.element(form).not.toBeInTheDocument();
+		expect(screen.getByText('sync.state_changed').query()).toBeNull();
+		expect(screen.getByText(m.settings_sync_password_changed()).query()).toBeNull();
 	});
 });

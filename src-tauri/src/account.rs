@@ -112,6 +112,8 @@ pub struct ProStatus {
 pub enum AccountError {
     /// トークンが外された（窓口の画面で外した、アカウントを消したなど）。サインインし直す
     SignedOut,
+    /// 窓口が成功でない HTTP の状態を返した（401 を除く）。状態で振り分ける呼び出し元のために持つ
+    Http(u16),
     /// つながらない、または窓口が思わない答えを返した。詳しい中身はログに残す
     Other(String),
 }
@@ -187,7 +189,7 @@ async fn send_signed(
         return Err(AccountError::SignedOut);
     }
     if !response.status().is_success() {
-        return Err(other(format!("HTTP {}", response.status().as_u16())));
+        return Err(AccountError::Http(response.status().as_u16()));
     }
     Ok(response)
 }
@@ -278,17 +280,24 @@ pub async fn sync_key(client: &reqwest::Client, token: &str) -> Result<SyncKey, 
     })
 }
 
-/// 新しい鍵で同期を始める（同期を開始・同期をリセット）。窓口の前の写しは消える。
-pub async fn reset_sync(
+/// 新しい鍵で同期を始める。`replace` が false（同期を開始）なら、窓口にまだ包んだ鍵が無いときだけ始め、
+/// あれば `Ok(false)`（ほかのデバイスがもう始めた）。true（同期をリセット）なら、窓口の前の写しを消して置き換える
+pub async fn start_sync(
     client: &reqwest::Client,
     token: &str,
     key_id: &str,
     wrapped_key: &str,
-) -> Result<(), AccountError> {
+    replace: bool,
+) -> Result<bool, AccountError> {
+    let path = if replace { "reset" } else { "start" };
     let request = client
-        .post(format!("{ACCOUNT_URL}/v1/sync/reset"))
+        .post(format!("{ACCOUNT_URL}/v1/sync/{path}"))
         .json(&json!({ "key_id": key_id, "wrapped_key": wrapped_key }));
-    send_signed(request, token).await.map(|_| ())
+    match send_signed(request, token).await {
+        Ok(_) => Ok(true),
+        Err(AccountError::Http(409)) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// 同期のパスワードを変えた、包み直した鍵を置く。窓口の鍵が `key_id` と違えば（ほかのデバイスがリセットした）`Ok(false)`
@@ -298,21 +307,13 @@ pub async fn put_sync_key(
     key_id: &str,
     wrapped_key: &str,
 ) -> Result<bool, AccountError> {
-    let response = client
+    let request = client
         .put(format!("{ACCOUNT_URL}/v1/sync/key"))
-        .header(
-            reqwest::header::AUTHORIZATION,
-            bearer(token).map_err(other)?,
-        )
-        .json(&json!({ "key_id": key_id, "wrapped_key": wrapped_key }))
-        .send()
-        .await
-        .map_err(other)?;
-    match response.status() {
-        reqwest::StatusCode::UNAUTHORIZED => Err(AccountError::SignedOut),
-        reqwest::StatusCode::CONFLICT => Ok(false),
-        status if status.is_success() => Ok(true),
-        status => Err(other(format!("HTTP {}", status.as_u16()))),
+        .json(&json!({ "key_id": key_id, "wrapped_key": wrapped_key }));
+    match send_signed(request, token).await {
+        Ok(_) => Ok(true),
+        Err(AccountError::Http(409)) => Ok(false),
+        Err(error) => Err(error),
     }
 }
 
@@ -341,16 +342,24 @@ pub async fn devices(
     Ok(answer.devices)
 }
 
+/// `DELETE /v1/devices/:id` の URL。id はパスの1区切りとして入れる（`/` や `..` を含んでも、ほかの入口を指さない）
+fn device_url(id: &str) -> Result<reqwest::Url, AccountError> {
+    let mut url = reqwest::Url::parse(&format!("{ACCOUNT_URL}/v1/devices")).map_err(other)?;
+    url.path_segments_mut()
+        .map_err(|()| other("the account URL can't have a path"))?
+        .push(id);
+    Ok(url)
+}
+
 /// ほかのデバイスをサインアウトさせる（そのデバイスのトークンを外す）
 pub async fn sign_out_device(
     client: &reqwest::Client,
     token: &str,
     id: &str,
 ) -> Result<(), AccountError> {
-    let url = reqwest::Url::parse(&format!("{ACCOUNT_URL}/v1/devices/"))
-        .and_then(|base| base.join(id))
-        .map_err(other)?;
-    send_signed(client.delete(url), token).await.map(|_| ())
+    send_signed(client.delete(device_url(id)?), token)
+        .await
+        .map(|_| ())
 }
 
 /// 窓口の一覧で見分けるための、このデバイスの名前（コンピューター名）
@@ -540,6 +549,18 @@ mod tests {
         assert_eq!(
             failure(400, r#"{"error":"bad_request"}"#),
             Failure::Unexpected
+        );
+    }
+
+    #[test]
+    fn puts_a_device_id_into_a_single_path_segment() {
+        assert_eq!(
+            device_url("0123abcd").unwrap().as_str(),
+            format!("{ACCOUNT_URL}/v1/devices/0123abcd")
+        );
+        assert_eq!(
+            device_url("../token").unwrap().as_str(),
+            format!("{ACCOUNT_URL}/v1/devices/..%2Ftoken")
         );
     }
 

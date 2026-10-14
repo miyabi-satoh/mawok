@@ -35,9 +35,11 @@ const P_COST: u32 = 4;
 /// salt の長さ。RFC 9106 の推奨の 128 ビット。
 const SALT_LEN: usize = 16;
 /// 窓口から届いたパラメーターで、開くときに許す上限。窓口が値を大きくして、デバイスのメモリーや時間を使い切らせないため。
-const MAX_M_COST: u32 = 1024 * 1024;
-const MAX_T_COST: u32 = 16;
-const MAX_P_COST: u32 = 16;
+/// 下限はこの版が書く値（M_COST・T_COST・P_COST）で、窓口から軽い値を押し付けられて、漏れた包んだ鍵の総当たりが安くならないようにする。
+/// 上限は、後の版が値を上げても前の版で開けるよう、メモリーは 4 倍（256 MiB）、繰り返しと並列度はおおむね 2〜4 倍までの幅を残す。
+const MAX_M_COST: u32 = 4 * M_COST;
+const MAX_T_COST: u32 = 8;
+const MAX_P_COST: u32 = 8;
 
 /// 同期の鍵の状態（docs/sync.md「同期のパスワード」）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -178,6 +180,12 @@ fn wrap_with(key: &[u8; 32], password: &str, kdf: &Kdf) -> Result<String, String
     .map_err(|error| error.to_string())
 }
 
+fn kdf_in_range(m: u32, t: u32, p: u32) -> bool {
+    (M_COST..=MAX_M_COST).contains(&m)
+        && (T_COST..=MAX_T_COST).contains(&t)
+        && (P_COST..=MAX_P_COST).contains(&p)
+}
+
 /// 包んだ鍵を同期のパスワードで開く。重いので、画面のスレッドでは呼ばない。
 pub fn unwrap(wrapped: &str, password: &str) -> Result<[u8; 32], UnwrapError> {
     let unreadable = |detail: &str| UnwrapError::Unreadable(detail.to_string());
@@ -186,14 +194,14 @@ pub fn unwrap(wrapped: &str, password: &str) -> Result<[u8; 32], UnwrapError> {
     if wrapped.v != WRAP_VERSION || wrapped.kdf != KDF {
         return Err(unreadable("unknown wrapped key version"));
     }
-    if wrapped.m > MAX_M_COST || wrapped.t > MAX_T_COST || wrapped.p > MAX_P_COST {
-        return Err(unreadable("the key derivation parameters are too large"));
+    if !kdf_in_range(wrapped.m, wrapped.t, wrapped.p) {
+        return Err(unreadable("the key derivation parameters are out of range"));
     }
     let decode = |value: &str| STANDARD.decode(value).map_err(|_| unreadable("not base64"));
     let salt = decode(&wrapped.salt)?;
     let nonce = decode(&wrapped.nonce)?;
     let sealed = decode(&wrapped.key)?;
-    if salt.len() < SALT_LEN || nonce.len() != 24 {
+    if salt.len() != SALT_LEN || nonce.len() != 24 {
         return Err(unreadable("the salt or nonce has the wrong length"));
     }
     let kdf = Kdf {
@@ -239,9 +247,6 @@ pub fn store(key: &[u8; 32]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// テストでは Argon2id を軽くする。包み方と開き方は、パラメーターによらず同じ。
-    const LIGHT: Kdf = Kdf { m: 8, t: 1, p: 1 };
 
     #[test]
     fn derives_a_fixed_key_id() {
@@ -289,7 +294,7 @@ mod tests {
     #[test]
     fn unwraps_with_the_same_password_only() {
         let key = [7; 32];
-        let wrapped = wrap_with(&key, "correct horse", &LIGHT).unwrap();
+        let wrapped = wrap(&key, "correct horse").unwrap();
         assert_eq!(unwrap(&wrapped, "correct horse"), Ok(key));
         assert_eq!(
             unwrap(&wrapped, "correct hors"),
@@ -300,8 +305,8 @@ mod tests {
     #[test]
     fn wraps_the_same_key_differently_each_time() {
         let key = [7; 32];
-        let first = wrap_with(&key, "password", &LIGHT).unwrap();
-        let second = wrap_with(&key, "password", &LIGHT).unwrap();
+        let first = wrap(&key, "password").unwrap();
+        let second = wrap(&key, "password").unwrap();
         assert_ne!(first, second);
         assert_eq!(unwrap(&second, "password"), Ok(key));
     }
@@ -318,20 +323,31 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_or_oversized_wrapped_keys() {
-        let wrapped = wrap_with(&[1; 32], "password", &LIGHT).unwrap();
-        let mut value: serde_json::Value = serde_json::from_str(&wrapped).unwrap();
-        value["v"] = 2.into();
-        assert!(matches!(
-            unwrap(&value.to_string(), "password"),
-            Err(UnwrapError::Unreadable(_))
-        ));
-        value["v"] = 1.into();
-        value["m"] = (MAX_M_COST + 1).into();
-        assert!(matches!(
-            unwrap(&value.to_string(), "password"),
-            Err(UnwrapError::Unreadable(_))
-        ));
+    fn rejects_unknown_wrapped_keys_and_parameters_out_of_range() {
+        let wrapped = wrap(&[1; 32], "password").unwrap();
+        let original: serde_json::Value = serde_json::from_str(&wrapped).unwrap();
+        let changed = |name: &str, value: serde_json::Value| {
+            let mut changed = original.clone();
+            changed[name] = value;
+            unwrap(&changed.to_string(), "password")
+        };
+        let unreadable = |result: Result<[u8; 32], UnwrapError>| {
+            matches!(result, Err(UnwrapError::Unreadable(_)))
+        };
+        assert!(unreadable(changed("v", 2.into())));
+        // 窓口から軽い値を押し付けられても開かない（この版が書く値より下は断る）
+        assert!(unreadable(changed("m", (M_COST - 1).into())));
+        assert!(unreadable(changed("t", (T_COST - 1).into())));
+        assert!(unreadable(changed("p", (P_COST - 1).into())));
+        // 重すぎる値も、デバイスのメモリーや時間を使い切らないよう開かない
+        assert!(unreadable(changed("m", (MAX_M_COST + 1).into())));
+        assert!(unreadable(changed("t", (MAX_T_COST + 1).into())));
+        // salt は長さちょうど
+        assert!(unreadable(changed(
+            "salt",
+            STANDARD.encode([0u8; 17]).into()
+        )));
+        assert!(kdf_in_range(M_COST, T_COST, P_COST));
         assert!(matches!(
             unwrap("{", "password"),
             Err(UnwrapError::Unreadable(_))

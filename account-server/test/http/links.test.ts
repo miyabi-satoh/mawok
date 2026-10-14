@@ -150,12 +150,22 @@ describe('app tokens', () => {
 		const other = list.devices.find((device) => !device.current)!;
 		// ほかのアカウントのトークンでは外せない。
 		const stranger = await linkApp('devices-stranger@example.com');
-		await app(`/v1/devices/${other.id}`, stranger.token, { method: 'DELETE' });
+		expect(
+			(await app(`/v1/devices/${other.id}`, stranger.token, { method: 'DELETE' })).status
+		).toBe(404);
+		// 自分のトークンはここでは外さない (自分のサインアウトは DELETE /v1/token)。
+		const self = list.devices.find((device) => device.current)!;
+		const refused = await app(`/v1/devices/${self.id}`, first.token, { method: 'DELETE' });
+		expect(refused.status).toBe(400);
+		expect(await refused.json()).toEqual({ error: 'current_device' });
 		expect((await app('/v1/balance', second.token)).status).toBe(200);
 		expect((await app(`/v1/devices/${other.id}`, first.token, { method: 'DELETE' })).status).toBe(
 			204
 		);
 		expect((await app('/v1/balance', second.token)).status).toBe(401);
+		expect((await app(`/v1/devices/${other.id}`, first.token, { method: 'DELETE' })).status).toBe(
+			404
+		);
 		expect(
 			(await (await app('/v1/devices', first.token)).json<{ devices: unknown[] }>()).devices
 		).toHaveLength(1);
