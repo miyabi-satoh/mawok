@@ -298,6 +298,7 @@
 	"settings_sync_password_save": "Save",
 	"settings_sync_password_changed": "Password updated.",
 	"settings_sync_password_row": "Sync password",
+	"password_input_show": "Show password",
 	"settings_sync_password_change": "Change",
 	"settings_sync_reset": "Reset sync...",
 	"settings_sync_reset_confirm_title": "Reset sync?",

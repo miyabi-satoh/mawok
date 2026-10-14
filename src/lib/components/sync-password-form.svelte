@@ -2,7 +2,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
-	import { Input } from '$lib/components/ui/input';
+	import PasswordInput from '$lib/components/password-input.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import {
 		MIN_SYNC_PASSWORD_CHARS,
@@ -88,10 +88,9 @@
 )}
 	<Field.Field>
 		<Field.Label for="{id}-{field}">{label}</Field.Label>
-		<Input
+		<PasswordInput
 			id="{id}-{field}"
 			class="max-w-72"
-			type="password"
 			{autocomplete}
 			aria-invalid={errors[field] ? true : undefined}
 			aria-describedby={[hint && `${id}-${field}-hint`, errors[field] && `${id}-${field}-error`]
