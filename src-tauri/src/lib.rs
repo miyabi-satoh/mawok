@@ -187,6 +187,8 @@ struct AppState {
     sync_key_status: Mutex<SyncKeyStatus>,
     /// 鍵の確かめ・作成・窓口への登録・資格情報管理への保存を、一続きにする。
     sync_key_refresh: tokio::sync::Mutex<()>,
+    /// 窓口と鍵を照らせた回数。読み直しを頼んだ側が、照らせたかを見分けるのに使う（recheck_sync_key）
+    sync_key_checks: AtomicUsize,
     /// 設定を保存するたびに進める。同期の通信の間に利用者が変えた設定を、通信の前の設定から作った結果で戻さない。
     sync_generation: AtomicUsize,
     /// 同期の記録を消すたびに進める。サインアウトや鍵の替わりの後に、通信中だった同期が古い記録を書き戻さない。
@@ -2748,9 +2750,9 @@ async fn refresh_sync_key(
     if !pro_generation_is_current(app, generation) {
         return;
     }
-    let Some(local) = load_sync_key().await else {
-        return;
-    };
+    // 読めない・壊れた手元の鍵は「無い」として照らす。抜けられない None のままにせず、包んだ鍵があれば「入力」、
+    // 無ければ「作成」の欄を出す（パスワードを入れれば上書きされる）
+    let local = load_sync_key().await.flatten();
     let server = match account::sync_key(client, token).await {
         Ok(server) => server,
         Err(error) => {
@@ -2768,6 +2770,9 @@ async fn refresh_sync_key(
     if !pro_generation_is_current(app, generation) {
         return;
     }
+    app.state::<AppState>()
+        .sync_key_checks
+        .fetch_add(1, Ordering::SeqCst);
     let status = sync_key::decide(
         server.key_id.as_deref(),
         server.wrapped_key.is_some(),
@@ -2911,11 +2916,26 @@ const SHORT_SYNC_PASSWORD: &str = "sync.password_too_short";
 const SYNC_STATE_CHANGED: &str = "sync.state_changed";
 
 /// 窓口と同期の鍵の状態を照らし直し、画面に「状態が変わった」と返す。鍵の排他（sync_key_refresh）は放してから呼ぶ
+/// 読み直しそのものに失敗したら（つながらない・窓口の不調）、画面の欄は移っていないので、その失敗を返す
 async fn recheck_sync_key(app: &AppHandle) -> String {
-    if let Err(error) = refresh_mawok_account_status(app).await {
-        info!("couldn't recheck the sync key: {error}");
+    let checks = || {
+        app.state::<AppState>()
+            .sync_key_checks
+            .load(Ordering::SeqCst)
+    };
+    let before = checks();
+    match refresh_mawok_account_status(app).await {
+        Err(error) => {
+            info!("couldn't recheck the sync key: {error}");
+            error
+        }
+        // Pro は確かめられたが、鍵を窓口と照らせなかった（refresh_sync_key は一時的な失敗で状態を保つ）
+        Ok(Some(status)) if status.pro.active && checks() == before => {
+            info!("couldn't recheck the sync key against the account server");
+            "account.unreachable".to_string()
+        }
+        Ok(_) => SYNC_STATE_CHANGED.to_string(),
     }
-    SYNC_STATE_CHANGED.to_string()
 }
 
 /// 鍵の排他を取った後に、サインインのトークンと、そのときの Pro の世代を読む。
@@ -4829,6 +4849,7 @@ pub fn run() {
                 sync_key_id: Mutex::new(None),
                 sync_key_status: Mutex::new(SyncKeyStatus::None),
                 sync_key_refresh: tokio::sync::Mutex::new(()),
+                sync_key_checks: AtomicUsize::new(0),
                 sync_generation: AtomicUsize::new(0),
                 sync_record_generation: AtomicUsize::new(0),
                 sync_commit: tokio::sync::Mutex::new(()),
