@@ -39,6 +39,14 @@
 	let changed = $state(false);
 	const panel = $derived(syncPanel(view.syncKeyStatus, resetting));
 
+	// 同期していない状態に移ったら（ほかのデバイスのリセットなど）、書きかけの変更の欄と、変え終えた知らせを片付ける。
+	// 入れ直して戻ったときに、前の欄や知らせが残って見えないため
+	$effect(() => {
+		if (view.syncKeyStatus === 'ready') return;
+		changing = false;
+		changed = false;
+	});
+
 	const kinds = [
 		{ kind: 'settings', label: m.settings_sync_settings },
 		{ kind: 'keys', label: m.settings_sync_keys },

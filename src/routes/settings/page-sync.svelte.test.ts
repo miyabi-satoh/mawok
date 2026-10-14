@@ -480,4 +480,22 @@ describe('設定画面の同期のパスワード', () => {
 		expect(screen.getByText('sync.state_changed').query()).toBeNull();
 		expect(screen.getByText(m.settings_sync_password_changed()).query()).toBeNull();
 	});
+
+	it('同期していない状態に移ったら、書きかけの変更の欄を閉じる', async () => {
+		pro('ready');
+		const screen = await renderAt(m.settings_category_account);
+		await screen.getByRole('button', { name: m.settings_sync_password_change() }).click();
+		const form = screen.getByRole('form', { name: m.settings_sync_password_change_title() });
+		await expect.element(form).toBeVisible();
+		// ほかのデバイスのリセットで「入力」へ移り、入れ直して戻る
+		pro('needsPassword');
+		await expect
+			.element(screen.getByRole('form', { name: m.settings_sync_password_enter_title() }))
+			.toBeVisible();
+		pro('ready');
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_sync_password_change() }))
+			.toBeVisible();
+		expect(form.query()).toBeNull();
+	});
 });

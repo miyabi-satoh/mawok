@@ -17,8 +17,10 @@ updates:
       - dependency-name: 'webview2-com'
       - dependency-name: 'windows-core'
       - dependency-name: 'tauri-winrt-notification'
-      # snow・spake2 が使う版に揃え、暗号の crate を2版ずつ入れない。両方が新しい版に移ったら手で上げる
+      # sha2 と hkdf は同じ digest の版で組む (src-tauri/src/sync_key.rs の Hkdf::<Sha256>)。片方だけ上がるとビルドが通らず、
+      # sha2 を上げると Tauri (wry・tauri-codegen) の使う 0.10 と2版入る。Tauri が移ったら、2つを手で一緒に上げる
       - dependency-name: 'sha2'
+      - dependency-name: 'hkdf'
       # Tauri は 2.11 に留めている (理由は src-tauri/Cargo.toml の tauri のコメント)。プラグインの新しい minor も
       # 新しい Tauri を求めるので、まとめて minor を止める。混ざると、まとめた PR のほかの更新まで入れられなくなる
       - dependency-name: 'tauri'

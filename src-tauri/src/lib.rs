@@ -2352,7 +2352,9 @@ async fn start_mawok_sign_in(app: AppHandle) -> Result<MawokSignIn, String> {
         .map_err(|error| error.to_string())?
         .port();
     let lang = app.state::<AppState>().lang();
-    let url = link.url(port, &account::device_name(), lang.code());
+    // コンピューター名は macOS ではコマンド（scutil）を待って読むので、非同期の処理を止めない
+    let name = run_blocking(account::device_name).await?;
+    let url = link.url(port, &name, lang.code());
     if let Err(error) = open_page(&app, &url) {
         // ブラウザが開かなくても、画面の「ページを開き直す」から開ける
         warn!("couldn't open the sign-in page: {error}");
@@ -2912,6 +2914,17 @@ async fn recheck_sync_key(app: &AppHandle) -> String {
     SYNC_STATE_CHANGED.to_string()
 }
 
+/// 鍵の排他を取った後に、サインインのトークンと、そのときの Pro の世代を読む。
+/// 排他を待つ間にサインアウトや別のアカウントへのサインインが済んでいても、今のアカウントのトークンで送るため
+async fn token_in_generation(app: &AppHandle) -> Result<(String, usize), String> {
+    let generation = current_pro_generation(app);
+    let token = mawok_token().await?;
+    if !pro_generation_is_current(app, generation) {
+        return Err(SYNC_STATE_CHANGED.to_string());
+    }
+    Ok((token, generation))
+}
+
 /// 窓口とのやり取りの失敗を、画面に渡す符号にする。トークンが外されていれば、手元もサインアウトする。
 /// 鍵の排他（sync_key_refresh）は放してから呼ぶ（Pro が終わったときに、鍵の状態を読み直すため）
 async fn account_failure(app: &AppHandle, context: &str, error: account::AccountError) -> String {
@@ -2978,11 +2991,12 @@ async fn store_sync_key(key: [u8; 32]) -> Result<(), String> {
         .inspect_err(|error| error!("couldn't store the sync key: {error}"))
 }
 
-/// 窓口に断られたときに、資格情報管理の鍵を、置き換える前に戻す
-async fn restore_sync_key(previous: Option<[u8; 32]>) {
+/// 窓口に断られたときに、資格情報管理の鍵を、置き換える前に戻す。`previous` が None（前の鍵を読めなかった）なら触らない
+async fn restore_sync_key(previous: Option<Option<[u8; 32]>>) {
     let restored = match previous {
-        Some(key) => run_blocking(move || sync_key::store(&key)).await,
-        None => run_blocking(account_credentials::clear_key).await,
+        None => return,
+        Some(Some(key)) => run_blocking(move || sync_key::store(&key)).await,
+        Some(None) => run_blocking(account_credentials::clear_key).await,
     };
     if let Ok(Err(error)) | Err(error) = restored {
         warn!("couldn't restore the previous sync key: {error}");
@@ -3008,13 +3022,18 @@ async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(
     if !sync_key::password_long_enough(&password) {
         return Err(SHORT_SYNC_PASSWORD.to_string());
     }
-    let token = mawok_token().await?;
     let state = app.state::<AppState>();
     let refresh = state.sync_key_refresh.lock().await;
-    let previous = load_sync_key().await.flatten();
+    let (token, generation) = token_in_generation(&app).await?;
+    // None は読めなかった。読めない鍵は、無かった鍵と同じに消さない（戻すときに触らない）
+    let previous = load_sync_key().await;
     let key = run_blocking(sync_key::generate).await??;
     let wrapped = run_blocking(move || sync_key::wrap(&key, &password)).await??;
     let client = http_client(&app)?;
+    // 包んでいる間（1秒ほど）に、サインアウトや別のアカウントへのサインインが済んでいたら、何も置かない
+    if !pro_generation_is_current(&app, generation) {
+        return Err(SYNC_STATE_CHANGED.to_string());
+    }
     // 窓口より先に手元へ置く。窓口が受け付けた後に手元へ置けないと、窓口だけが新しい鍵になり、このデバイスが加われない
     store_sync_key(key).await?;
     let started =
@@ -3030,8 +3049,20 @@ async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(
             drop(refresh);
             Err(recheck_sync_key(&app).await)
         }
+        // 窓口が受けたか分からない（つながらない・窓口の不調）。窓口は新しい鍵のことがあるので戻さず、
+        // 鍵の状態を窓口と照らし直して合わせる（受けていなければ、作成か入力の欄になる）
+        Err(error @ (account::AccountError::Other(_) | account::AccountError::Http(500..))) => {
+            drop(refresh);
+            if let Err(detail) = refresh_mawok_account_status(&app).await {
+                info!("couldn't recheck the sync key: {detail}");
+            }
+            Err(account_failure(&app, "couldn't start sync", error).await)
+        }
+        // 窓口が断った（受けていない）。置く前の鍵に戻す。サインアウトは、トークンと一緒に鍵も消える
         Err(error) => {
-            restore_sync_key(previous).await;
+            if !matches!(error, account::AccountError::SignedOut) {
+                restore_sync_key(previous).await;
+            }
             drop(refresh);
             Err(account_failure(&app, "couldn't start sync", error).await)
         }
@@ -3042,9 +3073,9 @@ async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(
 #[tauri::command]
 async fn unlock_sync(app: AppHandle, password: String) -> Result<(), String> {
     info!("unlock sync");
-    let token = mawok_token().await?;
     let state = app.state::<AppState>();
     let refresh = state.sync_key_refresh.lock().await;
+    let (token, generation) = token_in_generation(&app).await?;
     let client = http_client(&app)?;
     let server = match account::sync_key(&client, &token).await {
         Ok(server) => server,
@@ -3063,6 +3094,10 @@ async fn unlock_sync(app: AppHandle, password: String) -> Result<(), String> {
         warn!("the wrapped sync key doesn't match its key ID");
         return Err(actions::Failure::Unexpected.code().to_string());
     }
+    // 開いている間に、サインアウトや別のアカウントへのサインインが済んでいたら、置かない
+    if !pro_generation_is_current(&app, generation) {
+        return Err(SYNC_STATE_CHANGED.to_string());
+    }
     store_sync_key(key).await?;
     adopt_sync_key(&app, key).await;
     Ok(())
@@ -3079,9 +3114,9 @@ async fn change_sync_password(
     if !sync_key::password_long_enough(&password) {
         return Err(SHORT_SYNC_PASSWORD.to_string());
     }
-    let token = mawok_token().await?;
     let state = app.state::<AppState>();
     let refresh = state.sync_key_refresh.lock().await;
+    let (token, generation) = token_in_generation(&app).await?;
     let client = http_client(&app)?;
     let server = match account::sync_key(&client, &token).await {
         Ok(server) => server,
@@ -3103,6 +3138,9 @@ async fn change_sync_password(
         return Err(recheck_sync_key(&app).await);
     }
     let rewrapped = run_blocking(move || sync_key::wrap(&key, &password)).await??;
+    if !pro_generation_is_current(&app, generation) {
+        return Err(SYNC_STATE_CHANGED.to_string());
+    }
     match account::put_sync_key(&client, &token, &sync_key::key_id(&key), &rewrapped).await {
         Ok(true) => Ok(()),
         // 開いた後に、ほかのデバイスがリセットした
