@@ -358,19 +358,64 @@ export async function putSync(env: Env, accountId: string, body: unknown): Promi
 	}
 }
 
-/** 鍵を作り直したデバイスのため、前の暗号文と消した記録を一度に外す。 */
+/** 包んだ鍵の上限。中身はアプリが決める (salt・パラメーター・暗号文を JSON にして 300 字ほど)。読まずに置くので、際限なく置かせない。 */
+export const WRAPPED_KEY_LENGTH = 1024;
+
+function validWrappedKey(value: unknown): value is string {
+	return typeof value === 'string' && value.length > 0 && value.length <= WRAPPED_KEY_LENGTH;
+}
+
+function keyRequest(body: unknown): { key_id: string; wrapped_key: string } | undefined {
+	if (!body || typeof body !== 'object') return undefined;
+	const { key_id, wrapped_key } = body as { key_id?: unknown; wrapped_key?: unknown };
+	return validKeyId(key_id) && validWrappedKey(wrapped_key) ? { key_id, wrapped_key } : undefined;
+}
+
+/**
+ * 新しい鍵で同期を始める (同期を開始・同期をリセット)。前の暗号文と消した記録を一度に外し、
+ * 同期のパスワードで包んだ新しい鍵を置く。
+ */
 export async function resetSync(env: Env, accountId: string, body: unknown) {
-	const key = body && typeof body === 'object' ? (body as { key_id?: unknown }).key_id : undefined;
-	if (!validKeyId(key)) return undefined;
+	const request = keyRequest(body);
+	if (!request) return undefined;
 	const [, account] = await env.DB.batch([
 		env.DB.prepare('DELETE FROM sync_items WHERE account_id = ?').bind(accountId),
 		env.DB.prepare(
-			`INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes) VALUES (?, ?, 0, 0, 0)
-			ON CONFLICT (account_id) DO UPDATE SET key_id = excluded.key_id, bytes = 0,
+			`INSERT INTO sync_accounts (account_id, key_id, wrapped_key, seq, purged_seq, bytes) VALUES (?, ?, ?, 0, 0, 0)
+			ON CONFLICT (account_id) DO UPDATE SET key_id = excluded.key_id, wrapped_key = excluded.wrapped_key, bytes = 0,
 			seq = sync_accounts.seq + 1, purged_seq = sync_accounts.seq + 1 RETURNING seq`
-		).bind(accountId, key)
+		).bind(accountId, request.key_id, request.wrapped_key)
 	]);
 	return { seq: (account.results[0] as { seq: number } | undefined)?.seq ?? 0 };
+}
+
+/** 同期の鍵の見分けと、包んだ鍵。まだ同期を始めていなければ、どちらも null。 */
+export async function getSyncKey(env: Env, accountId: string) {
+	const row = await env.DB.prepare(
+		'SELECT key_id, wrapped_key FROM sync_accounts WHERE account_id = ?'
+	)
+		.bind(accountId)
+		.first<{ key_id: string | null; wrapped_key: string | null }>();
+	return { key_id: row?.key_id ?? null, wrapped_key: row?.wrapped_key ?? null };
+}
+
+/**
+ * 同期のパスワードを変えたデバイスが、同じ鍵を包み直して置き換える。
+ * 鍵が替わった後 (ほかのデバイスがリセットした) の古い鍵では置き換えない。
+ */
+export async function putSyncKey(
+	env: Env,
+	accountId: string,
+	body: unknown
+): Promise<'ok' | 'invalid_request' | 'key_mismatch'> {
+	const request = keyRequest(body);
+	if (!request) return 'invalid_request';
+	const result = await env.DB.prepare(
+		'UPDATE sync_accounts SET wrapped_key = ? WHERE account_id = ? AND key_id = ?'
+	)
+		.bind(request.wrapped_key, accountId, request.key_id)
+		.run();
+	return result.meta.changes === 1 ? 'ok' : 'key_mismatch';
 }
 
 /** Cron から呼ぶ、消した記録と期限が切れて90日たった Pro の写しの掃除。 */

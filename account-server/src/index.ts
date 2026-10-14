@@ -3,7 +3,8 @@
  *
  * - `/v1/links/token`: Mawok を結ぶときに届けたコードを、アプリ用のトークンに替える。
  * - `/v1/ai`・`/v1/balance`・`/v1/token`: アプリ用のトークンで呼ぶ、中継・残高・サインアウト。
- * - `/v1/sync`: アプリ用のトークンで呼ぶ、Pro の設定と履歴の同期。
+ * - `/v1/devices`: アプリ用のトークンで呼ぶ、サインインしているデバイスの一覧と、ほかのデバイスのサインアウト。
+ * - `/v1/sync`: アプリ用のトークンで呼ぶ、Pro の設定と履歴の同期と、同期のパスワードで包んだ鍵。
  * - `/v1/stripe/webhook`: Stripe からの支払いの知らせ (処理は src/webhook.ts)。
  * - `/account/`: 人が開く画面 (サインイン・Mawok を結ぶ・買う)。
  * - それ以外: 紹介と規約類の静的なページ (wrangler.jsonc の assets)。
@@ -48,9 +49,11 @@ import { currentAccount, endSession, startSession } from './session';
 import { forgetOldRecords, handleStripeEvent, markStripeEvent } from './webhook';
 import {
 	getSync,
+	getSyncKey,
 	hasSyncPro,
 	purgeSync,
 	putSync,
+	putSyncKey,
 	resetSync,
 	SYNC_REQUEST_BYTES,
 	syncQuery
@@ -196,6 +199,33 @@ app.delete('/v1/token', async (c) => {
 	return c.body(null, 204);
 });
 
+/**
+ * 同じアカウントにサインインしている (結んでいる) デバイスの一覧。`current` は問い合わせたデバイス自身。
+ * 窓口の画面の「登録しているデバイス」と同じ行を出す。
+ */
+app.get('/v1/devices', async (c) => {
+	const token = bearerToken(c);
+	const accountId = await appAccount(c);
+	if (!token || !accountId) return c.json({ error: 'unauthorized' }, 401);
+	const { results } = await c.env.DB.prepare(
+		`SELECT id, coalesce(name, 'Mawok') AS name, token_hash = ? AS current
+		 FROM app_tokens WHERE account_id = ? ORDER BY created_at, rowid`
+	)
+		.bind(await sha256Hex(token), accountId)
+		.all<{ id: string; name: string; current: number }>();
+	return c.json({ devices: results.map((row) => ({ ...row, current: row.current === 1 })) });
+});
+
+/** ほかのデバイスをサインアウトさせる (トークンを外す)。外したデバイスは、次に窓口を使うときにサインインし直しになる。 */
+app.delete('/v1/devices/:id', async (c) => {
+	const accountId = await appAccount(c);
+	if (!accountId) return c.json({ error: 'unauthorized' }, 401);
+	await c.env.DB.prepare('DELETE FROM app_tokens WHERE id = ? AND account_id = ?')
+		.bind(c.req.param('id'), accountId)
+		.run();
+	return c.body(null, 204);
+});
+
 // ---- Pro の設定と履歴の同期 ----
 
 /** 同期の入口の共通の認可と、アカウントごとの書き込み上限。 */
@@ -233,6 +263,21 @@ app.put('/v1/sync', async (c) => {
 	if (result.error === 'too_large')
 		return c.json({ error: result.error, limit: result.limit }, 413);
 	return c.json({ error: result.error, conflicts: result.conflicts }, 409);
+});
+
+app.get('/v1/sync/key', async (c) => {
+	const accountId = await syncAccount(c);
+	if (accountId instanceof Response) return accountId;
+	return c.json(await getSyncKey(c.env, accountId));
+});
+
+app.put('/v1/sync/key', async (c) => {
+	const accountId = await syncAccount(c);
+	if (accountId instanceof Response) return accountId;
+	const result = await putSyncKey(c.env, accountId, await c.req.json().catch(() => undefined));
+	if (result === 'invalid_request') return c.json({ error: result }, 400);
+	if (result === 'key_mismatch') return c.json({ error: result }, 409);
+	return c.body(null, 204);
 });
 
 app.post('/v1/sync/reset', async (c) => {

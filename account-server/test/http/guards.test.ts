@@ -74,6 +74,12 @@ const ENTRIES: Entry[] = [
 		guards: [],
 		send: (s) => app('/v1/token', s.token, { method: 'DELETE' })
 	},
+	{ route: 'GET /v1/devices', guards: ['token'], send: (s) => app('/v1/devices', s.token) },
+	{
+		route: 'DELETE /v1/devices/:id',
+		guards: ['token'],
+		send: (s) => app('/v1/devices/x', s.token, { method: 'DELETE' })
+	},
 	{
 		route: 'POST /v1/ai',
 		guards: ['token'],
@@ -109,7 +115,22 @@ const ENTRIES: Entry[] = [
 			app('/v1/sync/reset', s.token, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ key_id: 'a'.repeat(16) })
+				body: JSON.stringify({ key_id: 'a'.repeat(16), wrapped_key: 'wrapped' })
+			})
+	},
+	{
+		route: 'GET /v1/sync/key',
+		guards: ['token', 'limit-account'],
+		send: (s) => app('/v1/sync/key', s.token)
+	},
+	{
+		route: 'PUT /v1/sync/key',
+		guards: ['token', 'limit-account'],
+		send: (s) =>
+			app('/v1/sync/key', s.token, {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ key_id: 'a'.repeat(16), wrapped_key: 'wrapped' })
 			})
 	},
 	{
