@@ -2662,13 +2662,6 @@ async fn refresh_mawok_account_status(
                 .as_ref()
                 .is_some_and(|old| old.account_id != status.account_id);
             if changed_account {
-                // 前のアカウントの鍵は、資格情報管理からも消す。残すと、続く鍵の確かめが読み直して使うため
-                match run_blocking(account_credentials::clear_key).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) | Err(error) => {
-                        warn!("couldn't clear the previous account's sync key: {error}")
-                    }
-                }
                 forget_sync_key(app).await;
             }
             remember_pro_state(app, &status, generation).await;
@@ -2762,7 +2755,11 @@ async fn refresh_sync_key(
         Ok(server) => server,
         Err(error) => {
             warn!("couldn't check the sync key: {error:?}");
-            if pro_generation_is_current(app, generation) {
+            // 窓口と照らして決まっていた状態（NeedsPassword・NotStarted・Ready）は、一時的な失敗で手元の鍵から決め直さない。
+            // 決め直すと、画面が「入力」と同期の設定の間で揺れ、古い鍵で同期が始まる。まだ照らしていない（None）ときだけ使う
+            let unverified =
+                *app.state::<AppState>().sync_key_status.lock().unwrap() == SyncKeyStatus::None;
+            if unverified && pro_generation_is_current(app, generation) {
                 use_unverified_sync_key(app, local);
             }
             return;
@@ -2998,12 +2995,12 @@ async fn store_sync_key(key: [u8; 32]) -> Result<(), String> {
         .inspect_err(|error| error!("couldn't store the sync key: {error}"))
 }
 
-/// 窓口に断られたときに、資格情報管理の鍵を、置き換える前に戻す。`previous` が None（前の鍵を読めなかった）なら触らない
+/// 窓口に断られたときに、資格情報管理の鍵を、置き換える前に戻す。前の鍵が無かった・読めなかった（`None`）なら消す。
+/// 読めなかった鍵は、新しい鍵を置いたときに上書きされていて、戻すものが無いため
 async fn restore_sync_key(previous: Option<Option<[u8; 32]>>) {
-    let restored = match previous {
-        None => return,
-        Some(Some(key)) => run_blocking(move || sync_key::store(&key)).await,
-        Some(None) => run_blocking(account_credentials::clear_key).await,
+    let restored = match previous.flatten() {
+        Some(key) => run_blocking(move || sync_key::store(&key)).await,
+        None => run_blocking(account_credentials::clear_key).await,
     };
     if let Ok(Err(error)) | Err(error) = restored {
         warn!("couldn't restore the previous sync key: {error}");
@@ -3145,13 +3142,18 @@ async fn change_sync_password(
         drop(refresh);
         return Err(recheck_sync_key(&app).await);
     };
-    // 今のパスワードで開けることで、変えてよい人かを確かめる（窓口はパスワードを知らない）
-    let key = unwrap_sync_key(wrapped, current).await?;
+    // 先に窓口の鍵と手元の鍵を照らす。ほかのデバイスがリセットして手元の鍵が古いと、前のパスワードは開けず、
+    // 「パスワードが正しくありません」が出続けるため。違えば状態を読み直して「入力」の欄へ移す
     let local = *app.state::<AppState>().sync_key.lock().unwrap();
-    if local != Some(key) {
-        // ほかのデバイスがリセットして、このデバイスの鍵が古くなっていた。「入力」の欄へ移す
+    if local.as_ref().map(sync_key::key_id) != server.key_id {
         drop(refresh);
         return Err(recheck_sync_key(&app).await);
+    }
+    // 今のパスワードで開けることで、変えてよい人かを確かめる（窓口はパスワードを知らない）
+    let key = unwrap_sync_key(wrapped, current).await?;
+    if local != Some(key) {
+        warn!("the wrapped sync key doesn't match its key ID");
+        return Err(actions::Failure::Unexpected.code().to_string());
     }
     let rewrapped = run_blocking(move || sync_key::wrap(&key, &password)).await??;
     if !pro_generation_is_current(&app, generation) {

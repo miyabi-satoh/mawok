@@ -94,13 +94,17 @@
 			type="password"
 			{autocomplete}
 			aria-invalid={errors[field] ? true : undefined}
+			aria-describedby={[hint && `${id}-${field}-hint`, errors[field] && `${id}-${field}-error`]
+				.filter(Boolean)
+				.join(' ') || undefined}
 			bind:value={values[field]}
 		/>
 		{#if hint}
-			<Field.Description>{hint}</Field.Description>
+			<Field.Description id="{id}-{field}-hint">{hint}</Field.Description>
 		{/if}
 		{#if errors[field]}
-			<Field.Error>{errors[field]}</Field.Error>
+			<!-- 出たときは部品の role="alert" で読み上げ、欄に戻ったときも読めるよう欄と結ぶ -->
+			<Field.Error id="{id}-{field}-error">{errors[field]}</Field.Error>
 		{/if}
 	</Field.Field>
 {/snippet}

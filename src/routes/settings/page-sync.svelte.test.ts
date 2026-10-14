@@ -411,6 +411,10 @@ describe('設定画面の同期のパスワード', () => {
 		await form.getByLabelText(m.settings_sync_password_confirm()).fill('password2');
 		await form.getByRole('button', { name: m.settings_sync_start() }).click();
 		await expect.element(form.getByText(m.sync_password_error_mismatch())).toBeVisible();
+		// 欄に戻ったときも、読み上げで間違いが分かる
+		await expect
+			.element(form.getByLabelText(m.settings_sync_password_confirm()))
+			.toHaveAccessibleDescription(m.sync_password_error_mismatch());
 		expect(callsOf(invoked, 'start_sync')).toHaveLength(0);
 
 		await form.getByLabelText(m.settings_sync_password_confirm()).fill('password1');
