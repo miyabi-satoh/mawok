@@ -13,6 +13,7 @@
 	 * ほかのデバイスはここからサインアウトさせる。このデバイスのサインアウトは、アカウントの行に置いてある
 	 */
 	let { call }: { call: Call } = $props();
+	const id = $props.id();
 
 	/** 窓口が答えた一覧。読めていなければ null で、見出しごと出さない */
 	let devices = $state<SignedInDevice[] | null>(null);
@@ -36,11 +37,18 @@
 		{#each devices as device (device.id)}
 			<SettingsRow>
 				<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-					<Field.Title>{device.name}</Field.Title>
+					<Field.Title id="{id}-{device.id}">{device.name}</Field.Title>
 					{#if device.current}
 						<span class="text-sm text-muted-foreground">{m.settings_devices_this_device()}</span>
 					{:else}
-						<Button variant="outline" size="sm" onclick={() => signOut(device.id)}>
+						<!-- 読み上げでどの行の操作か分かるよう、名前にデバイスの名前を入れる -->
+						<Button
+							id="{id}-{device.id}-sign-out"
+							variant="outline"
+							size="sm"
+							aria-labelledby="{id}-{device.id}-sign-out {id}-{device.id}"
+							onclick={() => signOut(device.id)}
+						>
 							{m.settings_mawok_sign_out()}
 						</Button>
 					{/if}

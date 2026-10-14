@@ -267,10 +267,13 @@ describe('設定画面のサインインしているデバイス', () => {
 		const screen = await renderAt(m.settings_category_account);
 		await expect.element(screen.getByText(m.settings_devices_this_device())).toBeVisible();
 		await expect.element(screen.getByText('living-room-pc')).toBeVisible();
-		const signOuts = screen.getByRole('button', { name: m.settings_mawok_sign_out() });
-		// アカウントの行と、ほかのデバイスの行の2つ。このデバイスの行には置かない
-		await expect.element(signOuts.nth(1)).toBeVisible();
-		await signOuts.nth(1).click();
+		// このデバイスの行には置かない（アカウントの行のサインアウトを使う）
+		expect(
+			screen.getByRole('button', { name: `${m.settings_mawok_sign_out()} mac-mini` }).query()
+		).toBeNull();
+		await screen
+			.getByRole('button', { name: `${m.settings_mawok_sign_out()} living-room-pc` })
+			.click();
 		await vi.waitFor(() =>
 			expect(invoked).toHaveBeenCalledWith('sign_out_mawok_device', { id: 'b' })
 		);

@@ -1886,7 +1886,7 @@ async fn run_sync(app: &AppHandle) {
             }
             match failure.error {
                 sync::Error::KeyMismatch => {
-                    info!("sync key mismatch; refreshing the shared key");
+                    info!("sync key mismatch; refreshing the sync key");
                     let _ = refresh_mawok_account_status(app).await;
                 }
                 sync::Error::SignedOut => {
