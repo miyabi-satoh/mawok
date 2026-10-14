@@ -11,8 +11,6 @@ pub const SYNC_APPLIED: &str = "sync-applied";
 pub const SYNC_CHOICE_REQUESTED: &str = "sync-choice-requested";
 /// テキストウィンドウのエラーの帯から、AI の設定を頼まれた。設定画面は「AI」に移る。
 pub const AI_SETTINGS_REQUESTED: &str = "ai-settings-requested";
-pub const PAIRING_CODE_ENDED: &str = "pairing-code-ended";
-pub const PAIRING_CODE_OFFERED: &str = "pairing-code-offered";
 pub const SHOWN: &str = "shown";
 pub const HIDE_REQUESTED: &str = "hide-requested";
 pub const DRAFT_HIDDEN: &str = "draft-hidden";

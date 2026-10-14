@@ -4,7 +4,11 @@
 <dict>
 	<key>LSUIElement</key>
 	<true/>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>自分のデバイスを追加して設定と履歴を同期するために、同じネットワークのデバイスを探します。</string>
+	<!-- アプリの日本語と英語を OS に伝え、OS が出す部品 (フォルダーを選ぶ画面など) を同じ言語にする。訳す文字列が無いので lproj は置かない -->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ja</string>
+	</array>
 </dict>
 </plist>

@@ -12,7 +12,8 @@ export const CONSTANTS = {
 	SH_PREFIX: "@sh",
 	NEW_SNIPPET: {"id":"","name":"","body":"","output":"replace","encoding":"utf-8","enabled":true,"sync":true},
 	SYNCABLE_SETTINGS: ["language", "theme", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "trim_trailing_whitespace", "punctuation_style", "alphabet_width", "digit_width", "space_width", "symbol_width", "katakana_width", "exclude_from_clipboard_history", "text_font_family", "text_font_size", "text_color_light", "text_color_dark", "input_guidance", "ai_service", "ai_models"],
-	MODIFIED_SETTINGS: ["hotkey", "text_window_keys.copy", "text_window_keys.settings", "text_window_keys.snippets", "text_window_keys.historyOlder", "text_window_keys.historyNewer", "text_window_keys.changeFolder", "autostart", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "language", "theme", "text_font", "text_color", "input_guidance", "trim_trailing_whitespace", "exclude_from_clipboard_history", "char_width", "ai_service", "ai_models", "sync_settings", "sync_keys", "sync_replacements", "sync_snippets", "sync_history"]
+	MODIFIED_SETTINGS: ["hotkey", "text_window_keys.copy", "text_window_keys.settings", "text_window_keys.snippets", "text_window_keys.historyOlder", "text_window_keys.historyNewer", "text_window_keys.changeFolder", "autostart", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "language", "theme", "text_font", "text_color", "input_guidance", "trim_trailing_whitespace", "exclude_from_clipboard_history", "char_width", "ai_service", "ai_models", "sync_settings", "sync_keys", "sync_replacements", "sync_snippets", "sync_history"],
+	MIN_SYNC_PASSWORD_CHARS: 8
 } as const;
 
 export const EVENTS = {
@@ -23,8 +24,6 @@ export const EVENTS = {
 	SYNC_APPLIED: "sync-applied",
 	SYNC_CHOICE_REQUESTED: "sync-choice-requested",
 	AI_SETTINGS_REQUESTED: "ai-settings-requested",
-	PAIRING_CODE_ENDED: "pairing-code-ended",
-	PAIRING_CODE_OFFERED: "pairing-code-offered",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested",
 	DRAFT_HIDDEN: "draft-hidden",

@@ -171,20 +171,6 @@ impl ActionEncoding {
     }
 }
 
-/// 確認コードで追加した自分のデバイス（docs/lan.md「デバイスを追加する」）
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(default, rename_all = "camelCase")]
-pub struct Device {
-    /// ペアリングか生存確認で相手が名乗った名前
-    pub name: String,
-    /// 相手の公開鍵（小文字の16進）
-    pub public_key: String,
-    /// 最後にペアリングか生存確認が通ったときのアドレス
-    pub address: String,
-}
-
 /// 読み込みは `parse`、書き出しは `apply` で項目ごとに行う。項目名は `key` にまとめてある
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -237,8 +223,6 @@ pub struct Config {
     pub text_color_light: String,
     /// 下書きの入力欄の文字色（ダーク）。小文字の #rrggbb。空なら標準の文字色
     pub text_color_dark: String,
-    /// 確認コードで追加した自分のデバイス
-    pub devices: Vec<Device>,
     /// 下書きの入力欄に出す案内。None なら既定の案内（画面側で今の言語とホットキーから作る）、空文字なら出さない。
     /// 既定のままのときは、設定ファイルに書かない
     pub input_guidance: Option<String>,
@@ -326,7 +310,6 @@ impl Default for Config {
             text_font_size: DEFAULT_DRAFT_FONT_SIZE,
             text_color_light: String::new(),
             text_color_dark: String::new(),
-            devices: Vec::new(),
             input_guidance: None,
             ai_service: AiService::default(),
             ai_consent: None,
@@ -538,7 +521,6 @@ mod key {
     pub const TEXT_FONT_SIZE: &str = "text_font_size";
     pub const TEXT_COLOR_LIGHT: &str = "text_color_light";
     pub const TEXT_COLOR_DARK: &str = "text_color_dark";
-    pub const DEVICES: &str = "devices";
     pub const INPUT_GUIDANCE: &str = "input_guidance";
     pub const AI_SERVICE: &str = "ai_service";
     pub const AI_CONSENT: &str = "ai_consent";
@@ -865,25 +847,6 @@ impl Row for LegacyAction {
     }
 }
 
-impl Row for Device {
-    fn read(table: &dyn TableLike) -> Option<Self> {
-        let default = Device::default();
-        Some(Self {
-            name: text_field(table, "name", default.name)?,
-            public_key: text_field(table, "public_key", default.public_key)?,
-            address: text_field(table, "address", default.address)?,
-        })
-    }
-
-    fn fields(&self) -> Vec<(&'static str, Value)> {
-        vec![
-            ("name", Value::from(self.name.clone())),
-            ("public_key", Value::from(self.public_key.clone())),
-            ("address", Value::from(self.address.clone())),
-        ]
-    }
-}
-
 /// 数の項目。TOML では整数と小数が別の型なので、どちらも数として読む
 fn number(item: &Item) -> Option<f64> {
     item.as_integer()
@@ -1008,7 +971,6 @@ fn parse(text: &str) -> Result<Parsed, String> {
     reader.read_with(key::INPUT_GUIDANCE, &mut config.input_guidance, |item| {
         item.as_str().map(|text| Some(text.to_string()))
     });
-    reader.read_rows(key::DEVICES, &mut config.devices);
     // 知らない AI サービスの名前は、型の合わない値と同じく既定に戻す
     reader.read_with(key::AI_SERVICE, &mut config.ai_service, |item| {
         item.as_str().and_then(AiService::from_name)
@@ -1595,9 +1557,6 @@ fn apply(root: &mut Table, config: &Config, changes: &Changes<'_>) {
     }
     if changes.includes(key::AI_MODELS, |old| old.ai_models != config.ai_models) {
         sync_ai_models(root, &config.ai_models);
-    }
-    if changes.includes(key::DEVICES, |old| old.devices != config.devices) {
-        sync_rows(root, key::DEVICES, &config.devices);
     }
 }
 
@@ -2750,11 +2709,6 @@ body = "git status"
             text_font_size: 20,
             text_color_light: "#2f4f4f".to_string(),
             text_color_dark: "#e0e0e0".to_string(),
-            devices: vec![Device {
-                name: "Mac".to_string(),
-                public_key: "ab".repeat(32),
-                address: "192.168.0.10".to_string(),
-            }],
             input_guidance: Some("自分用のメモ".to_string()),
             ai_service: AiService::Gemini,
             ai_consent: Some(AiService::Gemini),
@@ -3772,7 +3726,7 @@ command = "sort"
 
     #[test]
     fn ignores_items_of_features_that_no_longer_exist() {
-        // この版に無い項目（デバイスの send_to、text_window_keys の send・send_targets など）は読み捨て、修復の知らせにしない
+        // この版に無い項目（前の版のデバイスの一覧、text_window_keys の send・send_targets など）は読み捨て、修復の知らせにしない
         let path = temp_path("paired-devices");
         write(
             &path,
@@ -3781,14 +3735,6 @@ command = "sort"
         );
         let (config, error) = load_or_create(&path);
         assert_eq!(error, None);
-        assert_eq!(
-            config.devices,
-            vec![Device {
-                name: "Mac".to_string(),
-                public_key: "ab".to_string(),
-                address: "192.168.0.10".to_string(),
-            }]
-        );
         assert_eq!(config.text_window_keys, DraftKeys::default());
     }
 

@@ -25,7 +25,7 @@ use crate::{
     draft_keys::{DraftAction, DraftKeys, Platform},
     history_store::{self, History},
     i18n::Lang,
-    shared_key,
+    sync_key,
     text::{KatakanaWidth, PunctuationStyle, Replacement, WidthStyle},
 };
 
@@ -329,7 +329,7 @@ pub fn clear(path: &Path) -> Result<(), String> {
 }
 
 fn derived_key(key: &[u8; 32]) -> [u8; 32] {
-    shared_key::derive(key, KEY_INFO)
+    sync_key::derive(key, KEY_INFO)
 }
 
 fn associated_data(key_id: &str, item: &ItemKey) -> Vec<u8> {
@@ -3157,7 +3157,6 @@ mod tests {
         let items = config_items(&config);
         for name in [
             "autostart",
-            "devices",
             "ai_consent",
             "sync_settings",
             "sync_history",

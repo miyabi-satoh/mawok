@@ -90,7 +90,7 @@ pub struct AccountStatus {
     pub email: String,
     /// 残りの割合（切り上げ。使い切ったときだけ 0）
     pub remaining_percent: u32,
-    /// 同期の鍵を受け渡すデバイスが同じアカウントかを見分けるための、窓口のランダムなアカウントID
+    /// サインインし直したときに、アカウントが替わったかを見分けるための、窓口のランダムなアカウントID
     pub account_id: String,
     pub pro: ProStatus,
 }
@@ -252,31 +252,121 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
     })
 }
 
-/// 同期の最初のページだけを読み、共有の鍵の見分けを得る。
-pub async fn sync_key_id(
-    client: &reqwest::Client,
-    token: &str,
-) -> Result<Option<String>, AccountError> {
-    let request = client.get(format!("{ACCOUNT_URL}/v1/sync?since=0&limit=1"));
-    let response = send_signed(request, token).await?;
-    let body: Value = response.json().await.map_err(other)?;
-    match body.get("key_id") {
+/// 窓口にある同期の鍵の見分けと、同期のパスワードで包んだ鍵（docs/sync.md「同期のパスワード」）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncKey {
+    pub key_id: Option<String>,
+    pub wrapped_key: Option<String>,
+}
+
+fn optional_string(body: &Value, name: &str) -> Result<Option<String>, AccountError> {
+    match body.get(name) {
         Some(Value::Null) | None => Ok(None),
-        Some(Value::String(key_id)) if !key_id.is_empty() => Ok(Some(key_id.clone())),
-        _ => Err(other("the sync answer has an invalid key ID")),
+        Some(Value::String(value)) if !value.is_empty() => Ok(Some(value.clone())),
+        _ => Err(other(format!("the answer has an invalid {name}"))),
     }
 }
 
-/// 鍵を失くしたときの同期の作り直し。鍵の見分けだけを窓口へ渡す。
+/// 窓口にある同期の鍵を読む。
+pub async fn sync_key(client: &reqwest::Client, token: &str) -> Result<SyncKey, AccountError> {
+    let request = client.get(format!("{ACCOUNT_URL}/v1/sync/key"));
+    let response = send_signed(request, token).await?;
+    let body: Value = response.json().await.map_err(other)?;
+    Ok(SyncKey {
+        key_id: optional_string(&body, "key_id")?,
+        wrapped_key: optional_string(&body, "wrapped_key")?,
+    })
+}
+
+/// 新しい鍵で同期を始める（同期を開始・同期をリセット）。窓口の前の写しは消える。
 pub async fn reset_sync(
     client: &reqwest::Client,
     token: &str,
     key_id: &str,
+    wrapped_key: &str,
 ) -> Result<(), AccountError> {
     let request = client
         .post(format!("{ACCOUNT_URL}/v1/sync/reset"))
-        .json(&json!({ "key_id": key_id }));
+        .json(&json!({ "key_id": key_id, "wrapped_key": wrapped_key }));
     send_signed(request, token).await.map(|_| ())
+}
+
+/// 同期のパスワードを変えた、包み直した鍵を置く。窓口の鍵が `key_id` と違えば（ほかのデバイスがリセットした）`Ok(false)`
+pub async fn put_sync_key(
+    client: &reqwest::Client,
+    token: &str,
+    key_id: &str,
+    wrapped_key: &str,
+) -> Result<bool, AccountError> {
+    let response = client
+        .put(format!("{ACCOUNT_URL}/v1/sync/key"))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            bearer(token).map_err(other)?,
+        )
+        .json(&json!({ "key_id": key_id, "wrapped_key": wrapped_key }))
+        .send()
+        .await
+        .map_err(other)?;
+    match response.status() {
+        reqwest::StatusCode::UNAUTHORIZED => Err(AccountError::SignedOut),
+        reqwest::StatusCode::CONFLICT => Ok(false),
+        status if status.is_success() => Ok(true),
+        status => Err(other(format!("HTTP {}", status.as_u16()))),
+    }
+}
+
+/// 同じアカウントにサインインしているデバイス（docs/account-server.md「Mawok とアカウントを結ぶ」）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+pub struct SignedInDevice {
+    pub id: String,
+    pub name: String,
+    /// 問い合わせたデバイス自身か
+    pub current: bool,
+}
+
+/// 同じアカウントにサインインしているデバイスの一覧
+pub async fn devices(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<Vec<SignedInDevice>, AccountError> {
+    #[derive(serde::Deserialize)]
+    struct Answer {
+        devices: Vec<SignedInDevice>,
+    }
+    let response = send_signed(client.get(format!("{ACCOUNT_URL}/v1/devices")), token).await?;
+    let answer: Answer = response.json().await.map_err(other)?;
+    Ok(answer.devices)
+}
+
+/// ほかのデバイスをサインアウトさせる（そのデバイスのトークンを外す）
+pub async fn sign_out_device(
+    client: &reqwest::Client,
+    token: &str,
+    id: &str,
+) -> Result<(), AccountError> {
+    let url = reqwest::Url::parse(&format!("{ACCOUNT_URL}/v1/devices/"))
+        .and_then(|base| base.join(id))
+        .map_err(other)?;
+    send_signed(client.delete(url), token).await.map(|_| ())
+}
+
+/// 窓口の一覧で見分けるための、このデバイスの名前（コンピューター名）
+pub fn device_name() -> String {
+    #[cfg(target_os = "macos")]
+    let name = std::process::Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok());
+    #[cfg(not(target_os = "macos"))]
+    let name = std::env::var("COMPUTERNAME").ok();
+    name.map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| crate::APP_NAME.to_string())
 }
 
 /// トークンを外す（Mawok でのサインアウト）。外せなくても、手元のトークンは消す（窓口の画面からも外せる）

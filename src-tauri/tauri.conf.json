@@ -55,11 +55,7 @@
     ],
     "macOS": {
       "signingIdentity": "-",
-      "minimumSystemVersion": "13.0",
-      "files": {
-        "Resources/en.lproj/InfoPlist.strings": "macos/en.lproj/InfoPlist.strings",
-        "Resources/ja.lproj/InfoPlist.strings": "macos/ja.lproj/InfoPlist.strings"
-      }
+      "minimumSystemVersion": "13.0"
     },
     "windows": {
       "nsis": {
