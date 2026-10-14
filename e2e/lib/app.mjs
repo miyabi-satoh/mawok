@@ -7,7 +7,13 @@ import {
 	isDraftWindowVisible,
 	sendGlobalHotkey
 } from './os.mjs';
-import { clickClientPoint, clickTitleBar, sendKeySequence, VK } from './input.mjs';
+import {
+	clickClientPoint,
+	clickTitleBar,
+	neutralizeForeground,
+	sendKeySequence,
+	VK
+} from './input.mjs';
 import { expectStays, waitFor } from './wait.mjs';
 import { DEFAULT_HOTKEY } from './config.mjs';
 import { APP_PATH } from './paths.mjs';
@@ -42,6 +48,7 @@ export async function launchApp({ port }) {
 
 /** 下書きウィンドウを表示する (OS のグローバルホットキー経由。トグルなので、隠れている前提で呼ぶこと) */
 export async function showDraft() {
+	await neutralizeForeground();
 	await sendGlobalHotkey();
 }
 

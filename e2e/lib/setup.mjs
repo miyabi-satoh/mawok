@@ -10,6 +10,7 @@ import {
 	stopPowerShell
 } from './os.mjs';
 import { launchApp } from './app.mjs';
+import { neutralizeForeground } from './input.mjs';
 import { PROFILE_ENV } from './app-conf.mjs';
 import { markLog, readLogSince } from './files.mjs';
 import { waitFor } from './wait.mjs';
@@ -95,6 +96,8 @@ export function createSuite() {
 			// 前のテストの後始末 (closeClient) が確実に終わっている前提だが、
 			// 万一まだ残っていたら黙って殺さずここで気づけるようにする
 			await ensureMawokNotRunning();
+			// 前面をシェルが握ったままだと、起動したアプリの前面化が通らない。テストの頭でニュートラルにしておく
+			await neutralizeForeground();
 			const mark = markLog(LOG_PATH);
 			const client = await launchApp({ port: driver.port });
 			// プロファイルを見ない版 (ビルドが古い) は、常用の置き場で動いてアカウントと同期する。
