@@ -167,11 +167,11 @@ importers:
   .:
     devDependencies:
       smol-toml:
-        specifier: ^1.9.0
-        version: 1.9.0
+        specifier: ^1.9.1
+        version: 1.9.1
       webdriverio:
-        specifier: ^10.0.0
-        version: 10.0.0(supports-color@7.2.0)(yauzl@2.10.0)
+        specifier: ^10.0.2
+        version: 10.0.2(supports-color@7.2.0)(yauzl@2.10.0)
 
 packages:
 
@@ -199,9 +199,6 @@ packages:
       yauzl:
         optional: true
 
-  '@types/node@20.19.43':
-    resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
-
   '@types/node@22.20.5':
     resolution: {integrity: sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==}
 
@@ -217,8 +214,8 @@ packages:
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
-  '@wdio/config@10.0.0':
-    resolution: {integrity: sha512-g0xaQxKJM5hIhZBW05Ivs7vZi/txB+UcWeoiuzNl0/fS5rvQYvofnYlROvCBKeEdf72ooIRtfkRnW8nKQ97P+A==}
+  '@wdio/config@10.0.1':
+    resolution: {integrity: sha512-n6elHE4ItKAtr4lwAaWIh/sAFuEFhyesLM27i5l9IWBJEK6VECdt0Pigj/4vUD2tliOoBtsWxphSW4oiNFXotg==}
     engines: {node: '>=22.19.0'}
 
   '@wdio/logger@10.0.0':
@@ -229,20 +226,20 @@ packages:
     resolution: {integrity: sha512-0ZAEIo6PNyMIJPlOGkIgyOJUjcd0pC8/QHlVAAe1c91/IcjZ1X+k0yidXHaboJdN7dq1XPUacmhRdtua0U5EZg==}
     engines: {node: '>=18.20.0'}
 
-  '@wdio/protocols@10.0.0':
-    resolution: {integrity: sha512-426ENC79fH7N4ggoGRHhZBY/exkdHAndbBiXcs9pQkzGP356H8C7VkQUx8g78m4k1TUC0RhOl8Se8VE0Mutpqw==}
+  '@wdio/protocols@10.0.2':
+    resolution: {integrity: sha512-ewuQuu+niq/ZpV1TLn904nDA4F9n4LLu9X1U8Juwwm1ahq09dpEP8lEytDnpaD0f21uIx//mFBKmBAjSexMdEA==}
     engines: {node: '>=22.19.0'}
 
   '@wdio/repl@10.0.0':
     resolution: {integrity: sha512-wAC9ksdWWv2E3Sj86eNKxB3IUt0gEyw9rgDGAWjk/GWgi6K3e+/n3erGNweI9JMJyC/+RNe0qHgVPQpRJMRVpg==}
     engines: {node: '>=22.19.0'}
 
-  '@wdio/types@10.0.0':
-    resolution: {integrity: sha512-qUJbKEHjsN0PuC3S2r7Gy9wYtbChmX+PYghKGHYQhjyH9P9t+sWhSPQWUBk3S+IUTYT1f+Z4VbF+5FmvlHL6Lg==}
+  '@wdio/types@10.0.1':
+    resolution: {integrity: sha512-HGP9lAYXCsLAXzugfT4khCh7tYByWOMIxZHCG+tUvgmpwNzi6lfIsxyIlWownXK1wYJUpk6tkDBX/iXwN+q0lg==}
     engines: {node: '>=22.19.0'}
 
-  '@wdio/utils@10.0.0':
-    resolution: {integrity: sha512-Ta3wq+u83DT0Vnz1QcuqkagBSwWBnTg8LCIQmDO6DGkMIiHXJrhUMfz6ibrlMJPslt4g0P/Ri5wm7WkJXo9HXw==}
+  '@wdio/utils@10.0.1':
+    resolution: {integrity: sha512-aYvTtF+7IYsvkFdXdu32Q2vexEaXYK79R1wLTnAXrT2Q7fp0oCDL0UgBx8Jgo5Tn98ZLWx4JlUeZsDRAIkV4Zw==}
     engines: {node: '>=22.19.0'}
 
   '@zip.js/zip.js@2.14.0':
@@ -749,8 +746,8 @@ packages:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
 
-  smol-toml@1.9.0:
-    resolution: {integrity: sha512-hpd+HLON7HdZXqYchMM/+LaTTbdK0AU3NngIJ4KVyWbY9bfQqdL9cD+4yf6dUoU2Ap4VsU0JkQi6FxAI1B2mXQ==}
+  smol-toml@1.9.1:
+    resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
     engines: {node: '>= 18'}
 
   spacetrim@0.11.59:
@@ -840,12 +837,12 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  webdriver@10.0.0:
-    resolution: {integrity: sha512-EyMSQjY+Nq9mAUTCzzW1hjarwHNJWtCBRtGSZkiTcdJdFZ6siKF0Z01hHJFVkF1Xm+aCkFxD1atm1S2cNxCQxA==}
+  webdriver@10.0.2:
+    resolution: {integrity: sha512-q2eKiapaOyCH2QfVykBjrYznQiL4gjmGakTYVzQqq3Ycqpd2VPOMSkmbxGHFo8+CpO628QwvpxgKvAxA3hpDaA==}
     engines: {node: '>=22.19.0'}
 
-  webdriverio@10.0.0:
-    resolution: {integrity: sha512-DiDflg731z/b+qg4EmVAGihMJSWhHJYhlwrS6Q1uSFqL4c48+xHDj9VjhQr7sFzZ/MBJySjGZfMBGyjP7p547Q==}
+  webdriverio@10.0.2:
+    resolution: {integrity: sha512-o+T+DXwsn2e0niAmz9PWUMDwE/8R06euZ4O85faB6fGG9X/uVOom8sloIH+SYc1tI0fjcI34sU9hptrQj9fDdQ==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
       puppeteer-core: '>=24 <26'
@@ -940,10 +937,6 @@ snapshots:
     optionalDependencies:
       yauzl: 2.10.0
 
-  '@types/node@20.19.43':
-    dependencies:
-      undici-types: 6.21.0
-
   '@types/node@22.20.5':
     dependencies:
       undici-types: 6.21.0
@@ -952,19 +945,19 @@ snapshots:
 
   '@types/split2@4.2.3':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.5
 
   '@types/which@2.0.2': {}
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.5
 
-  '@wdio/config@10.0.0(supports-color@7.2.0)(yauzl@2.10.0)':
+  '@wdio/config@10.0.1(supports-color@7.2.0)(yauzl@2.10.0)':
     dependencies:
       '@wdio/logger': 10.0.0
-      '@wdio/types': 10.0.0
-      '@wdio/utils': 10.0.0(supports-color@7.2.0)(yauzl@2.10.0)
+      '@wdio/types': 10.0.1
+      '@wdio/utils': 10.0.1(supports-color@7.2.0)(yauzl@2.10.0)
       deepmerge-ts: 8.0.2
       glob: 10.5.0
       import-meta-resolve: 4.2.0
@@ -990,22 +983,22 @@ snapshots:
       safe-regex2: 5.1.1
       strip-ansi: 7.2.0
 
-  '@wdio/protocols@10.0.0': {}
+  '@wdio/protocols@10.0.2': {}
 
   '@wdio/repl@10.0.0':
     dependencies:
       '@types/node': 22.20.5
 
-  '@wdio/types@10.0.0':
+  '@wdio/types@10.0.1':
     dependencies:
       '@types/node': 22.20.5
 
-  '@wdio/utils@10.0.0(supports-color@7.2.0)(yauzl@2.10.0)':
+  '@wdio/utils@10.0.1(supports-color@7.2.0)(yauzl@2.10.0)':
     dependencies:
       '@puppeteer/browsers': 3.2.3(yauzl@2.10.0)
       '@types/split2': 4.2.3
       '@wdio/logger': 10.0.0
-      '@wdio/types': 10.0.0
+      '@wdio/types': 10.0.1
       aria-query: 5.3.2
       decamelize: 6.0.1
       deepmerge-ts: 8.0.2
@@ -1511,7 +1504,7 @@ snapshots:
 
   signal-exit@4.1.0: {}
 
-  smol-toml@1.9.0: {}
+  smol-toml@1.9.1: {}
 
   spacetrim@0.11.59: {}
 
@@ -1617,15 +1610,15 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  webdriver@10.0.0(supports-color@7.2.0)(yauzl@2.10.0):
+  webdriver@10.0.2(supports-color@7.2.0)(yauzl@2.10.0):
     dependencies:
       '@types/node': 22.20.5
       '@types/ws': 8.18.1
-      '@wdio/config': 10.0.0(supports-color@7.2.0)(yauzl@2.10.0)
+      '@wdio/config': 10.0.1(supports-color@7.2.0)(yauzl@2.10.0)
       '@wdio/logger': 10.0.0
-      '@wdio/protocols': 10.0.0
-      '@wdio/types': 10.0.0
-      '@wdio/utils': 10.0.0(supports-color@7.2.0)(yauzl@2.10.0)
+      '@wdio/protocols': 10.0.2
+      '@wdio/types': 10.0.1
+      '@wdio/utils': 10.0.1(supports-color@7.2.0)(yauzl@2.10.0)
       deepmerge-ts: 8.0.2
       https-proxy-agent: 7.0.6(supports-color@7.2.0)
       undici: 8.11.2
@@ -1637,16 +1630,16 @@ snapshots:
       - utf-8-validate
       - yauzl
 
-  webdriverio@10.0.0(supports-color@7.2.0)(yauzl@2.10.0):
+  webdriverio@10.0.2(supports-color@7.2.0)(yauzl@2.10.0):
     dependencies:
       '@types/node': 22.20.5
       '@types/sinonjs__fake-timers': 8.1.5
-      '@wdio/config': 10.0.0(supports-color@7.2.0)(yauzl@2.10.0)
+      '@wdio/config': 10.0.1(supports-color@7.2.0)(yauzl@2.10.0)
       '@wdio/logger': 10.0.0
-      '@wdio/protocols': 10.0.0
+      '@wdio/protocols': 10.0.2
       '@wdio/repl': 10.0.0
-      '@wdio/types': 10.0.0
-      '@wdio/utils': 10.0.0(supports-color@7.2.0)(yauzl@2.10.0)
+      '@wdio/types': 10.0.1
+      '@wdio/utils': 10.0.1(supports-color@7.2.0)(yauzl@2.10.0)
       archiver: 8.0.0
       aria-query: 5.3.2
       cheerio: 1.2.0
@@ -1661,7 +1654,7 @@ snapshots:
       rgb2hex: 0.2.5
       serialize-error: 12.0.0
       urlpattern-polyfill: 10.1.0
-      webdriver: 10.0.0(supports-color@7.2.0)(yauzl@2.10.0)
+      webdriver: 10.0.2(supports-color@7.2.0)(yauzl@2.10.0)
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
