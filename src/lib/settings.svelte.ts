@@ -9,7 +9,6 @@ export type { ActionOutput } from '$lib/bindings/ActionOutput';
 export type { ActionEncoding } from '$lib/bindings/ActionEncoding';
 export type { AiService } from '$lib/bindings/AiService';
 export type { CharWidths } from '$lib/bindings/CharWidths';
-export type { Device } from '$lib/bindings/Device';
 export type { PunctuationStyle } from '$lib/bindings/PunctuationStyle';
 export type { Replacement } from '$lib/bindings/Replacement';
 export type { Snippet } from '$lib/bindings/Snippet';

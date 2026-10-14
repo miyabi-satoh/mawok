@@ -15,8 +15,8 @@
 	import SyncToggle from '$lib/components/sync-toggle.svelte';
 	import SettingsAi from '$lib/components/settings-ai.svelte';
 	import SettingsSnippets from '$lib/components/settings-snippets.svelte';
-	import SettingsDevices from '$lib/components/settings-devices.svelte';
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
+	import SettingsMawokDevices from '$lib/components/settings-mawok-devices.svelte';
 	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
@@ -37,7 +37,6 @@
 	import { focusFirstField } from '$lib/focus-field';
 	import { isBlankReplacement } from '$lib/blank-rows';
 	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '$lib/history.svelte';
-	import { lanErrorMessage } from '$lib/lan-errors';
 	import { modifiedName } from '$lib/modified-settings';
 	import { onEvent } from '$lib/on-event';
 	import { SnippetsEditor } from '$lib/snippets-editor.svelte';
@@ -86,8 +85,8 @@
 	const callSettings = commandCaller(settingsFailed, showError);
 	/** アクションのコマンドを呼ぶ。失敗したら、アクションの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
 	const callActions = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
-	/** ペアリングのコマンドを呼ぶ。Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする */
-	const callLan = commandCaller(lanErrorMessage, showError);
+	/** 欄の下に出さない失敗を、アクションの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
+	const showActionError = (e: unknown) => showError(actionErrorMessage(e) ?? settingsFailed(e));
 	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
 	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
 	let refreshingMawokAccountStatus = false;
@@ -136,10 +135,6 @@
 		void show();
 		return onEvent(EVENTS.AI_SETTINGS_REQUESTED, show);
 	});
-
-	function openDevices() {
-		category = 'devices';
-	}
 
 	/** ほかのデバイスと別々に変えた設定の、どちらを使うか選ぶ画面を出しているか */
 	let syncChoiceOpen = $state(false);
@@ -1142,14 +1137,6 @@
 						/>
 					{/if}
 				</Tabs.Content>
-				<Tabs.Content value="devices">
-					<SettingsDevices
-						{view}
-						open={category === 'devices'}
-						call={callSettings}
-						lanCall={callLan}
-					/>
-				</Tabs.Content>
 				<Tabs.Content value="account">
 					{#if category === 'account'}
 						<div class="flex flex-col gap-5">
@@ -1168,9 +1155,12 @@
 								<SettingsSync
 									{view}
 									call={callSettings}
-									onopendevices={openDevices}
+									onfailure={showActionError}
 									bind:choiceOpen={syncChoiceOpen}
 								/>
+							{/if}
+							{#if view.mawokAccountSignedIn}
+								<SettingsMawokDevices call={callActions} />
 							{/if}
 						</div>
 					{/if}

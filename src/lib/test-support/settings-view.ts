@@ -53,10 +53,8 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 			anthropic: 'claude-haiku-4-5',
 			openai: 'gpt-5.4-nano'
 		},
-		devices: [],
-		deviceName: 'desk-pc',
 		proAvailable: false,
-		sharedKeyStatus: 'none',
+		syncKeyStatus: 'none',
 		mawokAccountSignedIn: false,
 		syncKinds: {
 			settings: true,

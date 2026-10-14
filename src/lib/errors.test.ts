@@ -31,7 +31,7 @@ describe('describeError', () => {
 
 describe('errorCode', () => {
 	it('符号だけの文字列はそのまま返す', () => {
-		expect(errorCode('lan.unreachable')).toBe('lan.unreachable');
+		expect(errorCode('account.unreachable')).toBe('account.unreachable');
 	});
 
 	it('{ code } の形から符号を取り出す', () => {

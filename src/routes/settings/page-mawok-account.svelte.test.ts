@@ -249,3 +249,31 @@ describe('設定画面の Mawok のアカウント', () => {
 			.toBeVisible();
 	});
 });
+
+describe('設定画面のサインインしているデバイス', () => {
+	it('このデバイスに印を付け、ほかのデバイスをサインアウトさせる', async () => {
+		let devices = [
+			{ id: 'a', name: 'mac-mini', current: true },
+			{ id: 'b', name: 'living-room-pc', current: false }
+		];
+		invoked.mockImplementation((command, args) => {
+			if (command === 'mawok_devices') return Promise.resolve(devices);
+			if (command === 'sign_out_mawok_device') {
+				devices = devices.filter(({ id }) => id !== (args as { id: string }).id);
+			}
+			return Promise.resolve(undefined);
+		});
+		settings.current = settingsView({ mawokAccountSignedIn: true });
+		const screen = await renderAt(m.settings_category_account);
+		await expect.element(screen.getByText(m.settings_devices_this_device())).toBeVisible();
+		await expect.element(screen.getByText('living-room-pc')).toBeVisible();
+		const signOuts = screen.getByRole('button', { name: m.settings_mawok_sign_out() });
+		// アカウントの行と、ほかのデバイスの行の2つ。このデバイスの行には置かない
+		await expect.element(signOuts.nth(1)).toBeVisible();
+		await signOuts.nth(1).click();
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('sign_out_mawok_device', { id: 'b' })
+		);
+		await expect.element(screen.getByText('living-room-pc')).not.toBeInTheDocument();
+	});
+});
