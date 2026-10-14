@@ -16,11 +16,19 @@
 </script>
 
 <InputGroup.Root class={className}>
-	<InputGroup.Input bind:value type={visible ? 'text' : 'password'} {...restProps} />
+	<!-- 見せている間も、綴りの下線・自動の大文字・置き換えでパスワードが書き換わらないようにする -->
+	<InputGroup.Input
+		bind:value
+		type={visible ? 'text' : 'password'}
+		spellcheck={false}
+		autocapitalize="off"
+		autocorrect="off"
+		{...restProps}
+	/>
 	<InputGroup.Addon align="inline-end">
 		<InputGroup.Button
 			size="icon-xs"
-			aria-label={visible ? m.password_input_hide() : m.password_input_show()}
+			aria-label={m.password_input_show()}
 			aria-pressed={visible}
 			onclick={() => (visible = !visible)}
 		>

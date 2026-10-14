@@ -436,10 +436,12 @@ describe('設定画面の同期のパスワード', () => {
 		expect(invoked).toHaveBeenCalledWith('unlock_sync', { password: 'wrong-password' });
 
 		// 打った文字を見て確かめられる
+		const show = form.getByRole('button', { name: m.password_input_show() });
 		await expect.element(field).toHaveAttribute('type', 'password');
-		await form.getByRole('button', { name: m.password_input_show() }).click();
+		await show.click();
 		await expect.element(field).toHaveAttribute('type', 'text');
-		await form.getByRole('button', { name: m.password_input_hide() }).click();
+		await expect.element(show).toHaveAttribute('aria-pressed', 'true');
+		await show.click();
 		await expect.element(field).toHaveAttribute('type', 'password');
 	});
 

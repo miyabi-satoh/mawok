@@ -299,7 +299,6 @@
 	"settings_sync_password_changed": "パスワードを変更しました。",
 	"settings_sync_password_row": "同期のパスワード",
 	"password_input_show": "パスワードを表示",
-	"password_input_hide": "パスワードを隠す",
 	"settings_sync_password_change": "変更",
 	"settings_sync_reset": "同期をリセット...",
 	"settings_sync_reset_confirm_title": "同期をリセットしますか？",
