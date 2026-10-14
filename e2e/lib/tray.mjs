@@ -19,7 +19,7 @@ import { expectStays, waitFor } from './wait.mjs';
 // ここのスクリプトは、立ち上げたままの PowerShell (`os.mjs` の runPowerShell) の中で
 // スクリプトブロックとして動く。`exit` を書くとホストごと終わってしまうので、`return` で返すこと
 
-/** トレイのアイコンの名前 (ツールチップ)。届いた下書きがあると後ろに文が付く (`lib.rs` の tray_tooltip) */
+/** トレイのアイコンの名前 (ツールチップ)。問題があると後ろに ` ⚠` が付く (`lib.rs` の tray_tooltip) */
 const ICON_NAME = 'Mawok';
 
 const UIA_PRELUDE = `
@@ -35,7 +35,7 @@ function Find-Window([string]$className) {
 }
 
 # 通知領域のアイコンは AutomationId が NotifyItemIcon。名前はツールチップなので、
-# 届いた下書きがあるときは「Mawok — 届いたテキストがあります」になる
+# 問題があるときは「Mawok ⚠」になる
 function Find-Icon($window, [string]$name) {
     if ($null -eq $window) { return $null }
     $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'NotifyItemIcon')

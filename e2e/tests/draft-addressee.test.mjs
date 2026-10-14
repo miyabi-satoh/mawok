@@ -5,7 +5,7 @@ import {
 	expectDraftStaysVisible,
 	listDraftButtons,
 	readDraft,
-	sendToAddressee,
+	runDraft,
 	setDraftValue,
 	setJapanese,
 	showDraftAndWaitVisible,
@@ -16,14 +16,12 @@ import { sendKeySequence, VK } from '../lib/input.mjs';
 import { beginTestConfig } from '../lib/config.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
-// テキストの1行目の宛先 (@ai・@sh・@all・デバイスの名前)。宛先の候補の出し入れ、入力欄の役割、
-// 送るボタンの名前、宛先だけで中身が無いときの帯を見る。
+// テキストの1行目の宛先 (@ai・@sh)。宛先の候補の出し入れ、入力欄の役割、
+// コピーのボタンが「実行」になること、宛先だけで中身が無いときの帯を見る。
 // 候補の絞り込みと宛先の読み方は src/lib/addressee.test.ts で見ている。@sh の実行は actions-command.test.mjs、
-// @ai の失敗は draft-actions.test.mjs で見る。デバイスへ実際に送ることはしない (つながらない文書用のアドレスにしてある)
+// @ai の失敗は draft-actions.test.mjs で見る
 
 const suite = createSuite();
-
-const DEVICE = 'MacBook Air';
 
 /** 出ている宛先の候補の文字 (出ていなければ null) */
 async function readAddressList(client) {
@@ -54,16 +52,7 @@ test.describe('1行目の宛先', () => {
 			language: 'ja',
 			hideTextWindowOnBlur: false,
 			textWindowAlwaysOnTop: true,
-			showTextWindowButtons: true,
-			devices: [
-				{
-					name: DEVICE,
-					publicKey: 'ab'.repeat(32),
-					// 文書用のアドレス (TEST-NET-1) なので、どこにも繋がらない
-					address: '192.0.2.1',
-					sendTo: true
-				}
-			]
+			showTextWindowButtons: true
 		});
 	});
 	test.after(async () => {
@@ -92,7 +81,7 @@ test.describe('1行目の宛先', () => {
 			(list) => list !== null,
 			{ label: '宛先の候補' }
 		);
-		assert.deepEqual(candidates, ['@ai', '@sh', '@all', `@${DEVICE}`]);
+		assert.deepEqual(candidates, ['@ai', '@sh']);
 		assert.equal(await readDraftRole(client), 'combobox');
 
 		await sendKeySequence([[VK.ESCAPE]]);
@@ -106,7 +95,7 @@ test.describe('1行目の宛先', () => {
 		assert.equal((await readDraft(client)).value, '@');
 	});
 
-	test('「@s」に絞られた候補を Tab で入れると「@sh 」になり、送るボタンが「実行」になる', async () => {
+	test('「@s」に絞られた候補を Tab で入れると「@sh 」になり、コピーのボタンが「実行」になる', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, '@s');
 		const candidates = await waitFor(
@@ -131,13 +120,13 @@ test.describe('1行目の宛先', () => {
 		);
 	});
 
-	test('本文の途中の @ や、知らない宛先では、候補も「実行」も出ず、送るボタンは「送信」のまま', async () => {
+	test('本文の途中の @ や、知らない宛先では、候補も「実行」も出ず、ボタンは「コピー」のまま', async () => {
 		await showDraftAndWaitVisible();
 		await setDraftValue(client, 'メールは a@example.com へ。\n@tanaka お願いします');
 		assert.equal(await readAddressList(client), null);
 		const buttons = await listDraftButtons(client);
 		assert.ok(
-			buttons.some((button) => button.text === '送信'),
+			buttons.some((button) => button.text === 'コピー'),
 			JSON.stringify(buttons)
 		);
 		assert.equal(
@@ -147,20 +136,10 @@ test.describe('1行目の宛先', () => {
 		);
 	});
 
-	test('デバイスの宛先だけで2行目から下が無いと、送らずに知らせる帯が出て、テキストは変わらない', async () => {
-		await showDraftAndWaitVisible();
-		await setDraftValue(client, `@${DEVICE}`);
-		await sendToAddressee();
-		const alert = await waitAlert(client, '送るテキストが無い帯');
-		assert.ok(alert.includes('2行目から下に、送るテキストを書いてください'), alert);
-		await expectDraftStaysVisible('宛先だけを送ろうとした後');
-		assert.equal((await readDraft(client)).value, `@${DEVICE}`);
-	});
-
-	test('@sh の後ろが空のまま送るキーで出すと、指示かコマンドを書くよう知らせる帯が出る', async () => {
+	test('@sh の後ろが空のままコピーして閉じる・実行のキーで出すと、指示かコマンドを書くよう知らせる帯が出る', async () => {
 		await showDraftAndWaitVisible();
 		await setDraftValue(client, '@sh\nabc');
-		await sendToAddressee();
+		await runDraft();
 		const alert = await waitAlert(client, '宛先の後ろが空の帯');
 		assert.ok(alert.includes('宛先の後ろに、指示かコマンドを書いてください'), alert);
 		assert.equal((await readDraft(client)).value, '@sh\nabc');

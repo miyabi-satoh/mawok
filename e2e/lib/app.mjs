@@ -242,9 +242,9 @@ export async function runSnippet(client, name) {
 	await clickSnippetOption(client, name);
 }
 
-/** 「送る」キー (本物の Ctrl+Shift+Enter) で、1行目の宛先へ出す */
-export async function sendToAddressee() {
-	await sendKeySequence([[VK.CONTROL, VK.SHIFT, VK.ENTER]]);
+/** 「コピーして閉じる・実行」のキー (本物の Ctrl+Enter)。1行目が宛先ならコピーせずに実行する */
+export async function runDraft() {
+	await sendKeySequence([[VK.CONTROL, VK.ENTER]]);
 }
 
 /** 失敗の帯の中身。出ていなければ null */

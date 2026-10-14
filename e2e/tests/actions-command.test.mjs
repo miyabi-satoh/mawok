@@ -16,7 +16,7 @@ import {
 	readDraft,
 	runSnippet,
 	setDraftCaret,
-	sendToAddressee,
+	runDraft,
 	setDraftValue,
 	setJapanese,
 	showDraftAndWaitVisible,
@@ -76,10 +76,10 @@ const SNIPPETS = [
 	sh('無いコマンド', 'mawok-no-such-command'),
 	sh('失敗する', 'echo oops 1>&2 & exit /b 3'),
 	sh('何も返さない', `${MORE} >nul`),
-	// 受け取った引数をそのまま JSON で返す。E2E は node で動いているので node を使う
+	// 標準入力で受け取った文をそのまま JSON で返す。E2E は node で動いているので node を使う
 	sh(
-		'引数',
-		`"${process.execPath}" -e "process.stdout.write(JSON.stringify(process.argv.slice(1)))" {{t}}`
+		'標準入力',
+		`"${process.execPath}" -e "process.stdout.write(JSON.stringify(require('fs').readFileSync(0,'utf8')))"`
 	),
 	sh('日付', 'echo %DATE%', 'insert'),
 	sh('記録', `${MORE} >> "${APPEND_FILE}"`, 'none'),
@@ -201,7 +201,7 @@ test.describe('@sh のコマンド', () => {
 		}
 	});
 
-	test('設定で足した定型文は、本文を @sh で始めると結果の出し方が出て、! の注意の出し入れと、Enter・貼り付けの改行の扱いが効く (21.)', async () => {
+	test('設定で足した定型文は、本文を @sh で始めると結果の出し方が出て、Enter・貼り付けの改行の扱いが効く (21.)', async () => {
 		await showDraftAndWaitVisible();
 		const draftHandle = await openSettingsFromDraft(client);
 		try {
@@ -228,18 +228,10 @@ test.describe('@sh のコマンド', () => {
 			// 宛先で始まらない本文は、挿入するだけの文なので、結果の出し方は出ない
 			assert.deepEqual(await readOutputs(), []);
 
-			const warning = () =>
-				client.execute(
-					(element) => element.parentElement.textContent.includes('Windows の cmd の決まり'),
-					body
-				);
-			await body.setValue('@sh echo {{t}}!');
+			await body.setValue('@sh echo hi');
 			await waitFor(readOutputs, (outputs) => outputs.join() === '置換,挿入,出さない', {
 				label: '結果の出し方が出る'
 			});
-			await waitFor(warning, (shown) => shown === true, { label: '! の注意が出る' });
-			await body.setValue('@sh echo {{t}}');
-			await waitFor(warning, (shown) => shown === false, { label: '! の注意が消える' });
 
 			// 本文は複数行にできるので Enter は改行を入れる。貼り付けた改行も残す (本物のキー入力で見る)
 			await body.click();
@@ -250,7 +242,7 @@ test.describe('@sh のコマンド', () => {
 			await sendKeySequence([[VK.ENTER]]);
 			await waitFor(
 				() => body.getValue(),
-				(value) => value === '@sh echo {{t}}\n',
+				(value) => value === '@sh echo hi\n',
 				{ label: 'Enter で改行が入る' }
 			);
 			// 2行目から下がある本文は、挿入する文なので結果の出し方は出ない
@@ -304,7 +296,7 @@ test.describe('@sh のコマンド', () => {
 		await sendKeySequence([[VK.ESCAPE]]);
 
 		await setDraftValue(client, '@ai 関西弁に\nabc');
-		await sendToAddressee();
+		await runDraft();
 		const alert = await waitAlert(client, 'AI を使えない帯');
 		assert.ok(alert.includes('AI を使える状態になっていません'), alert);
 		assert.equal((await readDraft(client)).value, '@ai 関西弁に\nabc');
@@ -389,18 +381,18 @@ test.describe('@sh のコマンド', () => {
 		assert.equal((await readDraft(client)).value, 'abc');
 	});
 
-	test('下書きの全体が、記号も改行もそのまま1つの引数で渡る (28.)', async () => {
+	test('下書きの全体が、記号も改行もそのまま標準入力で渡る (28.)', async () => {
 		const text = 'a "b" \\ c; echo x\n$HOME %PATH% !x!';
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'x');
 		await setDraftValue(client, text);
-		await runSnippet(client, '引数');
+		await runSnippet(client, '標準入力');
 		const result = await waitFor(
 			async () => (await readDraft(client)).value,
 			(value) => value !== text,
-			{ label: '引数の結果', timeout: 10000 }
+			{ label: '標準入力の結果', timeout: 10000 }
 		);
-		assert.deepEqual(JSON.parse(result), [text]);
+		assert.equal(JSON.parse(result), text);
 	});
 
 	test('「挿入」は、カーソルの位置と選んだ範囲の後ろに入れ、下書きが空でも実行できる (29.)', async () => {
@@ -447,18 +439,18 @@ test.describe('@sh のコマンド', () => {
 		assert.ok(written.includes(text), written);
 	});
 
-	test('1行目に @sh と書いて送るキーで出すと、登録しなくても、2行目から下を標準入力にして実行し、全体が結果で置き換わる (31.)', async () => {
+	test('1行目に @sh と書いてコピーして閉じる・実行のキーで出すと、登録しなくても、2行目から下を標準入力にして実行し、全体が結果で置き換わる (31.)', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abc');
 		// Windows の find は LF だけの改行を行の区切りにしないので、1行で見る
 		await setDraftValue(client, `@sh ${FIND} /c /v ""\nabc`);
-		// 1行目が @sh のときは、送るボタンが「実行」になる
+		// 1行目が @sh のときは、コピーのボタンが「実行」になる
 		await waitFor(
 			() => listDraftButtons(client),
 			(buttons) => buttons.some((button) => button.text === '実行'),
-			{ label: '送るボタンが「実行」になる' }
+			{ label: 'ボタンが「実行」になる' }
 		);
-		await sendToAddressee();
+		await runDraft();
 		await waitDraftValue(client, '1', '行の数で置き換わった下書き');
 	});
 

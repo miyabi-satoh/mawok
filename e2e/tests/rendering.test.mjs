@@ -39,11 +39,10 @@ import { waitFor } from '../lib/wait.mjs';
 // 描かれ方。画面の状態ごとに、テーマ (ライト・ダーク) × 言語 (日本語・英語) と、最小の大きさ × 言語で、
 // 重なり・はみ出し・省略・潰れを lib/rendering.mjs で調べ、画面を e2e/screenshots/ に撮る。
 // 撮った画面は人とエージェントが目で見る (バランスや余白の不揃いは機械では決めにくいため)。
-// 状態を作るのに要る設定は config.toml で入れる。送信先のデバイスは架空のもの
-// (デバイスを追加していない機で流す前提。共有の鍵が無いので、送るとつなぐ前に断られる)。
+// 状態を作るのに要る設定は config.toml で入れる。
 // アクションは一覧を開いて撮るだけで、選ばない。この機の資格情報管理に本物のキーがあれば、選んだ時点で
 // AI サービスへ送ってしまうため (画面の invoke は差し替えられず、送る手前で止める口もない)。
-// 同じ理由で、アクションに失敗したときの知らせと、届いた下書きの知らせ (相手のデバイスが要る) は撮らない
+// 同じ理由で、アクションに失敗したときの知らせは撮らない
 
 const suite = createSuite();
 
@@ -75,15 +74,6 @@ const TEST_CONFIG = {
 		{
 			name: 'とても長い名前の定型文で、一覧の幅に収まりきらないときの見え方を確かめるためのもの',
 			body: '本文も長めにしておきます。'.repeat(8)
-		}
-	],
-	devices: [
-		{
-			name: 'MacBook Air',
-			publicKey: 'ab'.repeat(32),
-			// 文書用のアドレス (TEST-NET-1) なので、どこにも繋がらない
-			address: '192.0.2.1',
-			sendTo: true
 		}
 	],
 	aiService: 'gemini',
@@ -297,40 +287,6 @@ test.describe('描かれ方', () => {
 					(text) => text !== '',
 					{ label: '登録の知らせが出る' }
 				);
-			}
-		});
-	});
-
-	test('下書き: 送信先の一覧', async () => {
-		await focusDraft(client);
-		await openPaletteWith(client, VK.L);
-		await inspectDraft(client, 'send-targets', { overlays: ['[role="dialog"]'] });
-	});
-
-	// 送っている最中の画面は撮らない。共有の鍵が無い機では、送信はつなぐ前に断られるため。
-	// 「送信中…」の文言と、その間のボタンが押せない見た目は、手での確認で見る
-
-	test('下書き: 送れなかったときのエラー', async () => {
-		// 共有の鍵が無いので、送るとすぐエラーが出る。エラーは表示言語を替えると消えるので、
-		// 撮るたびに、出ていなければ送り直す。共有の鍵がある機では、つなぐのを 3 秒待ってから
-		// つながらないエラーが出るので、その分も待つ
-		// 隠れている帯や消えかけの古い帯に当たらないよう、出ている帯があるかで見る
-		const readAlertShown = () =>
-			client.execute(() =>
-				[...document.querySelectorAll('[role="alert"]')].some(
-					(alert) => alert.checkVisibility() && alert.getBoundingClientRect().height > 0
-				)
-			);
-		await inspectDraft(client, 'send-error', {
-			overlays: ['[role="alert"]'],
-			prepare: async () => {
-				if (await readAlertShown()) return;
-				// 「送信」ボタン (送信先の▼とつながった左側)。キーは前面のウィンドウに届かないことがあるので押す
-				await client.$('main button.rounded-r-none').click();
-				await waitFor(readAlertShown, (shown) => shown, {
-					label: '送れなかったエラーが出る',
-					timeout: 10000
-				});
 			}
 		});
 	});

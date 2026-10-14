@@ -9,7 +9,7 @@ import {
 	openSnippetPalette,
 	readDraft,
 	readSnippetPalette,
-	sendToAddressee,
+	runDraft,
 	setDraftValue,
 	setJapanese,
 	showDraftAndWaitVisible,
@@ -136,13 +136,13 @@ test.describe('AI を使えないとき', () => {
 		});
 	});
 
-	test('1行目に @ai と書いて送るキーで出しても、元の文のまま AI を使える状態にするよう促す帯が出る', async () => {
+	test('1行目に @ai と書いてコピーして閉じる・実行のキーで出しても、元の文のまま AI を使える状態にするよう促す帯が出る', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abc');
 		const text = '@ai 関西弁に\nabc';
 		await setDraftValue(client, text);
 
-		await sendToAddressee();
+		await runDraft();
 
 		const alert = await waitAlert(client, '失敗の帯');
 		assert.ok(alert.includes('AI を使える状態になっていません'), alert);

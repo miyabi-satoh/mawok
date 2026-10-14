@@ -117,14 +117,10 @@ const DEFAULT_CONFIG = {
 // draft_keys.rs の既定のキーの写し
 const DEFAULT_DRAFT_KEYS = {
 	copy: 'CommandOrControl+Enter',
-	send: 'CommandOrControl+Shift+Enter',
 	settings: 'CommandOrControl+Comma',
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	sendTargets: 'CommandOrControl+KeyL',
-	insertReceived: 'CommandOrControl+KeyI',
-	discardReceived: 'CommandOrControl+Shift+Backspace',
 	changeFolder: 'CommandOrControl+KeyD'
 };
 
