@@ -429,10 +429,18 @@ describe('設定画面の同期のパスワード', () => {
 		failures.unlock_sync = 'sync.wrong_password';
 		const screen = await renderAt(m.settings_category_account);
 		const form = screen.getByRole('form', { name: m.settings_sync_password_enter_title() });
-		await form.getByLabelText(m.settings_sync_password()).fill('wrong-password');
+		const field = form.getByLabelText(m.settings_sync_password(), { exact: true });
+		await field.fill('wrong-password');
 		await form.getByRole('button', { name: m.settings_sync_start() }).click();
 		await expect.element(form.getByText(m.sync_password_error_incorrect())).toBeVisible();
 		expect(invoked).toHaveBeenCalledWith('unlock_sync', { password: 'wrong-password' });
+
+		// 打った文字を見て確かめられる
+		await expect.element(field).toHaveAttribute('type', 'password');
+		await form.getByRole('button', { name: m.password_input_show() }).click();
+		await expect.element(field).toHaveAttribute('type', 'text');
+		await form.getByRole('button', { name: m.password_input_hide() }).click();
+		await expect.element(field).toHaveAttribute('type', 'password');
 	});
 
 	it('パスワードを忘れたら、確かめてから新しいパスワードで始め直す', async () => {

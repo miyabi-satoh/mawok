@@ -378,7 +378,7 @@ export function approvePage(lang: Lang, email: string, link: LinkRequest, here: 
 		lang,
 		t.linkTitle,
 		html`<h1>${t.linkTitle}</h1>
-			<p>${t.linkConfirm(link.name)}</p>
+			<p>${t.linkConfirm(link.name, email)}</p>
 			<form method="post" action="${ACCOUNT}/link">
 				<input type="hidden" name="port" value="${String(link.port)}" />
 				<input type="hidden" name="state" value="${link.state}" />

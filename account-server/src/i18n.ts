@@ -85,8 +85,8 @@ const ja = {
 	signedInAs: (email: string) => `${email} でサインインしています。`,
 	signOut: 'サインアウト',
 	linkTitle: 'デバイスを登録',
-	linkConfirm: (name: string) =>
-		`「${name}」をこのアカウントに登録します。登録したデバイスの Mawok は、アカウントのクレジットで AI アクションを使えます。`,
+	linkConfirm: (name: string, email: string) =>
+		`「${name}」を ${email} のアカウントに登録します。登録したデバイスの Mawok は、アカウントのクレジットで AI アクションを使えます。`,
 	approve: 'このデバイスを登録',
 	linkInvalidTitle: 'このページは開けません',
 	linkInvalid: 'Mawok の設定の「アカウント」で「サインイン」を押して、もう一度開いてください。',
@@ -231,8 +231,8 @@ const en: typeof ja = {
 	signedInAs: (email: string) => `Signed in as ${email}.`,
 	signOut: 'Sign out',
 	linkTitle: 'Link a device',
-	linkConfirm: (name: string) =>
-		`Link "${name}" to this account. Mawok on a linked device can use this account's credit for AI actions.`,
+	linkConfirm: (name: string, email: string) =>
+		`Link "${name}" to the account ${email}. Mawok on a linked device can use this account's credit for AI actions.`,
 	approve: 'Link this device',
 	linkInvalidTitle: 'This page cannot be opened',
 	linkInvalid: 'In Mawok settings, open Account and click Sign in to open it again.',

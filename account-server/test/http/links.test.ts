@@ -24,7 +24,7 @@ describe('linking Mawok', () => {
 		expect(location).toBe(linkPath(fields));
 
 		const page = await (await request(location!, { cookie })).text();
-		expect(page).toContain('「Taro の MacBook」をこのアカウントに登録します');
+		expect(page).toContain('「Taro の MacBook」を owner@example.com のアカウントに登録します');
 		expect(page).toContain('このデバイスを登録');
 
 		const code = await approve(fields, cookie);
