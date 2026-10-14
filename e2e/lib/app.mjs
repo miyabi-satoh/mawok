@@ -2,11 +2,12 @@ import { remote } from 'webdriverio';
 import { SETTINGS_TITLE } from './app-conf.mjs';
 import {
 	findVisibleMawokWindow,
+	getDraftWindowHandle,
 	getForegroundWindowHandle,
 	isDraftWindowVisible,
 	sendGlobalHotkey
 } from './os.mjs';
-import { clickClientPoint, sendKeySequence, VK } from './input.mjs';
+import { clickClientPoint, clickTitleBar, sendKeySequence, VK } from './input.mjs';
 import { expectStays, waitFor } from './wait.mjs';
 import { DEFAULT_HOTKEY } from './config.mjs';
 import { APP_PATH } from './paths.mjs';
@@ -126,6 +127,21 @@ export async function setJapanese(client) {
 export async function showDraftAndWaitVisible(label = '下書きウィンドウの表示') {
 	await showDraft();
 	await waitDraftVisible(label);
+	await ensureForeground(await getDraftWindowHandle());
+}
+
+/**
+ * ウィンドウが前面でなければ、本物のクリックで前面にする。シェル (ShellExperienceHost など) が前面を握ったままだと
+ * アプリの前面化が通らず、本物のキー入力がアプリでない窓に入ってしまうため
+ */
+export async function ensureForeground(hwnd) {
+	// 前面になるのは出した直後ではなく少し後のことがあるので、先に短く待つ
+	const isForeground = () => getForegroundWindowHandle().then((handle) => handle === hwnd);
+	try {
+		await waitFor(isForeground, (foreground) => foreground, { label: '前面', timeout: 800 });
+	} catch {
+		await clickTitleBar(hwnd);
+	}
 }
 
 /** 下書きがネイティブウィンドウとして表示されるまで待つ。`options` は waitFor に渡す (timeout など) */
@@ -363,6 +379,7 @@ export async function waitSettingsWindow(client, draftHandle) {
 		(hwnd) => hwnd !== null,
 		{ label: '設定ウィンドウの表示' }
 	);
+	await ensureForeground(settingsHwnd);
 	await waitFor(getForegroundWindowHandle, (handle) => handle === settingsHwnd, {
 		label: '設定ウィンドウが前面になる'
 	});
@@ -381,6 +398,12 @@ export async function openSettingsFromDraft(client) {
 	await waitDraftHidden('下書きウィンドウの非表示 (設定を開いた直後)');
 	const handles = await waitForWindowCount(client, 2);
 	await client.switchToWindow(handles.find((handle) => handle !== draftHandle));
+	const settingsHwnd = await waitFor(
+		() => findVisibleMawokWindow(SETTINGS_TITLE),
+		(hwnd) => hwnd !== null,
+		{ label: '設定ウィンドウの表示' }
+	);
+	await ensureForeground(settingsHwnd);
 	return draftHandle;
 }
 

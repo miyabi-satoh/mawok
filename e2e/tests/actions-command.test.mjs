@@ -392,7 +392,8 @@ test.describe('@sh のコマンド', () => {
 			(value) => value !== text,
 			{ label: '標準入力の結果', timeout: 10000 }
 		);
-		assert.equal(JSON.parse(result), text);
+		// 標準入力には、行を数えるコマンドのために、末尾に改行が1つ足されて渡る
+		assert.equal(JSON.parse(result), `${text}\n`);
 	});
 
 	test('「挿入」は、カーソルの位置と選んだ範囲の後ろに入れ、下書きが空でも実行できる (29.)', async () => {
@@ -447,7 +448,7 @@ test.describe('@sh のコマンド', () => {
 		// 1行目が @sh のときは、コピーのボタンが「実行」になる
 		await waitFor(
 			() => listDraftButtons(client),
-			(buttons) => buttons.some((button) => button.text === '実行'),
+			(buttons) => buttons.some((button) => button.text.startsWith('実行')),
 			{ label: 'ボタンが「実行」になる' }
 		);
 		await runDraft();

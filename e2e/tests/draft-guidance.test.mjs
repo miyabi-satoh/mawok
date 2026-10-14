@@ -26,10 +26,10 @@ const suite = createSuite();
 
 /** 既定の案内 (messages/ja.json の draft_guidance_write・address・summon・change をつないだもの) を、Windows のキーの並べ方で組み立てたもの */
 const defaultGuidance = (hotkey = 'Ctrl+Shift+Space') =>
-	`ここに書いて Ctrl+Enter を押すと、コピーして元のアプリに戻ります。あとは貼るだけです。1 行目を @ で始めると、AI やコマンドに通せます。\n${hotkey} でいつでも呼び出せます。\nこの案内は設定（Ctrl+,）で変えたり消したりできます。`;
+	`ここに書いて Ctrl+Enter を押すと、コピーして元のアプリに戻ります。あとは貼るだけです。1 行目を @ で始めると、AI やコマンドに通せます。\n${hotkey} でいつでも呼び出せます。この案内は設定（Ctrl+,）で変えたり消したりできます。`;
 
 const ENGLISH_GUIDANCE =
-	'Write here and press Ctrl+Enter to copy it and go back to your app, ready to paste. Start the first line with @ to send it to AI or a command.\nBring this back anytime with Ctrl+Shift+Space.\nChange or remove this hint in Settings (Ctrl+,).';
+	'Write here and press Ctrl+Enter to copy it and go back to your app, ready to paste. Start the first line with @ to send it to AI or a command.\nBring this back anytime with Ctrl+Shift+Space. Change or remove this hint in Settings (Ctrl+,).';
 
 test.describe('下書きの入力欄の案内', () => {
 	let testConfig;

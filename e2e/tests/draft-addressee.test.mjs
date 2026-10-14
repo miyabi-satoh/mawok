@@ -115,7 +115,7 @@ test.describe('1行目の宛先', () => {
 
 		const buttons = await listDraftButtons(client);
 		assert.ok(
-			buttons.some((button) => button.text === '実行'),
+			buttons.some((button) => button.text.startsWith('実行')),
 			JSON.stringify(buttons)
 		);
 	});
@@ -126,11 +126,11 @@ test.describe('1行目の宛先', () => {
 		assert.equal(await readAddressList(client), null);
 		const buttons = await listDraftButtons(client);
 		assert.ok(
-			buttons.some((button) => button.text === 'コピー'),
+			buttons.some((button) => button.text.startsWith('コピー')),
 			JSON.stringify(buttons)
 		);
 		assert.equal(
-			buttons.some((button) => button.text === '実行'),
+			buttons.some((button) => button.text.startsWith('実行')),
 			false,
 			JSON.stringify(buttons)
 		);
