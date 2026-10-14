@@ -100,7 +100,7 @@
 		else if (refreshingMawokAccountStatus) return;
 		const refresh = ++mawokAccountRefresh;
 		refreshingMawokAccountStatus = true;
-		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「アカウント」の欄が出す。
+		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「AI」の残りの欄が出す。
 		// 資格情報を読めなかったときは Rust 側がサインインしていない扱いにするので、「サインイン」からやり直せる。
 		let status: AccountStatus | null;
 		try {
