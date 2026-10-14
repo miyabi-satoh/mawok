@@ -37,6 +37,18 @@
 - 入力内容はログに残さない。アクションで渡した内容と受け取った結果も、コマンドの行と標準エラーも残さない。アクションについては、始めた・終えた・取り消した・失敗した（失敗の種類、コマンドなら終了コード）ことだけを残す。
 - 置き場所は OS 標準のログフォルダ（macOS は `~/Library/Logs/<identifier>/`、Windows は `%LOCALAPPDATA%\<identifier>\logs\`）。時刻は UTC。
 
+## プロファイル
+
+環境変数 `MAWOK_PROFILE` に名前（英小文字・数字・`-` の 32 文字まで）を入れて起動すると、アプリの識別子の後ろに `.<名前>` を付けて動く（`src-tauri/src/profile.rs`）。常用の Mawok と分かれるのは、識別子で決まるもの。
+
+- 設定・履歴・ログのフォルダー（`<identifier>.<名前>`）。
+- OS の資格情報管理の service。アカウントのトークンと共有の鍵・AI サービスのキーを、常用のものと別に持つ。プロファイルでサインインしなければ、同期も Pro の確かめも動かない。
+- 単一起動の見分け。
+
+自動の確認（`e2e/`）は `e2e`、開発版（デバッグビルド）は何も付けなければ `dev` で動く。常用の設定とアカウントのまま動かすと、テストの設定や履歴が、同期で窓口とほかのデバイスへ書かれるため。開発版を常用の置き場で動かすときは、`MAWOK_PROFILE=` と空にする。
+
+グローバルホットキー・LAN のポート・ログイン項目は OS の上で1つなので、分かれない。常用の Mawok と同時には動かさない。
+
 ## クリップボードの履歴に残さない
 
 - コピーするときに、クリップボードの履歴やほかのデバイスへの同期、クリップボード管理アプリに残さないよう、印を付けて書き込む。設定で切り替えられ、既定はオン。テキストには API キーやトークンが紛れることがあり、それが履歴や同期に残るのを防ぐ。
@@ -64,7 +76,7 @@
 - 変換中の Esc と Cmd+Enter（Ctrl+Enter）の判定は `KeyboardEvent.isComposing` か keyCode 229 で行う（`src/lib/keys.ts`）。
 - ウィンドウの大きさ（2026-09 に macOS 26 で検証）: `set_size` に渡した高さはタイトルバーを含む外側の高さとして効き、`inner_size` もタイトルバーを含んだ値を返す。ドキュメントの説明（どちらも中身の大きさ）とは食い違う、未修正の不具合（[tauri#15136](https://github.com/tauri-apps/tauri/issues/15136)・[#6333](https://github.com/tauri-apps/tauri/issues/6333)・[#12152](https://github.com/tauri-apps/tauri/issues/12152)）。wry が `contentView` を差し替えるため、tao が持つ古いビューの大きさが当てにならないことが原因。中身の大きさに合わせる公式の API はなく、差分を自分で求めるのが Tauri のメンテナの回答（[discussion#11816](https://github.com/orgs/tauri-apps/discussions/11816)）。今は、この差分を求めて使っているところはない。
 - ホットキーの重複（2026-09 に macOS 26 で検証）: `RegisterEventHotKey` は、別のプロセスが登録済みの組み合わせでも、システムのショートカット（⌘Space・⌘⇧3・⌃Space）でも成功を返す。別のプロセスと重なった場合、押すと登録したすべてのプロセスに届き、前面のアプリの keydown には届かない。システムのショートカットは `CopySymbolicHotKeys` で照合できるが、ほかのアプリのホットキーを調べる公開 API はない。Windows の `RegisterHotKey` は重複を `ERROR_HOTKEY_ALREADY_REGISTERED` で返す（PowerToys はこれで重複を見つけている）。ただし Windows でも、ほかのアプリが登録済みのキーは記録中の WebView2 に届かない（2026-09 に検証）。そのため、どちらの OS でも重複は登録の失敗としては現れない。
-- 同じ LAN へ送るときの OS の許可（2026-09 に Mac と Windows 11 の実機で検証）:
+- 同じ LAN のデバイスを見つけるときの OS の許可（2026-09 に Mac と Windows 11 の実機で検証）:
   - macOS のローカルネットワークの許可: 初めて待ち受け・名乗りを始めたときにダイアログが出て、`Info.plist` の `NSLocalNetworkUsageDescription` の説明文が出る。説明文は `src-tauri/macos/{en,ja}.lproj/InfoPlist.strings` で訳し（`bundle.macOS.files` で載せる）、OS の言語に合わせて日英が出る。ad-hoc 署名のままでも、同じ版の入れ直し・中身の違う別ビルド・ad-hoc の署名の識別子が変わったビルドのどれに差し替えても聞き直さず、システム設定の項目も1件のままだった（bundle id で追っているとみられる）。LaunchAgent から起動したときも、手で起動したときに出した許可がそのまま効いた。Apple は ad-hoc 署名では許可を確実に追えないとして Apple 発行の署名を勧めているが（TN3179）、LAN の機能のためだけに Developer ID で署名することはしない。bundle id が変わると許可は出し直しになる。
   - Windows のファイアウォール: 初めて待ち受けたときに「パブリック ネットワークとプライベート ネットワークにこのアプリへのアクセスを許可しますか?」のダイアログが出る。**出た時点で、実行ファイルの受信を止める規則（TCP・UDP、Private と Public）が作られ、押す前から受信は止まる**。「許可」を押すと同じ規則が許可に書き換わる。規則は実行ファイルのパスで作られ中身は見ないので、同じ場所に別ビルドを入れ直しても出直さない。今の NSIS（ユーザーごと、管理者なし）は規則を足せないので、初回のダイアログに任せる。
   - mDNS を試したとき、Windows の UDP 5353 は OS 標準の mDNS と分け合えたが、発見は通らなかった（使わない理由は docs/lan.md）。ブロードキャストは、Windows のファイアウォールの規則（UDP）でも macOS の許可でも通った。ブロードキャストの宛先には VirtualBox・WSL の vEthernet・Tailscale のサブネットも入る。名乗りに書かれた鍵は申告にすぎず、相手が本人かどうかは、つなぐときの Noise の握手で確かめる。
@@ -118,7 +130,7 @@
 
 - Microsoft Store 向け。`just msix` で、`pnpm tauri build --no-bundle` で作った `mawok.exe` とロゴを、`src-tauri/msix/AppxManifest.xml` と、makepri で作る `resources.pri` と一緒に makeappx で固める（`scripts/msix.mjs`）。中身は EXE 版と同じ1つのコードで、MSIX として動いているか（このアプリの AUMID が取れるか。`GetCurrentApplicationUserModelId`）で違うところだけを分ける。今分けているのはログイン時の起動と通知。
 - 試しに入れるには、先に管理者の PowerShell で `src-tauri/msix/new-test-cert.ps1` を1回実行し、自己署名の証明書を作って信頼させておく。`just msix` はその証明書で署名する。識別子（Name・Publisher・PublisherDisplayName）は、Partner Center で予約した製品の「Product identity」の値を `scripts/msix.mjs` の `IDENTITY` に書いてある。試しに入れるための証明書も、Subject をこの Publisher と揃える。Store に上げる版は `just msix --unsigned` で署名せずに作る（Store が署名する。Store の Publisher の証明書は手元に無い）。
-- LAN の権限は `privateNetworkClientServer` だけにする（`internetClientServer` を付けると、別に受信規則が足されるため。受信の規則はマニフェストで決める）。ファイアウォールは、マニフェストの `windows.firewallRules` で、TCP と UDP の受信をすべてのネットワーク（ドメイン・プライベート・パブリック）で許す。Windows 11 は新しくつないだネットワークを既定でパブリックにするので、パブリックを外すと、自宅の Wi-Fi でも理由が分からないまま届かない（2026-09-27 に、ドメインとプライベートだけの規則ではパブリックの Wi-Fi でほかのデバイスから届かないことを実機で確認）。EXE 版で初回のダイアログの「許可」を押したときと同じ範囲。テキストと生存確認は、つなぐときの Noise の握手で同じ共有の鍵を持つデバイスに限り、コードを出している間だけ鍵を渡すペアリングを受け付ける。入れた場所（`WindowsApps` の下）は版ごとに変わるので、EXE 版のように初めて待ち受けたときのダイアログで exe のパスに作る規則には頼らない。
+- LAN の権限は `privateNetworkClientServer` だけにする（`internetClientServer` を付けると、別に受信規則が足されるため。受信の規則はマニフェストで決める）。ファイアウォールは、マニフェストの `windows.firewallRules` で、TCP と UDP の受信をすべてのネットワーク（ドメイン・プライベート・パブリック）で許す。Windows 11 は新しくつないだネットワークを既定でパブリックにするので、パブリックを外すと、自宅の Wi-Fi でも理由が分からないまま届かない（2026-09-27 に、ドメインとプライベートだけの規則ではパブリックの Wi-Fi でほかのデバイスから届かないことを実機で確認）。EXE 版で初回のダイアログの「許可」を押したときと同じ範囲。生存確認は、つなぐときの Noise の握手で同じ共有の鍵を持つデバイスに限り、コードを出している間だけ鍵を渡すペアリングを受け付ける。入れた場所（`WindowsApps` の下）は版ごとに変わるので、EXE 版のように初めて待ち受けたときのダイアログで exe のパスに作る規則には頼らない。
 - ログイン時の起動は、マニフェストの StartupTask（既定は無効）で行う。MSIX の中から HKCU の Run に書いても、パッケージごとの場所に回されて効かないため。アプリは EXE 版と同じ決まり（「常駐」）で、`RequestEnableAsync` で有効にし、`Disable` で外す。タスクマネージャーや Windows の設定の「スタートアップ アプリ」で切られていると（`DisabledByUser`）アプリからは戻せないので、設定でオンにしたときは Windows の設定の「スタートアップ アプリ」を開き、戻せなかったことを伝える（2026-09-27 に Windows 11 の実機で確認。利用者が切った状態は、レジストリの State を 1 にして再現した）。
 - 通知は、差出人をパッケージの AUMID（`GetCurrentApplicationUserModelId`）にして出す。tauri-plugin-notification は識別子の `com.amiiby.mawok` を差出人にするので、MSIX 版ではエラーにもならずに出ない（2026-09-27 に Windows 11 の実機で確認）。
 - 設定・履歴・ログの置き場所（2026-09-27・28、Windows 11 の実機）: Windows 10 1903 以降、AppData の下に新しく作るファイルはパッケージごとの場所に回される（Microsoft の文書「Understanding how packaged desktop apps run on Windows」）。

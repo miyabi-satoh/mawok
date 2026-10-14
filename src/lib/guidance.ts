@@ -23,5 +23,7 @@ export function draftGuidance(
 		: m.draft_guidance_change_no_settings();
 	// 日本語は文の間を空けず、英語は空白で区切る
 	const gap = getLocale() === 'ja' ? '' : ' ';
-	return `${[write, summon].filter(Boolean).join(gap)}\n${change}`;
+	// 1行目はここでできること、2行目はこの欄そのものの扱い。宛先は画面にボタンが無く、案内でしか気づけないので書く
+	const use = [write, m.draft_guidance_address()].join(gap);
+	return `${use}\n${[summon, change].filter(Boolean).join(gap)}`;
 }

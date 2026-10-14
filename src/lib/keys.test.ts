@@ -137,20 +137,20 @@ describe('draftActionFor', () => {
 		keyCode: ime.keyCode ?? 0
 	});
 
-	it('Mac では ⌘Enter でコピー、⌘⇧Enter で送る', () => {
+	it('Mac では ⌘Enter でコピー。Shift を足したキーは別のキーとして扱う', () => {
 		expect(draftActionFor(press('Enter', { meta: true }), DEFAULT_DRAFT_KEYS, 'macos')).toBe(
 			'copy'
 		);
 		expect(
 			draftActionFor(press('Enter', { meta: true, shift: true }), DEFAULT_DRAFT_KEYS, 'macos')
-		).toBe('send');
+		).toBeNull();
 	});
 
 	it('Windows では Ctrl で同じ操作になり、Mac の ⌘ に当たる Win キーでは呼ばない', () => {
-		expect(draftActionFor(press('KeyJ', { ctrl: true }), DEFAULT_DRAFT_KEYS, 'windows')).toBe(
+		expect(draftActionFor(press('KeyK', { ctrl: true }), DEFAULT_DRAFT_KEYS, 'windows')).toBe(
 			'snippets'
 		);
-		expect(draftActionFor(press('KeyJ', { meta: true }), DEFAULT_DRAFT_KEYS, 'windows')).toBeNull();
+		expect(draftActionFor(press('KeyK', { meta: true }), DEFAULT_DRAFT_KEYS, 'windows')).toBeNull();
 	});
 
 	it('Mac の ⌃ は ⌘ と別のキーとして扱う（⌃K は行末まで消す操作）', () => {

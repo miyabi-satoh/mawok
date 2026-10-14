@@ -6,7 +6,7 @@ import {
 	isDraftWindowVisible,
 	sendGlobalHotkey
 } from './os.mjs';
-import { clickClientPoint, sendKeySequence, VK } from './input.mjs';
+import { clickClientPoint, neutralizeForeground, sendKeySequence, VK } from './input.mjs';
 import { expectStays, waitFor } from './wait.mjs';
 import { DEFAULT_HOTKEY } from './config.mjs';
 import { APP_PATH } from './paths.mjs';
@@ -41,6 +41,7 @@ export async function launchApp({ port }) {
 
 /** 下書きウィンドウを表示する (OS のグローバルホットキー経由。トグルなので、隠れている前提で呼ぶこと) */
 export async function showDraft() {
+	await neutralizeForeground();
 	await sendGlobalHotkey();
 }
 
@@ -199,23 +200,26 @@ export async function readSnippetPalette(client) {
 			options: [...(dialog?.querySelectorAll('[role="option"]') ?? [])].map((option) =>
 				option.textContent.trim()
 			),
-			status: dialog?.querySelector('[role="status"]')?.textContent.trim() ?? null
+			status: dialog?.querySelector('[role="status"]')?.textContent.trim() ?? null,
+			selected: [...(dialog?.querySelectorAll('[role="option"]') ?? [])].findIndex(
+				(option) => option.getAttribute('aria-selected') === 'true'
+			)
 		};
 	});
 }
 
-/** アクションの一覧を開き (本物の Ctrl+K)、開いた一覧を返す。一覧を開いたときの選択が、実行する範囲になる */
-export async function openActions(client) {
+/** 定型文の一覧を開き (本物の Ctrl+K)、開いた一覧を返す。一覧を開いたときの選択が、宛先へ出す範囲になる */
+export async function openSnippetPalette(client) {
 	await sendKeySequence([[VK.CONTROL, VK.K]]);
 	return waitFor(
 		() => readSnippetPalette(client),
 		(palette) => palette.open,
-		{ label: 'アクションの一覧' }
+		{ label: '定型文の一覧' }
 	);
 }
 
-/** アクションの一覧の行 (見出しと、その下に添えたコマンドの行) */
-export async function readActionOptions(client) {
+/** 定型文の一覧の行 (見出しと、その下に添えた本文の1行目) */
+export async function readSnippetOptions(client) {
 	return client.execute(() =>
 		[...document.querySelectorAll('[role="dialog"] [role="option"]')].map((option) => {
 			const [label, preview] = option.querySelectorAll('span.flex > span');
@@ -224,19 +228,24 @@ export async function readActionOptions(client) {
 	);
 }
 
-/** 開いているアクションの一覧で、見出しが `label` の行を押す */
-export async function clickActionOption(client, label) {
-	const options = await readActionOptions(client);
+/** 開いている定型文の一覧で、見出しが `label` の行を押す */
+export async function clickSnippetOption(client, label) {
+	const options = await readSnippetOptions(client);
 	const index = options.findIndex((option) => option.label === label);
 	if (index === -1) throw new Error(`一覧に「${label}」があるはず: ${JSON.stringify(options)}`);
 	const elements = await client.$$('[role="dialog"] [role="option"]');
 	await elements[index].click();
 }
 
-/** アクションの一覧を開いて、見出しが `name` の行を押す */
-export async function runAction(client, name) {
-	await openActions(client);
-	await clickActionOption(client, name);
+/** 定型文の一覧を開いて、見出しが `name` の行を押す (宛先で始まる1行の定型文なら、その場で出す) */
+export async function runSnippet(client, name) {
+	await openSnippetPalette(client);
+	await clickSnippetOption(client, name);
+}
+
+/** 「コピーして閉じる・実行」のキー (本物の Ctrl+Enter)。1行目が宛先ならコピーせずに実行する */
+export async function runDraft() {
+	await sendKeySequence([[VK.CONTROL, VK.ENTER]]);
 }
 
 /** 失敗の帯の中身。出ていなければ null */
@@ -373,6 +382,11 @@ export async function openSettingsFromDraft(client) {
 	await waitDraftHidden('下書きウィンドウの非表示 (設定を開いた直後)');
 	const handles = await waitForWindowCount(client, 2);
 	await client.switchToWindow(handles.find((handle) => handle !== draftHandle));
+	await waitFor(
+		() => findVisibleMawokWindow(SETTINGS_TITLE),
+		(hwnd) => hwnd !== null,
+		{ label: '設定ウィンドウの表示' }
+	);
 	return draftHandle;
 }
 

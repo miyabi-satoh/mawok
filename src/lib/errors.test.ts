@@ -36,7 +36,6 @@ describe('errorCode', () => {
 
 	it('{ code } の形から符号を取り出す', () => {
 		expect(errorCode({ code: 'action.cancelled', detail: null })).toBe('action.cancelled');
-		expect(errorCode({ code: 'lan.partial', devices: ['ab'] })).toBe('lan.partial');
 	});
 
 	it('符号を持たなければ、文字列にしたものを返す', () => {

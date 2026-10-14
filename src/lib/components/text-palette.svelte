@@ -18,7 +18,7 @@
 	import { filterSnippets, snippetLabel, snippetPreview, type NamedText } from '$lib/snippets';
 
 	/**
-	 * 名前と本文の組を選ぶ一覧。定型文の一覧とアクションの一覧で使い、出し方・絞り込み・選び方・閉じ方を揃える
+	 * 名前と本文の組を選ぶ一覧（定型文の一覧）
 	 */
 	type Props = {
 		items: T[];
@@ -122,7 +122,7 @@
 	<p role="status" class="px-3 py-6 text-center text-sm text-muted-foreground">{message}</p>
 {/snippet}
 
-<!-- 下は、送信先の一覧と同じく、下書きの下の列に重ならないよう 2.75rem 空ける -->
+<!-- 下は、下書きの下の列に重ならないよう 2.75rem 空ける -->
 <PaletteFrame label={listLabel} maxHeightClass="max-h-[calc(100%-4.5rem)]" {onclose}>
 	<div class="flex h-9 shrink-0 items-center gap-2 border-b px-3">
 		<SearchIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

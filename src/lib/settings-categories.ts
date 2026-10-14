@@ -17,7 +17,7 @@ export function settingsCategories() {
 		{ value: 'draft', label: m.settings_category_draft, icon: TypeIcon },
 		{ value: 'copy', label: m.settings_category_copy, icon: WandSparklesIcon },
 		{ value: 'snippets', label: m.settings_category_snippets, icon: TextQuoteIcon },
-		{ value: 'actions', label: m.settings_category_actions, icon: SparklesIcon },
+		{ value: 'ai', label: m.settings_category_ai, icon: SparklesIcon },
 		{ value: 'devices', label: m.settings_category_devices, icon: LaptopIcon },
 		{ value: 'account', label: m.settings_category_account, icon: CircleUserRoundIcon },
 		{ value: 'about', label: m.settings_category_about, icon: InfoIcon }

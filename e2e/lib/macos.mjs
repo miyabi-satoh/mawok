@@ -12,6 +12,9 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
 	APP_IDENTIFIER,
+	PROFILE,
+	PROFILE_ENV,
+	PROFILE_IDENTIFIER,
 	DRAFT_TITLE,
 	SETTINGS_TITLE,
 	SETTINGS_TITLES,
@@ -29,13 +32,24 @@ import { expectStays, waitFor } from './wait.mjs';
 
 const execFileAsync = promisify(execFile);
 
-const APP_BUNDLE = process.env.MAWOK_APP ?? '/Applications/Mawok.app';
+const REGULAR_APP = '/Applications/Mawok.app';
+const APP_BUNDLE = process.env.MAWOK_APP ?? REGULAR_APP;
 const PROCESS_NAME = 'mawok';
 
-const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', APP_IDENTIFIER);
+const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', PROFILE_IDENTIFIER);
+// `open` は自分の環境変数を渡さないので、起動のたびに渡す
+const OPEN_APP = ['--env', `${PROFILE_ENV}=${PROFILE}`, APP_BUNDLE];
 const CONFIG_PATH = path.join(DATA_DIR, 'config.toml');
 const HISTORY_PATH = path.join(DATA_DIR, 'history.json');
-const LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', APP_IDENTIFIER, 'Mawok.log');
+const REGULAR_CONFIG_PATH = path.join(
+	os.homedir(),
+	'Library',
+	'Application Support',
+	APP_IDENTIFIER,
+	'config.toml'
+);
+const REGULAR_LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', APP_IDENTIFIER, 'Mawok.log');
+const LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', PROFILE_IDENTIFIER, 'Mawok.log');
 // 設定・履歴・位置の記録。テストが書き換えるので、まとめて控えて戻す
 const HELD_FILES = ['config.toml', 'history.json', '.window-state.json'];
 
@@ -376,7 +390,7 @@ export async function escapeComposition(before, isOpen) {
 	throw new Error(`Esc を3回送っても、入力欄が ${JSON.stringify(before)} に戻らない`);
 }
 
-/** 開いている一覧 (アクション・定型文) の行 (「名前 本文の頭」の文)。一覧が開いていなければ null */
+/** 開いている定型文の一覧の行 (「名前 本文の頭」の文)。一覧が開いていなければ null */
 export async function paletteOptions() {
 	const elements = (await windowElements(DRAFT_TITLE)) ?? [];
 	const list = elements.findIndex(({ role }) => role === 'AXList');
@@ -389,20 +403,20 @@ export async function paletteOptions() {
 }
 
 /**
- * 下書きで Cmd+K でアクションの一覧を開き、絞り込みに `filter` を打って、`option` で始まる行を選ぶ。
- * 一覧の先頭は、絞り込みに書いたものをそのまま実行する「この内容で実行」なので、Enter の前に ↓ で行まで移る。
+ * 下書きで Cmd+K で定型文の一覧を開き、絞り込みに `filter` を打って、`option` で始まる行 (宛先で始まる定型文) を選んで実行する。
  * 絞り込みは英数で打つ (日本語入力のままだと変換される)
  */
 export async function runAction(filter, option = `${filter} `) {
 	await keyCode(KEY.k, ['command down']);
-	await waitFor(paletteOptions, (options) => options !== null, { label: 'アクションの一覧' });
+	await waitFor(paletteOptions, (options) => options !== null, { label: '定型文の一覧' });
 	await keystroke(filter);
-	// 先頭の「この内容で実行」が打った文字を写していれば、絞り込み終えている。終える前の一覧で数えると、行の位置がずれる
+	// 打った文字を含まない行が、末尾の「…定型文に登録」だけになれば、絞り込み終えている。終える前の一覧で数えると、行の位置がずれる
 	const options = await waitFor(
 		paletteOptions,
 		(current) =>
-			current?.[0] === `この内容で実行 ${filter}` &&
-			current.some((name) => name.startsWith(option)),
+			current !== null &&
+			current.some((name) => name.startsWith(option)) &&
+			current.every((name) => name.includes(filter) || name.includes('定型文に登録')),
 		{ label: `一覧の「${option.trim()}」の行` }
 	);
 	const index = options.findIndex((name) => name.startsWith(option));
@@ -875,12 +889,16 @@ async function quitMawok() {
 	});
 }
 
-/** Finder から開くのと同じく LaunchServices で起動し、メニューバーのアイコンが出るまで待つ */
-async function launchMawok() {
+/**
+ * Finder から開くのと同じく LaunchServices で起動し、メニューバーのアイコンが出るまで待つ。
+ * `regular` なら、プロファイルを分けずに常用の Mawok として起動する (控えたときに動いていたものを起動し直すとき)
+ */
+async function launchMawok({ regular = false } = {}) {
+	const mark = markLog(LOG_PATH);
 	// 終了した直後は、LaunchServices がまだ前のプロセスを抱えていて -609 で失敗することがあるので、少し置いてやり直す
 	await waitFor(
 		() =>
-			execFileAsync('open', [APP_BUNDLE]).then(
+			execFileAsync('open', regular ? [REGULAR_APP] : OPEN_APP).then(
 				() => true,
 				() => false
 			),
@@ -893,6 +911,19 @@ async function launchMawok() {
 		Boolean,
 		{ timeout: 20_000, interval: 300, label: 'Mawok の起動 (メニューバーのアイコン)' }
 	);
+	// プロファイルを知らない前の版は、常用の置き場で動いてアカウントと同期する。動かす前に止める
+	if (regular) return;
+	const sawProfile = await waitFor(() => readLogSince(LOG_PATH, mark) !== '', Boolean, {
+		timeout: 5_000,
+		interval: 200,
+		label: 'プロファイルのログ'
+	}).catch(() => false);
+	if (!sawProfile) {
+		await quitMawok();
+		throw new Error(
+			`${APP_BUNDLE} が ${PROFILE_ENV} を見ていません。just bundle した版を入れ直すか、MAWOK_APP で指してください`
+		);
+	}
 }
 
 /**
@@ -966,7 +997,7 @@ function waitAppWindow(name) {
 
 /** 動いている Mawok を、Finder から開くのと同じく `open` で開き直す。`newInstance` なら `open -n` で2つ目を立てる */
 export function openAgain({ newInstance = false } = {}) {
-	return execFileAsync('open', newInstance ? ['-n', APP_BUNDLE] : [APP_BUNDLE]);
+	return execFileAsync('open', newInstance ? ['-n', ...OPEN_APP] : OPEN_APP);
 }
 
 /** 今からの Mawok のログを読む関数を返す (呼んだ時点より後に書かれた分) */
@@ -1015,15 +1046,27 @@ export function draftWindowLayer() {
  * ほかのアプリからは読めない (SMAppService の mainAppService は、呼んだアプリ自身のもの) ので、これで見分ける
  */
 async function readAutostartOn() {
-	const config = await readTextIfExists(CONFIG_PATH);
+	// ログイン項目は OS の上で1つで、プロファイルでは分かれない。利用者の状態は、常用の設定と常用の起動で読む
+	const config = await readTextIfExists(REGULAR_CONFIG_PATH);
 	// 設定ファイルが無いと初めての起動になり、起動すると登録してしまうので、起動せずに効いていないとみなす
 	// (戻すときに登録を外す。利用者が次に起動したときは初めての起動になり、そこで登録される)
 	if (config === null) return false;
 	if (/^autostart\s*=\s*false\s*$/m.test(config)) return false;
-	const log = watchLog();
-	await launchMawok();
+	const mark = markLog(REGULAR_LOG_PATH);
+	await launchMawok({ regular: true });
 	await quitMawok();
-	return !log().includes('launch at login was turned off outside Mawok');
+	return !readLogSince(REGULAR_LOG_PATH, mark).includes(
+		'launch at login was turned off outside Mawok'
+	);
+}
+
+/**
+ * 画面がロックされていれば、始める前に落とす。ロックの間はウィンドウが出ず、どの確認も時間切れで落ちるので、原因が分からない
+ */
+export async function assertScreenUnlocked() {
+	const { stdout } = await execFileAsync('ioreg', ['-n', 'Root', '-d1', '-a']);
+	if (/<key>CGSSessionScreenIsLocked<\/key>\s*<true\/>/.test(stdout))
+		throw new Error('画面がロックされています。ロックを解いてから回してください');
 }
 
 /**
@@ -1066,6 +1109,7 @@ export async function holdUserState() {
 	// 控えを取り終える前に止まっても、動いていた Mawok を起動し直せるよう、先に書いておく
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'running.json'), { wasRunning });
 	await quitMawok();
+	await fs.mkdir(DATA_DIR, { recursive: true });
 	const present = [];
 	for (const name of HELD_FILES) {
 		const source = path.join(DATA_DIR, name);
@@ -1100,7 +1144,8 @@ export async function restoreUserState({ relaunch = true } = {}) {
 		const running = await fs
 			.readFile(path.join(BACKUP_DIR, 'running.json'), 'utf8')
 			.then(JSON.parse, () => ({ wasRunning: false }));
-		if (relaunch && running.wasRunning && !(await isMawokRunning())) await launchMawok();
+		if (relaunch && running.wasRunning && !(await isMawokRunning()))
+			await launchMawok({ regular: true });
 		await fs.rm(BACKUP_DIR, { recursive: true, force: true });
 		return running.wasRunning;
 	}
@@ -1109,9 +1154,13 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	// ログイン項目の登録を、利用者の状態に戻す。初めての起動を試すと登録され、ログイン時の起動の確認は登録を外すので、
 	// オフならオフの設定で一度起動して外し、オンなら設定ファイルの無い初めての起動で登録する
 	// (設定がオンで登録が無いと、起動しても登録せず、設定をオフにそろえるため。src-tauri/src/lib.rs の autostart_at_launch)
+	await fs.mkdir(DATA_DIR, { recursive: true });
 	if (state.autostartOn) await fs.rm(CONFIG_PATH, { force: true });
 	else await fs.writeFile(CONFIG_PATH, 'autostart = false\n');
-	await launchMawok();
+	// 起動できなくても (プロファイルを見ない版を指していたなど)、控えたファイルとクリップボードは戻す
+	await launchMawok().catch((error) =>
+		console.warn(`ログイン項目を戻せませんでした: ${error.message}`)
+	);
 	await quitMawok();
 	for (const name of HELD_FILES) {
 		const target = path.join(DATA_DIR, name);
@@ -1132,7 +1181,7 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	await fs.rm(stateFile, { force: true });
 	await fs.rm(path.join(BACKUP_DIR, 'files'), { recursive: true, force: true });
 	await fs.rm(path.join(BACKUP_DIR, 'clipboard'), { recursive: true, force: true });
-	if (relaunch && state.wasRunning) await launchMawok();
+	if (relaunch && state.wasRunning) await launchMawok({ regular: true });
 	await fs.rm(BACKUP_DIR, { recursive: true, force: true });
 	return state.wasRunning;
 }

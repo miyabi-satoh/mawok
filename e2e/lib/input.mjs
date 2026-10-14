@@ -287,6 +287,47 @@ export async function clickScreenPoint(x, y) {
 	);
 }
 
+/**
+ * 前面をシェル (ShellExperienceHost の「新しい通知」など) が握っていれば、通知センターを Win+N で開いて閉じ、
+ * 前面をデスクトップに戻す。シェルが前面のままだと、アプリを前面にする要求が通らず、本物のキー入力が
+ * アプリでない窓に入る。小さな窓を出して前面を取っても、閉じると通知に前面が戻るので、通知のほうを閉じる。
+ * バックグラウンドの動きで前面はテストの最中にも変わるので、テストの頭 (`lib/setup.mjs` の `newClient`) と、
+ * 下書きを出す前 (`showDraft`) で呼ぶ。前面がシェルでなければ何もしない (ユーザーの端末などの前面は奪わない)。
+ * 3回試してもシェルが前面のままなら、前面のプロセス名を入れて落とす
+ */
+export async function neutralizeForeground() {
+	await runPowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class E2EForeground {
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+    [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    public static void WinN() {
+        keybd_event(0x5B, 0, 0, UIntPtr.Zero);
+        keybd_event(0x4E, 0, 0, UIntPtr.Zero);
+        keybd_event(0x4E, 0, 2, UIntPtr.Zero);
+        keybd_event(0x5B, 0, 2, UIntPtr.Zero);
+    }
+}
+"@
+$shell = @('ShellExperienceHost', 'SearchHost', 'StartMenuExperienceHost', 'TextInputHost', 'LockApp')
+function Get-ForegroundName {
+    $foregroundPid = 0
+    [void][E2EForeground]::GetWindowThreadProcessId([E2EForeground]::GetForegroundWindow(), [ref]$foregroundPid)
+    (Get-Process -Id $foregroundPid -ErrorAction SilentlyContinue).ProcessName
+}
+for ($i = 0; $i -lt 3 -and ($shell -contains (Get-ForegroundName)); $i++) {
+    [E2EForeground]::WinN()
+    Start-Sleep -Milliseconds 800
+    [E2EForeground]::WinN()
+    Start-Sleep -Milliseconds 800
+}
+$remaining = Get-ForegroundName
+if ($shell -contains $remaining) { throw "前面がシェルのままです: $remaining" }`);
+}
+
 /** ウィンドウのクライアント領域の点 (物理ピクセル) を、本物のマウス入力で左クリックする */
 export async function clickClientPoint(hwnd, x, y) {
 	await runPowerShell(

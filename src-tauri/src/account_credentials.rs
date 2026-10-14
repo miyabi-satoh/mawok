@@ -154,7 +154,7 @@ pub fn clear_key() -> Result<(), String> {
     write_locked(&with_key(read_or_empty_locked()?, None))
 }
 
-/// サインアウトする。共有の鍵は残す（デバイスの間の送受信は、サインインしていなくても使うため）。
+/// サインアウトする。共有の鍵は残す（サインインし直したときに、追加済みのデバイスと同じ鍵のまま同期を続けるため）。
 pub fn delete_token() -> Result<(), String> {
     let _access = ACCESS.lock().unwrap();
     let read = read_or_empty_locked();

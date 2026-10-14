@@ -25,6 +25,7 @@ mod menu_tracking;
 mod package;
 mod placement;
 mod pro;
+mod profile;
 mod secrets;
 mod shared_key;
 mod sync;
@@ -46,7 +47,6 @@ use std::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex, OnceLock,
     },
-    thread,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -68,9 +68,7 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use crate::{
     ai::AiService,
-    config::{
-        Action, ActionEncoding, ActionOutput, Config, Device, Language, LoadProblem, Snippet, Theme,
-    },
+    config::{ActionEncoding, ActionOutput, Config, Device, Language, LoadProblem, Snippet, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     hotkey::Registrar as _,
     i18n::Lang,
@@ -105,11 +103,6 @@ const TRAY_ICON: Image<'_> = include_image!("icons/tray-template/36x36.png");
 /// タスクトレイは小さいので、アプリのアイコンの余白を削ったものを使う
 #[cfg(not(target_os = "macos"))]
 const TRAY_ICON: Image<'_> = include_image!("icons/tray/32x32.png");
-/// 届いた下書きをまだ見ていない間のアイコン。右上に点を付ける
-#[cfg(target_os = "macos")]
-const TRAY_ICON_RECEIVED: Image<'_> = include_image!("icons/tray-template-received/36x36.png");
-#[cfg(not(target_os = "macos"))]
-const TRAY_ICON_RECEIVED: Image<'_> = include_image!("icons/tray-received/32x32.png");
 
 /// 起動から画面の読み込み完了までの時間をログに出すための、起動時刻
 static STARTED_AT: OnceLock<Instant> = OnceLock::new();
@@ -123,10 +116,6 @@ struct DraftState {
     blur: debounce::Debounce,
     /// 下書きを出してから、一度でもフォーカスが入ったか。入っていなければ、フォーカスが外れたとして隠さない
     focused_since_shown: AtomicBool,
-    /// 追加済みのデバイスから届き、画面がまだ受け取っていない下書き。画面の読み込み中に届いても失わないよう、起動中だけここに溜める
-    received: Mutex<Vec<ReceivedDraft>>,
-    /// 下書きが隠れている間に届き、まだ下書きを出していないか。トレイのアイコンに点を付ける
-    unseen_received: AtomicBool,
 }
 
 /// アクションの実行（actions.rs・ai.rs）
@@ -193,7 +182,7 @@ struct AppState {
     mawok_account_signed_in: AtomicBool,
     /// Pro の状態を消すたびに進める。問い合わせている間にサインアウトやアカウントの替わりがあったら、その答えを捨てる。
     pro_generation: AtomicUsize,
-    /// 資格情報管理にある共有の鍵。デバイスの間の送受信に使う。設定ファイルには置かない。
+    /// 資格情報管理にある共有の鍵。追加済みのデバイスの確かめと同期に使う。設定ファイルには置かない。
     shared_key: Mutex<Option<[u8; 32]>>,
     /// 同期に使う鍵の見分け。Pro で窓口と照らした後だけある。
     shared_key_id: Mutex<Option<String>>,
@@ -211,8 +200,12 @@ struct AppState {
     sync_debounce: debounce::Debounce,
     /// 同期の記録にある、利用者が選ぶのを待っている食い違いの数（docs/sync.md「食い違い」）
     sync_conflicts: AtomicUsize,
+    /// テキストウィンドウを出したことをきっかけに、最後に同期を頼んだ時刻
+    synced_on_show: Mutex<Option<Instant>>,
     /// トレイから食い違いを選ぶ画面を頼まれた。設定ウィンドウが、開いたときに受け取る
     sync_choice_requested: AtomicBool,
+    /// テキストウィンドウから AI の設定を頼まれた。設定ウィンドウが、開いたときに受け取る
+    ai_settings_requested: AtomicBool,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -333,7 +326,7 @@ struct SettingsView {
     text_history_size: u16,
     trim_trailing_whitespace: bool,
     replacements: Vec<Replacement>,
-    /// 定型文。登録した順
+    /// 定型文。登録した順。設定ファイルに書いていなければ、今の表示言語の既定の定型文
     snippets: Vec<Snippet>,
     /// 確認コードで追加した自分のデバイス。見つけた順
     devices: Vec<Device>,
@@ -372,8 +365,6 @@ struct SettingsView {
     ai_models: BTreeMap<AiService, String>,
     /// AI サービスごとの既定のモデル。既定は Rust 側だけで決める
     default_ai_models: BTreeMap<AiService, String>,
-    /// アクションの並び。設定ファイルに書いていなければ、今の表示言語の既定のアクション
-    actions: Vec<Action>,
     /// アプリのバージョン。ログの先頭に出しているものと同じ
     version: String,
     /// 表示言語の設定と OS の言語から決めた Paraglide のロケール
@@ -408,9 +399,6 @@ fn settings_view(state: &AppState) -> SettingsView {
             .filter(|service| *service != AiService::None)
             .map(|service| (service, service.default_model().to_string()))
             .collect(),
-        actions: config
-            .actions
-            .unwrap_or_else(|| actions::default_actions(lang)),
         platform: Platform::current(),
         hotkey: config.hotkey,
         modified_settings,
@@ -426,7 +414,9 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_history_size: config.text_history_size,
         trim_trailing_whitespace: config.trim_trailing_whitespace,
         replacements: config.replacements,
-        snippets: config.snippets,
+        snippets: config
+            .snippets
+            .unwrap_or_else(|| actions::default_snippets(lang)),
         devices: config.devices,
         device_name: state.device_name.clone(),
         pro_available,
@@ -566,6 +556,7 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
         // 出せていないのに記録を寝かせると、隠れたまま戻せなくなる
         return false;
     }
+    request_sync_on_show(app);
     if capture_return_target {
         // 自分で出したものは、設定を閉じたときに出し直す対象ではない
         app.state::<DraftState>()
@@ -573,14 +564,6 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
             .store(false, Ordering::Relaxed);
     }
     let _ = app.emit(events::SHOWN, ());
-    // 出せば、届いた下書きは入力欄か帯で見える
-    if app
-        .state::<DraftState>()
-        .unseen_received
-        .swap(false, Ordering::Relaxed)
-    {
-        refresh_tray_icon(app);
-    }
     true
 }
 
@@ -1386,6 +1369,23 @@ fn open_settings_window(app: AppHandle) {
     open_settings(&app);
 }
 
+/// 下書きウィンドウの AI のエラーの帯から、設定ウィンドウを「AI」で開く。
+/// 開いている設定ウィンドウにはイベントで、これから作る設定ウィンドウには目印で伝える
+#[tauri::command]
+fn open_ai_settings(app: AppHandle) {
+    app.state::<AppState>()
+        .ai_settings_requested
+        .store(true, Ordering::SeqCst);
+    open_settings(&app);
+    let _ = app.emit_to(SETTINGS_WINDOW, events::AI_SETTINGS_REQUESTED, ());
+}
+
+/// 設定ウィンドウが、「AI」で開くよう頼まれていたかを受け取る。受け取ったら頼みは消える
+#[tauri::command]
+fn take_ai_settings_request(state: tauri::State<'_, AppState>) -> bool {
+    state.ai_settings_requested.swap(false, Ordering::SeqCst)
+}
+
 /// 下書きウィンドウの設定のキー（既定は Cmd+, / Ctrl+,）で、設定ウィンドウを開閉する。
 /// 設定ウィンドウが存在する場合は、開いているか見えているかに関わらず閉じる。
 #[tauri::command]
@@ -1426,7 +1426,7 @@ fn set_snippets(app: AppHandle, snippets: Vec<Snippet>) -> Result<Vec<Snippet>, 
     // トレイには関わらないので、打つたびに作り直さない
     let mut snippets = snippets;
     config::repair_item_ids(&mut snippets)?;
-    save_as_typed(&app, |config| config.snippets = snippets.clone())?;
+    save_as_typed(&app, |config| config.snippets = Some(snippets.clone()))?;
     emit_settings(&app);
     Ok(snippets)
 }
@@ -1438,12 +1438,16 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     if snippet.body.trim().is_empty() {
         return Err("the snippet body is empty".to_string());
     }
-    let exists = app
-        .state::<AppState>()
+    let state = app.state::<AppState>();
+    let lang = state.lang();
+    let exists = state
         .config
         .lock()
         .unwrap()
         .snippets
+        .clone()
+        // 既定の定型文のままなら、この後に書き出す既定の定型文と比べる
+        .unwrap_or_else(|| actions::default_snippets(lang))
         .iter()
         .any(|existing| existing.body == snippet.body);
     if exists {
@@ -1453,7 +1457,13 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     let mut snippet = snippet;
     config::repair_item_ids(std::slice::from_mut(&mut snippet))?;
     info!("add snippet");
-    save_as_typed(&app, |config| config.snippets.push(snippet.clone()))?;
+    // 既定の定型文のままなら、既定の定型文を書き出してから足す。足した1件だけを書くと、既定の定型文が消える
+    save_as_typed(&app, |config| {
+        config
+            .snippets
+            .get_or_insert_with(|| actions::default_snippets(lang))
+            .push(snippet.clone())
+    })?;
     emit_settings(&app);
     // 設定画面は定型文の並びを自分で持っていて settings-changed では写し直さないので、足した1件を別に知らせる。
     // 知らせないと、設定画面を開いたままにしていたとき、次に設定画面で直したときの保存で消える
@@ -1526,22 +1536,11 @@ fn set_ai_model(app: AppHandle, service: AiService, model: String) -> Result<(),
     })
 }
 
+/// 今の表示言語の既定の定型文。設定画面は、打っている途中の定型文を消さないよう、並びを自分で持ち、
+/// これを後ろに足してから set_snippets で保存する
 #[tauri::command]
-fn set_actions(app: AppHandle, actions: Vec<Action>) -> Result<Vec<Action>, String> {
-    info!("set actions: {} entries", actions.len());
-    // 打つたびに呼ばれる。定型文と同じく、下書きウィンドウの一覧が使うので画面へは反映し、トレイは作り直さない
-    let mut actions = actions;
-    config::repair_item_ids(&mut actions)?;
-    save_as_typed(&app, |config| config.actions = Some(actions.clone()))?;
-    emit_settings(&app);
-    Ok(actions)
-}
-
-/// 今の表示言語の既定のアクション。設定画面は、打っている途中のアクションを消さないよう、並びを自分で持ち、
-/// これを後ろに足してから set_actions で保存する
-#[tauri::command]
-fn default_actions(app: AppHandle) -> Vec<Action> {
-    actions::default_actions(app.state::<AppState>().lang())
+fn default_snippets(app: AppHandle) -> Vec<Snippet> {
+    actions::default_snippets(app.state::<AppState>().lang())
 }
 
 /// 今の AI サービスのキーがあるか。中身は読まない
@@ -1664,6 +1663,22 @@ fn schedule_sync_after_change(app: &AppHandle) {
     let debounce = &app.state::<AppState>().sync_debounce;
     let app = app.clone();
     debounce.trigger(Duration::from_secs(3), move || request_sync(&app));
+}
+
+/// テキストウィンドウを出すたびに窓口へ問い合わせないための間隔。出して隠すのを続けて繰り返しても、窓口の回数の上限に届かない長さにする
+const SYNC_ON_SHOW_INTERVAL: Duration = Duration::from_secs(10);
+
+/// テキストウィンドウを出したときに同期する。ほかのデバイスで覚えた履歴を、出してすぐたどれるようにするため（docs/sync.md「いつ同期するか」）
+fn request_sync_on_show(app: &AppHandle) {
+    {
+        let state = app.state::<AppState>();
+        let mut last = state.synced_on_show.lock().unwrap();
+        if last.is_some_and(|at| at.elapsed() < SYNC_ON_SHOW_INTERVAL) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    request_sync(app);
 }
 
 /// 同期は1つだけ走らせ、実行中に届いたきっかけは終わった後の1回へまとめる。
@@ -2022,7 +2037,6 @@ async fn set_sync_kind(app: AppHandle, kind: sync::SyncKind, enabled: bool) -> R
         sync::SyncKind::Keys => config.sync_keys = enabled,
         sync::SyncKind::Replacements => config.sync_replacements = enabled,
         sync::SyncKind::Snippets => config.sync_snippets = enabled,
-        sync::SyncKind::Actions => config.sync_actions = enabled,
         sync::SyncKind::History => config.sync_history = enabled,
     })
     .await
@@ -2773,8 +2787,7 @@ async fn refresh_shared_key(
     }
     *app.state::<AppState>().shared_key_id.lock().unwrap() = server.clone();
     if shared_key::decide(server.as_deref(), local.as_ref()) == shared_key::Status::NeedsPairing {
-        // 窓口の鍵と違う手元の鍵は消さない。その鍵でつないだデバイスとの送受信は、同期と関係なく続ける。
-        // 同期しているデバイスの確認コードを入力したときに、受け取った鍵で置き換わる
+        // 窓口の鍵と違う手元の鍵は消さない。同期しているデバイスの確認コードを入力したときに、受け取った鍵で置き換わる
         *app.state::<AppState>().shared_key.lock().unwrap() = local;
         *app.state::<AppState>().shared_key_status.lock().unwrap() =
             shared_key::Status::NeedsPairing;
@@ -2840,7 +2853,7 @@ async fn clear_sync_state(app: &AppHandle) {
 }
 
 /// サインアウトとアカウントの替わりで、同期の鍵の状態と進みを消す。共有の鍵は残す
-/// （デバイスの間の送受信は、サインインしていなくても使うため）。
+/// （サインインし直したときに、追加済みのデバイスと同じ鍵のまま同期を続けるため）。
 /// 鍵の状態を置く処理（確かめ・作り直し・ペアリングでの受け取り）と同じ排他を取り、消すのを必ず後にする
 async fn forget_sync_key(app: &AppHandle) {
     let state = app.state::<AppState>();
@@ -2852,7 +2865,7 @@ async fn forget_sync_key(app: &AppHandle) {
     apply_config(app);
 }
 
-/// 起動のときに、資格情報管理の共有の鍵を読む。サインインしていなくても、追加済みのデバイスと送受信するため
+/// 起動のときに、資格情報管理の共有の鍵を読む。サインインしていなくても、追加済みのデバイスを見つけるのに使う
 async fn load_shared_key_at_startup(app: &AppHandle) {
     let state = app.state::<AppState>();
     let _refresh = state.shared_key_refresh.lock().await;
@@ -3061,8 +3074,8 @@ impl From<actions::ActionError> for ActionFailure {
     }
 }
 
-/// アクションのコマンドの行を実行し、結果の文を返す。行頭が `@ai` なら指示文と実行する文を AI サービスへ送り、それ以外はシェルで実行する。
-/// 画面から渡された行をそのまま実行する（一覧でその場で打った行も実行するため）。
+/// 宛先の行を実行し、結果の文を返す。行頭が `@ai` なら指示文と実行する文を AI サービスへ送り、`@sh` ならシェルで実行する。
+/// 画面から渡された行をそのまま実行する（テキストウィンドウの1行目に書いた行も実行するため）。
 /// 結果の出し方が「出さない」なら、結果は空の文を返す。
 /// 失敗したら符号（actions.rs の Failure::code）を返し、詳しい中身はログにだけ残す。送った文と結果はログに書かない。
 /// `request` は begin_action で受け取った番号。より大きい番号のアクションを始めるか、
@@ -3072,7 +3085,9 @@ async fn run_action(
     app: AppHandle,
     request: u64,
     text: String,
-    action: Action,
+    line: String,
+    output: ActionOutput,
+    encoding: ActionEncoding,
 ) -> Result<String, ActionFailure> {
     let state = app.state::<ActionState>();
     if request <= state.requests.lock().unwrap().settled_through {
@@ -3080,24 +3095,32 @@ async fn run_action(
         return Err(ACTION_CANCELLED.into());
     }
     let stopper = command::Stopper::default();
-    let discard_output = action.output == ActionOutput::None;
+    let discard_output = output == ActionOutput::None;
     let tauri::async_runtime::JoinHandle::Tokio(task) =
-        match actions::ai_instruction(&action.command) {
-            Some(instruction) => start_ai_action(
+        match (actions::ai_instruction(&line), actions::sh_command(&line)) {
+            (Some(instruction), _) => start_ai_action(
                 &app,
                 request,
                 ai::Prompt::new(instruction, &text),
                 discard_output,
             )?,
-            None => start_command_action(
+            (None, Some(command)) => start_command_action(
                 &app,
                 request,
                 text,
-                action.command,
-                action.encoding,
+                command.to_string(),
+                encoding,
                 discard_output,
                 stopper.clone(),
             )?,
+            // 画面は、宛先が `@ai`・`@sh` の行だけを渡す
+            (None, None) => {
+                return Err(actions::ActionError::new(
+                    actions::Failure::Unexpected,
+                    "the line has no executable addressee",
+                )
+                .into())
+            }
         };
     let abort = task.abort_handle();
     {
@@ -3548,17 +3571,7 @@ fn show_notification(app: &AppHandle, message: String) {
     }
 }
 
-/// 追加済みのデバイスから届いた下書き（画面側の draft-received）
-#[derive(Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-struct ReceivedDraft {
-    /// 送ってきたデバイスの名前
-    from: String,
-    text: String,
-}
-
-/// 見つけたデバイスを設定の順番と送信先の選択を保ったまま更新する。初めてなら末尾へ加える。
+/// 見つけたデバイスを設定の順番を保ったまま更新する。初めてなら末尾へ加える。
 fn remember_found_device(devices: &mut Vec<Device>, peer: lan::Peer, address: IpAddr) -> bool {
     let public_key = hex::to_hex(&peer.public_key);
     let address = address.to_string();
@@ -3577,7 +3590,6 @@ fn remember_found_device(devices: &mut Vec<Device>, peer: lan::Peer, address: Ip
         name: peer.name,
         public_key,
         address,
-        send_to: true,
     });
     true
 }
@@ -3597,14 +3609,6 @@ fn remember_device_address(devices: &mut [Device], public_key: &[u8], address: I
     }
     device.address = address;
     true
-}
-
-fn received_device_name(devices: &[Device], public_key: &str) -> String {
-    devices
-        .iter()
-        .find(|device| device.public_key == public_key)
-        .map(|device| device.name.clone())
-        .unwrap_or_else(|| public_key[..4].to_string())
 }
 
 impl lan::Host for AppHandle {
@@ -3645,38 +3649,6 @@ impl lan::Host for AppHandle {
                 warn!("lan: couldn't remember a device's address: {error}");
             }
         }
-    }
-
-    fn on_received(&self, from: &[u8], text: String) -> bool {
-        let from = hex::to_hex(from);
-        let state = self.state::<AppState>();
-        let config = state.config.lock().unwrap();
-        let name = received_device_name(&config.devices, &from);
-        // 前面には出さない。画面側で、入力欄が空ならそのまま入れ、書きかけがあれば帯で知らせる
-        self.state::<DraftState>()
-            .received
-            .lock()
-            .unwrap()
-            .push(ReceivedDraft { from: name, text });
-        drop(config);
-        // 中身は載せずに知らせるだけ。画面は take_received_drafts で取りに来る（読み込み中で知らせを取り逃がしても、読み込み後に取りに来る）
-        let _ = self.emit(events::DRAFT_RECEIVED, ());
-        // 前面に出さないので、隠れている間に届いたらトレイで知らせる。出ていれば入力欄か帯で見える。
-        // 下書きを出す処理（show_draft）と同じ main スレッドで確かめ、出した直後に点が残らないようにする
-        let app = self.clone();
-        let _ = self.run_on_main_thread(move || {
-            let hidden =
-                main_window(&app).is_none_or(|window| !window.is_visible().unwrap_or(false));
-            if hidden
-                && !app
-                    .state::<DraftState>()
-                    .unseen_received
-                    .swap(true, Ordering::Relaxed)
-            {
-                refresh_tray_icon(&app);
-            }
-        });
-        true
     }
 
     fn pro_account_tag(&self) -> Option<[u8; lan::ACCOUNT_TAG_LEN]> {
@@ -3788,17 +3760,11 @@ fn pro_account_tag(app: &AppHandle) -> Option<[u8; lan::ACCOUNT_TAG_LEN]> {
     <AppHandle as lan::Host>::pro_account_tag(app)
 }
 
-/// 組み合わせと送信の失敗を、画面に渡す符号にする。画面は符号から案内を出す（src/lib/lan-errors.ts）。
+/// 組み合わせの失敗を、画面に渡す符号にする。画面は符号から案内を出す（src/lib/lan-errors.ts）。
 /// 詳しい中身は、調べるときのためにログに残す
 fn lan_failure(context: &str, error: lan::LanError) -> String {
     warn!("{context}: {}", error.detail);
     error.failure.code().to_string()
-}
-
-/// 届いてから画面がまだ受け取っていない下書きを、届いた順に渡して空にする
-#[tauri::command]
-fn take_received_drafts(state: tauri::State<'_, DraftState>) -> Vec<ReceivedDraft> {
-    std::mem::take(&mut *state.received.lock().unwrap())
 }
 
 /// コードを出して、組み合わせる相手が入れるのを待つ。コードと画面表示用の残り秒を返す
@@ -3853,7 +3819,7 @@ async fn join_pairing(
 }
 
 /// 共有の鍵が替わった・消えたときに、デバイスの一覧を空にする。一覧は「今の鍵で確かめた相手」なので、
-/// 前の鍵の相手を残すと、送れない送信先が並ぶ。新しい鍵を持つデバイスは、次の名乗りで一覧に戻る
+/// 前の鍵の相手を残すと、同期しないデバイスが並ぶ。新しい鍵を持つデバイスは、次の名乗りで一覧に戻る
 fn forget_devices(app: &AppHandle) {
     let empty = app
         .state::<AppState>()
@@ -3868,235 +3834,6 @@ fn forget_devices(app: &AppHandle) {
         }
     }
     app.state::<Arc<lan::Lan>>().forget_devices();
-}
-
-/// 送れなかったときに画面へ渡すもの。一部のデバイスにだけ届かなかったら、符号は `lan.partial` で、届かなかったデバイスの公開鍵を添える
-#[derive(Debug, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(rename_all = "camelCase")]
-struct SendFailure {
-    code: String,
-    devices: Vec<String>,
-}
-
-impl From<String> for SendFailure {
-    fn from(code: String) -> Self {
-        Self {
-            code,
-            devices: Vec::new(),
-        }
-    }
-}
-
-/// 一部のデバイスにだけ届かなかったときの符号（src/lib/lan-errors.ts）
-const PARTIAL_SEND: &str = "lan.partial";
-
-/// 入力内容を追加済みのデバイスへ送り、直前のアプリへフォーカスを戻してウィンドウを隠す（コピーして隠すときと揃える）。
-/// 送信先は、`targets`（公開鍵）を渡せばそのデバイス、渡さなければ送信先にチェックしたデバイス。
-/// 送ったら true、入力欄が空で何も送らなかったら false を返す。1台にでも届かなければ隠さない。
-/// 相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
-#[tauri::command]
-async fn send_draft(
-    app: AppHandle,
-    text: String,
-    targets: Option<Vec<String>>,
-) -> Result<bool, SendFailure> {
-    info!("send draft");
-    // 送れなかったときの詳しい中身は、lan_failure がログに残す
-    run_blocking(move || send_and_hide(&app, &text, targets.as_deref()))
-        .await
-        .map_err(SendFailure::from)?
-}
-
-/// 追加済みのデバイスのうち `include` に当てはまるものと、その鍵。鍵が読めないデバイスは、ログに残して除く
-fn device_targets(app: &AppHandle, include: impl Fn(&Device) -> bool) -> Vec<(Device, Vec<u8>)> {
-    let state = app.state::<AppState>();
-    let config = state.config.lock().unwrap();
-    config
-        .devices
-        .iter()
-        .filter(|device| include(device))
-        .filter_map(|device| match hex::from_hex(&device.public_key) {
-            Some(key) => Some((device.clone(), key)),
-            None => {
-                warn!("lan: a device's key is unreadable");
-                None
-            }
-        })
-        .collect()
-}
-
-/// 相手の場所が変わっていたら覚え直す。起動した直後で名乗りがまだ届いていないときに使う
-fn remember_addresses(app: &AppHandle, reached: &[(String, IpAddr)]) {
-    let changed = {
-        let state = app.state::<AppState>();
-        let config = state.config.lock().unwrap();
-        reached.iter().any(|(public_key, address)| {
-            config.devices.iter().any(|paired| {
-                &paired.public_key == public_key && paired.address != address.to_string()
-            })
-        })
-    };
-    if changed {
-        // 起動時に読めなかった設定ファイルを、ここで初めて写すこともあるので、トレイと画面にも反映する
-        if let Err(error) = update_config(app, |config| {
-            for (public_key, address) in reached {
-                for paired in &mut config.devices {
-                    if &paired.public_key == public_key {
-                        paired.address = address.to_string();
-                    }
-                }
-            }
-        }) {
-            warn!("lan: couldn't remember the devices' addresses: {error}");
-        }
-    }
-}
-
-/// デバイスごとに同時に `call` を呼び、デバイスと結果の組を `targets` の順に返す。動いていないデバイスを待つ時間が、台数分重ならないようにする。
-/// `call` には、デバイスの鍵と、覚えていた場所（読めなければ None）を渡す
-fn on_each_device<'a, T: Send>(
-    app: &AppHandle,
-    targets: &'a [(Device, Vec<u8>)],
-    call: impl Fn(&lan::Lan, &[u8], Option<IpAddr>) -> T + Sync,
-) -> Vec<(&'a Device, T)> {
-    let state = app.state::<Arc<lan::Lan>>();
-    let (lan, call): (&lan::Lan, _) = (&state, &call);
-    thread::scope(|scope| {
-        let handles: Vec<_> = targets
-            .iter()
-            .map(|(device, key)| {
-                scope.spawn(move || (device, call(lan, key, device.address.parse().ok())))
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|handle| handle.join().expect("device thread panicked"))
-            .collect()
-    })
-}
-
-/// 送受信に使う共有の鍵。無ければ、追加したデバイスも無い
-fn shared_key_for_lan(app: &AppHandle) -> Result<[u8; 32], lan::Failure> {
-    let key = *app.state::<AppState>().shared_key.lock().unwrap();
-    key.ok_or(lan::Failure::NoDevice)
-}
-
-fn send_and_hide(
-    app: &AppHandle,
-    text: &str,
-    targets: Option<&[String]>,
-) -> Result<bool, SendFailure> {
-    let sent = !text.is_empty();
-    if sent {
-        let shared_key = shared_key_for_lan(app)
-            .map_err(|failure| SendFailure::from(failure.code().to_string()))?;
-        if app
-            .state::<AppState>()
-            .config
-            .lock()
-            .unwrap()
-            .devices
-            .is_empty()
-        {
-            return Err(lan::Failure::NoDevice.code().to_string().into());
-        }
-        let targets = device_targets(app, |device| match targets {
-            Some(keys) => keys.contains(&device.public_key),
-            None => device.send_to,
-        });
-        if targets.is_empty() {
-            return Err(lan::Failure::NoTarget.code().to_string().into());
-        }
-        // 送るのは整える前の入力欄の中身。整えるのは、受け取った側がコピーするとき
-        let results = on_each_device(app, &targets, |lan, key, saved| {
-            lan.send(key, saved, &shared_key, text)
-        });
-        let mut reached = Vec::new();
-        let mut failures = Vec::new();
-        for (device, result) in results {
-            match result {
-                Ok(address) => reached.push((device.public_key.clone(), address)),
-                Err(error) => failures.push((device.public_key.clone(), error)),
-            }
-        }
-        remember_addresses(app, &reached);
-        if !failures.is_empty() {
-            let all_failed = reached.is_empty();
-            let devices = failures
-                .iter()
-                .map(|(public_key, _)| public_key.clone())
-                .collect();
-            // lan_failure は原因をログに残すので、どの分岐でも全部のデバイスの分を先に評価する
-            let codes: Vec<String> = failures
-                .into_iter()
-                .map(|(_, error)| lan_failure("couldn't send", error))
-                .collect();
-            // 1台にも届かなければ、今までどおり失敗の種類で知らせる（台数が多ければ、最初のデバイスの種類）
-            if all_failed {
-                return Err(codes.into_iter().next().unwrap_or_default().into());
-            }
-            return Err(SendFailure {
-                code: PARTIAL_SEND.to_string(),
-                devices,
-            });
-        }
-    }
-    // ウィンドウを隠してフォーカスを戻すのは、コピーして隠すときと同じくメインスレッドで行う
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let handle = app.clone();
-    app.run_on_main_thread(move || {
-        // 送っている数秒の間に、ほかのアプリへ移っていたら隠さない。戻り先へフォーカスを戻すと、移った先から奪ってしまう
-        let result = if main_window(&handle).is_some_and(|window| is_in_front(&window)) {
-            hide_draft_and_return(&handle, &handle.state::<DraftState>())
-        } else {
-            info!("send: the draft is no longer in front, leave it as is");
-            Ok(())
-        };
-        let _ = sender.send(result);
-    })
-    .map_err(|error| SendFailure::from(error.to_string()))?;
-    receiver
-        .recv()
-        .map_err(|error| SendFailure::from(error.to_string()))?
-        .inspect_err(|error| error!("send: couldn't hide the draft: {error}"))?;
-    Ok(sent)
-}
-
-/// 追加済みのデバイスへつないで、動いているかを確かめる（送信先の一覧を開いたとき）。つながったデバイスの公開鍵を返す。
-/// デバイスごとに同時に確かめ、相手へつなぐ間にメインスレッドを止めないよう、非同期のコマンドにする
-#[tauri::command]
-async fn probe_devices(app: AppHandle) -> Result<Vec<String>, String> {
-    run_blocking(move || {
-        let shared_key = shared_key_for_lan(&app).map_err(|failure| failure.code().to_string())?;
-        let targets = device_targets(&app, |_| true);
-        let reached: Vec<(String, IpAddr)> = on_each_device(&app, &targets, |lan, key, saved| {
-            lan.probe(key, saved, &shared_key)
-                // つながらないのはよくあること（電源が入っていないなど）なので、細かい中身だけログに残す
-                .inspect_err(|error| info!("probe: {}", error.detail))
-                .ok()
-        })
-        .into_iter()
-        .filter_map(|(device, address)| Some((device.public_key.clone(), address?)))
-        .collect();
-        remember_addresses(&app, &reached);
-        Ok(reached
-            .into_iter()
-            .map(|(public_key, _)| public_key)
-            .collect())
-    })
-    .await?
-}
-
-/// 送信先のチェックを覚える。渡した公開鍵のデバイスにチェックを入れ、ほかは外す
-#[tauri::command]
-fn set_send_targets(app: AppHandle, public_keys: Vec<String>) -> Result<(), String> {
-    update_config(&app, |config| {
-        for device in &mut config.devices {
-            device.send_to = public_keys.contains(&device.public_key);
-        }
-    })
 }
 
 /// global-shortcut プラグインでホットキーを登録・解除する
@@ -4825,32 +4562,12 @@ fn tray_tooltip(app: &AppHandle) -> String {
     if !state.problems.lock().unwrap().is_empty() {
         tooltip.push_str(" ⚠");
     }
-    if app
-        .state::<DraftState>()
-        .unseen_received
-        .load(Ordering::Relaxed)
-    {
-        tooltip.push_str(" — ");
-        tooltip.push_str(state.lang().draft_received());
-    }
     tooltip
-}
-
-fn tray_icon(app: &AppHandle) -> Image<'static> {
-    if app
-        .state::<DraftState>()
-        .unseen_received
-        .load(Ordering::Relaxed)
-    {
-        TRAY_ICON_RECEIVED
-    } else {
-        TRAY_ICON
-    }
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(tray_icon(app))
+        .icon(TRAY_ICON)
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip(tray_tooltip(app))
         .menu(&tray_menu(app)?)
@@ -4880,22 +4597,6 @@ fn refresh_tray(app: &AppHandle) {
             let _ = tray.set_menu(Some(menu));
         }
         Err(error) => error!("couldn't rebuild the tray menu: {error}"),
-    }
-    refresh_tray_icon(app);
-}
-
-/// 届いた下書きの印を、トレイのアイコンとツールチップに当て直す
-fn refresh_tray_icon(app: &AppHandle) {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        return;
-    };
-    // macOS は、アイコンを差し替えるとテンプレート画像の扱いが外れるので、一緒に付け直す
-    #[cfg(target_os = "macos")]
-    let result = tray.set_icon_with_as_template(Some(tray_icon(app)), true);
-    #[cfg(not(target_os = "macos"))]
-    let result = tray.set_icon(Some(tray_icon(app)));
-    if let Err(error) = result {
-        error!("couldn't set the tray icon: {error}");
     }
     let _ = tray.set_tooltip(Some(tray_tooltip(app)));
 }
@@ -4974,6 +4675,8 @@ pub fn run() {
             sync_conflicts,
             resolve_sync_conflicts,
             take_sync_choice_request,
+            open_ai_settings,
+            take_ai_settings_request,
             open_settings_window,
             toggle_settings_window,
             close_settings_window,
@@ -5001,8 +4704,7 @@ pub fn run() {
             consent_ai,
             set_ai_service,
             set_ai_model,
-            set_actions,
-            default_actions,
+            default_snippets,
             has_ai_key,
             set_ai_key,
             delete_ai_key,
@@ -5046,10 +4748,6 @@ pub fn run() {
             cancel_pairing,
             set_devices_open,
             join_pairing,
-            send_draft,
-            probe_devices,
-            set_send_targets,
-            take_received_drafts,
             #[cfg(target_os = "macos")]
             updater::update_status,
             #[cfg(target_os = "macos")]
@@ -5231,7 +4929,9 @@ pub fn run() {
                 sync_schedule: Mutex::new(SyncSchedule::default()),
                 sync_debounce: debounce::Debounce::default(),
                 sync_conflicts: AtomicUsize::new(sync_conflicts),
+                synced_on_show: Mutex::new(None),
                 sync_choice_requested: AtomicBool::new(false),
+                ai_settings_requested: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "macos")]
@@ -5278,8 +4978,13 @@ pub fn run() {
         .on_web_content_process_terminate(diagnostics::web_content_process_terminated)
         .menu(macos_app_menu);
 
+    // 識別子が、設定・履歴・ログのフォルダーと単一起動の見分けを決める
+    let mut context = tauri::generate_context!();
+    let identifier = profile::scoped(&context.config().identifier);
+    context.config_mut().identifier = identifier;
+
     builder
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(
             |#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] app, event| match event
@@ -5331,7 +5036,6 @@ mod tests {
             sync_keys: false,
             sync_replacements: false,
             sync_snippets: false,
-            sync_actions: false,
             sync_history: false,
             ..Config::default()
         };
@@ -5507,19 +5211,17 @@ mod tests {
     }
 
     #[test]
-    fn remembers_found_devices_without_resetting_existing_send_targets() {
+    fn remembers_found_devices_in_the_order_they_were_found() {
         let mut devices = vec![
             Device {
                 name: "desk".to_string(),
                 public_key: "aa".to_string(),
                 address: "192.168.0.2".to_string(),
-                send_to: false,
             },
             Device {
                 name: "laptop".to_string(),
                 public_key: "bb".to_string(),
                 address: "192.168.0.3".to_string(),
-                send_to: true,
             },
         ];
         let peer = lan::Peer {
@@ -5534,7 +5236,6 @@ mod tests {
         ));
         assert_eq!(devices[0].name, "new desk");
         assert_eq!(devices[0].address, "192.168.0.4");
-        assert!(!devices[0].send_to);
         assert_eq!(devices[1].public_key, "bb");
 
         assert!(!remember_found_device(
@@ -5552,7 +5253,6 @@ mod tests {
             "192.168.0.5".parse().unwrap()
         ));
         assert_eq!(devices[2].public_key, "cc");
-        assert!(devices[2].send_to);
     }
 
     #[test]
@@ -5561,7 +5261,6 @@ mod tests {
             name: "desk".to_string(),
             public_key: "aabb".to_string(),
             address: "192.168.0.2".to_string(),
-            send_to: false,
         }];
 
         assert!(remember_device_address(
@@ -5570,7 +5269,6 @@ mod tests {
             "192.168.0.3".parse().unwrap(),
         ));
         assert_eq!(devices[0].address, "192.168.0.3");
-        assert!(!devices[0].send_to);
         assert!(!remember_device_address(
             &mut devices,
             &[0xaa, 0xbb],
@@ -5581,17 +5279,5 @@ mod tests {
             &[0xcc],
             "192.168.0.4".parse().unwrap(),
         ));
-    }
-
-    #[test]
-    fn labels_a_draft_from_a_device_before_it_is_in_the_list() {
-        let devices = vec![Device {
-            name: "desk".to_string(),
-            public_key: "aabb".to_string(),
-            address: String::new(),
-            send_to: true,
-        }];
-        assert_eq!(received_device_name(&devices, "aabb"), "desk");
-        assert_eq!(received_device_name(&devices, "ccdd"), "ccdd");
     }
 }

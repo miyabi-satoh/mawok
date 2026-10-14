@@ -3,4 +3,4 @@
 /**
  * 同期する種類（docs/sync.md 冒頭）。オフの種類は読みも書きもしない。
  */
-export type SyncKind = "settings" | "keys" | "replacements" | "snippets" | "actions" | "history";
+export type SyncKind = "settings" | "keys" | "replacements" | "snippets" | "history";

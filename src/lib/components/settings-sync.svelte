@@ -30,7 +30,6 @@
 		{ kind: 'keys', label: m.settings_sync_keys },
 		{ kind: 'replacements', label: m.settings_sync_replacements },
 		{ kind: 'snippets', label: m.settings_sync_snippets },
-		{ kind: 'actions', label: m.settings_sync_actions },
 		{ kind: 'history', label: m.settings_sync_history }
 	] as const;
 </script>

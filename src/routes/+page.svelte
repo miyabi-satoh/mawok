@@ -1,32 +1,28 @@
 <script lang="ts">
-	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
-	import SendIcon from '@lucide/svelte/icons/send';
+	import PlayIcon from '@lucide/svelte/icons/play';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
-	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import TextQuoteIcon from '@lucide/svelte/icons/text-quote';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { onMount, tick } from 'svelte';
+	import AddressSuggestions from '$lib/components/address-suggestions.svelte';
 	import FolderButton from '$lib/components/folder-button.svelte';
 	import FolderPalette from '$lib/components/folder-palette.svelte';
 	import KeyCaps from '$lib/components/key-caps.svelte';
-	import SendTargetPalette from '$lib/components/send-target-palette.svelte';
 	import TextPalette, { type PaletteAction } from '$lib/components/text-palette.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '$lib/font';
 	import { draftGuidance } from '$lib/guidance';
-	import { deviceLabels, unbrokenAtHyphens } from '$lib/devices';
 	import { errorCode } from '$lib/errors';
 	import { insertAsTyped } from '$lib/insert-text';
-	import { isPartialSend, lanErrorMessage } from '$lib/lan-errors';
 	import {
 		DEFAULT_DRAFT_HISTORY_SIZE,
 		DraftHistory,
@@ -35,10 +31,16 @@
 	} from '$lib/history.svelte';
 	import { caretLine } from '$lib/caret-line';
 	import { clamp } from '$lib/clamp';
-	import { draftActionFor, formatKeys, isDismissKey, keyHint, type DraftAction } from '$lib/keys';
+	import {
+		draftActionFor,
+		formatKeys,
+		isDismissKey,
+		isImeKey,
+		keyHint,
+		type DraftAction
+	} from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
-	import type { ReceivedDraft } from '$lib/bindings/ReceivedDraft';
 	import type { FolderCompletion } from '$lib/bindings/FolderCompletion';
 	import type { FolderMenu } from '$lib/bindings/FolderMenu';
 	import { coalescedSaver } from '$lib/saver';
@@ -48,10 +50,26 @@
 		ReplacementPreview,
 		type ReplacementMatch
 	} from '$lib/replacement-preview.svelte';
-	import { actionErrorMessage } from '$lib/action-errors';
-	import { aiInstruction, isRunnable, newAction, splitActionTarget } from '$lib/action-target';
-	import { settings, type Action, type ActionOutput } from '$lib/settings.svelte';
-	import { firstLine, snippetLabel } from '$lib/snippets';
+	import { actionErrorMessage, needsAiSettings } from '$lib/action-errors';
+	import { splitActionTarget } from '$lib/action-target';
+	import {
+		ADDRESS_CANDIDATES,
+		completedAddress,
+		isRunnable,
+		matchingAddresses,
+		rowAddressee,
+		splitFirstLine,
+		textAddressee,
+		typedAddress,
+		type AddressCandidate
+	} from '$lib/addressee';
+	import {
+		settings,
+		type ActionEncoding,
+		type ActionOutput,
+		type Snippet
+	} from '$lib/settings.svelte';
+	import { firstLine, newSnippet, snippetLabel } from '$lib/snippets';
 
 	// 設定は画面が出る前に読み終わっている（src/hooks.client.ts）が、届く前に描かれても既定で表示できるようにする
 	const fontFamily = $derived(draftFontFamily(settings.current?.textFontFamily ?? ''));
@@ -74,13 +92,6 @@
 
 	// 入力欄の上下に操作のボタンを出すか
 	const showButtons = $derived(settings.current?.showTextWindowButtons ?? true);
-
-	// 追加済みのデバイスがあるときだけ、送るキーとボタンを使える。
-	const devices = $derived(settings.current?.devices ?? []);
-	const hasDevice = $derived(devices.length > 0);
-	const deviceNames = $derived(deviceLabels(devices));
-	// 送信先の一覧を出しているか
-	let targetsOpen = $state(false);
 
 	let text = $state('');
 	// 書きかけがあるかを Rust 側に知らせる。Mac 版の更新で再起動する前に、消えることを設定の画面で伝えるため。
@@ -190,16 +201,17 @@
 		hoveredMatch = null;
 	});
 	let error = $state('');
-	// エラーの帯の見出し。コピーと送るで分ける
+	// エラーの帯の見出し。何に失敗したかで分ける
 	let errorTitle = $state('');
-	function showError(title: string, message: string) {
+	// 設定の「AI」で直す失敗か。帯に、その分類を開く操作を添える
+	let errorNeedsAiSettings = $state(false);
+	function showError(title: string, message: string, { aiSettings = false } = {}) {
 		errorTitle = title;
 		error = message;
+		errorNeedsAiSettings = aiSettings;
 	}
 	// 残高が尽きたときだけ、料金ページを開く操作を帯に添える。帯の文から決めるので、ほかの失敗で文が変わればボタンも消える
 	const noCredit = $derived(error === m.action_error_no_credit());
-	// 追加済みのデバイスへ送っている最中か。つないで送り終えるまで数秒かかることがあり、その間は書き換えさせない
-	let sending = $state(false);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	/** 画面の描き直し（一覧が閉じる、入力欄が編集できる状態に戻る）を待ってから、入力欄にフォーカスを移す */
 	async function focusDraft() {
@@ -304,7 +316,7 @@
 			.catch(onDraftHistoryReady);
 	});
 
-	// 一覧（定型文・アクション）を出したときの入力欄のカーソルと選択範囲。差し込む先・書き直す範囲で、閉じたときにも戻す。
+	// 定型文の一覧を出したときの入力欄のカーソルと選択範囲。差し込む先・書き直す範囲で、閉じたときにも戻す。
 	// 一覧は一度に1つしか出さないので、1つだけ持つ
 	let selectionBeforeList = { start: 0, end: 0 };
 
@@ -327,7 +339,7 @@
 		return textarea;
 	}
 
-	/** 一覧を出したときに選んでいた範囲。選んでいなければ入力欄の中身全体（アクションで実行する文、定型文に登録する文） */
+	/** 一覧を出したときに選んでいた範囲。選んでいなければ入力欄の中身全体（宛先で始まる定型文で出す文、定型文に登録する文） */
 	function listTarget() {
 		const { start, end } = selectionBeforeList;
 		const [from, to] = start === end ? [0, text.length] : [start, end];
@@ -383,7 +395,7 @@
 		await closeSnippets();
 		try {
 			const added = await invoke<boolean>('add_snippet', {
-				snippet: { id: '', name, body, sync: true }
+				snippet: newSnippet(name, body)
 			});
 			showNotice(added ? m.draft_snippet_registered() : m.draft_snippet_already_registered());
 		} catch (e) {
@@ -414,30 +426,27 @@
 		shownLocale = locale;
 	});
 
-	// アクションの一覧に出すもの。コマンドの行を本文として、定型文の一覧と同じ部品で出し、見出しの下に行を添える。
-	// 切ったアクションは出さない。AI が使えるかどうかでは絞らない（使えないときに `@ai` の行を実行したら、失敗の帯で知らせる）
-	const actionItems = $derived(
-		(settings.current?.actions ?? []).flatMap((action) => {
-			if (!action.enabled || !isRunnable(action.command)) return [];
-			return [{ name: action.name, body: action.command, action }];
-		})
+	// 一覧に出す定型文。切った定型文は出さない。AI が使えるかどうかでは絞らない（使えないときに `@ai` の行を出したら、失敗の帯で知らせる）
+	const listedSnippets = $derived(
+		(settings.current?.snippets ?? []).filter((snippet) => snippet.enabled)
 	);
+
 	/**
-	 * 一覧の先頭に添える、打った行をその場で実行する項目。登録したアクションと同じ規則で、`@ai` なら AI、それ以外はシェルで実行し、
-	 * 結果で置き換える。実行するものがないので、空の行（`@ai` だけの行を含む）では出さない。
-	 * AI が使えない状態で `@ai` の行を実行したら、Rust 側が action.disabled を返し、失敗の帯で知らせる
+	 * 一覧で選んだ定型文。本文が1行だけで宛先から始まるものは、一覧を出したときのテキストを中身にして出す。
+	 * ほかは、カーソルの位置に挿入する（docs/actions.md「定型文」）
 	 */
-	function freeInputAction(query: string): PaletteAction | null {
-		if (!isRunnable(query)) return null;
-		// 固定の見出しではなく、打った内容そのものを状態の行に出す
-		return {
-			label: m.actions_free_input(),
-			preview: query,
-			run: () => executeAction(newAction('', query), query)
-		};
+	async function pickSnippet(snippet: Snippet) {
+		const addressee = rowAddressee(snippet.body);
+		if (!addressee) return insertSnippet(snippet.body);
+		await closeSnippets();
+		const { start, end, text: target } = listTarget();
+		return runLine(
+			{ ...addressee, output: snippet.output, encoding: snippet.encoding },
+			snippetLabel(snippet),
+			{ target, start, end, caret: selectionBeforeList.end }
+		);
 	}
-	// アクションの一覧を出しているか
-	let actionsOpen = $state(false);
+
 	// 作業フォルダーへ移る欄を出しているか
 	let folderOpen = $state(false);
 	// 欄を開いたときの作業フォルダーの見せる形（Rust 側の current_folder）。欄はこのパスを入れた状態で出す
@@ -462,24 +471,13 @@
 	// アクションを実行している最中の1回。していなければ null。
 	// 取り消しや次の実行と、遅れて届いた結果を見分けるため、同じものかどうかをそのまま比べる（proxy にしない）
 	let running = $state.raw<RunningAction | null>(null);
-	// 送っている間とアクションを実行している間は、入力欄を書き換える操作を止める
-	const busy = $derived(sending || running !== null);
+	// アクションを実行している間は、入力欄を書き換える操作を止める
+	const busy = $derived(running !== null);
 	// 下書きウィンドウが出ているか。画面の描き分けには使わないので、状態にしない。
 	// 実行は出ているときにしか始められないので、読み込んだときは出ているものとしてよい
 	let draftVisible = true;
 	/** 隠れている間に届いたアクションの結果を差し替える関数。出し直したときに呼ぶ */
 	let pendingResult: (() => Promise<void>) | null = null;
-
-	function openActions(): boolean {
-		if (!rememberSelection()) return false;
-		actionsOpen = true;
-		return true;
-	}
-
-	async function closeActions() {
-		actionsOpen = false;
-		await restoreSelection();
-	}
 
 	function openFolder(): boolean {
 		if (!rememberSelection()) return false;
@@ -537,26 +535,39 @@
 		return null;
 	}
 
+	/** `@ai` か `@sh` の1行と、結果の出し方 */
+	type RunLine = {
+		line: string;
+		ai: boolean;
+		output: ActionOutput;
+		encoding: ActionEncoding;
+	};
+
 	/**
-	 * 選んだアクションを実行する。一覧を出したときに範囲を選んでいればその範囲、なければ入力欄の中身全体を渡す（空でも実行する）。
-	 * 届いたら結果の出し方に従って下書きに出し、差し替える前の中身全体を履歴に積む
+	 * 宛先が `@ai`・`@sh` の行を実行する。`range` の `target` を中身として渡す（空でも実行する）。
+	 * 届いたら結果の出し方に従って `range` の位置に出し、差し替える前の中身全体を履歴に積む
 	 */
-	async function executeAction(action: Action, label: string) {
-		await closeActions();
-		const { start, end, text: target } = listTarget();
+	async function runLine(
+		run: RunLine,
+		label: string,
+		range: { target: string; start: number; end: number; caret: number; whole?: boolean }
+	) {
+		const { start, end, target } = range;
 		// 前の失敗の知らせは、次の実行を始めたら消す
 		error = '';
 		const session: RunningAction = {
 			label,
 			request: null,
 			original: text,
-			output: action.output,
+			output: run.output,
 			start,
 			end,
-			caret: selectionBeforeList.end
+			caret: range.caret
 		};
 		running = session;
-		const parts = splitActionTarget(target, aiInstruction(action.command) !== null);
+		const split = splitActionTarget(target, run.ai);
+		// テキスト全体を結果で置き換えるときは、中身の前後の空行を結果の前後に戻さない。1行目の宛先ごと置き換わるので、戻す先が無い
+		const parts = range.whole ? { ...split, leading: '', trailing: '' } : split;
 		let result: string;
 		try {
 			const request = await invoke<number>('begin_action');
@@ -566,13 +577,21 @@
 				invoke('cancel_action', { request }).catch(() => {});
 				return;
 			}
-			result = await invoke<string>('run_action', { request, text: parts.body, action });
+			result = await invoke<string>('run_action', {
+				request,
+				text: parts.body,
+				line: run.line,
+				output: run.output,
+				encoding: run.encoding
+			});
 		} catch (e) {
 			// 取り消した後や、次の実行が始まった後に届いた失敗は、知らせない
 			if (running !== session) return;
 			running = null;
 			if (errorCode(e) !== 'action.cancelled') {
-				showError(m.action_failed(), actionErrorMessage(e) ?? errorCode(e));
+				showError(m.action_failed(), actionErrorMessage(e) ?? errorCode(e), {
+					aiSettings: needsAiSettings(e)
+				});
 				if (!draftVisible) notifyFinished(m.action_notify_failed({ action: label }));
 			}
 			await focusDraft();
@@ -637,7 +656,7 @@
 		if (!session) return;
 		running = null;
 		pendingResult = null;
-		// 番号を受け取る前なら、受け取ったところで executeAction が取り消しを伝える
+		// 番号を受け取る前なら、受け取ったところで runLine が取り消しを伝える
 		if (session.request !== null) {
 			invoke('cancel_action', { request: session.request }).catch(() => {});
 		}
@@ -649,141 +668,124 @@
 		return commit();
 	}
 
-	function commit() {
-		return hideWith('commit', m.copy_failed());
-	}
-
-	/** 追加済みのデバイスの下書きへ送って隠す。送った下書きも、コピーしたときと同じく履歴に覚える */
-	function send() {
-		// 送信先にチェックしたデバイスがなければ、送らずに一覧を開いて選んでもらう
-		if (!devices.some((device) => device.sendTo)) {
-			targetsOpen = true;
-			return;
-		}
-		return hideWith('send_draft', m.send_failed());
-	}
-
-	/** 送信先の一覧を閉じ、入力欄に戻る */
-	async function closeTargets() {
-		targetsOpen = false;
-		await focusDraft();
-	}
-
-	/** 送信先の一覧から送る。チェックが入っていて、つながったデバイスだけに送る */
-	async function sendToTargets(publicKeys: string[]) {
-		await closeTargets();
-		return hideWith('send_draft', m.send_failed(), publicKeys);
-	}
-
-	/**
-	 * コピーするか送るかして隠す。隠すのは Rust 側で、渡したら true、空で何もしなかったら false が返る。
-	 * 送るときは、targets（公開鍵）を渡せばそのデバイスへ、渡さなければ送信先にチェックしたデバイスへ送る
-	 */
-	async function hideWith(
-		command: 'commit' | 'send_draft',
-		failedTitle: string,
-		targets?: string[]
-	) {
+	/** コピーして隠す。隠すのは Rust 側で、渡したら true、空で何もしなかったら false が返る */
+	async function commit() {
 		if (hiding) return;
 		hiding = true;
-		sending = command === 'send_draft';
 		const shownAtCommit = shownCount;
 		// 完了を待つ間に打ち直されうるので、コピーに渡した内容を履歴に覚える
 		const committed = text;
-		// ネイティブ側は invoke の中でウィンドウを隠すので、完了を待つ前にホットキーで再表示されうる。先に空にする予約をしておく。
-		// 送るときは失敗しうるので、送っている間に出し直しても空にしない（onShown）。空にするのは送れてから
+		// ネイティブ側は invoke の中でウィンドウを隠すので、完了を待つ前にホットキーで再表示されうる。先に空にする予約をしておく
 		clearOnShow = true;
 		try {
 			// 整えた結果が空でクリップボードを変えなかったときは false が返り、履歴にも覚えない
-			const copied = await invoke<boolean>(
-				command,
-				targets ? { text: committed, targets } : { text: committed }
-			);
+			const copied = await invoke<boolean>('commit', { text: committed });
 			// クリップボードを変えたかどうかに関わらず、隠したので履歴をたどっていた状態は終える
 			draftHistory.stopBrowsing();
 			if (copied && draftHistory.record(committed)) saveDraftHistory();
-			// コピーの完了を待つ間に再表示されていたら、そこで空にしてから打ち直した内容なので消さない。
-			// 送るときは出し直しても空にしておらず、送っている間は書き換えられないので、中身が同じなら送った内容。
-			// 中身が変わっていたとき（空の入力欄に届いた下書きが入ったときなど）は、渡していない内容なので消さない
-			if ((sending || shownCount === shownAtCommit) && text === committed) text = '';
+			// コピーの完了を待つ間に再表示されていたら、そこで空にしてから打ち直した内容なので消さない
+			if (shownCount === shownAtCommit && text === committed) text = '';
 			error = '';
 		} catch (e) {
-			clearOnShow = false;
-			if (command === 'send_draft' && isPartialSend(e)) {
-				// 一部のデバイスにだけ届かなかった。原因は出さず、どのデバイスに届かなかったかだけを出す
-				const names = e.devices.map((publicKey) =>
-					unbrokenAtHyphens(deviceNames.get(publicKey) ?? publicKey)
-				);
-				showError(
-					m.send_partial(),
-					m.send_partial_devices({
-						devices: new Intl.ListFormat(settings.current?.locale).format(names)
-					})
-				);
-			} else {
-				// 送れなかったときは、Rust 側が失敗の種類を符号で返すので、何をすればよいかの案内にする
-				showError(failedTitle, command === 'send_draft' ? lanErrorMessage(e) : errorCode(e));
-			}
+			showError(m.copy_failed(), errorCode(e));
 			// 隠れずに残るので、コピーのボタンで押したときも、そのまま書き続けてキーを使えるよう入力欄に戻す
 			textarea?.focus();
 		} finally {
 			// 終わったら予約は要らない。残すと、後で書いた下書きを次に出したときに消してしまう
 			clearOnShow = false;
 			hiding = false;
-			sending = false;
 		}
 	}
 
-	// 書きかけがあったので、挿入か破棄かを選ぶまで溜めている下書き。届いた順。起動中だけメモリーに持つ
-	let received = $state<ReceivedDraft[]>([]);
+	// 入力欄のカーソルの位置。範囲を選んでいる間は null（宛先の候補を出さない）
+	let caret = $state<number | null>(null);
+	// 宛先の候補を Esc で閉じたか。次に打つまで出さない
+	let addressDismissed = $state(false);
+	let activeAddress = $state(0);
+	const addressListId = $props.id();
 
-	/** 入力欄が空ならそのまま入れる。書きかけがあれば溜め、帯で挿入か破棄かを選ばせる */
-	function onReceived(draft: ReceivedDraft) {
-		if (text === '' && received.length === 0) {
-			text = draft.text;
-			// 隠れている間に入れた中身を、次に出したときに空にしない
-			clearOnShow = false;
-			return;
-		}
-		received.push(draft);
-	}
-
-	/** 帯の「カーソルの位置に挿入」。定型文と同じく、取り消しで戻せる形で差し込み、範囲を選んでいたら置き換える */
-	function insertReceived() {
-		const draft = received.shift();
-		if (!draft || !textarea) return;
-		textarea.focus();
-		insertAsTyped(textarea, draft.text);
+	function trackCaret() {
+		caret =
+			textarea && textarea.selectionStart === textarea.selectionEnd
+				? textarea.selectionStart
+				: null;
 	}
 
 	/**
-	 * Rust 側に溜まっている届いた下書きを、届いた順に受け取る。画面の読み込み中に届いた分も、読み込み後にここで受け取る。
-	 * 並べて取りに行くと、応答の順が入れ替わって届いた順が崩れるので、取りに行っている間に次の知らせが来たら、終わってから取り直す
+	 * 1行目で `@` を打っている間に出す宛先の候補（docs/actions.md「宛先」）。
+	 * 変換中の文字は確定するまで元にしない。実行の間と、一覧を出している間は出さない
 	 */
-	const takeReceived = coalescedSaver(async () => {
-		const drafts = await invoke<ReceivedDraft[]>('take_received_drafts');
-		for (const draft of drafts ?? []) onReceived(draft);
+	const addressMatches = $derived.by(() => {
+		if (composing || busy || addressDismissed || caret === null) return [];
+		if (snippetsOpen || folderOpen) return [];
+		const typed = typedAddress(text, caret);
+		return typed === null ? [] : matchingAddresses(ADDRESS_CANDIDATES, typed);
+	});
+	$effect(() => {
+		// 候補が変わったら、先頭から選び直す
+		void addressMatches.map((match) => match.address).join('\n');
+		activeAddress = 0;
 	});
 
-	function discardReceived() {
-		received.shift();
-		textarea?.focus();
+	/** 候補を1行目に入れる。1行目の打ちかけを置き換え、カーソルはその末尾に置く */
+	function pickAddress(candidate: AddressCandidate) {
+		if (!textarea) return;
+		const { line } = splitFirstLine(text);
+		textarea.focus();
+		textarea.setSelectionRange(0, line.length);
+		insertAsTyped(textarea, completedAddress(candidate), 0, line.length);
+		trackCaret();
+	}
+
+	/** 宛先の候補が出ている間のキー。受けたら true */
+	function onAddressKeydown(event: KeyboardEvent): boolean {
+		if (addressMatches.length === 0) return false;
+		// 変換を確定する Enter は、候補を選ぶキーにしない
+		if (isImeKey(event) || event.altKey || event.ctrlKey || event.metaKey) return false;
+		const last = addressMatches.length - 1;
+		if (event.key === 'ArrowDown') {
+			activeAddress = activeAddress >= last ? 0 : activeAddress + 1;
+		} else if (event.key === 'ArrowUp') {
+			activeAddress = activeAddress <= 0 ? last : activeAddress - 1;
+		} else if ((event.key === 'Tab' || event.key === 'Enter') && !event.shiftKey) {
+			pickAddress(addressMatches[activeAddress]);
+		} else if (event.key === 'Escape') {
+			addressDismissed = true;
+		} else {
+			return false;
+		}
+		event.preventDefault();
+		return true;
+	}
+
+	// 1行目の宛先が指す先。宛先でなければ null。宛先があれば、コピーのキーとボタンは、コピーせずに宛先へ出す
+	const addressee = $derived(textAddressee(text));
+
+	/** 1行目の宛先（`@ai`・`@sh`）へ出す。2行目から下を中身にして実行し、結果でテキスト全体を置き換える */
+	function runAddressed() {
+		if (!addressee) return;
+		const { line, rest } = splitFirstLine(text);
+		if (!isRunnable(line)) return showError(m.action_failed(), m.draft_address_empty());
+		// 出した時点のテキストを、呼び戻して直せるよう履歴に覚える。失敗したときや、結果を出さないときにも残すため、始める前に積む
+		if (!draftHistory.isBrowsing && draftHistory.record(text)) saveDraftHistory();
+		return runLine(
+			{ ...addressee, line: line.trim(), output: 'replace', encoding: 'utf-8' },
+			line.trim(),
+			{ target: rest, start: 0, end: text.length, caret: text.length, whole: true }
+		);
 	}
 
 	async function onShown() {
 		shownCount++;
 		draftVisible = true;
-		// 一覧を出したまま隠れていたら、出し直したときは入力欄から始める。
-		// 送信先の一覧は、次に開いたときにつながるかを確かめ直す
+		// 一覧を出したまま隠れていたら、出し直したときは入力欄から始める
 		snippetsOpen = false;
-		actionsOpen = false;
 		folderOpen = false;
-		targetsOpen = false;
 		// 前に出していたときの知らせは、出し直したら要らない
 		notice = '';
 		// 変換中に隠れて compositionend が届かなかった場合に備え、出し直すたびに変換中の扱いを解く
 		composing = false;
-		if (clearOnShow && !sending) {
+		if (clearOnShow) {
 			text = '';
 			clearOnShow = false;
 		}
@@ -807,6 +809,8 @@
 	}
 
 	function onKeydown(event: KeyboardEvent) {
+		// 宛先の候補が出ている間は、選ぶ・入れる・閉じるキーを先に受ける。Esc は候補を閉じるだけで、ウィンドウは隠さない
+		if (event.target === textarea && onAddressKeydown(event)) return;
 		const view = settings.current;
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
 		// アクションを実行している間、Esc は取り消しだけで隠さない。ほかの下書きのキーと履歴のキーは効かない
@@ -832,7 +836,7 @@
 			return;
 		}
 		const direction = historyDirection(event);
-		if (direction && textarea && !sending) recallHistory(event, direction, textarea);
+		if (direction && textarea) recallHistory(event, direction, textarea);
 	}
 
 	/** ブラウザーとして読み込み直すキー（F5・Ctrl+R と、Shift や Ctrl を足したもの） */
@@ -855,7 +859,7 @@
 		if (handled || event.target === textarea) return;
 		const view = settings.current;
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
-		if (snippetsOpen || actionsOpen || folderOpen || targetsOpen) {
+		if (snippetsOpen || folderOpen) {
 			if (action) event.preventDefault();
 			return;
 		}
@@ -864,48 +868,29 @@
 		onKeydown(event);
 	}
 
-	/**
-	 * キーに割り当てた操作を呼ぶ。今は使えない操作（デバイスが見つかっていないときの送る、
-	 * 届いた下書きがないときの差し込むなど）なら何もせず false を返す
-	 */
+	/** コピーのキーとボタン。1行目が宛先なら、コピーせずに宛先へ出す。そうでなければ、コピーして隠す */
+	function commitOrRun() {
+		return addressee ? runAddressed() : commit();
+	}
+
+	/** キーに割り当てた操作を呼ぶ。今は使えない操作なら何もせず false を返す */
 	function runAction(action: DraftAction): boolean {
 		switch (action) {
 			case 'copy':
-				commit();
-				return true;
-			case 'send':
-				if (!hasDevice) return false;
-				send();
+				commitOrRun();
 				return true;
 			case 'settings':
 				// 設定を開く間、下書きは Rust 側で隠れる。コピーはしないので書きかけは残り、設定を閉じると出し直される。
 				// 設定がすでにあれば、キーだけはトグルとして閉じる。
 				invoke('toggle_settings_window');
 				return true;
-			// 送っている間は入力欄を書き換えない（docs/lan.md「送る」）。書き換えると、送れたときに空にするか決められない
 			case 'snippets':
-				return !sending && openSnippets();
-			case 'actions':
-				return !sending && openActions();
+				return openSnippets();
 			case 'changeFolder':
-				return !sending && openFolder();
+				return openFolder();
 			case 'historyOlder':
 			case 'historyNewer':
-				if (sending) return false;
 				stepHistory(action === 'historyOlder' ? 'older' : 'newer');
-				return true;
-			case 'sendTargets':
-				// ▼のボタンと同じく、送っている最中は開かない
-				if (!hasDevice || sending) return false;
-				targetsOpen = true;
-				return true;
-			case 'insertReceived':
-				if (received.length === 0 || sending) return false;
-				insertReceived();
-				return true;
-			case 'discardReceived':
-				if (received.length === 0) return false;
-				discardReceived();
 				return true;
 		}
 	}
@@ -971,7 +956,6 @@
 			listen(EVENTS.DRAFT_HIDDEN, () => {
 				draftVisible = false;
 			}),
-			listen(EVENTS.DRAFT_RECEIVED, takeReceived),
 			listen(EVENTS.DRAFT_HISTORY_CLEARED, () => {
 				historyClearedCount += 1;
 				draftHistory.clear();
@@ -979,8 +963,6 @@
 			}),
 			listen(EVENTS.DRAFT_HISTORY_SYNCED, reloadDraftHistory)
 		]).then((fns) => {
-			// 読み込みが終わる前に届いた下書きは、知らせを取り逃がしているので、ここで取りに行く
-			takeReceived();
 			refreshFolderMenu();
 			// 読み込みが終わる前に表示されると shown を取り逃がすので、表示中かを Rust 側に確かめる。
 			// 表示中なら Rust 側が WebView にキーボードのフォーカスを移すので、ここでは表示時の処理をする
@@ -1057,17 +1039,6 @@
 				<Button
 					tabindex={-1}
 					variant="ghost"
-					size="sm"
-					title={keyHint(m.draft_actions_hint(), keys.actions, platform)}
-					disabled={busy}
-					onclick={openActions}
-				>
-					<SparklesIcon data-icon="inline-start" />
-					<span class="@max-[30rem]:sr-only">{m.draft_actions()}</span>
-				</Button>
-				<Button
-					tabindex={-1}
-					variant="ghost"
 					size="icon-sm"
 					aria-label={m.draft_settings()}
 					title={keyHint(m.draft_settings_hint(), keys.settings, platform)}
@@ -1116,14 +1087,41 @@
 			readonly={busy}
 			placeholder={guidance || undefined}
 			aria-label={m.draft_label()}
+			role={addressMatches.length > 0 ? 'combobox' : undefined}
+			aria-autocomplete="list"
+			aria-expanded={addressMatches.length > 0 ? true : undefined}
+			aria-controls={addressMatches.length > 0 ? addressListId : undefined}
+			aria-activedescendant={addressMatches.length > 0
+				? `${addressListId}-${activeAddress}`
+				: undefined}
 			onkeydown={onKeydown}
-			oninput={() => draftHistory.stopBrowsing()}
+			oninput={() => {
+				draftHistory.stopBrowsing();
+				addressDismissed = false;
+				trackCaret();
+			}}
+			onkeyup={trackCaret}
+			onclick={trackCaret}
+			onselect={trackCaret}
+			onfocus={trackCaret}
 			onscroll={syncPreviewScroll}
 			onmousemove={onDraftMouseMove}
 			onmouseleave={() => (hoveredMatch = null)}
 			oncompositionstart={() => (composing = true)}
-			oncompositionend={() => (composing = false)}
+			oncompositionend={() => {
+				composing = false;
+				trackCaret();
+			}}
 		/>
+		{#if addressMatches.length > 0}
+			<AddressSuggestions
+				id={addressListId}
+				top={fontSize * 1.5 + 12}
+				candidates={addressMatches}
+				active={activeAddress}
+				onpick={pickAddress}
+			/>
+		{/if}
 		{#if hoveredMatch}
 			<!-- ハイライトの上（余地がなければ下）に置き換え後の文字列を出す。マウスの動きを邪魔しないよう、こちらも pointer-events-none -->
 			<div
@@ -1162,8 +1160,8 @@
 	{/if}
 	{#if showButtons && keys && platform}
 		<!--
-			下の並び。左に今のフォルダー、右に送る・コピー。キーを添えるのはコピーだけで、ほかは狭い窓に文字を詰め込まないよう、
-			マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
+			下の並び。左に今のフォルダー、右にコピー（1行目が宛先のときは実行）。キーを添えるのはこのボタンだけで、
+			ほかは狭い窓に文字を詰め込まないよう、マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
 		-->
 		<div class="@container flex items-center gap-1">
 			{#if folderMenu}
@@ -1176,82 +1174,29 @@
 					onclose={() => textarea?.focus()}
 				/>
 			{/if}
-			{#if hasDevice}
-				<!-- 本体でチェックしたデバイスへ送り、▼で送信先の一覧を開く -->
-				<div class="ml-auto flex">
-					<Button
-						tabindex={-1}
-						variant="outline"
-						size="sm"
-						class="rounded-r-none"
-						title={keyHint(m.draft_send_hint(), keys.send, platform)}
-						disabled={busy}
-						onclick={send}
-					>
-						<SendIcon data-icon="inline-start" />
-						{sending ? m.draft_sending() : m.draft_send()}
-					</Button>
-					<Button
-						tabindex={-1}
-						variant="outline"
-						size="sm"
-						class="-ml-px rounded-l-none px-1.5"
-						aria-label={m.draft_send_targets()}
-						title={keyHint(m.draft_send_targets(), keys.sendTargets, platform)}
-						disabled={busy}
-						onclick={() => (targetsOpen = true)}
-					>
-						<ChevronDownIcon />
-					</Button>
-				</div>
-			{/if}
-			<!-- 変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピーする -->
+			<!--
+				1行目が `@ai`・`@sh` のときは、同じボタンとキーが実行になる。押す前に気づけるよう、名前を変えてアイコンを添える。
+				変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピー（実行）する
+			-->
 			<Button
 				tabindex={-1}
 				size="sm"
-				class={hasDevice ? '' : 'ml-auto'}
-				disabled={running !== null}
-				onclick={commit}
+				class="ml-auto"
+				title={addressee ? m.draft_run_hint() : undefined}
+				disabled={busy}
+				onclick={commitOrRun}
 			>
-				{m.draft_copy()}
+				{#if addressee}
+					<PlayIcon data-icon="inline-start" />
+					{m.draft_run()}
+				{:else}
+					{m.draft_copy()}
+				{/if}
 				{#if keys.copy}
 					<KeyCaps key={keys.copy} {platform} />
 				{/if}
 			</Button>
 		</div>
-	{/if}
-	{#if received.length > 0 && !running}
-		{@const draft = received[0]}
-		<!-- 1件ずつ知らせる。書きかけを消さないよう、挿入か破棄かを選ぶまで溜めておく。アクションを実行している間は出さず、終わってから知らせる -->
-		<Alert.Root>
-			<SendIcon />
-			<Alert.Title>{m.draft_received({ device: draft.from })}</Alert.Title>
-			<div class="col-start-2 flex gap-2 pt-1">
-				<Button
-					tabindex={-1}
-					variant="outline"
-					size="sm"
-					title={keys && platform
-						? keyHint(m.draft_received_insert(), keys.insertReceived, platform)
-						: undefined}
-					disabled={sending}
-					onclick={insertReceived}
-				>
-					{m.draft_received_insert()}
-				</Button>
-				<Button
-					tabindex={-1}
-					variant="ghost"
-					size="sm"
-					title={keys && platform
-						? keyHint(m.draft_received_discard(), keys.discardReceived, platform)
-						: undefined}
-					onclick={discardReceived}
-				>
-					{m.draft_received_discard()}
-				</Button>
-			</div>
-		</Alert.Root>
 	{/if}
 	{#if error}
 		<Alert.Root variant="destructive">
@@ -1269,13 +1214,24 @@
 						{m.settings_mawok_buy()}
 					</Button>
 				</div>
+			{:else if errorNeedsAiSettings}
+				<div class="col-start-2 pt-1">
+					<Button
+						tabindex={-1}
+						variant="outline"
+						size="sm"
+						onclick={() => invoke('open_ai_settings')}
+					>
+						{m.action_open_ai_settings()}
+					</Button>
+				</div>
 			{/if}
 		</Alert.Root>
 	{/if}
 	{#if snippetsOpen && settings.current}
 		<!-- 一覧を出している間は、フォーカスが一覧にあるので、入力欄のキー（Cmd+Enter など）は効かない -->
 		<TextPalette
-			items={settings.current.snippets}
+			items={listedSnippets}
 			platform={settings.current.platform}
 			toggleKey={settings.current.textWindowKeys.snippets}
 			listLabel={m.snippets_list()}
@@ -1291,30 +1247,8 @@
 			noMatchMessage={m.snippets_no_match()}
 			action={registerSnippetAction}
 			actionAt="end"
-			onpick={(snippet) => insertSnippet(snippet.body)}
+			onpick={pickSnippet}
 			onclose={closeSnippets}
-		/>
-	{/if}
-	{#if actionsOpen && settings.current}
-		<!-- 定型文の一覧と同じ出し方・絞り込み・選び方・閉じ方 -->
-		<TextPalette
-			items={actionItems}
-			platform={settings.current.platform}
-			toggleKey={settings.current.textWindowKeys.actions}
-			listLabel={m.actions_list()}
-			searchLabel={m.actions_search()}
-			emptyMessage={settings.current.textWindowKeys.settings
-				? m.actions_empty({
-						settings: formatKeys(
-							settings.current.textWindowKeys.settings,
-							settings.current.platform
-						)
-					})
-				: m.actions_empty_no_key()}
-			noMatchMessage={m.actions_no_match()}
-			action={freeInputAction}
-			onpick={(item) => executeAction(item.action, snippetLabel(item))}
-			onclose={closeActions}
 		/>
 	{/if}
 	{#if folderOpen && settings.current}
@@ -1325,17 +1259,6 @@
 			onsubmit={changeFolder}
 			oncomplete={completeFolder}
 			onclose={closeFolder}
-		/>
-	{/if}
-	{#if targetsOpen && hasDevice && settings.current}
-		<!-- 一覧を出している間は、フォーカスが一覧にあるので、入力欄のキーは効かない -->
-		<SendTargetPalette
-			{devices}
-			platform={settings.current.platform}
-			targetsKey={settings.current.textWindowKeys.sendTargets}
-			onsend={sendToTargets}
-			onclose={closeTargets}
-			onerror={(message) => showError(m.draft_send_targets_save_failed(), message)}
 		/>
 	{/if}
 </main>

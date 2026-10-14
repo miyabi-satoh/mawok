@@ -11,7 +11,7 @@ use crate::ai::Prompt;
 
 /// 窓口の URL。開発版は手元で動かす窓口（`just dev-account-server`）を使う。
 /// 開発版は、ビルドのときの環境変数 `MAWOK_ACCOUNT_URL` で向き先を替えられる。
-/// 2台のデバイスの間の動き（送受信・同期）は、両方が同じ窓口を向かないと確かめられないため
+/// 2台のデバイスの間の動き（同期）は、両方が同じ窓口を向かないと確かめられないため
 #[cfg(not(debug_assertions))]
 pub const ACCOUNT_URL: &str = "https://mawok.amiiby.com";
 #[cfg(debug_assertions)]

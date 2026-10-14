@@ -1,6 +1,6 @@
 //! コマンドのアクション（docs/actions.md「コマンド」）。
-//! 利用者が書いた1行のコマンドをシェルで実行し、実行する文を `{{t}}`・標準入力・環境変数 `MAWOK_TEXT` で渡して、標準出力を結果として受け取る。
-//! 標準入力と標準出力は、アクションの文字コードで読み書きする（`{{t}}` と `MAWOK_TEXT` は OS の文字列で渡すので関わらない）。
+//! 利用者が書いた1行のコマンドをシェルで実行し、実行する文を標準入力で渡して、標準出力を結果として受け取る。
+//! 標準入力と標準出力は、アクションの文字コードで読み書きする。
 //! コマンドの行・渡した文・標準出力・標準エラーはログに書かない（秘密を含みうるため）。記録するのは終了コードと失敗の種類だけ
 
 use std::{
@@ -13,27 +13,9 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
-    actions::{ActionError, Failure, TEXT_MARK},
+    actions::{ActionError, Failure},
     config::ActionEncoding,
 };
-
-/// 実行する文を入れる環境変数
-const TEXT_ENV: &str = "MAWOK_TEXT";
-/// 実行する文を、受け取るプログラムの引数の規則で囲い直して入れる環境変数（Windows で `{{t}}` を埋め込むため。embed_text）
-#[cfg(windows)]
-const QUOTED_TEXT_ENV: &str = "MAWOK_TEXT_QUOTED";
-/// `MAWOK_TEXT` に入れる文の大きさの上限。macOS は引数と環境変数を合わせて ARG_MAX（1 MiB）までなので、ほかの環境変数の分を残す
-#[cfg(unix)]
-const MAX_ENV_TEXT: usize = 256 * 1024;
-/// `{{t}}` を埋め込んだシェルの行と `MAWOK_TEXT` を合わせた大きさの上限（macOS。ARG_MAX に、ほかの環境変数の分の余裕を見る）
-#[cfg(unix)]
-const MAX_EMBEDDED_TOTAL: usize = 768 * 1024;
-/// `MAWOK_TEXT` に入れる文の大きさの上限。Windows の環境変数の値の上限（UTF-16 で数える）
-#[cfg(windows)]
-const MAX_ENV_TEXT: usize = 32_767;
-/// `{{t}}` を展開した後の cmd の行の長さの上限（UTF-16 で数える）。cmd が1行として扱えるのは 8,191 文字まで
-#[cfg(windows)]
-const MAX_EXPANDED_LINE: usize = 8_191;
 
 /// 標準出力の上限。止まらずに出力し続けるコマンドへの備え
 pub const MAX_OUTPUT: usize = 1024 * 1024;
@@ -99,67 +81,6 @@ impl Drop for StopOnDrop {
 #[cfg(unix)]
 const NOT_FOUND_EXIT_CODE: i32 = 127;
 
-/// 行の中の `{{t}}` を、実行する文を単引用符で囲んだ1つの引数に置き換える（macOS）
-#[cfg(unix)]
-fn embed_text(command: &str, text: &str) -> String {
-    command.replace(TEXT_MARK, &format!("'{}'", text.replace('\'', "'\\''")))
-}
-
-/// 実行する文を `MAWOK_TEXT` で渡せるか。NUL を含む文は、環境変数にも引数にもできない
-fn env_passable(text: &str) -> bool {
-    if text.contains('\0') {
-        return false;
-    }
-    #[cfg(unix)]
-    let length = text.len();
-    #[cfg(windows)]
-    let length = text.encode_utf16().count();
-    length <= MAX_ENV_TEXT
-}
-
-/// 行の `{{t}}` に実行する文を埋め込めるか。組み上がる行（macOS は `MAWOK_TEXT` と合わせて、Windows は展開した後の cmd の行）の長さで見る
-fn embeddable(command: &str, text: &str) -> bool {
-    if !env_passable(text) {
-        return false;
-    }
-    #[cfg(unix)]
-    return embed_text(command, text).len() + text.len() <= MAX_EMBEDDED_TOTAL;
-    #[cfg(windows)]
-    {
-        let marks = command.matches(TEXT_MARK).count();
-        let quoted = quote_windows_arg(text).encode_utf16().count();
-        let rest = command.encode_utf16().count() - marks * TEXT_MARK.len();
-        // 展開した値は、囲う引用符の中に入る
-        rest + marks * (quoted + 2) <= MAX_EXPANDED_LINE
-    }
-}
-
-/// 引用符で囲んだ引数の中身として、受け取るプログラムが元の文に戻せる形にする（Windows の CommandLineToArgvW と C ランタイムの規則）。
-/// `"` の前には `\` を置き、`"` と文末の前の `\` の並びは倍にする。囲う引用符そのものは、呼ぶ側が付ける
-#[cfg(any(windows, test))]
-fn quote_windows_arg(text: &str) -> String {
-    let mut quoted = String::with_capacity(text.len());
-    let mut backslashes = 0;
-    for c in text.chars() {
-        match c {
-            '\\' => backslashes += 1,
-            '"' => {
-                quoted.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
-                backslashes = 0;
-            }
-            _ => {
-                quoted.extend(std::iter::repeat_n('\\', backslashes));
-                backslashes = 0;
-            }
-        }
-        if c != '\\' {
-            quoted.push(c);
-        }
-    }
-    quoted.extend(std::iter::repeat_n('\\', backslashes * 2));
-    quoted
-}
-
 /// 行の前後にある、空白だけの行を落とす（Windows）。貼り付けで付いただけの行で、cmd が実行するものを変えない。
 /// 改行を含まない行の前後の空白は、`echo a ` の出力のように実行するものを変えうるので残す
 #[cfg(any(windows, test))]
@@ -176,24 +97,10 @@ fn strip_blank_lines(command: &str) -> &str {
     &command[..end]
 }
 
-/// 行の中の `{{t}}` を、環境変数 `MAWOK_TEXT_QUOTED` の遅延展開に置き換える（Windows）。cmd には任意の文字列を確実に囲う方法が無いが、
-/// 遅延展開は行を解釈した後に起きるので、中の記号がコマンドとして読まれない。
-/// 受け取るプログラムは引用符と `\` の規則で引数を分け直すので、その規則で囲い直した文（quote_windows_arg）を展開する。
-/// 空の環境変数は無いものとして扱われ、`!MAWOK_TEXT_QUOTED!` が文字どおり残るので、実行する文が空なら空の引数 `""` にする
-#[cfg(windows)]
-fn embed_text(command: &str, text: &str) -> String {
-    let embedded = if text.is_empty() {
-        "\"\"".to_string()
-    } else {
-        format!("\"!{QUOTED_TEXT_ENV}!\"")
-    };
-    command.replace(TEXT_MARK, &embedded)
-}
-
 /// コマンドを渡すシェル（macOS）。Dock などから起動した GUI のアプリはターミナルの PATH を引き継がないので、
 /// ログインシェルで読む設定の PATH で動かす
 #[cfg(unix)]
-fn shell_command(command: &str, _expands_text: bool) -> tokio::process::Command {
+fn shell_command(command: &str) -> tokio::process::Command {
     let shell = std::env::var_os("SHELL")
         .filter(|shell| !shell.is_empty())
         .unwrap_or_else(|| "/bin/zsh".into());
@@ -207,15 +114,13 @@ fn shell_command(command: &str, _expands_text: bool) -> tokio::process::Command 
 /// コマンドを渡すシェル（Windows）。cmd は標準入出力を読まずに子へ引き継ぐので、下書きのバイトがそのまま届く。
 /// PowerShell はパイプやコマンドレットで化け、起動も遅い
 #[cfg(windows)]
-fn shell_command(command: &str, expands_text: bool) -> tokio::process::Command {
+fn shell_command(command: &str) -> tokio::process::Command {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let mut process = tokio::process::Command::new("cmd.exe");
-    // /d はレジストリの AutoRun を走らせない。/v:on は `{{t}}` を埋め込む遅延展開（embed_text）のため。
-    // 遅延展開は、行に `!` があると引用符の中でも `^` を消すので、`{{t}}` の無い行では切る。
-    // 何も付けないとレジストリの既定（DelayedExpansion）に従うので、/v:off をはっきり付ける。
+    // /d はレジストリの AutoRun を走らせない。/v:off は遅延展開を切る。遅延展開が効くと、行に `!` があるとき
+    // 引用符の中でも `^` が消える。何も付けないとレジストリの既定（DelayedExpansion）に従うので、はっきり付ける。
     // /s /c "…" で、コマンドの行を引用符ごとそのまま渡す
-    let delayed = if expands_text { "/v:on" } else { "/v:off" };
-    process.raw_arg(format!("/d {delayed} /s /c \"{command}\""));
+    process.raw_arg(format!("/d /v:off /s /c \"{command}\""));
     process.creation_flags(CREATE_NO_WINDOW);
     // Python は既定だと標準入出力を cp932 で扱い、下書きが化ける。利用者が決めていればそれに従う
     if std::env::var_os("PYTHONUTF8").is_none() {
@@ -326,8 +231,8 @@ impl ProcessTree {
     }
 }
 
-/// コマンドを実行する。`input` は実行する文（前の空行と後ろの空白と改行を除いたもの）で、行の `{{t}}` と環境変数 `MAWOK_TEXT` にそのまま入れ、
-/// 標準入力には改行を1つ足して `encoding` で書き、閉じる（空なら何も書かずに閉じる）。標準出力も `encoding` で読む。
+/// コマンドを実行する。`input` は実行する文（前の空行と後ろの空白と改行を除いたもの）で、
+/// 標準入力に改行を1つ足して `encoding` で書き、閉じる（空なら何も書かずに閉じる）。標準出力も `encoding` で読む。
 /// 終了コードが 0 なら、標準出力から末尾の改行を落としたものを返す。`discard_output` なら標準出力を読み捨て、空の文を返す。
 /// `folder` で動かす。`stopper` で外から止められる
 pub async fn run(
@@ -349,28 +254,13 @@ pub async fn run(
             "the command line has a line break",
         ));
     }
-    // 大きすぎる文や NUL を含む文は、環境変数にも引数にもできず、起動に失敗する。`{{t}}` の無い行なら、標準入力だけで渡す
-    let has_mark = command.contains(TEXT_MARK);
-    if has_mark && !embeddable(command, input) {
-        return Err(ActionError::new(
-            Failure::TextNotEmbeddable,
-            format!("the text ({} bytes) can't be embedded", input.len()),
-        ));
-    }
     // 表せない文字があれば、起動する前に断る
     let stdin_bytes = if input.is_empty() {
         Vec::new()
     } else {
         encode_input(&format!("{input}\n"), encoding)?
     };
-    let mut process = shell_command(&embed_text(command, input), has_mark);
-    if env_passable(input) {
-        process.env(TEXT_ENV, input);
-    }
-    #[cfg(windows)]
-    if has_mark {
-        process.env(QUOTED_TEXT_ENV, quote_windows_arg(input));
-    }
+    let mut process = shell_command(command);
     process
         .current_dir(folder)
         .stdin(Stdio::piped())
@@ -721,27 +611,6 @@ mod tests {
     }
 
     #[test]
-    fn embeds_the_text_as_one_argument() {
-        assert_eq!(
-            run_now("printf '[%s]' {{t}} {{t}}", "a b; echo 'x'\n$HOME").unwrap(),
-            "[a b; echo 'x'\n$HOME][a b; echo 'x'\n$HOME]"
-        );
-        assert_eq!(run_now("printf '[%s]' {{t}}", "").unwrap(), "[]");
-        assert_eq!(
-            run_now("printf '%s' \"$MAWOK_TEXT\"", "あ\nい").unwrap(),
-            "あ\nい"
-        );
-    }
-
-    #[test]
-    fn quotes_the_text_for_windows_arguments() {
-        assert_eq!(quote_windows_arg(r#"say "hi"#), r#"say \"hi"#);
-        assert_eq!(quote_windows_arg(r"C:\dir\"), r"C:\dir\\");
-        assert_eq!(quote_windows_arg(r#"a\"b"#), r#"a\\\"b"#);
-        assert_eq!(quote_windows_arg(r"a\b"), r"a\b");
-    }
-
-    #[test]
     fn strips_only_blank_lines_around_the_command() {
         assert_eq!(strip_blank_lines("sort\r\n"), "sort");
         assert_eq!(strip_blank_lines("echo hi\n "), "echo hi");
@@ -753,36 +622,6 @@ mod tests {
             strip_blank_lines("echo one\necho two\n"),
             "echo one\necho two"
         );
-    }
-
-    #[test]
-    fn passes_text_too_large_to_embed_on_stdin_only() {
-        let large = "a".repeat(MAX_ENV_TEXT + 1);
-        assert_eq!(
-            run_now(
-                "wc -c | tr -d ' '; printf '%s' \"${MAWOK_TEXT:-none}\"",
-                &large
-            )
-            .unwrap(),
-            format!("{}\nnone", MAX_ENV_TEXT + 2)
-        );
-        assert_eq!(
-            run_now("printf '%s' {{t}}", &large).unwrap_err().failure,
-            Failure::TextNotEmbeddable
-        );
-        // 環境変数には入る大きさでも、埋め込んだ行と合わせて上限を超えれば埋め込まない（`'` は埋め込むと4バイトになる）
-        let quotes = "'".repeat(MAX_ENV_TEXT);
-        assert!(env_passable(&quotes));
-        assert_eq!(
-            run_now("printf '%s' {{t}}", &quotes).unwrap_err().failure,
-            Failure::TextNotEmbeddable
-        );
-        let text = "a".repeat(MAX_ENV_TEXT);
-        assert_eq!(
-            run_now("printf '%s' {{t}} | wc -c | tr -d ' '", &text).unwrap(),
-            MAX_ENV_TEXT.to_string()
-        );
-        assert_eq!(run_now("cat", "a\0b").unwrap(), "a\0b");
     }
 
     #[test]
@@ -807,6 +646,9 @@ mod tests {
         assert_eq!(run_now("sort", "b\na").unwrap(), "a\nb");
         // 標準入力の末尾に改行を足すので、行を数えるコマンドも最後の行を数える
         assert_eq!(run_now("wc -l | tr -d ' '", "a\nb").unwrap(), "2");
+        assert_eq!(run_now("cat", "a\0b").unwrap(), "a\0b");
+        // 行の中の `{{t}}` は、ただの文字
+        assert_eq!(run_now("printf '%s' '{{t}}'; cat", "x").unwrap(), "{{t}}x");
         assert_eq!(run_now("printf 'x\\r\\n\\n\\n'", "").unwrap(), "x");
         // 改行は LF に揃える
         assert_eq!(run_now("printf 'a\\r\\nb'", "").unwrap(), "a\nb");
@@ -906,17 +748,6 @@ mod tests {
                 "1～2∥－―￠￡￢"
             );
         }
-        // `{{t}}` と `MAWOK_TEXT` は OS の文字列のまま（UTF-8）
-        assert_eq!(
-            run_in(
-                "printf '%s' \"$MAWOK_TEXT\" {{t}} | od -An -tx1 | tr -d ' \\n'",
-                "あ",
-                ActionEncoding::ShiftJis,
-                false
-            )
-            .unwrap(),
-            "e38182e38182"
-        );
     }
 
     #[test]

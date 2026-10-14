@@ -6,17 +6,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { createSuite } from '../lib/setup.mjs';
 import {
-	clickActionOption,
 	closeDraftSettings,
 	invokeApp,
 	listDraftButtons,
-	openActions,
+	openSnippetPalette,
 	openSettingsFromDraft,
-	readActionOptions,
+	readSnippetOptions,
 	readAlert,
 	readDraft,
-	runAction,
+	runSnippet,
 	setDraftCaret,
+	runDraft,
 	setDraftValue,
 	setJapanese,
 	showDraftAndWaitVisible,
@@ -24,7 +24,7 @@ import {
 	waitAlert
 } from '../lib/app.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
-import { APP_IDENTIFIER } from '../lib/app-conf.mjs';
+import { PROFILE_IDENTIFIER } from '../lib/app-conf.mjs';
 import { APP_DATA_DIRS, beginTestConfig, tryReadConfig } from '../lib/config.mjs';
 import { markLog, readLogSince } from '../lib/files.mjs';
 import { getMawokProcessId, isMawokRunning, runPowerShell, setClipboard } from '../lib/os.mjs';
@@ -34,11 +34,11 @@ import {
 	closeTrayOverflow,
 	openTrayMenu
 } from '../lib/tray.mjs';
-import { expectStays, waitFor } from '../lib/wait.mjs';
+import { waitFor } from '../lib/wait.mjs';
 
-// コマンドのアクションと、AI のキーの資格情報。
-// AI のアクションは本物の AI サービスへ送ってしまうので実行しない (送り先を差し替える口は作らない)。
-// ここで見るのは、AI を使わない状態でのコマンドのアクション (21. の 21.〜32.) と、キーを入れて消したときの
+// @sh の定型文と1行目の @sh、AI のキーの資格情報。
+// @ai は本物の AI サービスへ送ってしまうので実行しない (送り先を差し替える口は作らない)。
+// ここで見るのは、AI を使わない状態での @sh (21. の 21.〜32.) と、キーを入れて消したときの
 // 資格情報マネージャー (21. の 15.)。キーは仮の文字列で、使わない
 
 const suite = createSuite();
@@ -58,23 +58,32 @@ const FIND = String.raw`%SystemRoot%\System32\find.exe`;
 const LONG_PING = `ping -n 31 127.0.0.1 >nul & ${MORE}`;
 const QUIT_PING = `ping -n 61 127.0.0.1 >nul & ${MORE}`;
 
-const action = (name, command, output = 'replace') => ({ name, command, output, enabled: true });
-const ACTIONS = [
-	action('大文字', 'findstr /n "^"'),
-	action('ビジネス向け', '@ai 丁寧な文に書き直してください。'),
-	action('改行入り', 'echo a\necho b'),
-	action('待つ', LONG_PING),
-	action('無いコマンド', 'mawok-no-such-command'),
-	action('失敗する', 'echo oops 1>&2 & exit /b 3'),
-	action('何も返さない', `${MORE} >nul`),
-	// 受け取った引数をそのまま JSON で返す。E2E は node で動いているので node を使う
-	action(
-		'引数',
-		`"${process.execPath}" -e "process.stdout.write(JSON.stringify(process.argv.slice(1)))" {{t}}`
+const sh = (name, command, output = 'replace') => ({
+	name,
+	body: `@sh ${command}`,
+	output,
+	enabled: true
+});
+const SNIPPETS = [
+	sh('大文字', 'findstr /n "^"'),
+	{
+		name: 'ビジネス向け',
+		body: '@ai 丁寧な文に書き直してください。',
+		output: 'replace',
+		enabled: true
+	},
+	sh('待つ', LONG_PING),
+	sh('無いコマンド', 'mawok-no-such-command'),
+	sh('失敗する', 'echo oops 1>&2 & exit /b 3'),
+	sh('何も返さない', `${MORE} >nul`),
+	// 標準入力で受け取った文をそのまま JSON で返す。E2E は node で動いているので node を使う
+	sh(
+		'標準入力',
+		`"${process.execPath}" -e "process.stdout.write(JSON.stringify(require('fs').readFileSync(0,'utf8')))"`
 	),
-	action('日付', 'echo %DATE%', 'insert'),
-	action('記録', `${MORE} >> "${APPEND_FILE}"`, 'none'),
-	action('終了まで待つ', QUIT_PING)
+	sh('日付', 'echo %DATE%', 'insert'),
+	sh('記録', `${MORE} >> "${APPEND_FILE}"`, 'none'),
+	sh('終了まで待つ', QUIT_PING)
 ];
 
 /** 入力欄の下の知らせ (実行している間の「…を実行しています」、終わった後の「…を実行しました」)。出ていなければ null */
@@ -110,14 +119,14 @@ async function listPings(marker) {
 }
 
 /** AI サービスのキーを入れる資格情報の名前 (ai.rs の credential_user と、secrets.rs のサービス名) */
-const credentialName = (service) => `${service}-api-key.${APP_IDENTIFIER}`;
+const credentialName = (service) => `${service}-api-key.${PROFILE_IDENTIFIER}`;
 
 async function hasCredential(service) {
 	const stdout = await runPowerShell('cmdkey /list | Out-String');
 	return stdout.includes(credentialName(service));
 }
 
-test.describe('コマンドのアクション', () => {
+test.describe('@sh のコマンド', () => {
 	let testConfig;
 	let client;
 	let pid;
@@ -132,7 +141,7 @@ test.describe('コマンドのアクション', () => {
 			// ユーザーの設定でサービスを選んでいても、AI を使わない状態で回す
 			aiService: 'none',
 			aiConsent: null,
-			actions: ACTIONS
+			snippets: SNIPPETS
 		});
 		logStart = markLog(LOG_PATH);
 	});
@@ -192,11 +201,11 @@ test.describe('コマンドのアクション', () => {
 		}
 	});
 
-	test('設定で足すと、等幅のコマンドの欄と結果の出し方が出て、! の注意の出し入れ、Enter と貼り付けの改行の扱いが効く (21.)', async () => {
+	test('設定で足した定型文は、本文を @sh で始めると結果の出し方が出て、Enter・貼り付けの改行の扱いが効く (21.)', async () => {
 		await showDraftAndWaitVisible();
 		const draftHandle = await openSettingsFromDraft(client);
 		try {
-			await client.$('button[role="tab"]*=アクション').click();
+			await client.$('button[role="tab"]*=定型文').click();
 			const panel = await client.$('[role="tabpanel"]:not([hidden])');
 			const addButton = await panel.$('button=追加');
 			await addButton.waitForDisplayed({ timeout: 5000 });
@@ -205,110 +214,98 @@ test.describe('コマンドのアクション', () => {
 			const fields = await waitFor(
 				() => panel.$$('textarea'),
 				(found) => found.length === before + 1,
-				{ label: '足した行のコマンドの欄' }
+				{ label: '足した行の本文の欄' }
 			);
-			const command = fields[fields.length - 1];
-			const row = await client.execute((element) => {
-				const font = getComputedStyle(element).fontFamily;
-				const group = element.closest('div.flex.flex-col')?.parentElement;
-				const outputs = [
-					...(group?.querySelectorAll('[role="group"] button, [role="radiogroup"] button') ?? [])
-				].map((button) => button.textContent.trim());
-				return { font, outputs };
-			}, command);
-			assert.match(row.font, /mono|consolas|courier/i, `等幅のはず: ${row.font}`);
-			assert.deepEqual(row.outputs, ['置換', '挿入', '出さない']);
+			const body = fields[fields.length - 1];
+			const readOutputs = () =>
+				client.execute((element) => {
+					const group = element.closest('div.flex.flex-col')?.parentElement;
+					return [
+						...(group?.querySelectorAll('[role="group"] button, [role="radiogroup"] button') ?? [])
+					].map((button) => button.textContent.trim());
+				}, body);
 
-			const warning = () =>
-				client.execute(
-					(element) => element.parentElement.textContent.includes('Windows の cmd の決まり'),
-					command
-				);
-			await command.setValue('echo {{t}}!');
-			await waitFor(warning, (shown) => shown === true, { label: '! の注意が出る' });
-			await command.setValue('echo {{t}}');
-			await waitFor(warning, (shown) => shown === false, { label: '! の注意が消える' });
+			// 宛先で始まらない本文は、挿入するだけの文なので、結果の出し方は出ない
+			assert.deepEqual(await readOutputs(), []);
 
-			// Enter は改行を入れない。貼り付けた改行は残す (本物のキー入力で見る)
-			await command.click();
+			await body.setValue('@sh echo hi');
+			await waitFor(readOutputs, (outputs) => outputs.join() === '置換,挿入,出さない', {
+				label: '結果の出し方が出る'
+			});
+
+			// 本文は複数行にできるので Enter は改行を入れる。貼り付けた改行も残す (本物のキー入力で見る)
+			await body.click();
 			await client.execute(
 				(element) => element.setSelectionRange(element.value.length, element.value.length),
-				command
+				body
 			);
 			await sendKeySequence([[VK.ENTER]]);
-			await expectStays(() => command.getValue(), 'echo {{t}}', {
-				label: 'Enter で改行が入らないはず',
-				duration: 500
-			});
-			await client.execute((element) => element.select(), command);
-			await setClipboard('echo 1\necho 2');
+			await waitFor(
+				() => body.getValue(),
+				(value) => value === '@sh echo hi\n',
+				{ label: 'Enter で改行が入る' }
+			);
+			// 2行目から下がある本文は、挿入する文なので結果の出し方は出ない
+			await client.execute((element) => element.select(), body);
+			await setClipboard('@sh echo 1\necho 2');
 			await sendKeySequence([[VK.CONTROL, VK.V]]);
 			await waitFor(
-				() => command.getValue(),
-				(value) => value === 'echo 1\necho 2',
+				() => body.getValue(),
+				(value) => value === '@sh echo 1\necho 2',
 				{
 					label: '貼り付けた2行'
 				}
 			);
 			await waitFor(
 				tryReadConfig,
-				(config) => config?.actions?.some((saved) => saved.command === 'echo 1\necho 2'),
-				{ label: 'config.toml に保存された2行のコマンド' }
+				(config) => config?.snippets?.some((saved) => saved.body === '@sh echo 1\necho 2'),
+				{ label: 'config.toml に保存された2行の本文' }
 			);
 		} finally {
 			await closeDraftSettings(client, draftHandle);
 			// 足した行を消す (ほかのテストの一覧に混ぜない)
-			await invokeApp(client, 'set_actions', { actions: ACTIONS });
+			await invokeApp(client, 'set_snippets', { snippets: SNIPPETS });
 		}
 	});
 
-	test('改行を含むコマンドは実行せず、帯で知らせて下書きは変わらない (21.)', async () => {
-		await showDraftAndWaitVisible();
-		await typeIntoDraft(client, 'abc');
-		await runAction(client, '改行入り');
-		const alert = await waitAlert(client, '改行の帯');
-		assert.ok(alert.includes('改行を含むコマンドの行は実行できません'), alert);
-		assert.equal((await readDraft(client)).value, 'abc');
-	});
-
-	test('AI を使わなくても、アクションのボタンと一覧に、コマンドのアクションも AI のアクションも出て、@ai の自由入力は AI を使えるようにする帯になる (22.)', async () => {
+	test('AI を使わなくても、定型文のボタンと一覧に、@sh の定型文も @ai の定型文も出て、1行目の @ai は AI を使えるようにする帯になる (22.)', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abc');
 		const buttons = await listDraftButtons(client);
 		assert.ok(
+			buttons.some((button) => button.text.startsWith('定型文')),
+			JSON.stringify(buttons)
+		);
+		assert.equal(
 			buttons.some((button) => button.text.startsWith('アクション')),
+			false,
 			JSON.stringify(buttons)
 		);
 
-		await openActions(client);
-		const options = await readActionOptions(client);
+		await openSnippetPalette(client);
+		const options = await readSnippetOptions(client);
 		assert.deepEqual(
 			options.find((option) => option.label === '大文字'),
-			{ label: '大文字', preview: 'findstr /n "^"' }
+			{ label: '大文字', preview: '@sh findstr /n "^"' }
 		);
-		// AI を使えなくても、AI のアクションも出す (選んだときに失敗の帯で知らせる。draft-actions.test.mjs)
+		// AI を使えなくても、@ai の定型文も出す (選んだときに失敗の帯で知らせる。draft-actions.test.mjs)
 		assert.ok(
 			options.some((option) => option.label === 'ビジネス向け'),
-			`AI のアクションも出るはず: ${JSON.stringify(options)}`
+			`@ai の定型文も出るはず: ${JSON.stringify(options)}`
 		);
+		await sendKeySequence([[VK.ESCAPE]]);
 
-		const filter = await client.$('[role="dialog"] input[role="combobox"]');
-		await filter.setValue('@ai 関西弁に');
-		await waitFor(
-			() => readActionOptions(client),
-			(current) => current.some((option) => option.label === 'この内容で実行'),
-			{ label: '「この内容で実行」' }
-		);
-		await clickActionOption(client, 'この内容で実行');
+		await setDraftValue(client, '@ai 関西弁に\nabc');
+		await runDraft();
 		const alert = await waitAlert(client, 'AI を使えない帯');
 		assert.ok(alert.includes('AI を使える状態になっていません'), alert);
-		assert.equal((await readDraft(client)).value, 'abc');
+		assert.equal((await readDraft(client)).value, '@ai 関西弁に\nabc');
 	});
 
 	test('コマンドの結果で下書きが置き換わる (23.)', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'hello mawok');
-		await runAction(client, '大文字');
+		await runSnippet(client, '大文字');
 		await waitDraftValue(client, '1:hello mawok', '置き換わった下書き');
 		const draft = await readDraft(client);
 		assert.equal(draft.focused, true, '入力欄にフォーカスがあるはず');
@@ -317,7 +314,7 @@ test.describe('コマンドのアクション', () => {
 	test('実行している間に Esc で取り消すと、すぐ元の文のまま書き換えられる状態に戻り、コマンドが残らない (24.)', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abc');
-		await runAction(client, '待つ');
+		await runSnippet(client, '待つ');
 		await waitFor(
 			() => readStatus(client),
 			(status) => status?.includes('待つを実行しています'),
@@ -359,7 +356,7 @@ test.describe('コマンドのアクション', () => {
 	test('見つからないコマンドは、終了コード 1 の失敗と、文字化けしない cmd の標準エラーを帯に出す (25.)', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abc');
-		await runAction(client, '無いコマンド');
+		await runSnippet(client, '無いコマンド');
 		const alert = await waitAlert(client, '失敗の帯');
 		assert.ok(alert.includes('終了コード 1'), alert);
 		assert.ok(alert.includes('として認識されていません'), alert);
@@ -369,12 +366,12 @@ test.describe('コマンドのアクション', () => {
 	test('失敗したコマンドの終了コードと標準エラー、何も返さないコマンドを帯に出し、下書きは変わらない (26.)', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abc');
-		await runAction(client, '失敗する');
+		await runSnippet(client, '失敗する');
 		const failed = await waitAlert(client, '終了コード 3 の帯');
 		assert.ok(failed.includes('終了コード 3'), failed);
 		assert.ok(failed.includes('oops'), failed);
 
-		await runAction(client, '何も返さない');
+		await runSnippet(client, '何も返さない');
 		const empty = await waitFor(
 			() => readAlert(client),
 			(alert) => alert?.includes('何も返りませんでした'),
@@ -384,18 +381,19 @@ test.describe('コマンドのアクション', () => {
 		assert.equal((await readDraft(client)).value, 'abc');
 	});
 
-	test('下書きの全体が、記号も改行もそのまま1つの引数で渡る (28.)', async () => {
+	test('下書きの全体が、記号も改行もそのまま標準入力で渡る (28.)', async () => {
 		const text = 'a "b" \\ c; echo x\n$HOME %PATH% !x!';
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'x');
 		await setDraftValue(client, text);
-		await runAction(client, '引数');
+		await runSnippet(client, '標準入力');
 		const result = await waitFor(
 			async () => (await readDraft(client)).value,
 			(value) => value !== text,
-			{ label: '引数の結果', timeout: 10000 }
+			{ label: '標準入力の結果', timeout: 10000 }
 		);
-		assert.deepEqual(JSON.parse(result), [text]);
+		// 標準入力には、行を数えるコマンドのために、末尾に改行が1つ足されて渡る
+		assert.equal(JSON.parse(result), `${text}\n`);
 	});
 
 	test('「挿入」は、カーソルの位置と選んだ範囲の後ろに入れ、下書きが空でも実行できる (29.)', async () => {
@@ -403,16 +401,16 @@ test.describe('コマンドのアクション', () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abcdef');
 		await setDraftCaret(client, 3);
-		await runAction(client, '日付');
+		await runSnippet(client, '日付');
 		await waitDraftValue(client, `abc${date}def`, 'カーソルの位置に挿入');
 
 		await setDraftValue(client, 'abcdef');
 		await setDraftCaret(client, 1, 3);
-		await runAction(client, '日付');
+		await runSnippet(client, '日付');
 		await waitDraftValue(client, `abc${date}def`, '選んだ範囲の後ろに差し込む');
 
 		await setDraftValue(client, '');
-		await runAction(client, '日付');
+		await runSnippet(client, '日付');
 		await waitDraftValue(client, date, '空の下書きに差し込む');
 	});
 
@@ -420,7 +418,7 @@ test.describe('コマンドのアクション', () => {
 		const text = `mawok-e2e-${STAMP}`;
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, text);
-		await runAction(client, '記録');
+		await runSnippet(client, '記録');
 		await waitFor(
 			() => readStatus(client),
 			(status) => status === '記録を実行しました',
@@ -442,19 +440,18 @@ test.describe('コマンドのアクション', () => {
 		assert.ok(written.includes(text), written);
 	});
 
-	test('絞り込みの欄に書いたコマンドを、登録しなくても実行できる (31.)', async () => {
+	test('1行目に @sh と書いてコピーして閉じる・実行のキーで出すと、登録しなくても、2行目から下を標準入力にして実行し、全体が結果で置き換わる (31.)', async () => {
 		await showDraftAndWaitVisible();
-		// Windows の find は LF だけの改行を行の区切りにしないので、1行で見る
 		await typeIntoDraft(client, 'abc');
-		await openActions(client);
-		const filter = await client.$('[role="dialog"] input[role="combobox"]');
-		await filter.setValue(`${FIND} /c /v ""`);
+		// Windows の find は LF だけの改行を行の区切りにしないので、1行で見る
+		await setDraftValue(client, `@sh ${FIND} /c /v ""\nabc`);
+		// 1行目が @sh のときは、コピーのボタンが「実行」になる
 		await waitFor(
-			() => readActionOptions(client),
-			(current) => current.some((option) => option.label === 'この内容で実行'),
-			{ label: '「この内容で実行」' }
+			() => listDraftButtons(client),
+			(buttons) => buttons.some((button) => button.text.startsWith('実行')),
+			{ label: 'ボタンが「実行」になる' }
 		);
-		await clickActionOption(client, 'この内容で実行');
+		await runDraft();
 		await waitDraftValue(client, '1', '行の数で置き換わった下書き');
 	});
 
@@ -478,7 +475,7 @@ test.describe('コマンドのアクション', () => {
 	test('実行している間にトレイから終了すると、コマンドが残らない (32.)', async () => {
 		await showDraftAndWaitVisible();
 		await typeIntoDraft(client, 'abc');
-		await runAction(client, '終了まで待つ');
+		await runSnippet(client, '終了まで待つ');
 		await waitFor(
 			() => listPings('-n 61'),
 			(pings) => pings.length > 0,

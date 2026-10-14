@@ -11,6 +11,11 @@ use keyring_core::{api::CredentialStore, Entry, Error};
 /// 資格情報の service。user に AI サービスごとの名前（`gemini-api-key` など）を入れて、サービスごとに分けて置く
 const SERVICE: &str = "com.amiiby.mawok";
 
+/// プロファイルを分けた起動は、常用のアカウントのトークンと共有の鍵を読まない
+fn service() -> String {
+    crate::profile::scoped(SERVICE)
+}
+
 /// キーを読めなかった理由
 #[derive(Debug)]
 pub enum ReadError {
@@ -41,7 +46,7 @@ fn store() -> keyring_core::Result<Arc<CredentialStore>> {
 }
 
 fn entry(user: &str) -> keyring_core::Result<Entry> {
-    store()?.build(SERVICE, user, None)
+    store()?.build(&service(), user, None)
 }
 
 /// キーを読む
@@ -72,7 +77,8 @@ pub fn delete(user: &str) -> Result<(), String> {
 /// macOS は属性だけを引く検索にする（中身を読む find_generic_password は、許可を求めることがある）
 #[cfg(target_os = "macos")]
 pub fn exists(user: &str) -> Result<bool, String> {
-    let spec = std::collections::HashMap::from([("service", SERVICE), ("user", user)]);
+    let service = service();
+    let spec = std::collections::HashMap::from([("service", service.as_str()), ("user", user)]);
     store()
         .and_then(|store| store.search(&spec))
         .map(|found| !found.is_empty())

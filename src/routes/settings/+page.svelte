@@ -13,8 +13,8 @@
 	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import { errorCode } from '$lib/errors';
 	import SyncToggle from '$lib/components/sync-toggle.svelte';
-	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
-	import SettingsActions from '$lib/components/settings-actions.svelte';
+	import SettingsAi from '$lib/components/settings-ai.svelte';
+	import SettingsSnippets from '$lib/components/settings-snippets.svelte';
 	import SettingsDevices from '$lib/components/settings-devices.svelte';
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
 	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
@@ -35,22 +35,20 @@
 	import { DEFAULT_DRAFT_FONT_SIZE, MAX_DRAFT_FONT_SIZE, MIN_DRAFT_FONT_SIZE } from '$lib/font';
 	import { draftGuidance } from '$lib/guidance';
 	import { focusFirstField } from '$lib/focus-field';
-	import { isBlankReplacement, isBlankSnippet } from '$lib/blank-rows';
+	import { isBlankReplacement } from '$lib/blank-rows';
 	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '$lib/history.svelte';
 	import { lanErrorMessage } from '$lib/lan-errors';
 	import { modifiedName } from '$lib/modified-settings';
 	import { onEvent } from '$lib/on-event';
-	import { ActionsEditor } from '$lib/actions-editor.svelte';
+	import { SnippetsEditor } from '$lib/snippets-editor.svelte';
 	import KeyCaps from '$lib/components/key-caps.svelte';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { matchedKeys, showsFilter, shownRows } from '$lib/list-filter';
-	import { SvelteSet } from 'svelte/reactivity';
 	import { actionErrorMessage } from '$lib/action-errors';
 	import { RowList } from '$lib/row-list.svelte';
 	import { coalescedSaver } from '$lib/saver';
 	import { CHAR_WIDTH_KINDS, LANGUAGES, PUNCTUATION_STYLES, THEMES } from '$lib/setting-options';
 	import { settingsCategories } from '$lib/settings-categories';
-	import { firstLine } from '$lib/snippets';
 	import {
 		DRAFT_ACTIONS_IN_SETTINGS,
 		draftActionLabel,
@@ -102,7 +100,7 @@
 		else if (refreshingMawokAccountStatus) return;
 		const refresh = ++mawokAccountRefresh;
 		refreshingMawokAccountStatus = true;
-		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「アカウント」の欄が出す。
+		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「AI」の残りの欄が出す。
 		// 資格情報を読めなかったときは Rust 側がサインインしていない扱いにするので、「サインイン」からやり直せる。
 		let status: AccountStatus | null;
 		try {
@@ -128,6 +126,16 @@
 	function openAccount() {
 		category = 'account';
 	}
+
+	// テキストウィンドウのエラーの帯から頼まれたら、「AI」に移る。設定ウィンドウを作る前の頼みは、
+	// イベントでは届かないので、載せたときに Rust 側に尋ねる
+	$effect(() => {
+		const show = async () => {
+			if (await invoke<boolean>('take_ai_settings_request').catch(() => false)) category = 'ai';
+		};
+		void show();
+		return onEvent(EVENTS.AI_SETTINGS_REQUESTED, show);
+	});
 
 	function openDevices() {
 		category = 'devices';
@@ -265,22 +273,12 @@
 		isBlankReplacement
 	);
 
-	/** アクションとモデル。アクションの分類は開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
-	const actionsEditor = new ActionsEditor(settings.current, callActions);
+	/** 定型文とモデル。定型文の分類は開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
+	const snippetsEditor = new SnippetsEditor(settings.current, callActions);
 	$effect(() => {
-		if (settings.current) actionsEditor.followLocale(settings.current);
+		if (settings.current) snippetsEditor.followLocale(settings.current);
 	});
 
-	/** 定型文。打っている途中に Rust 側からの反映で打ち消されないよう、辞書と同じく画面側で持つ */
-	const snippets = new RowList<Snippet>(
-		settings.current?.snippets ?? [],
-		(snippets) => saveItems<Snippet>('set_snippets', { snippets }),
-		isBlankSnippet
-	);
-
-	/** 開いている定型文の行。分類を移っても開いたままにする */
-	const expandedSnippets = new SvelteSet<string>();
-	let snippetFilter = $state('');
 	let replacementFilter = $state('');
 	/** 絞り込みに当たった置き換え辞書の行の画面用 key。語を変えたときにだけ求め直す。null なら絞り込んでいない */
 	const replacementMatches = $derived(
@@ -292,18 +290,12 @@
 	);
 	const shownReplacements = $derived(shownRows(replacements.rows, replacementMatches));
 
-	function addSnippet() {
-		// 名前も本文も空の1件は一覧に出ないだけなので、書きかけのまま保存してよい。足した行は、書けるよう開いておく
-		snippetFilter = '';
-		const row = snippets.addBlank({ id: '', name: '', body: '', sync: true });
-		expandedSnippets.add(row.key);
-		focusFirstField(`row-${row.key}`);
-	}
-
 	// 下書きウィンドウから定型文を足したら、開いている設定画面の並びにも足す。
 	// 足さないと、次に設定画面で直したときに、足す前の並びで保存して消してしまう。
 	// add は並び全体を保存し直すので、足す前の並びの保存が遅れて届いても、その後に保存して上書きする
-	$effect(() => onEvent<Snippet>(EVENTS.SNIPPET_ADDED, (snippet) => snippets.add(snippet)));
+	$effect(() =>
+		onEvent<Snippet>(EVENTS.SNIPPET_ADDED, (snippet) => snippetsEditor.snippets.add(snippet))
+	);
 
 	/** フォントの設定。打っている途中に Rust 側からの反映で打ち消されないよう、辞書と同じく画面側で持つ */
 	let fontFamily = $state(settings.current?.textFontFamily ?? '');
@@ -440,8 +432,7 @@
 	$effect(() =>
 		onEvent<SettingsView>(EVENTS.SYNC_APPLIED, (view) => {
 			replacements.recopy(view.replacements, true);
-			snippets.recopy(view.snippets, true);
-			actionsEditor.recopy(view);
+			snippetsEditor.recopy(view);
 			fontFamily = view.textFontFamily;
 			fontSize = view.textFontSize;
 			// 保存の前の、打っている途中の値（離れるまで保存しない件数、読めない色）は消さない
@@ -585,8 +576,7 @@
 					if (recording) stopRecording();
 					// 足したまま書かなかった行は、分類を離れたら捨てる。戻ったときに「未入力」の行が残らないように
 					replacements.dropBlanks();
-					snippets.dropBlanks();
-					actionsEditor.actions.dropBlanks();
+					snippetsEditor.snippets.dropBlanks();
 					category = value;
 				}
 			}
@@ -650,9 +640,6 @@
 				{/if}
 				<Tabs.Content value="general">
 					<div class="flex flex-col gap-5">
-						{#if view.proAvailable && view.syncKinds.settings}
-							<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />
-						{/if}
 						<SettingsSection title={m.settings_section_startup()}>
 							<SettingsRow modified={modifiedName(view, 'autostart')}>
 								<Field.Field orientation="horizontal" class="min-h-8">
@@ -853,9 +840,6 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="draft">
-					{#if view.proAvailable && view.syncKinds.settings}
-						<SettingsSyncNote class="mb-3 px-1" text={m.settings_sync_description()} />
-					{/if}
 					<SettingsSection>
 						<SettingsRow modified={modifiedName(view, 'text_font')}>
 							<div class="flex items-center gap-1">
@@ -987,9 +971,6 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="copy">
-					{#if view.proAvailable && (view.syncKinds.settings || view.syncKinds.replacements)}
-						<SettingsSyncNote class="mb-3 px-1" text={m.settings_sync_description()} />
-					{/if}
 					<SettingsSection>
 						{@render switchRow(
 							'trim_trailing_whitespace',
@@ -1008,10 +989,7 @@
 							m.settings_exclude_history_description()
 						)}
 						<SettingsRow modified={modifiedName(view, 'char_width')}>
-							<div class="flex items-center gap-1">
-								<Field.Title>{m.settings_char_width()}</Field.Title>
-								{@render syncSetting('char_widths', m.settings_char_width())}
-							</div>
+							<Field.Title>{m.settings_char_width()}</Field.Title>
 							<Field.Description class="leading-snug">
 								{m.settings_char_width_description()}
 							</Field.Description>
@@ -1041,7 +1019,10 @@
 							</Field.Field>
 							{#each CHAR_WIDTH_KINDS as row (row.kind)}
 								<Field.Field orientation="horizontal" class="flex-wrap justify-between">
-									<span id="char-width-{row.kind}" class="text-sm">{row.label()}</span>
+									<div class="flex items-center gap-1">
+										<span id="char-width-{row.kind}" class="text-sm">{row.label()}</span>
+										{@render syncSetting(`${row.kind}_width`, row.label())}
+									</div>
 									<ToggleGroup.Root
 										type="single"
 										variant="outline"
@@ -1146,62 +1127,16 @@
 					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="snippets">
-					<!-- 画面の題名と同じ見出しをカードに重ねず、説明は題名のすぐ下に一度だけ置く -->
-					<div class="flex flex-col gap-3">
-						<p class="settings-lead">
-							{view.textWindowKeys.snippets
-								? m.settings_snippets_description({
-										key: formatKeys(view.textWindowKeys.snippets, view.platform)
-									})
-								: m.settings_snippets_description_no_key()}
-						</p>
-						{#if view.proAvailable && view.syncKinds.snippets}
-							<SettingsSyncNote class="px-1" text={m.settings_sync_description()} />
-						{:else if view.proAvailable}
-							<SettingsSyncNote text={m.settings_sync_snippets_off()} />
-						{/if}
-						<SettingsSection>
-							<SettingsRow>
-								{#if showsFilter(snippets.rows.length, snippetFilter)}
-									<ListFilter label={m.settings_snippets_filter()} bind:value={snippetFilter} />
-								{/if}
-								<ReorderableRows
-									list={snippets}
-									expanded={expandedSnippets}
-									bodyKey="body"
-									nameLabel={m.settings_snippets_name()}
-									bodyLabel={m.settings_snippets_body()}
-									preview={(row) => firstLine(row.body)}
-									query={snippetFilter}
-									searchText={(row) => [row.name, row.body]}
-								>
-									{#snippet trailing(row)}
-										{#if view.proAvailable && view.syncKinds.snippets}
-											<SyncToggle
-												pressed={row.sync}
-												name={row.name}
-												onchange={(sync) => {
-													row.sync = sync;
-													snippets.save();
-												}}
-											/>
-										{/if}
-									{/snippet}
-								</ReorderableRows>
-								<Button variant="outline" size="sm" class="w-fit" onclick={addSnippet}>
-									<PlusIcon data-icon="inline-start" />
-									{m.settings_snippets_add()}
-								</Button>
-							</SettingsRow>
-						</SettingsSection>
-					</div>
+					{#if category === 'snippets'}
+						<SettingsSnippets {view} editor={snippetsEditor} />
+					{/if}
 				</Tabs.Content>
-				<Tabs.Content value="actions">
+				<Tabs.Content value="ai">
 					<!-- 開いたときだけ描く。キーがあるかの確認でキーチェーンの許可を求められうるため -->
-					{#if category === 'actions'}
-						<SettingsActions
+					{#if category === 'ai'}
+						<SettingsAi
 							{view}
-							editor={actionsEditor}
+							editor={snippetsEditor}
 							{mawokAccountStatus}
 							onopenaccount={openAccount}
 						/>

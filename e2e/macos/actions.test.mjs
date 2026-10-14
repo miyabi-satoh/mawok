@@ -30,24 +30,24 @@ import {
 } from '../lib/macos.mjs';
 import { expectStays, waitFor } from '../lib/wait.mjs';
 
-// コマンドのアクションを macOS で見る。コマンドを渡すシェル (ログインシェル) と、止めるときにプロセスの
+// コマンド (`@sh`) の定型文を macOS で見る。コマンドを渡すシェル (ログインシェル) と、止めるときにプロセスの
 // グループごと止める作りが OS ごとに別なので、Windows の E2E (tests/actions-command.test.mjs) とは別に見る。
 // ログに書かないこと (27.) も、失敗の見分け (終了コード 127 を「見つからない」とする等) が macOS の側の作りなので見る。
-// 設定のコマンドの欄の Enter と貼り付け (21.) は、文字の入力を WKWebView が受けるので見る。
-// アクションは、絞り込みに名前を打って選ぶので、名前を英数にする。AI のアクションは本物の AI サービスへ
+// 設定の本文の欄に入れた宛先で、結果の出し方が出ること (21.) も見る。
+// 定型文は、絞り込みに名前を打って選ぶので、名前を英数にする。`@ai` の定型文は本物の AI サービスへ
 // 送ってしまうので置かない
 
 const STAMP = Date.now();
-// 「出さない」のアクションが追記するファイル
+// 「出さない」の定型文が追記するファイル
 const APPEND_FILE = path.join(os.tmpdir(), `mawok-macos-actions-${STAMP}.txt`);
 // sleep の秒数は、ほかで動いている sleep と見分けるため、ありそうにない数にする
 const CANCEL_SLEEP = 'sleep 31.7';
 const QUIT_SLEEP = 'sleep 61.7';
 const INSERTED = '<D>';
 
-/** 設定ファイルの [[actions]] の1件。値は TOML の文字列に書く */
+/** 設定ファイルの [[snippets]] の、コマンドを実行する1件。値は TOML の文字列に書く */
 const action = (name, command, output = 'replace') =>
-	`[[actions]]\nname = ${JSON.stringify(name)}\ncommand = ${JSON.stringify(command)}\noutput = "${output}"\n`;
+	`[[snippets]]\nname = ${JSON.stringify(name)}\nbody = ${JSON.stringify(`@sh ${command}`)}\noutput = "${output}"\n`;
 
 const ACTIONS = [
 	action('upper', 'tr a-z A-Z'),
@@ -55,7 +55,7 @@ const ACTIONS = [
 	action('missing', 'mawok-no-such-command'),
 	action('fail', 'echo oops >&2; exit 3'),
 	action('silent', 'cat >/dev/null'),
-	action('args', "printf '[%s]' {{t}}"),
+	action('whole', `printf '[%s]' "$(cat)"`),
 	action('insert', `printf '${INSERTED}'`, 'insert'),
 	action('record', `cat >> '${APPEND_FILE}'`, 'none'),
 	action('quitwait', `${QUIT_SLEEP}; cat`)
@@ -88,7 +88,7 @@ async function clearAndHideDraft() {
 	await hideDraft();
 }
 
-test.describe('macOS: コマンドのアクション', () => {
+test.describe('macOS: コマンドの定型文', () => {
 	let log;
 
 	test.before(async () => {
@@ -168,10 +168,10 @@ test.describe('macOS: コマンドのアクション', () => {
 		await clearAndHideDraft();
 	});
 
-	test('下書きの全体が、記号も改行もそのまま1つの引数で渡る (28.)', async () => {
+	test('下書きの全体が、記号も改行もそのまま標準入力で渡る (28.)', async () => {
 		const text = 'a "b" \\ c; echo x\n$HOME %PATH% !x!';
 		await showDraftWith(text, { paste: true });
-		await runAction('args');
+		await runAction('whole');
 		await waitDraftValue(`[${text}]`);
 		await clearAndHideDraft();
 	});
@@ -212,9 +212,9 @@ test.describe('macOS: コマンドのアクション', () => {
 		await clearAndHideDraft();
 	});
 
-	test('絞り込みの欄に書いたコマンドを、登録しなくても実行できる (31.)', async () => {
-		await showDraftWith('abc', { paste: true });
-		await runAction('wc -l', 'この内容で実行');
+	test('1行目に `@sh` で書いたコマンドを、コピーのキーで、登録しなくても実行できる (31.)', async () => {
+		await showDraftWith('@sh wc -l\nabc', { paste: true });
+		await keyCode(KEY.return, ['command down']);
 		await waitFor(draftValue, (value) => value.trim() === '1', {
 			label: '行の数で置き換わった下書き'
 		});
@@ -238,47 +238,36 @@ test.describe('macOS: コマンドのアクション', () => {
 		assert.match(written, /action \d+ failed: .*3/);
 	});
 
-	test('設定で足すと、コマンドの欄と結果の出し方が出て、コマンドの欄の Enter では改行が入らず、貼り付けた改行は残る (21.)', async () => {
-		await openSettings('アクション', '既定のアクションを追加');
+	test('設定で足した行の本文に `@sh` の行を入れると、結果の出し方が出る (21.)', async () => {
+		await openSettings('定型文', '既定の定型文を追加');
 		await pressInSettings('AXButton', '追加');
-		const commandValue = async () =>
+		const BODY = '定型文の本文';
+		// 設定の分類の切り替えも AXRadioButton なので、結果の出し方の名前だけを拾う
+		const OUTPUTS = ['置換', '挿入', '出さない'];
+		const radios = async () =>
+			(await windowElements(SETTINGS_TITLE))
+				.filter(({ role, name }) => role === 'AXRadioButton' && OUTPUTS.includes(name))
+				.map(({ name }) => name);
+		const bodyValue = async () =>
 			(await windowElements(SETTINGS_TITLE)).findLast(
-				({ role, name }) => role === 'AXTextArea' && name === 'コマンド'
+				({ role, name }) => role === 'AXTextArea' && name === BODY
 			)?.value ?? null;
-		const elements = await waitFor(
-			() => windowElements(SETTINGS_TITLE),
-			(current) => current.some(({ role, name }) => role === 'AXTextArea' && name === 'コマンド'),
-			{ label: '足した行のコマンドの欄' }
-		);
-		assert.deepEqual(
-			elements
-				.filter(({ role }) => role === 'AXRadioButton')
-				.map(({ name }) => name)
-				.slice(-3),
-			['置換', '挿入', '出さない'],
-			'結果の出し方の選択'
-		);
+		await waitFor(bodyValue, (value) => value === '', { label: '足した行の本文の欄' });
+		assert.deepEqual(await radios(), [], '宛先の無い行には、結果の出し方を出さない');
 
-		await focusWindowElement(SETTINGS_TITLE, 'AXTextArea', 'コマンド');
+		await focusWindowElement(SETTINGS_TITLE, 'AXTextArea', BODY);
 		await keyCode(KEY.eisu);
-		await keystroke('echo hi');
-		await waitFor(commandValue, (value) => value === 'echo hi', { label: '打ったコマンド' });
-		await keyCode(KEY.return);
-		await expectStays(commandValue, 'echo hi', {
-			label: 'Enter で改行が入らない',
-			duration: 500
-		});
-		await keystroke('a', ['command down']);
-		await setClipboard('echo 1\necho 2');
+		await setClipboard('@sh echo hi');
 		await keystroke('v', ['command down']);
-		await waitFor(commandValue, (value) => value === 'echo 1\necho 2', {
-			label: '貼り付けた2行'
+		await waitFor(bodyValue, (value) => value === '@sh echo hi', { label: '入れた本文' });
+		await waitFor(radios, (names) => names.join() === OUTPUTS.join(), {
+			label: '結果の出し方の選択'
 		});
 		await closeSettings();
 	});
 
 	test('既定の「行を並べ替え」で、日本語を含む行が並べ替わる', async () => {
-		// アクションを書かない設定で起動すると、既定のアクションになる
+		// 定型文を書かない設定で起動すると、既定の定型文になる
 		await relaunchWithTestConfig('language = "ja"\nai_service = "none"\n');
 		await showDraftWith('うめ\nあんず\nいちご', { paste: true });
 		await runAction('sort', '行を並べ替え ');

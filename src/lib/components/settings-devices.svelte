@@ -6,7 +6,6 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
 	import { Input } from '$lib/components/ui/input';
-	import { Switch } from '$lib/components/ui/switch';
 	import { EVENTS } from '$lib/bindings/constants';
 	import type { PairingOffer } from '$lib/bindings/PairingOffer';
 	import type { Call } from '$lib/call';
@@ -36,7 +35,7 @@
 
 	const panel = $derived(devicesPanel(view.sharedKeyStatus, view.devices.length));
 
-	/** 出しているコード。空なら出していない（docs/lan.md「同じ LAN の自分のデバイスへ送る」） */
+	/** 出しているコード。空なら出していない（docs/lan.md「デバイスを追加する」） */
 	let pairingCode = $state('');
 	/** `want` を受けて自動で出したコードか。相手のデバイスに出す案内だけを替える。 */
 	let pairingAutomatic = $state(false);
@@ -125,13 +124,6 @@
 		resettingKey = false;
 	}
 
-	function setDeviceSendTo(publicKey: string, sendTo: boolean) {
-		const publicKeys = view.devices
-			.filter((device) => (device.publicKey === publicKey ? sendTo : device.sendTo))
-			.map((device) => device.publicKey);
-		void call('set_send_targets', { publicKeys });
-	}
-
 	$effect(() => {
 		void invoke('set_devices_open', { open });
 		return () => void invoke('set_devices_open', { open: false });
@@ -190,22 +182,11 @@
 			<Field.Title>{m.settings_devices_list_title()}</Field.Title>
 			{#if view.devices.length > 0}
 				{@const labels = deviceLabels(view.devices)}
-				<!-- 同じ名前のデバイスは、送信先の一覧と同じく公開鍵の先頭4文字で見分ける。 -->
-				<div class="flex flex-col gap-3">
+				<ul class="flex flex-col gap-1 text-sm" aria-label={m.settings_devices_list_title()}>
 					{#each view.devices as device (device.publicKey)}
-						<Field.Field orientation="horizontal">
-							<Field.Label for={`send-to-${device.publicKey}`}>
-								{labels.get(device.publicKey) ?? device.name}
-							</Field.Label>
-							<Switch
-								id={`send-to-${device.publicKey}`}
-								bind:checked={
-									() => device.sendTo, (sendTo) => setDeviceSendTo(device.publicKey, sendTo)
-								}
-							/>
-						</Field.Field>
+						<li>{labels.get(device.publicKey) ?? device.name}</li>
 					{/each}
-				</div>
+				</ul>
 			{:else}
 				<Field.Description class="leading-snug">{m.settings_devices_empty()}</Field.Description>
 			{/if}

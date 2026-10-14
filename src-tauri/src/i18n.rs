@@ -79,14 +79,6 @@ impl Lang {
         }
     }
 
-    /// トレイのツールチップに添える。届いた下書きをまだ見ていない間だけ出す
-    pub fn draft_received(self) -> &'static str {
-        match self {
-            Lang::En => "Text has arrived",
-            Lang::Ja => "届いたテキストがあります",
-        }
-    }
-
     /// メニューの項目と、使い方のウィンドウのタイトル
     pub fn manual(self) -> &'static str {
         match self {

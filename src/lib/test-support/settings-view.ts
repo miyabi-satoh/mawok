@@ -1,19 +1,14 @@
-import { newAction } from '$lib/action-target';
 import type { DraftKeys } from '$lib/keys';
-import type { Action, SettingsView } from '$lib/settings.svelte';
+import type { SettingsView, Snippet } from '$lib/settings.svelte';
+import { newSnippet } from '$lib/snippets';
 
 /** Rust 側の既定のキー（src-tauri/src/draft_keys.rs）の写し */
 export const DEFAULT_DRAFT_KEYS: DraftKeys = {
 	copy: 'CommandOrControl+Enter',
-	send: 'CommandOrControl+Shift+Enter',
 	settings: 'CommandOrControl+Comma',
-	snippets: 'CommandOrControl+KeyJ',
-	actions: 'CommandOrControl+KeyK',
+	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	sendTargets: 'CommandOrControl+KeyL',
-	insertReceived: 'CommandOrControl+KeyI',
-	discardReceived: 'CommandOrControl+Shift+Backspace',
 	changeFolder: 'CommandOrControl+KeyD'
 };
 
@@ -58,7 +53,6 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 			anthropic: 'claude-haiku-4-5',
 			openai: 'gpt-5.4-nano'
 		},
-		actions: [],
 		devices: [],
 		deviceName: 'desk-pc',
 		proAvailable: false,
@@ -69,7 +63,6 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 			keys: true,
 			replacements: true,
 			snippets: true,
-			actions: true,
 			history: true
 		},
 		syncExcludedSettings: [],
@@ -81,7 +74,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 	};
 }
 
-/** AI のアクションの1件 */
-export function aiAction(name: string, instruction: string): Action {
-	return newAction(name, `@ai ${instruction}`);
+/** AI に頼む定型文の1件 */
+export function aiSnippet(name: string, instruction: string): Snippet {
+	return newSnippet(name, `@ai ${instruction}`);
 }

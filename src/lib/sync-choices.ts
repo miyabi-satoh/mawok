@@ -22,7 +22,7 @@ import { snippetLabel } from '$lib/snippets';
 export type ChoiceText = { label: string; thisDevice: string; otherDevice: string };
 
 type ValueOf<T extends SyncValue['type']> = Extract<SyncValue, { type: T }>;
-type Row = ValueOf<'replacement' | 'snippet' | 'action'>;
+type Row = ValueOf<'replacement' | 'snippet'>;
 
 const onOff = (on: boolean) => (on ? m.sync_choice_on() : m.sync_choice_off());
 const pair = (label: string, value: string) => m.sync_choice_pair({ label, value });
@@ -43,8 +43,6 @@ function rowName(row: Row): string {
 			return orEmpty(row.value.from);
 		case 'snippet':
 			return orEmpty(snippetLabel(row.value));
-		case 'action':
-			return orEmpty(snippetLabel({ name: row.value.name, body: row.value.command }));
 	}
 }
 
@@ -70,8 +68,15 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 				group: m.settings_char_width(),
 				item: m.settings_char_width_punctuation()
 			});
-		case 'char_widths':
-			return m.settings_char_width();
+		case 'alphabet_width':
+		case 'digit_width':
+		case 'space_width':
+		case 'symbol_width':
+		case 'katakana_width':
+			return m.sync_choice_label_sub({
+				group: m.settings_char_width(),
+				item: CHAR_WIDTH_KINDS.find(({ kind }) => `${kind}_width` === value.type)?.label() ?? ''
+			});
 		case 'exclude_from_clipboard_history':
 			return m.settings_exclude_history();
 		case 'text_font_size':
@@ -102,15 +107,12 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 			return m.sync_choice_row_replacement({ name: rowName(value) });
 		case 'snippet':
 			return m.sync_choice_row_snippet({ name: rowName(value) });
-		case 'action':
-			return m.sync_choice_row_action({ name: rowName(value) });
 		case 'order':
 			return m.sync_choice_order({
 				name:
 					{
 						replacements: m.settings_replacements(),
-						snippets: m.settings_category_snippets(),
-						actions: m.settings_category_actions()
+						snippets: m.settings_category_snippets()
 					}[value.value] ?? value.value
 			});
 		default:
@@ -140,8 +142,7 @@ export function restoreChangeText(changes: SyncBackupDifference[], locale: Local
 	// 行が消える・戻るなら並びも必ず変わる。その一覧の並びまで挙げると、同じことを2回言うことになる
 	const ROW_OF_ORDER: Record<string, SyncValue['type']> = {
 		replacements: 'replacement',
-		snippets: 'snippet',
-		actions: 'action'
+		snippets: 'snippet'
 	};
 	const rowsMoved = new Set(
 		changes
@@ -203,12 +204,12 @@ function valueText(value: SyncValue, other: SyncValue, platform: Platform): stri
 			return String(value.value);
 		case 'punctuation_style':
 			return optionName(PUNCTUATION_STYLES, value.value);
-		case 'char_widths': {
-			const theirs = sameType(value, other)?.value;
-			return differing(CHAR_WIDTH_KINDS, ({ kind }) => theirs?.[kind] === value.value[kind])
-				.map(({ kind, label }) => pair(label(), optionName(WIDTH_STYLES, value.value[kind])))
-				.join('\n');
-		}
+		case 'alphabet_width':
+		case 'digit_width':
+		case 'space_width':
+		case 'symbol_width':
+		case 'katakana_width':
+			return optionName(WIDTH_STYLES, value.value);
 		case 'text_color_light':
 			return value.value || DEFAULT_TEXT_COLORS.light;
 		case 'text_color_dark':
@@ -253,22 +254,20 @@ function valueText(value: SyncValue, other: SyncValue, platform: Platform): stri
 			}
 			return lines.join('\n');
 		}
-		case 'snippet':
-			return [value.value.name, value.value.body].filter((line) => line !== '').join('\n');
-		case 'action': {
+		case 'snippet': {
 			const row = value.value;
 			const theirs = sameType(value, other)?.value;
-			const lines = [row.name, row.command].filter((line) => line !== '');
+			const lines = [row.name, row.body].filter((line) => line !== '');
 			if (theirs && theirs.output !== row.output) {
 				const output = OUTPUTS.find((option) => option.value === row.output);
-				lines.push(pair(m.settings_actions_output(), output?.name() ?? row.output));
+				lines.push(pair(m.settings_snippets_output(), output?.name() ?? row.output));
 			}
 			if (theirs && theirs.encoding !== row.encoding) {
 				const encoding = ENCODINGS.find((option) => option.value === row.encoding);
-				lines.push(pair(m.settings_actions_encoding(), encoding?.name ?? row.encoding));
+				lines.push(pair(m.settings_snippets_encoding(), encoding?.name ?? row.encoding));
 			}
 			if (theirs && theirs.enabled !== row.enabled) {
-				lines.push(pair(m.settings_actions_enabled_unnamed(), onOff(row.enabled)));
+				lines.push(pair(m.settings_snippets_enabled_unnamed(), onOff(row.enabled)));
 			}
 			return lines.join('\n');
 		}

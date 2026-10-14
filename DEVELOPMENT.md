@@ -17,8 +17,8 @@
 
 技術の説明:
 
-- [アクションの実行](docs/actions.md)
-- [同じ LAN の自分のデバイスへ送る](docs/lan.md)
+- [宛先へ出す（@ai・@sh）と定型文](docs/actions.md)
+- [同じ LAN の自分のデバイスを追加する](docs/lan.md)
 - [設定ファイル](docs/config.md)
 - [設定と履歴の同期](docs/sync.md)
 - [OS ごとの作り](docs/platform.md)
@@ -31,7 +31,7 @@
 
 - [Tauri 2 の前提環境](https://v2.tauri.app/start/prerequisites/)（Rust と、OS ごとのビルドツール）
 - Node.js と pnpm
-- [cargo-about](https://github.com/EmbarkStudios/cargo-about)（`cargo install --locked cargo-about@0.9.2 --features cli`。`just ci` の中でライセンス表示を作り直すのに使う）
+- [cargo-about](https://github.com/EmbarkStudios/cargo-about)（`cargo install --locked cargo-about@0.9.2 --features cli`。依存を変えたときに、ライセンス表示を作り直すのに使う）
 - [just](https://github.com/casey/just) と [lefthook](https://github.com/evilmartians/lefthook)
 
 ```sh
@@ -47,10 +47,12 @@ pnpm exec playwright install chromium   # 画面の部品テストで使うブ�
 just dev        # 開発版を起動する（起動時にはウィンドウを出さないので、ホットキーで表示する）
 just fmt        # Rust（cargo fmt）と画面側（Prettier）をまとめて整形する
 just ci         # CI と同じチェック一式（整形の確認・lint・型チェック・ライセンス表示が最新か・テスト・画面との境目の生成物が最新か）
-just licenses   # Rust の依存のライセンス表示を作り直す（依存を変えたとき。要: cargo-about）
+just licenses   # Rust の依存のライセンス表示を作り直す（依存や Cargo.toml を変えたとき。要: cargo-about。結果と印 src-tauri/rust-licenses.stamp をコミットする）
 ```
 
 開発版では、ログイン時の自動起動を登録しません。
+
+開発版は、常用の Mawok と別の設定・履歴・資格情報で動きます（プロファイル `dev`。→ docs/platform.md「プロファイル」）。サインインも開発版の中で別に行います。
 
 ## テスト
 
@@ -90,7 +92,7 @@ just release-mac publish
 - 手元で動かす: `just dev-account-server`。メールは送らず、サインインのリンクをログに出す。
 - 本番に置く: `pnpm run deploy`（`site/` をビルドしてから置く）。
 - staging に置く: `pnpm run deploy --env staging`（`site/` をビルドしてから置く）。
-- 開発版を staging の窓口に向ける: `MAWOK_ACCOUNT_URL=https://mawok-account-staging.amiiby.workers.dev just dev`。2台のデバイスの間の動き（送受信・同期）を確かめるときに、両方をこうして起動する。値はビルドのときに読むので、`just dev` を打つ所で付ける。URL の末尾に `/` は付けない。
+- 開発版を staging の窓口に向ける: `MAWOK_ACCOUNT_URL=https://mawok-account-staging.amiiby.workers.dev just dev`。2台のデバイスの間の動き（同期）を確かめるときに、両方をこうして起動する。値はビルドのときに読むので、`just dev` を打つ所で付ける。URL の末尾に `/` は付けない。
 - 秘密の値: `pnpm exec wrangler secret put <名前>`（staging は `--env staging` を付ける）。
 - 表を変えたら、置く前に `pnpm exec wrangler d1 migrations apply DB --remote`（staging は `--env staging` も）。
 

@@ -1,6 +1,5 @@
 import { errorCode } from '$lib/errors';
 import type { ActionFailure } from '$lib/bindings/ActionFailure';
-import { TEXT_MARK } from '$lib/action-target';
 import { m } from '$lib/paraglide/messages';
 
 /**
@@ -27,7 +26,6 @@ const MESSAGES: Record<string, () => string> = {
 	'action.timeout': m.action_error_timeout,
 	'action.command_not_started': m.action_error_command_not_started,
 	'action.folder_missing': m.action_error_folder_missing,
-	'action.text_not_embeddable': () => m.action_error_text_not_embeddable({ mark: TEXT_MARK }),
 	'action.multiline_command': m.action_error_multiline_command,
 	'action.empty_output': m.action_error_empty_output,
 	'action.output_too_large': m.action_error_output_too_large,
@@ -53,6 +51,21 @@ function isActionFailure(error: unknown): error is ActionFailure {
 function commandFailedMessage(error: unknown): string {
 	const code = isActionFailure(error) ? error.exitCode : null;
 	return code === null ? m.action_error_command_killed() : m.action_error_command_failed({ code });
+}
+
+/** 設定の「AI」で直す失敗。エラーの帯に、その分類を開く操作を添える */
+const AI_SETTINGS_CODES = new Set([
+	'action.disabled',
+	'action.no_key',
+	'action.key_unreadable',
+	'action.invalid_key',
+	'action.rejected',
+	'action.model_not_found'
+]);
+
+/** 設定の「AI」で直す失敗か */
+export function needsAiSettings(error: unknown): boolean {
+	return AI_SETTINGS_CODES.has(errorCode(error));
 }
 
 /**

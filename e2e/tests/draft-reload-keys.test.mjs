@@ -97,7 +97,7 @@ test.describe('読み込み直すキー', () => {
 	});
 
 	test('定型文の一覧を開いているとき', async () => {
-		await sendKeySequence([[VK.CONTROL, VK.J]]);
+		await sendKeySequence([[VK.CONTROL, VK.K]]);
 		await waitFor(
 			() => readSnippetPalette(client),
 			(palette) => palette.open && palette.inputFocused,

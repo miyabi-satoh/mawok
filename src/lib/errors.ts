@@ -13,7 +13,7 @@ export function describeError(error: unknown): string {
 }
 
 /**
- * Rust 側が返した失敗の符号。符号だけの文字列でも、`{ code, ... }` の形（送信やアクションの失敗）でも取り出す。
+ * Rust 側が返した失敗の符号。符号だけの文字列でも、`{ code, ... }` の形（アクションの失敗）でも取り出す。
  * どちらでもなければ、受け取ったものをそのまま文字列にする
  */
 export function errorCode(error: unknown): string {

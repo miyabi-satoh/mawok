@@ -5,9 +5,13 @@ import {
 	expandAllRows,
 	hideDraft,
 	invokeApp,
+	readAlert,
+	runDraft,
+	setDraftValue,
 	setJapanese,
 	showDraftAndWaitVisible,
 	typeIntoDraft,
+	waitAlert,
 	waitDraftHidden,
 	waitForWindowCount,
 	waitSettingsWindow
@@ -39,11 +43,10 @@ import { waitFor } from '../lib/wait.mjs';
 // 描かれ方。画面の状態ごとに、テーマ (ライト・ダーク) × 言語 (日本語・英語) と、最小の大きさ × 言語で、
 // 重なり・はみ出し・省略・潰れを lib/rendering.mjs で調べ、画面を e2e/screenshots/ に撮る。
 // 撮った画面は人とエージェントが目で見る (バランスや余白の不揃いは機械では決めにくいため)。
-// 状態を作るのに要る設定は config.toml で入れる。送信先のデバイスは架空のもの
-// (デバイスを追加していない機で流す前提。共有の鍵が無いので、送るとつなぐ前に断られる)。
+// 状態を作るのに要る設定は config.toml で入れる。
 // アクションは一覧を開いて撮るだけで、選ばない。この機の資格情報管理に本物のキーがあれば、選んだ時点で
 // AI サービスへ送ってしまうため (画面の invoke は差し替えられず、送る手前で止める口もない)。
-// 同じ理由で、アクションに失敗したときの知らせと、届いた下書きの知らせ (相手のデバイスが要る) は撮らない
+// 同じ理由で、アクションの失敗は撮らない。失敗の帯は、送らずに出せる「宛先の後ろが空」で撮る
 
 const suite = createSuite();
 
@@ -69,22 +72,14 @@ const TEST_CONFIG = {
 	snippets: [
 		{ name: 'かくにん', body: '一つずつ質問してください。\n以上です。' },
 		{ name: '', body: 'git status' },
+		// 選ぶと宛先へ出す行 (一覧に並ぶ。設定では、結果の出し方と @sh の文字コードが出る)
+		{ name: '英訳', body: '@ai 英語に訳してください。', output: 'replace' },
+		{ name: '行を並べ替え', body: '@sh sort', output: 'replace', encoding: 'shift_jis' },
 		{
 			name: 'とても長い名前の定型文で、一覧の幅に収まりきらないときの見え方を確かめるためのもの',
 			body: '本文も長めにしておきます。'.repeat(8)
 		}
 	],
-	devices: [
-		{
-			name: 'MacBook Air',
-			publicKey: 'ab'.repeat(32),
-			// 文書用のアドレス (TEST-NET-1) なので、どこにも繋がらない
-			address: '192.0.2.1',
-			sendTo: true
-		}
-	],
-	// 開発機の利用者のアクションに左右されないよう、既定の2件 (@ai の行とコマンドの行) で撮る
-	actions: null,
 	aiService: 'gemini',
 	aiConsent: 'gemini'
 };
@@ -274,7 +269,7 @@ test.describe('描かれ方', () => {
 
 	test('下書き: 定型文の一覧', async () => {
 		await focusDraft(client);
-		await openPaletteWith(client, VK.J);
+		await openPaletteWith(client, VK.K);
 		await inspectDraft(client, 'snippets', { overlays: ['[role="dialog"]'] });
 	});
 
@@ -284,7 +279,7 @@ test.describe('描かれ方', () => {
 			prepare: async () => {
 				if (!(await readPaletteOpen(client))) {
 					await focusDraft(client);
-					await openPaletteWith(client, VK.J);
+					await openPaletteWith(client, VK.K);
 				}
 				const options = await client.$$('[role="dialog"] [role="option"]');
 				await options[options.length - 1].click();
@@ -300,42 +295,16 @@ test.describe('描かれ方', () => {
 		});
 	});
 
-	test('下書き: アクション一覧', async () => {
-		await focusDraft(client);
-		await openPaletteWith(client, VK.K);
-		await inspectDraft(client, 'actions', { overlays: ['[role="dialog"]'] });
-	});
-
-	test('下書き: 送信先の一覧', async () => {
-		await focusDraft(client);
-		await openPaletteWith(client, VK.L);
-		await inspectDraft(client, 'send-targets', { overlays: ['[role="dialog"]'] });
-	});
-
-	// 送っている最中の画面は撮らない。共有の鍵が無い機では、送信はつなぐ前に断られるため。
-	// 「送信中…」の文言と、その間のボタンが押せない見た目は、手での確認で見る
-
-	test('下書き: 送れなかったときのエラー', async () => {
-		// 共有の鍵が無いので、送るとすぐエラーが出る。エラーは表示言語を替えると消えるので、
-		// 撮るたびに、出ていなければ送り直す。共有の鍵がある機では、つなぐのを 3 秒待ってから
-		// つながらないエラーが出るので、その分も待つ
-		// 隠れている帯や消えかけの古い帯に当たらないよう、出ている帯があるかで見る
-		const readAlertShown = () =>
-			client.execute(() =>
-				[...document.querySelectorAll('[role="alert"]')].some(
-					(alert) => alert.checkVisibility() && alert.getBoundingClientRect().height > 0
-				)
-			);
-		await inspectDraft(client, 'send-error', {
-			overlays: ['[role="alert"]'],
+	test('下書き: 失敗の帯 (宛先の後ろが空)', async () => {
+		// @ai だけの行を実行すると、AI へは送らずに帯が出る。表示言語を替えると帯が消えるので、
+		// 出ていなければ出し直す
+		await setDraftValue(client, '@ai');
+		await inspectDraft(client, 'alert', {
 			prepare: async () => {
-				if (await readAlertShown()) return;
-				// 「送信」ボタン (送信先の▼とつながった左側)。キーは前面のウィンドウに届かないことがあるので押す
-				await client.$('main button.rounded-r-none').click();
-				await waitFor(readAlertShown, (shown) => shown, {
-					label: '送れなかったエラーが出る',
-					timeout: 10000
-				});
+				if ((await readAlert(client)) === null) {
+					await runDraft();
+					await waitAlert(client, '宛先の後ろが空の帯');
+				}
 			}
 		});
 	});
@@ -363,12 +332,12 @@ test.describe('描かれ方', () => {
 			}
 		}
 
-		// アクションの行を開いた状態。コマンドの行には文字コードの選択が出る
-		await client.$('[role="tab"][data-value="actions"]').click();
-		const actionsPanel = await client.$('[role="tabpanel"]:not([hidden])');
-		await expandAllRows(client, actionsPanel);
+		// 宛先の行を開いた状態。@sh の行には文字コードの選択が出る
+		await client.$('[role="tab"][data-value="snippets"]').click();
+		const snippetsPanel = await client.$('[role="tabpanel"]:not([hidden])');
+		await expandAllRows(client, snippetsPanel);
 		try {
-			await inspect(client, 'settings-actions-open', {
+			await inspect(client, 'settings-snippets-open', {
 				hwnd: settingsHwnd,
 				minSize: SETTINGS_MIN_SIZE,
 				// 狭い幅では文字コードの選択が下に隠れるので、そこまで送ってから撮る

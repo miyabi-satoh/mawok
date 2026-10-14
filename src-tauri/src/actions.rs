@@ -1,16 +1,16 @@
-//! アクション。
-//! 登録した1行のコマンドを実行して、結果を下書きに出す。行頭が `@ai` なら AI（ai.rs）へ、それ以外はシェル（command.rs）へ渡す。
-//! ここには実行先によらない決めごと（行の読み方、既定のアクション、失敗の種類）を置く
+//! 宛先へ出す。
+//! 1行目の行頭が `@ai` なら AI（ai.rs）へ、`@sh` ならシェル（command.rs）へ渡して、結果を下書きに出す（docs/actions.md）。
+//! ここには実行先によらない決めごと（行の読み方、既定の定型文、失敗の種類）を置く
 
 use crate::{
-    config::{Action, ActionEncoding, ActionOutput},
+    config::{ActionEncoding, ActionOutput, Snippet},
     i18n::Lang,
 };
 
-/// 行頭にあれば、残りを指示文として AI サービスへ送る印
+/// 行頭にあれば、残りを指示文として AI サービスへ送る宛先
 pub const AI_PREFIX: &str = "@ai";
-/// コマンドの行や指示文の中で、実行する文に置き換える印
-pub const TEXT_MARK: &str = "{{t}}";
+/// 行頭にあれば、残りをコマンドとしてその機のシェルで実行する宛先
+pub const SH_PREFIX: &str = "@sh";
 /// 言語を替えても同じ既定の翻訳アクションを見分けるための ID。
 const DEFAULT_TRANSLATE_ACTION_ID: &str = "6b6a77e6d4f846f2a8bbf953fbd0e0d3";
 /// 言語を替えても同じ既定の並べ替えアクションを見分けるための ID。
@@ -21,17 +21,51 @@ fn ai_line(instruction: &str) -> String {
     format!("{AI_PREFIX} {}", instruction.trim())
 }
 
-/// 行頭が `@ai` なら、その後ろ（前後の空白を除く）の指示文を返す。`@ai` の直後は空白か行の終わりに限る（`@aix` は AI の行ではない）
-pub fn ai_instruction(command: &str) -> Option<&str> {
-    let rest = command.trim_start().strip_prefix(AI_PREFIX)?;
+/// 行頭が宛先 `prefix` なら、その後ろ（前後の空白を除く）を返す。宛先の直後は空白か行の終わりに限る（`@aix` は `@ai` の行ではない）。
+/// 大文字と小文字は区別しない（`@AI` と打っても宛先として読む）
+fn addressed<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = line.trim_start();
+    let word = head.get(..prefix.len())?;
+    if !word.eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    let rest = &head[prefix.len()..];
     (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
 }
 
-/// 既定のアクション。設定ファイルにアクションの項目がないときに、今の表示言語で使う。
+/// 行頭が `@ai` なら、その後ろの指示文を返す
+pub fn ai_instruction(line: &str) -> Option<&str> {
+    addressed(line, AI_PREFIX)
+}
+
+/// 行頭が `@sh` なら、その後ろのコマンドを返す
+pub fn sh_command(line: &str) -> Option<&str> {
+    addressed(line, SH_PREFIX)
+}
+
+/// アクションが別の並びだったころのコマンドの行を、宛先で始まる定型文の本文にする。`@ai` の行はそのまま、ほかはシェルの行だったので `@sh` を付ける。
+/// 複数行の指示文は、改行の所だけを空白にして1行につなぐ。選ぶと出す定型文は本文が1行のものだけなので、つながないと、挿入するだけの定型文に変わる
+pub fn legacy_action_body(command: &str) -> String {
+    // コマンドを書いていなかった行は、一覧に出ない空の定型文のままにする
+    if command.trim().is_empty() {
+        command.to_string()
+    } else if ai_instruction(command).is_some() {
+        command
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        format!("{SH_PREFIX} {command}")
+    }
+}
+
+/// 既定の定型文。設定ファイルに定型文の項目がないときに、今の表示言語で使う。
 /// AI の見本（英訳）と、どの OS にも入っているコマンドの見本（`sort`。標準入力を並べ替えて返す）を1つずつ。
 /// Windows の `sort` はシステムの文字コードで読み書きするので、Shift_JIS にする。
 /// 文字コードの既定が OS で違うコマンドの見本は、同期しない行にしておく（docs/sync.md「同期する単位」）
-pub fn default_actions(lang: Lang) -> Vec<Action> {
+pub fn default_snippets(lang: Lang) -> Vec<Snippet> {
     let (translate, translate_instruction, sort) = match lang {
         Lang::Ja => (
             "英訳",
@@ -60,16 +94,16 @@ pub fn default_actions(lang: Lang) -> Vec<Action> {
         (
             DEFAULT_SORT_ACTION_ID,
             sort,
-            "sort".to_string(),
+            format!("{SH_PREFIX} sort"),
             sort_encoding,
             false,
         ),
     ]
     .into_iter()
-    .map(|(id, name, command, encoding, sync)| Action {
+    .map(|(id, name, body, encoding, sync)| Snippet {
         id: id.to_string(),
         name: name.to_string(),
-        command,
+        body,
         output: ActionOutput::Replace,
         encoding,
         enabled: true,
@@ -122,8 +156,6 @@ pub enum Failure {
     CommandNotFound,
     /// コマンドが 0 以外の終了コードで終わったか、シグナルで止まった
     CommandFailed,
-    /// 実行する文が大きすぎるか NUL を含み、行の `{{t}}` に埋め込めない（command.rs の embeddable）
-    TextNotEmbeddable,
     /// コマンドの行に改行がある。Windows の cmd は最初の改行より後ろを黙って捨てるので、実行しない（command.rs の run）
     #[cfg_attr(not(windows), allow(dead_code))]
     MultilineCommand,
@@ -161,7 +193,6 @@ impl Failure {
             Self::FolderMissing => "action.folder_missing",
             Self::CommandNotFound => "action.command_not_found",
             Self::CommandFailed => "action.command_failed",
-            Self::TextNotEmbeddable => "action.text_not_embeddable",
             Self::MultilineCommand => "action.multiline_command",
             Self::EmptyOutput => "action.empty_output",
             Self::OutputTooLarge => "action.output_too_large",
@@ -212,29 +243,29 @@ mod tests {
     #[test]
     fn only_the_command_sample_is_kept_out_of_sync() {
         for lang in [Lang::Ja, Lang::En] {
-            let synced: Vec<_> = default_actions(lang)
+            let synced: Vec<_> = default_snippets(lang)
                 .into_iter()
-                .map(|action| (action.command == "sort", action.sync))
+                .map(|snippet| (snippet.body == "@sh sort", snippet.sync))
                 .collect();
             assert_eq!(synced, [(false, true), (true, false)]);
         }
     }
 
     #[test]
-    fn has_one_ai_action_and_one_command_action_by_default_in_each_language() {
+    fn has_one_ai_row_and_one_command_row_by_default_in_each_language() {
         let mut ids: Option<Vec<String>> = None;
         for lang in [Lang::Ja, Lang::En] {
-            let actions = default_actions(lang);
-            assert_eq!(actions.len(), 2);
-            assert!(actions.iter().all(|action| !action.name.is_empty()
-                && action.enabled
-                && action.output == ActionOutput::Replace));
-            assert!(ai_instruction(&actions[0].command)
+            let snippets = default_snippets(lang);
+            assert_eq!(snippets.len(), 2);
+            assert!(snippets.iter().all(|snippet| !snippet.name.is_empty()
+                && snippet.enabled
+                && snippet.output == ActionOutput::Replace));
+            assert!(ai_instruction(&snippets[0].body)
                 .is_some_and(|instruction| !instruction.is_empty()));
-            assert_eq!(actions[1].command, "sort");
-            let current = actions
+            assert_eq!(sh_command(&snippets[1].body), Some("sort"));
+            let current = snippets
                 .iter()
-                .map(|action| action.id.clone())
+                .map(|snippet| snippet.id.clone())
                 .collect::<Vec<_>>();
             if let Some(ref ids) = ids {
                 assert_eq!(current.as_slice(), ids.as_slice());
@@ -246,14 +277,36 @@ mod tests {
 
     #[test]
     fn reads_the_ai_prefix_only_at_the_head_of_the_line() {
-        assert_eq!(ai_instruction("@ai 丁寧に: {{t}}"), Some("丁寧に: {{t}}"));
+        assert_eq!(ai_instruction("@ai 丁寧に: 敬語で"), Some("丁寧に: 敬語で"));
         assert_eq!(
             ai_instruction("  @ai\t訳して | sort "),
             Some("訳して | sort")
         );
         assert_eq!(ai_instruction("@ai"), Some(""));
+        assert_eq!(ai_instruction("@AI 訳して"), Some("訳して"));
         assert_eq!(ai_instruction("@aix"), None);
+        assert_eq!(ai_instruction("@あ"), None);
         assert_eq!(ai_instruction("echo @ai"), None);
         assert_eq!(ai_line(" 訳して "), "@ai 訳して");
+    }
+
+    #[test]
+    fn reads_the_sh_prefix_only_at_the_head_of_the_line() {
+        assert_eq!(sh_command("@sh sort | uniq"), Some("sort | uniq"));
+        assert_eq!(sh_command("@sh"), Some(""));
+        assert_eq!(sh_command("@Sh ls"), Some("ls"));
+        assert_eq!(sh_command("@shell ls"), None);
+        assert_eq!(sh_command("sort"), None);
+    }
+
+    #[test]
+    fn turns_a_command_line_from_the_separate_action_list_into_an_addressed_body() {
+        assert_eq!(legacy_action_body("sort"), "@sh sort");
+        assert_eq!(legacy_action_body("@ai 訳して"), "@ai 訳して");
+        assert_eq!(
+            legacy_action_body("@ai 丁寧に直して。\n  例: \"a  b\"\n\n直した文だけを返して。"),
+            "@ai 丁寧に直して。 例: \"a  b\" 直した文だけを返して。"
+        );
+        assert_eq!(legacy_action_body(""), "");
     }
 }

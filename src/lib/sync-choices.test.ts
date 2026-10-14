@@ -4,7 +4,8 @@ import type { SyncConflict } from '$lib/bindings/SyncConflict';
 import type { SyncValue } from '$lib/bindings/SyncValue';
 import { DEFAULT_TEXT_COLORS } from '$lib/color';
 import { m } from '$lib/paraglide/messages';
-import type { Action, Replacement, Snippet } from '$lib/settings.svelte';
+import type { Replacement, Snippet } from '$lib/settings.svelte';
+import { newSnippet } from '$lib/snippets';
 import { DEFAULT_DRAFT_KEYS } from '$lib/test-support/settings-view';
 import { choiceText, fromDifference, restoreChangeText, sideName } from './sync-choices';
 
@@ -17,13 +18,22 @@ const text = (thisDevice: SyncValue, otherDevice: SyncValue, platform = 'macos' 
 
 const pair = (label: string, value: string) => m.sync_choice_pair({ label, value });
 
-const widths = {
-	alphabet: 'keep',
-	digit: 'keep',
-	space: 'keep',
-	symbol: 'keep',
-	katakana: 'keep'
-} as const;
+/** 「文字を揃える」の1行。名前は、まとまりと行のラベル */
+const widthRow = (
+	type: string,
+	mine: string,
+	theirs: string,
+	item: string,
+	thisDevice: string,
+	otherDevice: string
+): [string, unknown, unknown, string, string, string] => [
+	type,
+	mine,
+	theirs,
+	m.sync_choice_label_sub({ group: m.settings_char_width(), item }),
+	thisDevice,
+	otherDevice
+];
 
 const replacement: Replacement = {
 	id: 'a',
@@ -33,20 +43,10 @@ const replacement: Replacement = {
 	sync: true
 };
 const snippet: Snippet = {
-	id: 'b',
-	name: '挨拶',
-	body: 'お世話になっております。\n佐藤です。',
-	sync: true
+	...newSnippet('挨拶', 'お世話になっております。\n佐藤です。'),
+	id: 'b'
 };
-const action: Action = {
-	id: 'c',
-	name: '英訳',
-	command: '@ai 英語に訳す',
-	output: 'replace',
-	encoding: 'utf-8',
-	enabled: true,
-	sync: true
-};
+const addressed: Snippet = { ...newSnippet('英訳', '@ai 英語に訳す'), id: 'c' };
 
 /**
  * 同期する設定の項目（docs/sync.md「同期する単位」）ごとの、名前と値の言い方。
@@ -99,20 +99,46 @@ const SETTINGS: [string, unknown, unknown, string, string, string][] = [
 		'、。',
 		m.settings_char_width_keep()
 	],
-	[
-		'char_widths',
-		{ ...widths, alphabet: 'half', katakana: 'full' },
-		{ ...widths, alphabet: 'full' },
-		m.settings_char_width(),
-		[
-			pair(m.settings_char_width_alphabet(), m.settings_char_width_half()),
-			pair(m.settings_char_width_katakana(), m.settings_char_width_full())
-		].join('\n'),
-		[
-			pair(m.settings_char_width_alphabet(), m.settings_char_width_full()),
-			pair(m.settings_char_width_katakana(), m.settings_char_width_keep())
-		].join('\n')
-	],
+	widthRow(
+		'alphabet_width',
+		'half',
+		'full',
+		m.settings_char_width_alphabet(),
+		m.settings_char_width_half(),
+		m.settings_char_width_full()
+	),
+	widthRow(
+		'digit_width',
+		'keep',
+		'half',
+		m.settings_char_width_digit(),
+		m.settings_char_width_keep(),
+		m.settings_char_width_half()
+	),
+	widthRow(
+		'space_width',
+		'full',
+		'keep',
+		m.settings_char_width_space(),
+		m.settings_char_width_full(),
+		m.settings_char_width_keep()
+	),
+	widthRow(
+		'symbol_width',
+		'half',
+		'keep',
+		m.settings_char_width_symbol(),
+		m.settings_char_width_half(),
+		m.settings_char_width_keep()
+	),
+	widthRow(
+		'katakana_width',
+		'full',
+		'keep',
+		m.settings_char_width_katakana(),
+		m.settings_char_width_full(),
+		m.settings_char_width_keep()
+	),
 	[
 		'exclude_from_clipboard_history',
 		true,
@@ -192,7 +218,7 @@ describe('choiceText', () => {
 	it('同期する設定の項目を、どれも見ている', () => {
 		// SyncValue の種類のうち、行と「削除」を除いたもの。足したら、上の表にも足す
 		const types: Record<
-			Exclude<SyncValue['type'], 'replacement' | 'snippet' | 'action' | 'deleted' | 'order'>,
+			Exclude<SyncValue['type'], 'replacement' | 'snippet' | 'deleted' | 'order'>,
 			true
 		> = {
 			language: true,
@@ -203,7 +229,11 @@ describe('choiceText', () => {
 			text_history_size: true,
 			trim_trailing_whitespace: true,
 			punctuation_style: true,
-			char_widths: true,
+			alphabet_width: true,
+			digit_width: true,
+			space_width: true,
+			symbol_width: true,
+			katakana_width: true,
 			exclude_from_clipboard_history: true,
 			text_font_size: true,
 			text_color_light: true,
@@ -266,25 +296,32 @@ describe('choiceText', () => {
 		});
 	});
 
-	it('アクションは、名前とコマンドに、違っている項目だけを添える', () => {
-		const theirs: Action = { ...action, output: 'insert', encoding: 'shift_jis', enabled: false };
-		expect(text({ type: 'action', value: action }, { type: 'action', value: theirs })).toEqual({
-			label: m.sync_choice_row_action({ name: '英訳' }),
-			thisDevice: [
-				'英訳',
-				'@ai 英語に訳す',
-				pair(m.settings_actions_output(), m.settings_actions_output_replace()),
-				pair(m.settings_actions_encoding(), 'UTF-8'),
-				pair(m.settings_actions_enabled_unnamed(), m.sync_choice_on())
-			].join('\n'),
-			otherDevice: [
-				'英訳',
-				'@ai 英語に訳す',
-				pair(m.settings_actions_output(), m.settings_actions_output_insert()),
-				pair(m.settings_actions_encoding(), 'Shift_JIS'),
-				pair(m.settings_actions_enabled_unnamed(), m.sync_choice_off())
-			].join('\n')
-		});
+	it('定型文は、名前と本文に、違っている項目だけを添える', () => {
+		const theirs: Snippet = {
+			...addressed,
+			output: 'insert',
+			encoding: 'shift_jis',
+			enabled: false
+		};
+		expect(text({ type: 'snippet', value: addressed }, { type: 'snippet', value: theirs })).toEqual(
+			{
+				label: m.sync_choice_row_snippet({ name: '英訳' }),
+				thisDevice: [
+					'英訳',
+					'@ai 英語に訳す',
+					pair(m.settings_snippets_output(), m.settings_snippets_output_replace()),
+					pair(m.settings_snippets_encoding(), 'UTF-8'),
+					pair(m.settings_snippets_enabled_unnamed(), m.sync_choice_on())
+				].join('\n'),
+				otherDevice: [
+					'英訳',
+					'@ai 英語に訳す',
+					pair(m.settings_snippets_output(), m.settings_snippets_output_insert()),
+					pair(m.settings_snippets_encoding(), 'Shift_JIS'),
+					pair(m.settings_snippets_enabled_unnamed(), m.sync_choice_off())
+				].join('\n')
+			}
+		);
 	});
 });
 

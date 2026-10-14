@@ -31,7 +31,13 @@ import {
 import { dragBottomRightCorner } from '../lib/input.mjs';
 import { countTrayIcons } from '../lib/tray.mjs';
 import { beginTestConfig, WINDOW_STATE_PATH } from '../lib/config.mjs';
-import { DRAFT_DEFAULT_SIZE, DRAFT_MIN_SIZE, SETTINGS_TITLE } from '../lib/app-conf.mjs';
+import {
+	DRAFT_DEFAULT_SIZE,
+	DRAFT_MIN_SIZE,
+	PROFILE,
+	PROFILE_ENV,
+	SETTINGS_TITLE
+} from '../lib/app-conf.mjs';
 import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
@@ -101,7 +107,11 @@ test.describe('下書きのウィンドウ', () => {
 		const iconsBefore = await waitFor(countTrayIcons, (count) => count >= 1, {
 			label: 'トレイのアイコン'
 		});
-		const second = spawn(APP_PATH, [], { stdio: 'ignore' });
+		// 単一起動はプロファイルごとなので、もとのアプリと同じプロファイルで起動する
+		const second = spawn(APP_PATH, [], {
+			stdio: 'ignore',
+			env: { ...process.env, [PROFILE_ENV]: PROFILE }
+		});
 		const exitCode = await new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				second.kill();

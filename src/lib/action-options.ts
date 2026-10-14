@@ -3,9 +3,9 @@ import type { ActionEncoding, ActionOutput } from '$lib/settings.svelte';
 
 /** 結果の出し方の選択肢 */
 export const OUTPUTS: { value: ActionOutput; name: () => string }[] = [
-	{ value: 'replace', name: m.settings_actions_output_replace },
-	{ value: 'insert', name: m.settings_actions_output_insert },
-	{ value: 'none', name: m.settings_actions_output_none }
+	{ value: 'replace', name: m.settings_snippets_output_replace },
+	{ value: 'insert', name: m.settings_snippets_output_insert },
+	{ value: 'none', name: m.settings_snippets_output_none }
 ];
 
 /** コマンドの文字コードの選択肢（docs/actions.md「コマンド」）。名前は文字コードの名前なので、表示言語で変えない */

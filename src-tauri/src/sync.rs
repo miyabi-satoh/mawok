@@ -21,12 +21,12 @@ use crate::{
     account, actions,
     ai::AiService,
     atomic_file,
-    config::{self, valid_item_id, Action, Config, Language, Snippet, SyncRow, Theme},
+    config::{self, valid_item_id, Config, Language, Snippet, SyncRow, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     history_store::{self, History},
     i18n::Lang,
     shared_key,
-    text::{CharWidths, PunctuationStyle, Replacement},
+    text::{KatakanaWidth, PunctuationStyle, Replacement, WidthStyle},
 };
 
 pub const STATE_FILE_NAME: &str = "sync-state.json";
@@ -237,17 +237,15 @@ pub enum SyncKind {
     Keys,
     Replacements,
     Snippets,
-    Actions,
     History,
 }
 
 impl SyncKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::Settings,
         Self::Keys,
         Self::Replacements,
         Self::Snippets,
-        Self::Actions,
         Self::History,
     ];
 
@@ -261,7 +259,6 @@ impl SyncKind {
             Self::Keys => "keys",
             Self::Replacements => "replacements",
             Self::Snippets => "snippets",
-            Self::Actions => "actions",
             Self::History => "history",
         }
     }
@@ -276,23 +273,17 @@ pub struct Kinds {
     pub keys: bool,
     pub replacements: bool,
     pub snippets: bool,
-    pub actions: bool,
     pub history: bool,
 }
 
 impl Kinds {
     pub fn any(self) -> bool {
-        self.settings
-            || self.keys
-            || self.replacements
-            || self.snippets
-            || self.actions
-            || self.history
+        self.settings || self.keys || self.replacements || self.snippets || self.history
     }
 
     /// 履歴のほかの（collection `settings` に置く）種類のどれかを同期するか。
     fn any_settings(self) -> bool {
-        self.settings || self.keys || self.replacements || self.snippets || self.actions
+        self.settings || self.keys || self.replacements || self.snippets
     }
 
     pub fn enabled(self, kind: SyncKind) -> bool {
@@ -301,7 +292,6 @@ impl Kinds {
             SyncKind::Keys => self.keys,
             SyncKind::Replacements => self.replacements,
             SyncKind::Snippets => self.snippets,
-            SyncKind::Actions => self.actions,
             SyncKind::History => self.history,
         }
     }
@@ -313,7 +303,6 @@ pub fn kinds(config: &Config) -> Kinds {
         keys: config.sync_keys,
         replacements: config.sync_replacements,
         snippets: config.sync_snippets,
-        actions: config.sync_actions,
         history: config.sync_history,
     }
 }
@@ -493,7 +482,6 @@ enum Kind<'a> {
     Setting(&'a str),
     Replacement(&'a str),
     Snippet(&'a str),
-    Action(&'a str),
     Order(&'a str),
 }
 
@@ -504,8 +492,7 @@ impl Kind<'_> {
             Self::Setting(_) => SyncKind::Settings,
             Self::Replacement(_) | Self::Order("replacements") => SyncKind::Replacements,
             Self::Snippet(_) | Self::Order("snippets") => SyncKind::Snippets,
-            Self::Action(_) | Self::Order("actions") => SyncKind::Actions,
-            Self::Order(_) => unreachable!("only the three row orders are known"),
+            Self::Order(_) => unreachable!("only the two row orders are known"),
         }
     }
 }
@@ -524,13 +511,9 @@ fn kind(key: &ItemKey) -> Option<Kind<'_>> {
     if let Some(id) = key.id.strip_prefix("n_") {
         return valid_item_id(id).then_some(Kind::Snippet(id));
     }
-    if let Some(id) = key.id.strip_prefix("a_") {
-        return valid_item_id(id).then_some(Kind::Action(id));
-    }
     match key.id.as_str() {
         "o_replacements" => Some(Kind::Order("replacements")),
         "o_snippets" => Some(Kind::Order("snippets")),
-        "o_actions" => Some(Kind::Order("actions")),
         _ => None,
     }
 }
@@ -554,7 +537,11 @@ pub const SYNCABLE_SETTING_NAMES: &[&str] = &[
     "text_history_size",
     "trim_trailing_whitespace",
     "punctuation_style",
-    "char_widths",
+    "alphabet_width",
+    "digit_width",
+    "space_width",
+    "symbol_width",
+    "katakana_width",
     "exclude_from_clipboard_history",
     "text_font_family",
     "text_font_size",
@@ -671,7 +658,11 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
             "text_history_size" => json(config.text_history_size),
             "trim_trailing_whitespace" => json(config.trim_trailing_whitespace),
             "punctuation_style" => json(config.punctuation_style),
-            "char_widths" => json(config.char_widths),
+            "alphabet_width" => json(config.char_widths.alphabet),
+            "digit_width" => json(config.char_widths.digit),
+            "space_width" => json(config.char_widths.space),
+            "symbol_width" => json(config.char_widths.symbol),
+            "katakana_width" => json(config.char_widths.katakana),
             "exclude_from_clipboard_history" => json(config.exclude_from_clipboard_history),
             "text_font_family" => json(config.text_font_family.clone()),
             "text_font_size" => json(config.text_font_size),
@@ -687,9 +678,8 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
     items.insert(hotkey_item(), json(config.hotkey.clone()));
     items.insert(text_window_keys_item(), draft_keys_value(config));
     put_rows(&mut items, 'r', "replacements", &config.replacements);
-    put_rows(&mut items, 'n', "snippets", &config.snippets);
-    if let Some(actions) = &config.actions {
-        put_rows(&mut items, 'a', "actions", actions);
+    if let Some(snippets) = &config.snippets {
+        put_rows(&mut items, 'n', "snippets", snippets);
     }
     items
 }
@@ -753,9 +743,22 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
             &mut config.punctuation_style,
             parse::<PunctuationStyle>(value),
         ),
-        Some(Kind::Setting("char_widths")) => {
-            set_if(&mut config.char_widths, parse::<CharWidths>(value))
+        Some(Kind::Setting("alphabet_width")) => {
+            set_if(&mut config.char_widths.alphabet, parse::<WidthStyle>(value))
         }
+        Some(Kind::Setting("digit_width")) => {
+            set_if(&mut config.char_widths.digit, parse::<WidthStyle>(value))
+        }
+        Some(Kind::Setting("space_width")) => {
+            set_if(&mut config.char_widths.space, parse::<WidthStyle>(value))
+        }
+        Some(Kind::Setting("symbol_width")) => {
+            set_if(&mut config.char_widths.symbol, parse::<WidthStyle>(value))
+        }
+        Some(Kind::Setting("katakana_width")) => set_if(
+            &mut config.char_widths.katakana,
+            parse::<KatakanaWidth>(value),
+        ),
         Some(Kind::Setting("exclude_from_clipboard_history")) => {
             set_if(&mut config.exclude_from_clipboard_history, parse(value))
         }
@@ -811,70 +814,68 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
             set_if(&mut config.text_font_family, parse(value))
         }
         Some(Kind::Replacement(id)) => apply_row(&mut config.replacements, id, value),
-        Some(Kind::Snippet(id)) => apply_row(&mut config.snippets, id, value),
-        Some(Kind::Action(id)) => apply_action_row(config, id, value),
+        Some(Kind::Snippet(id)) => apply_snippet_row(config, id, value),
         Some(Kind::Order("replacements")) => apply_order(&mut config.replacements, value),
-        Some(Kind::Order("snippets")) => apply_order(&mut config.snippets, value),
-        // 入れられない並びのために、既定のアクションを書き出さない
-        Some(Kind::Order("actions")) => {
-            order_ids(value).is_some() && apply_order(synced_actions(config), value)
+        // 入れられない並びのために、既定の定型文を書き出さない
+        Some(Kind::Order("snippets")) => {
+            order_ids(value).is_some() && apply_order(synced_snippets(config), value)
         }
         _ => false,
     }
 }
 
-/// アクションの行。既定のアクションのままのデバイスでは、同期しない既定のアクションだけを設定に書き出す
+/// 定型文の行。既定の定型文のままのデバイスでは、同期しない既定の定型文だけを設定に書き出す
 /// （docs/sync.md「同期する単位」）。同期する行は、届いたものだけにする。
-fn synced_actions(config: &mut Config) -> &mut Vec<Action> {
+fn synced_snippets(config: &mut Config) -> &mut Vec<Snippet> {
     let language = config.language;
     config
-        .actions
+        .snippets
         .get_or_insert_with(|| unsynced_defaults(language, None))
 }
 
-fn default_actions_for(language: Language) -> Vec<Action> {
-    actions::default_actions(Lang::resolve(language, Lang::system()))
+fn default_snippets_for(language: Language) -> Vec<Snippet> {
+    actions::default_snippets(Lang::resolve(language, Lang::system()))
 }
 
-/// 設定に書き出す既定のアクション。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
-fn unsynced_defaults(language: Language, detached: Option<&str>) -> Vec<Action> {
-    let mut defaults = default_actions_for(language);
-    for action in &mut defaults {
-        if detached == Some(action.id.as_str()) {
-            action.sync = false;
+/// 設定に書き出す既定の定型文。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
+fn unsynced_defaults(language: Language, detached: Option<&str>) -> Vec<Snippet> {
+    let mut defaults = default_snippets_for(language);
+    for snippet in &mut defaults {
+        if detached == Some(snippet.id.as_str()) {
+            snippet.sync = false;
         }
     }
-    defaults.retain(|action| !action.sync);
+    defaults.retain(|snippet| !snippet.sync);
     defaults
 }
 
-/// 既定で同期する既定のアクションか。
-fn synced_default_action(id: &str) -> bool {
-    actions::default_actions(crate::i18n::Lang::En)
+/// 既定で同期する既定の定型文か。
+fn synced_default_snippet(id: &str) -> bool {
+    actions::default_snippets(crate::i18n::Lang::En)
         .iter()
-        .any(|action| action.id == id && action.sync)
+        .any(|snippet| snippet.id == id && snippet.sync)
 }
 
-fn apply_action_row(config: &mut Config, id: &str, value: &Value) -> bool {
-    // 入れられない行のために、既定のアクションを書き出さない
-    if parse::<Action>(value).is_none() {
+fn apply_snippet_row(config: &mut Config, id: &str, value: &Value) -> bool {
+    // 入れられない行のために、既定の定型文を書き出さない
+    if parse::<Snippet>(value).is_none() {
         return false;
     }
-    let rows = synced_actions(config);
+    let rows = synced_snippets(config);
     let is_new = rows.iter().all(|row| row.id != id);
     if !apply_row(rows, id, value) {
         return false;
     }
     if is_new {
-        seat_default_action(rows);
+        seat_default_snippet(rows);
     }
     true
 }
 
-/// 末尾に足した行が既定のアクションなら、既定の並びで次にある同期しない既定のアクションの前へ動かす。
+/// 末尾に足した行が既定の定型文なら、既定の並びで次にある同期しない既定の定型文の前へ動かす。
 /// 同期しない行は直前の行の後ろに置く決まりなので、並びが届いたときに、既定の並びのとおりに付いて動く。
-fn seat_default_action(rows: &mut Vec<Action>) {
-    let defaults = actions::default_actions(crate::i18n::Lang::En);
+fn seat_default_snippet(rows: &mut Vec<Snippet>) {
+    let defaults = actions::default_snippets(crate::i18n::Lang::En);
     let Some(added) = rows.last() else {
         return;
     };
@@ -1001,9 +1002,8 @@ fn apply_order<T: SyncRow>(rows: &mut Vec<T>, value: &Value) -> bool {
 fn remove_local(config: &mut Config, item: &ItemKey) -> bool {
     match kind(item) {
         Some(Kind::Replacement(id)) => remove_row(&mut config.replacements, id),
-        Some(Kind::Snippet(id)) => remove_row(&mut config.snippets, id),
-        Some(Kind::Action(id)) => config
-            .actions
+        Some(Kind::Snippet(id)) => config
+            .snippets
             .as_mut()
             .is_some_and(|rows| remove_row(rows, id)),
         _ => false,
@@ -1012,13 +1012,12 @@ fn remove_local(config: &mut Config, item: &ItemKey) -> bool {
 fn detach_local(config: &mut Config, item: &ItemKey) -> bool {
     match kind(item) {
         Some(Kind::Replacement(id)) => detach_row(&mut config.replacements, id),
-        Some(Kind::Snippet(id)) => detach_row(&mut config.snippets, id),
-        Some(Kind::Action(id)) => match &mut config.actions {
+        Some(Kind::Snippet(id)) => match &mut config.snippets {
             Some(rows) => detach_row(rows, id),
-            // 既定のアクションのままのデバイスでは、外された既定のアクションを同期しない行として書き出す。
+            // 既定の定型文のままのデバイスでは、外された既定の定型文を同期しない行として書き出す。
             // 書き出さないと、並びが届いたときに、誰も消していないのに手元から消える
-            None if synced_default_action(id) => {
-                config.actions = Some(unsynced_defaults(config.language, Some(id)));
+            None if synced_default_snippet(id) => {
+                config.snippets = Some(unsynced_defaults(config.language, Some(id)));
                 true
             }
             None => false,
@@ -1046,11 +1045,10 @@ fn detached(config: &Config, item: &ItemKey) -> bool {
             .replacements
             .iter()
             .any(|row| row.id == id && !row.sync),
-        Some(Kind::Snippet(id)) => config.snippets.iter().any(|row| row.id == id && !row.sync),
-        Some(Kind::Action(id)) => match &config.actions {
+        Some(Kind::Snippet(id)) => match &config.snippets {
             Some(rows) => rows.iter().any(|row| row.id == id && !row.sync),
-            // 既定のアクションのままでも、同期しない既定のアクションは手元の行
-            None => actions::default_actions(crate::i18n::Lang::En)
+            // 既定の定型文のままでも、同期しない既定の定型文は手元の行
+            None => actions::default_snippets(crate::i18n::Lang::En)
                 .iter()
                 .any(|row| row.id == id && !row.sync),
         },
@@ -1071,8 +1069,7 @@ fn synced_ids<T: SyncRow>(rows: &[T]) -> BTreeSet<&str> {
 fn settled_value(config: &Config, key: &ItemKey, value: &Value) -> Value {
     let synced = match kind(key) {
         Some(Kind::Order("replacements")) => synced_ids(&config.replacements),
-        Some(Kind::Order("snippets")) => synced_ids(&config.snippets),
-        Some(Kind::Order("actions")) => synced_ids(config.actions.as_deref().unwrap_or_default()),
+        Some(Kind::Order("snippets")) => synced_ids(config.snippets.as_deref().unwrap_or_default()),
         _ => return value.clone(),
     };
     let Some(ids) = order_ids(value) else {
@@ -1119,11 +1116,8 @@ fn dedupe_initial_config_rows(config: &mut Config, state: &State, initial: &Init
         changed |= dedupe_initial_rows(&mut config.replacements, &on_server("r_"));
     }
     if initial.for_kind(SyncKind::Snippets) {
-        changed |= dedupe_initial_rows(&mut config.snippets, &on_server("n_"));
-    }
-    if initial.for_kind(SyncKind::Actions) {
-        if let Some(actions) = &mut config.actions {
-            changed |= dedupe_initial_rows(actions, &on_server("a_"));
+        if let Some(snippets) = &mut config.snippets {
+            changed |= dedupe_initial_rows(snippets, &on_server("n_"));
         }
     }
     changed
@@ -1447,8 +1441,8 @@ fn reconcile_as(
         .filter(|remote| sync_enabled(local, &remote.key))
         .cloned()
         .collect();
-    // 言語を先に入れてから、None のアクションを既定から実体化する。並びは最後にしないと同じ回の行を並べ替えられない。
-    // 外した印は行より先に入れる。行が先に既定のアクションを実体化すると、外された既定のアクションを残せない。
+    // 言語を先に入れてから、None の定型文を既定から実体化する。並びは最後にしないと同じ回の行を並べ替えられない。
+    // 外した印は行より先に入れる。行が先に既定の定型文を実体化すると、外された既定の定型文を残せない。
     sorted.sort_by_key(|item| {
         (
             match kind(&item.key) {
@@ -1505,12 +1499,12 @@ fn reconcile_as(
         state.conflicts.contains(name) || state.ignored.contains_key(name)
     };
     let mut writes = Vec::new();
-    // 既定で同期する既定のアクションを、一度も書かないまま同期から外した。窓口に項目が無いと、ほかのデバイスには
+    // 既定で同期する既定の定型文を、一度も書かないまま同期から外した。窓口に項目が無いと、ほかのデバイスには
     // 並びから消えたことしか伝わらず、消した行と見分けられないので、外した印を書く。
     // 何回かに分けて書くときに、その行を抜いた並びだけが先に届かないよう、ほかの項目より前に積む
-    if kinds(&config).actions {
-        for default in actions::default_actions(crate::i18n::Lang::En) {
-            let key = ItemKey::new(SETTINGS, row_id('a', &default.id));
+    if kinds(&config).snippets {
+        for default in actions::default_snippets(crate::i18n::Lang::En) {
+            let key = ItemKey::new(SETTINGS, row_id('n', &default.id));
             let name = key.name();
             if default.sync
                 && detached(&config, &key)
@@ -1594,7 +1588,11 @@ pub enum SyncValue {
     TextHistorySize(u16),
     TrimTrailingWhitespace(bool),
     PunctuationStyle(PunctuationStyle),
-    CharWidths(CharWidths),
+    AlphabetWidth(WidthStyle),
+    DigitWidth(WidthStyle),
+    SpaceWidth(WidthStyle),
+    SymbolWidth(WidthStyle),
+    KatakanaWidth(KatakanaWidth),
     ExcludeFromClipboardHistory(bool),
     TextFontSize(u16),
     TextColorLight(String),
@@ -1607,7 +1605,6 @@ pub enum SyncValue {
     TextFontFamily(String),
     Replacement(Replacement),
     Snippet(Snippet),
-    Action(Action),
     /// 同期する行の並び。食い違いでは自動で合わせるが、控えへ戻すときは利用者に知らせる。
     Order(String),
     /// 行を消した。
@@ -1647,7 +1644,7 @@ pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
     let mut rejected = Vec::new();
     let initial_backup_items = config_items(backup);
     let (hotkey, keys) = (hotkey_item(), text_window_keys_item());
-    // 設定（言語）を先に入れる。控えが既定のアクションのままなら、この後の表示言語で実体化するため。
+    // 設定（言語）を先に入れる。控えが既定の定型文のままなら、この後の表示言語で実体化するため。
     for (key, value) in initial_backup_items.iter().filter(|(key, _)| {
         matches!(kind(key), Some(Kind::Setting(_))) && **key != hotkey && **key != keys
     }) {
@@ -1656,20 +1653,17 @@ pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
         }
     }
     let mut effective_backup = backup.clone();
-    if effective_backup.actions.is_none() {
-        effective_backup.actions = Some(default_actions_for(restored.language));
+    if effective_backup.snippets.is_none() {
+        effective_backup.snippets = Some(default_snippets_for(restored.language));
     }
     if current.sync_replacements {
         match_restore_rows(&mut effective_backup.replacements, &current.replacements);
     }
     if current.sync_snippets {
-        match_restore_rows(&mut effective_backup.snippets, &current.snippets);
-    }
-    if current.sync_actions {
-        if let Some(backup_actions) = &mut effective_backup.actions {
+        if let Some(backup_snippets) = &mut effective_backup.snippets {
             match_restore_rows(
-                backup_actions,
-                current.actions.as_deref().unwrap_or_default(),
+                backup_snippets,
+                current.snippets.as_deref().unwrap_or_default(),
             );
         }
     }
@@ -1722,11 +1716,11 @@ pub fn restore_config(current: &Config, backup: &Config) -> RestoreConfig {
     }) {
         let _ = remove_local(&mut restored, key);
     }
-    // 今も控えも既定のアクションのままなら、比べるために実体化した行を、既定のままという表現へ戻す。
+    // 今も控えも既定の定型文のままなら、比べるために実体化した行を、既定のままという表現へ戻す。
     // 今が行を持っているときは戻さない。None にすると行の項目が無くなり、次の同期が、記録にある行を
     // 消したものとして窓口へ書いて、ほかのデバイスの行まで消す
-    if backup.actions.is_none() && current.actions.is_none() && current.sync_actions {
-        restored.actions = None;
+    if backup.snippets.is_none() && current.snippets.is_none() && current.sync_snippets {
+        restored.snippets = None;
     }
     RestoreConfig {
         config: restored,
@@ -1812,11 +1806,10 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
     }
     Some(match kind(key)? {
         Kind::Replacement(id) => row(&config.replacements, id, SyncValue::Replacement),
-        Kind::Snippet(id) => row(&config.snippets, id, SyncValue::Snippet),
-        Kind::Action(id) => row(
-            config.actions.as_deref().unwrap_or_default(),
+        Kind::Snippet(id) => row(
+            config.snippets.as_deref().unwrap_or_default(),
             id,
-            SyncValue::Action,
+            SyncValue::Snippet,
         ),
         Kind::Order(_) => return None,
         Kind::Setting(name) if name == hotkey_name() => SyncValue::Hotkey(config.hotkey.clone()),
@@ -1840,7 +1833,11 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
                 SyncValue::TrimTrailingWhitespace(config.trim_trailing_whitespace)
             }
             "punctuation_style" => SyncValue::PunctuationStyle(config.punctuation_style),
-            "char_widths" => SyncValue::CharWidths(config.char_widths),
+            "alphabet_width" => SyncValue::AlphabetWidth(config.char_widths.alphabet),
+            "digit_width" => SyncValue::DigitWidth(config.char_widths.digit),
+            "space_width" => SyncValue::SpaceWidth(config.char_widths.space),
+            "symbol_width" => SyncValue::SymbolWidth(config.char_widths.symbol),
+            "katakana_width" => SyncValue::KatakanaWidth(config.char_widths.katakana),
             "exclude_from_clipboard_history" => {
                 SyncValue::ExcludeFromClipboardHistory(config.exclude_from_clipboard_history)
             }
@@ -3001,10 +2998,10 @@ mod tests {
     #[test]
     fn a_kind_started_later_is_initial_only_for_that_kind() {
         let local = Config {
-            snippets: vec![
+            snippets: Some(vec![
                 snippet('a', "same".to_string()),
                 snippet('b', "same".to_string()),
-            ],
+            ]),
             replacements: vec![replacement('c', "same"), replacement('d', "same")],
             ..Config::default()
         };
@@ -3030,12 +3027,12 @@ mod tests {
                 SETTINGS,
                 &snippet_key.id,
                 10,
-                row_value(&local.snippets[0]),
+                row_value(&local.snippets.as_ref().unwrap()[0]),
             )],
             "key",
             10,
         );
-        assert_eq!(result.config.snippets.len(), 1);
+        assert_eq!(result.config.snippets.unwrap().len(), 1);
         assert_eq!(result.config.replacements.len(), 2);
     }
 
@@ -3133,20 +3130,14 @@ mod tests {
             enabled: true,
             sync: true,
         });
-        config.snippets.push(Snippet {
-            id: id.clone(),
-            name: "name".into(),
-            body: "body".into(),
-            sync: true,
-        });
-        let mut actions = actions::default_actions(crate::i18n::Lang::En);
-        actions.push(Action {
+        let mut snippets = actions::default_snippets(crate::i18n::Lang::En);
+        snippets.push(Snippet {
             id,
             name: "name".into(),
-            command: "command".into(),
-            ..Action::default()
+            body: "body".into(),
+            ..Snippet::default()
         });
-        config.actions = Some(actions);
+        config.snippets = Some(snippets);
         for key in config_items(&config).into_keys() {
             assert_eq!(key.collection, SETTINGS, "{}", key.id);
             assert!(valid_wire_id(&key.id), "{}", key.id);
@@ -3204,10 +3195,10 @@ mod tests {
     }
 
     #[test]
-    fn conversion_omits_default_actions_not_written_to_config() {
+    fn conversion_omits_default_snippets_not_written_to_config() {
         assert!(!config_items(&Config::default())
             .keys()
-            .any(|key| key.id.starts_with("a_") || key.id == "o_actions"));
+            .any(|key| key.id.starts_with("n_") || key.id == "o_snippets"));
     }
 
     #[test]
@@ -3425,10 +3416,161 @@ mod tests {
         let items = [
             remote("history", "s_theme", 2, json!("dark")),
             remote(SETTINGS, "x_future", 3, json!(true)),
+            // 文字を揃える設定を、種類ごとでなく1項目に置いた形
+            remote(
+                SETTINGS,
+                "s_char_widths",
+                3,
+                json!({ "alphabet": "full", "digit": "half", "space": "keep", "symbol": "keep", "katakana": "full" }),
+            ),
         ];
-        let result = reconcile(&local, Some(recorded(&local)), &items, "key", 3);
+        let mut state = recorded(&local);
+        state.items.insert(
+            "settings\0s_char_widths".to_string(),
+            Seen {
+                seq: 1,
+                hash: hash_plain(&json!({})),
+            },
+        );
+        let result = reconcile(&local, Some(state), &items, "key", 3);
         assert_eq!(result.config, local);
         assert!(result.state.ignored.is_empty());
+        assert!(result.writes.is_empty());
+    }
+
+    fn widths(alphabet: WidthStyle, digit: WidthStyle, space: WidthStyle) -> Config {
+        let mut config = Config::default();
+        config.char_widths.alphabet = alphabet;
+        config.char_widths.digit = digit;
+        config.char_widths.space = space;
+        config
+    }
+
+    fn written_ids(result: &Reconcile) -> Vec<&str> {
+        result
+            .writes
+            .iter()
+            .map(|write| write.key.id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn char_widths_are_read_and_written_one_kind_at_a_time() {
+        let base = Config::default();
+        let local = widths(WidthStyle::Full, WidthStyle::Keep, WidthStyle::Keep);
+        let result = reconcile(
+            &local,
+            Some(recorded(&base)),
+            &[
+                remote(SETTINGS, "s_digit_width", 2, json!("half")),
+                remote(SETTINGS, "s_katakana_width", 3, json!("full")),
+            ],
+            "key",
+            3,
+        );
+        let mut expected = widths(WidthStyle::Full, WidthStyle::Half, WidthStyle::Keep);
+        expected.char_widths.katakana = KatakanaWidth::Full;
+        assert_eq!(result.config, expected);
+        assert!(result.state.conflicts.is_empty());
+        assert_eq!(written_ids(&result), ["s_alphabet_width"]);
+        assert_eq!(result.writes[0].plain, Some(json!("full")));
+    }
+
+    #[test]
+    fn the_first_sync_takes_each_char_width_kind_that_the_server_has() {
+        let local = widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Keep);
+        let result = reconcile(
+            &local,
+            None,
+            &[remote(SETTINGS, "s_digit_width", 1, json!("half"))],
+            "key",
+            1,
+        );
+        assert_eq!(
+            result.config,
+            widths(WidthStyle::Full, WidthStyle::Half, WidthStyle::Keep)
+        );
+        let written = written_ids(&result);
+        assert!(written.contains(&"s_alphabet_width"));
+        assert!(!written.contains(&"s_digit_width"));
+    }
+
+    #[test]
+    fn a_char_width_conflict_stops_only_that_kind() {
+        let base = Config::default();
+        let local = widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Keep);
+        let items = [
+            remote(SETTINGS, "s_alphabet_width", 2, json!("half")),
+            remote(SETTINGS, "s_space_width", 3, json!("half")),
+        ];
+        let result = reconcile(&local, Some(recorded(&base)), &items, "key", 3);
+        assert_eq!(
+            result.config,
+            widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Half)
+        );
+        assert_eq!(
+            result.state.conflicts.iter().collect::<Vec<_>>(),
+            ["settings\0s_alphabet_width"]
+        );
+        assert_eq!(written_ids(&result), ["s_digit_width"]);
+        assert_eq!(
+            conflicts(&result.config, &result.state, &items),
+            [SyncConflict {
+                id: "s_alphabet_width".to_string(),
+                seq: 2,
+                this_device: SyncValue::AlphabetWidth(WidthStyle::Full),
+                other_device: SyncValue::AlphabetWidth(WidthStyle::Half),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_excluded_char_width_kind_is_neither_read_nor_written() {
+        let base = Config::default();
+        let mut local = widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Keep);
+        local.sync_excluded_settings = vec!["digit_width".to_string()];
+        let result = reconcile(
+            &local,
+            Some(recorded(&base)),
+            &[
+                remote(SETTINGS, "s_digit_width", 2, json!("half")),
+                remote(SETTINGS, "s_space_width", 3, json!("half")),
+            ],
+            "key",
+            3,
+        );
+        assert_eq!(result.config.char_widths.digit, WidthStyle::Full);
+        assert_eq!(result.config.char_widths.space, WidthStyle::Half);
+        assert!(result.state.conflicts.is_empty());
+        assert_eq!(written_ids(&result), ["s_alphabet_width"]);
+    }
+
+    #[test]
+    fn unknown_char_width_values_are_not_applied_or_written_back() {
+        let local = Config::default();
+        for (id, value) in [
+            ("s_alphabet_width", json!("wide")),
+            // カタカナは半角に揃えない
+            ("s_katakana_width", json!("half")),
+            ("s_digit_width", json!({ "digit": "half" })),
+        ] {
+            let result = reconcile(
+                &local,
+                Some(recorded(&local)),
+                &[remote(SETTINGS, id, 2, value)],
+                "key",
+                2,
+            );
+            assert_eq!(result.config, local, "{id}");
+            assert!(
+                result
+                    .state
+                    .ignored
+                    .contains_key(&format!("settings\0{id}")),
+                "{id}"
+            );
+            assert!(result.writes.is_empty(), "{id}");
+        }
     }
 
     #[test]
@@ -3443,12 +3585,12 @@ mod tests {
             text_history_size: 42,
             trim_trailing_whitespace: false,
             punctuation_style: PunctuationStyle::Comma,
-            char_widths: CharWidths {
-                alphabet: crate::text::WidthStyle::Full,
-                digit: crate::text::WidthStyle::Half,
-                space: crate::text::WidthStyle::Full,
-                symbol: crate::text::WidthStyle::Half,
-                katakana: crate::text::KatakanaWidth::Full,
+            char_widths: crate::text::CharWidths {
+                alphabet: WidthStyle::Full,
+                digit: WidthStyle::Half,
+                space: WidthStyle::Full,
+                symbol: WidthStyle::Half,
+                katakana: KatakanaWidth::Full,
             },
             exclude_from_clipboard_history: false,
             hotkey: "Alt+KeyX".into(),
@@ -3470,23 +3612,17 @@ mod tests {
             enabled: false,
             sync: true,
         });
-        config.snippets.push(Snippet {
+        let mut snippets = actions::default_snippets(crate::i18n::Lang::En);
+        snippets.push(Snippet {
             id: id.clone(),
             name: "name".into(),
             body: "body".into(),
-            sync: true,
-        });
-        let mut actions = actions::default_actions(crate::i18n::Lang::En);
-        actions.push(Action {
-            id: id.clone(),
-            name: "action".into(),
-            command: "command".into(),
             output: crate::config::ActionOutput::Insert,
             encoding: crate::config::ActionEncoding::ShiftJis,
             enabled: false,
             sync: true,
         });
-        config.actions = Some(actions);
+        config.snippets = Some(snippets);
         let items = config_items(&config);
         let mut restored = Config::default();
         for (key, value) in items.iter().filter(|(key, _)| !is_order(key)) {
@@ -3763,12 +3899,12 @@ mod tests {
         *config.text_window_keys.get_mut(DraftAction::HistoryOlder) = "Alt+KeyP".into();
         config
             .text_window_keys
-            .get_mut(DraftAction::SendTargets)
+            .get_mut(DraftAction::ChangeFolder)
             .clear();
-        config.yielded_draft_keys = vec![DraftAction::SendTargets];
+        config.yielded_draft_keys = vec![DraftAction::ChangeFolder];
         let value = config_items(&config)[&text_window_keys_item()].clone();
         assert_eq!(value["history_older"], json!("Alt+KeyP"));
-        assert!(value.get("send_targets").is_none(), "{value}");
+        assert!(value.get("change_folder").is_none(), "{value}");
 
         let mut received = Config::default();
         assert!(apply_value(&mut received, &text_window_keys_item(), &value));
@@ -3778,8 +3914,36 @@ mod tests {
         );
         // 書いていない操作は、重なりが無ければ既定のキーを使う
         assert_eq!(
-            received.text_window_keys.get(DraftAction::SendTargets),
-            DraftKeys::default().get(DraftAction::SendTargets)
+            received.text_window_keys.get(DraftAction::ChangeFolder),
+            DraftKeys::default().get(DraftAction::ChangeFolder)
+        );
+    }
+
+    #[test]
+    fn text_window_keys_with_actions_this_version_does_not_have_are_taken() {
+        // 知らない操作のキーは読み捨て、知っている操作のキーだけを入れる
+        let value = json!({
+            "copy": "Alt+KeyP",
+            "send": "CommandOrControl+KeyJ",
+            "send_targets": "CommandOrControl+KeyL",
+            "insert_received": "CommandOrControl+KeyI",
+            "discard_received": "",
+        });
+        let mut received = Config::default();
+        assert!(apply_value(&mut received, &text_window_keys_item(), &value));
+        assert_eq!(received.text_window_keys.get(DraftAction::Copy), "Alt+KeyP");
+        // 知らない操作のキーは、どの操作のキーにもならない
+        assert_eq!(
+            received
+                .text_window_keys
+                .action_for("CommandOrControl+KeyL"),
+            None
+        );
+        assert_eq!(
+            received
+                .text_window_keys
+                .action_for("CommandOrControl+KeyJ"),
+            None
         );
     }
 
@@ -3793,7 +3957,7 @@ mod tests {
             // 2つの操作に同じキー
             (
                 text_window_keys_item(),
-                json!({ "snippets": "Alt+KeyP", "actions": "Alt+KeyP" }),
+                json!({ "snippets": "Alt+KeyP", "settings": "Alt+KeyP" }),
             ),
             // ホットキーと同じキー
             (text_window_keys_item(), json!({ "copy": local.hotkey })),
@@ -3922,26 +4086,26 @@ mod tests {
         assert!(decode_plain(&future).is_none());
     }
 
-    fn default_action(index: usize, lang: crate::i18n::Lang) -> Action {
-        actions::default_actions(lang).swap_remove(index)
+    fn default_snippet(index: usize, lang: crate::i18n::Lang) -> Snippet {
+        actions::default_snippets(lang).swap_remove(index)
     }
 
-    /// 既定のアクションのままのデバイスが、初めての同期でない回と初めての同期で受け取る
-    fn receive_actions(items: &[RemoteItem]) -> [Reconcile; 2] {
+    /// 既定の定型文のままのデバイスが、初めての同期でない回と初めての同期で受け取る
+    fn receive_snippets(items: &[RemoteItem]) -> [Reconcile; 2] {
         let local = Config::default();
         [Some(recorded(&local)), None].map(|state| reconcile(&local, state, items, "key", 9))
     }
 
     #[test]
-    fn default_actions_from_another_device_do_not_conflict_with_the_local_defaults() {
-        let sort = default_action(1, crate::i18n::Lang::system());
+    fn default_snippets_from_another_device_do_not_conflict_with_the_local_defaults() {
+        let sort = default_snippet(1, crate::i18n::Lang::system());
         // 相手は、英訳を別の表示言語で持ち、並べ替えを同期する行にして、別の文字コードで書いている
         for lang in [crate::i18n::Lang::Ja, crate::i18n::Lang::En] {
-            let translate = Action {
+            let translate = Snippet {
                 enabled: false,
-                ..default_action(0, lang)
+                ..default_snippet(0, lang)
             };
-            let their_sort = Action {
+            let their_sort = Snippet {
                 encoding: crate::config::ActionEncoding::ShiftJis,
                 output: crate::config::ActionOutput::Insert,
                 sync: true,
@@ -3950,54 +4114,54 @@ mod tests {
             let items = [
                 remote(
                     SETTINGS,
-                    &row_id('a', &their_sort.id),
+                    &row_id('n', &their_sort.id),
                     2,
                     row_value(&their_sort),
                 ),
                 remote(
                     SETTINGS,
-                    &row_id('a', &translate.id),
+                    &row_id('n', &translate.id),
                     3,
                     row_value(&translate),
                 ),
                 remote(
                     SETTINGS,
-                    "o_actions",
+                    "o_snippets",
                     4,
                     json!([translate.id, their_sort.id]),
                 ),
             ];
-            for result in receive_actions(&items) {
+            for result in receive_snippets(&items) {
                 assert!(result.state.conflicts.is_empty(), "{lang:?}");
                 assert_eq!(
-                    result.config.actions,
+                    result.config.snippets,
                     Some(vec![translate.clone(), sort.clone()]),
                     "{lang:?}"
                 );
                 // 並べ替えは手元で同期しない行。その id を抜いた並びを書き戻さない
-                assert!(action_writes(&result).is_empty(), "{lang:?}");
+                assert!(snippet_writes(&result).is_empty(), "{lang:?}");
             }
         }
     }
 
-    fn action_writes(result: &Reconcile) -> Vec<&Write> {
+    fn snippet_writes(result: &Reconcile) -> Vec<&Write> {
         result
             .writes
             .iter()
-            .filter(|write| write.key.id.starts_with("a_") || write.key.id == "o_actions")
+            .filter(|write| write.key.id.starts_with("n_") || write.key.id == "o_snippets")
             .collect()
     }
 
     #[test]
-    fn unsyncing_a_default_action_never_written_writes_the_mark_once() {
-        let mut translate = default_action(0, crate::i18n::Lang::system());
+    fn unsyncing_a_default_snippet_never_written_writes_the_mark_once() {
+        let mut translate = default_snippet(0, crate::i18n::Lang::system());
         translate.sync = false;
-        let key = ItemKey::new(SETTINGS, row_id('a', &translate.id));
-        // 既定のアクションのままのデバイスで、最初の操作として英訳を同期から外した
+        let key = ItemKey::new(SETTINGS, row_id('n', &translate.id));
+        // 既定の定型文のままのデバイスで、最初の操作として英訳を同期から外した
         let local = Config {
-            actions: Some(vec![
+            snippets: Some(vec![
                 translate,
-                default_action(1, crate::i18n::Lang::system()),
+                default_snippet(1, crate::i18n::Lang::system()),
             ]),
             ..Config::default()
         };
@@ -4020,17 +4184,17 @@ mod tests {
         }
     }
 
-    /// 英訳（既定で同期する既定のアクション）を、同期しない行として持つデバイス
+    /// 英訳（既定で同期する既定の定型文）を、同期しない行として持つデバイス
     fn translate_unsynced() -> (Config, ItemKey) {
-        let translate = Action {
+        let translate = Snippet {
             sync: false,
-            ..default_action(0, crate::i18n::Lang::system())
+            ..default_snippet(0, crate::i18n::Lang::system())
         };
-        let key = ItemKey::new(SETTINGS, row_id('a', &translate.id));
+        let key = ItemKey::new(SETTINGS, row_id('n', &translate.id));
         let local = Config {
-            actions: Some(vec![
+            snippets: Some(vec![
                 translate,
-                default_action(1, crate::i18n::Lang::system()),
+                default_snippet(1, crate::i18n::Lang::system()),
             ]),
             ..Config::default()
         };
@@ -4038,7 +4202,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unsynced_default_action_already_on_the_server_gets_no_mark() {
+    fn an_unsynced_default_snippet_already_on_the_server_gets_no_mark() {
         let (local, key) = translate_unsynced();
         let arrivals = [
             (
@@ -4047,7 +4211,7 @@ mod tests {
                     SETTINGS,
                     &key.id,
                     6,
-                    row_value(&default_action(0, crate::i18n::Lang::En)),
+                    row_value(&default_snippet(0, crate::i18n::Lang::En)),
                 ),
             ),
             ("deleted", deleted(&key, 6)),
@@ -4078,7 +4242,7 @@ mod tests {
             key: key.clone(),
             seq: Some(5),
             deleted: false,
-            plain: Some(Plain::value(row_value(&default_action(
+            plain: Some(Plain::value(row_value(&default_snippet(
                 0,
                 crate::i18n::Lang::En,
             )))),
@@ -4125,85 +4289,85 @@ mod tests {
                 .position(|batch| batch.iter().any(|write| write.key.id == id))
                 .unwrap_or_else(|| panic!("{id} is written"))
         };
-        assert!(batch_of(&key.id) <= batch_of("o_actions"));
+        assert!(batch_of(&key.id) <= batch_of("o_snippets"));
     }
 
     #[test]
-    fn a_default_action_unsynced_on_another_device_stays_as_an_unsynced_row() {
-        let sort = default_action(1, crate::i18n::Lang::system());
-        let translate = Action {
+    fn a_default_snippet_unsynced_on_another_device_stays_as_an_unsynced_row() {
+        let sort = default_snippet(1, crate::i18n::Lang::system());
+        let translate = Snippet {
             sync: false,
-            ..default_action(0, crate::i18n::Lang::system())
+            ..default_snippet(0, crate::i18n::Lang::system())
         };
-        let custom = Action {
+        let custom = Snippet {
             id: "a".repeat(32),
             name: "自作".into(),
-            command: "echo".into(),
-            ..Action::default()
+            body: "echo".into(),
+            ..Snippet::default()
         };
-        let mark_key = ItemKey::new(SETTINGS, row_id('a', &translate.id));
+        let mark_key = ItemKey::new(SETTINGS, row_id('n', &translate.id));
         // どれが先に届いても同じ
         for (mark_seq, other_seq) in [(2, 3), (3, 2)] {
             let items = [
                 detached_mark(&mark_key, mark_seq),
-                remote(SETTINGS, "o_actions", other_seq, json!([])),
+                remote(SETTINGS, "o_snippets", other_seq, json!([])),
             ];
-            for result in receive_actions(&items) {
+            for result in receive_snippets(&items) {
                 assert_eq!(
-                    result.config.actions,
+                    result.config.snippets,
                     Some(vec![translate.clone(), sort.clone()]),
                     "mark at {mark_seq}"
                 );
-                assert!(action_writes(&result).is_empty(), "mark at {mark_seq}");
+                assert!(snippet_writes(&result).is_empty(), "mark at {mark_seq}");
             }
             let items = [
                 detached_mark(&mark_key, mark_seq),
                 remote(
                     SETTINGS,
-                    &row_id('a', &custom.id),
+                    &row_id('n', &custom.id),
                     other_seq,
                     row_value(&custom),
                 ),
-                remote(SETTINGS, "o_actions", 4, json!([custom.id])),
+                remote(SETTINGS, "o_snippets", 4, json!([custom.id])),
             ];
-            for result in receive_actions(&items) {
+            for result in receive_snippets(&items) {
                 assert_eq!(
-                    result.config.actions,
+                    result.config.snippets,
                     Some(vec![translate.clone(), sort.clone(), custom.clone()]),
                     "mark at {mark_seq}"
                 );
-                assert!(action_writes(&result).is_empty(), "mark at {mark_seq}");
+                assert!(snippet_writes(&result).is_empty(), "mark at {mark_seq}");
             }
         }
     }
 
     #[test]
     fn an_empty_order_without_a_mark_does_not_write_out_the_synced_default() {
-        let sort = default_action(1, crate::i18n::Lang::system());
-        for result in receive_actions(&[remote(SETTINGS, "o_actions", 2, json!([]))]) {
-            assert_eq!(result.config.actions, Some(vec![sort.clone()]));
-            assert!(action_writes(&result).is_empty());
+        let sort = default_snippet(1, crate::i18n::Lang::system());
+        for result in receive_snippets(&[remote(SETTINGS, "o_snippets", 2, json!([]))]) {
+            assert_eq!(result.config.snippets, Some(vec![sort.clone()]));
+            assert!(snippet_writes(&result).is_empty());
         }
     }
 
     #[test]
-    fn a_default_action_deleted_on_another_device_does_not_come_back() {
-        let sort = default_action(1, crate::i18n::Lang::system());
-        let translate = default_action(0, crate::i18n::Lang::En);
-        let custom = Action {
+    fn a_default_snippet_deleted_on_another_device_does_not_come_back() {
+        let sort = default_snippet(1, crate::i18n::Lang::system());
+        let translate = default_snippet(0, crate::i18n::Lang::En);
+        let custom = Snippet {
             id: "a".repeat(32),
             name: "自作".into(),
-            command: "echo".into(),
-            ..Action::default()
+            body: "echo".into(),
+            ..Snippet::default()
         };
         let items = [
-            deleted(&ItemKey::new(SETTINGS, row_id('a', &translate.id)), 2),
-            remote(SETTINGS, &row_id('a', &custom.id), 3, row_value(&custom)),
-            remote(SETTINGS, "o_actions", 4, json!([custom.id])),
+            deleted(&ItemKey::new(SETTINGS, row_id('n', &translate.id)), 2),
+            remote(SETTINGS, &row_id('n', &custom.id), 3, row_value(&custom)),
+            remote(SETTINGS, "o_snippets", 4, json!([custom.id])),
         ];
-        for result in receive_actions(&items) {
+        for result in receive_snippets(&items) {
             assert_eq!(
-                result.config.actions,
+                result.config.snippets,
                 Some(vec![sort.clone(), custom.clone()])
             );
             let written = |prefix: &str| {
@@ -4212,23 +4376,23 @@ mod tests {
                     .iter()
                     .any(|write| write.key.id.starts_with(prefix))
             };
-            assert!(!written("a_") && !written("o_actions"));
+            assert!(!written("n_") && !written("o_snippets"));
         }
     }
 
     #[test]
-    fn an_unusable_action_item_leaves_the_default_actions_unwritten() {
+    fn an_unusable_snippet_item_leaves_the_default_snippets_unwritten() {
         let items = [
             remote(
                 SETTINGS,
-                &row_id('a', &"a".repeat(32)),
+                &row_id('n', &"a".repeat(32)),
                 2,
                 json!("not a row"),
             ),
-            remote(SETTINGS, "o_actions", 3, json!("not an order")),
+            remote(SETTINGS, "o_snippets", 3, json!("not an order")),
         ];
-        for result in receive_actions(&items) {
-            assert_eq!(result.config.actions, None);
+        for result in receive_snippets(&items) {
+            assert_eq!(result.config.snippets, None);
         }
     }
 
@@ -4455,18 +4619,18 @@ mod tests {
             id: id.to_string().repeat(32),
             name: name.to_string(),
             body: name.to_string(),
-            sync: true,
+            ..Snippet::default()
         };
         let local = Config {
-            snippets: vec![snippet('c', "手元")],
+            snippets: Some(vec![snippet('c', "手元")]),
             ..Config::default()
         };
         let theirs = Config {
-            snippets: vec![
+            snippets: Some(vec![
                 snippet('e', "新2"),
                 snippet('d', "新1"),
                 snippet('c', "手元"),
-            ],
+            ]),
             ..Config::default()
         };
         let their_items = config_items(&theirs);
@@ -4495,6 +4659,7 @@ mod tests {
                 .config
                 .snippets
                 .iter()
+                .flatten()
                 .map(|row| row.name.as_str())
                 .collect::<Vec<_>>(),
             ["新2", "新1", "手元"]
@@ -4621,11 +4786,11 @@ mod tests {
         };
         // 初めての同期。窓口には相手の行と並びがあり、手元には手元だけの行がある
         let local = Config {
-            snippets: vec![named('f', "手元")],
+            snippets: Some(vec![named('f', "手元")]),
             ..Config::default()
         };
         let theirs = Config {
-            snippets: vec![named('e', "相手2"), named('d', "相手1")],
+            snippets: Some(vec![named('e', "相手2"), named('d', "相手1")]),
             ..Config::default()
         };
         let their_items = config_items(&theirs);
@@ -4659,6 +4824,7 @@ mod tests {
             .config
             .snippets
             .iter()
+            .flatten()
             .map(|row| row.name.as_str())
             .collect();
         assert_eq!(names, ["相手2", "相手1", "手元"]);
@@ -4669,10 +4835,11 @@ mod tests {
     #[test]
     fn discarding_a_result_keeps_a_written_order_that_was_the_local_order() {
         let rows = |ids: [char; 3]| Config {
-            snippets: ids
-                .into_iter()
-                .map(|id| snippet(id, id.to_string()))
-                .collect(),
+            snippets: Some(
+                ids.into_iter()
+                    .map(|id| snippet(id, id.to_string()))
+                    .collect(),
+            ),
             ..Config::default()
         };
         let before = recorded(&rows(['d', 'e', 'f']));
@@ -4896,17 +5063,17 @@ mod tests {
             id: id.to_string().repeat(32),
             name: "name".into(),
             body,
-            sync: true,
+            ..Snippet::default()
         }
     }
 
     #[test]
     fn only_the_item_over_the_size_limit_is_left_unwritten() {
         let config = Config {
-            snippets: vec![
+            snippets: Some(vec![
                 snippet('a', "x".repeat(MAX_ENCRYPTED_ITEM_BYTES)),
                 snippet('b', "small".into()),
-            ],
+            ]),
             ..Config::default()
         };
         let large = row_key('n', 'a');
@@ -4923,7 +5090,7 @@ mod tests {
         assert!(again.writes.is_empty());
 
         let mut shortened = config.clone();
-        shortened.snippets[0].body = "short".into();
+        shortened.snippets.as_mut().unwrap()[0].body = "short".into();
         let mut third = FakeTransport::reading([read(first.seq, [])]).after_seq(first.seq);
         let result = run(&mut third, &shortened, Some(unchanged.state)).unwrap();
         assert_eq!(third.written(&large.id)[0].base_seq, None);
@@ -5199,7 +5366,11 @@ mod tests {
         let mut mine = snippet('b', "mine".into());
         mine.sync = false;
         let local = Config {
-            snippets: vec![snippet('a', "a".into()), mine, snippet('c', "c".into())],
+            snippets: Some(vec![
+                snippet('a', "a".into()),
+                mine,
+                snippet('c', "c".into()),
+            ]),
             ..Config::default()
         };
         // 相手は、手元で同期から外している行を同期している
@@ -5211,6 +5382,7 @@ mod tests {
                 .config
                 .snippets
                 .iter()
+                .flatten()
                 .map(|row| &row.id[..1])
                 .collect();
             assert_eq!(ids, ["c", "a", "b"], "first sync: {first_sync}");
@@ -5227,7 +5399,7 @@ mod tests {
     #[test]
     fn an_order_naming_a_row_not_held_locally_is_not_written_back() {
         let local = Config {
-            snippets: vec![snippet('a', "a".into()), snippet('c', "c".into())],
+            snippets: Some(vec![snippet('a', "a".into()), snippet('c', "c".into())]),
             ..Config::default()
         };
         // 相手の並びにある b は、手元では消したか、読み捨てた行
@@ -5239,6 +5411,7 @@ mod tests {
                 .config
                 .snippets
                 .iter()
+                .flatten()
                 .map(|row| &row.id[..1])
                 .collect();
             assert_eq!(ids, ["c", "a"], "first sync: {first_sync}");
@@ -5256,14 +5429,16 @@ mod tests {
     fn a_batch_written_before_a_failure_stays_in_the_record() {
         let base = Config::default();
         let mut local = base.clone();
-        for index in 0..WRITE_BATCH_SIZE {
-            local.snippets.push(Snippet {
-                id: format!("{index:032x}"),
-                name: "name".into(),
-                body: "body".into(),
-                sync: true,
-            });
-        }
+        local.snippets = Some(
+            (0..WRITE_BATCH_SIZE)
+                .map(|index| Snippet {
+                    id: format!("{index:032x}"),
+                    name: "name".into(),
+                    body: "body".into(),
+                    ..Snippet::default()
+                })
+                .collect(),
+        );
         let before = recorded(&base);
         let mut first = FakeTransport::reading([read(1, [])]).after_seq(1);
         // 1回目のまとまりは書け、2回目のまとまりが落ちる
@@ -5279,7 +5454,8 @@ mod tests {
         };
         // 書けた行を、次の回までに手元で直す。自分の書き込みを読み戻しても、食い違いにならない
         let mut edited = local.clone();
-        let row = edited.snippets.iter_mut().find(|row| row.id == id).unwrap();
+        let rows = edited.snippets.as_mut().unwrap();
+        let row = rows.iter_mut().find(|row| row.id == id).unwrap();
         row.body = "edited".into();
         let mut second =
             FakeTransport::reading([read(first.seq, first.stored.clone())]).after_seq(first.seq);
@@ -6136,7 +6312,6 @@ mod tests {
         config.sync_excluded_settings = vec!["theme".to_string()];
         config.sync_replacements = false;
         config.sync_snippets = false;
-        config.sync_actions = false;
         config.sync_keys = false;
         let replacement = replacement('a', "remote");
         let items = [
@@ -6162,12 +6337,6 @@ mod tests {
 
     #[test]
     fn disabled_row_kinds_leave_missing_recorded_rows_on_the_server() {
-        let custom_action = Action {
-            id: "a".repeat(32),
-            name: "custom".to_string(),
-            command: "echo".to_string(),
-            ..Action::default()
-        };
         let cases = [
             (
                 SyncKind::Replacements,
@@ -6179,18 +6348,12 @@ mod tests {
                 row_key('n', 'c'),
                 row_value(&snippet('c', "remote".to_string())),
             ),
-            (
-                SyncKind::Actions,
-                ItemKey::new(SETTINGS, row_id('a', &custom_action.id)),
-                row_value(&custom_action),
-            ),
         ];
         for (kind, key, value) in cases {
             let mut off = Config::default();
             match kind {
                 SyncKind::Replacements => off.sync_replacements = false,
                 SyncKind::Snippets => off.sync_snippets = false,
-                SyncKind::Actions => off.sync_actions = false,
                 _ => unreachable!(),
             }
             let mut old = State::new("key");
@@ -6206,13 +6369,13 @@ mod tests {
                 stopped.writes.iter().all(|write| write.key != key),
                 "{kind:?}"
             );
-            if kind == SyncKind::Actions {
+            if kind == SyncKind::Snippets {
                 assert!(
                     stopped
                         .writes
                         .iter()
-                        .all(|write| !write.key.id.starts_with("a_")),
-                    "default action marks stay unwritten while actions are off"
+                        .all(|write| !write.key.id.starts_with("n_")),
+                    "default snippet marks stay unwritten while snippets are off"
                 );
             }
 
@@ -6455,8 +6618,9 @@ mod tests {
     #[test]
     fn every_synced_setting_and_row_has_a_value_to_show() {
         let mut config = with_replacements("a");
-        config.snippets.push(snippet('b', "body".into()));
-        config.actions = Some(actions::default_actions(crate::i18n::Lang::En));
+        let mut snippets = actions::default_snippets(crate::i18n::Lang::En);
+        snippets.push(snippet('b', "body".into()));
+        config.snippets = Some(snippets);
         for key in config_items(&config).into_keys().filter(choosable) {
             let value = sync_value(&config, &key).unwrap_or_else(|| panic!("{}", key.id));
             assert_ne!(value, SyncValue::Deleted, "{}", key.id);
@@ -6813,8 +6977,8 @@ mod tests {
             theme: Theme::Dark,
             autostart: false,
             language: Language::En,
-            sync_excluded_settings: vec!["theme".to_string()],
-            ..Config::default()
+            sync_excluded_settings: vec!["theme".to_string(), "digit_width".to_string()],
+            ..widths(WidthStyle::Full, WidthStyle::Full, WidthStyle::Keep)
         };
         let backup = Config {
             theme: Theme::Light,
@@ -6824,6 +6988,10 @@ mod tests {
         };
         let restored = restore_config(&current, &backup);
         assert_eq!(restored.config.theme, Theme::Dark);
+        assert_eq!(
+            restored.config.char_widths,
+            widths(WidthStyle::Keep, WidthStyle::Full, WidthStyle::Keep).char_widths
+        );
         assert_eq!(restored.config.language, Language::Ja);
         assert!(!restored.config.autostart);
         assert!(restored.rejected.is_empty());
@@ -6832,7 +7000,7 @@ mod tests {
                 .iter()
                 .map(|change| change.id.as_str())
                 .collect::<Vec<_>>(),
-            ["s_language"]
+            ["s_alphabet_width", "s_language"]
         );
     }
 
@@ -6933,21 +7101,21 @@ mod tests {
     }
 
     #[test]
-    fn restoring_implicit_default_actions_uses_the_restored_language() {
+    fn restoring_implicit_default_snippets_uses_the_restored_language() {
         let current = Config {
             language: Language::En,
-            actions: Some(vec![
-                Action {
+            snippets: Some(vec![
+                Snippet {
                     id: "e".repeat(32),
-                    name: "received action".into(),
-                    command: "received".into(),
-                    ..Action::default()
+                    name: "received snippet".into(),
+                    body: "received".into(),
+                    ..Snippet::default()
                 },
-                default_action(1, crate::i18n::Lang::En),
+                default_snippet(1, crate::i18n::Lang::En),
             ]),
             ..Config::default()
         };
-        // `actions` が無い控えでも、設定を先に戻した後の表示言語の既定のアクションを入れる。
+        // `snippets` が無い控えでも、設定を先に戻した後の表示言語の既定の定型文を入れる。
         let backup = Config {
             language: Language::Ja,
             ..Config::default()
@@ -6956,26 +7124,26 @@ mod tests {
         assert!(restored.rejected.is_empty());
         assert_eq!(restored.config.language, Language::Ja);
         assert_eq!(
-            restored.config.actions,
+            restored.config.snippets,
             Some(vec![
-                default_action(0, crate::i18n::Lang::Ja),
-                default_action(1, crate::i18n::Lang::En),
+                default_snippet(0, crate::i18n::Lang::Ja),
+                default_snippet(1, crate::i18n::Lang::En),
             ])
         );
     }
 
     #[test]
-    fn restoring_implicit_default_actions_keeps_the_rows_when_the_device_has_rows() {
-        let received = Action {
+    fn restoring_implicit_default_snippets_keeps_the_rows_when_the_device_has_rows() {
+        let received = Snippet {
             id: "e".repeat(32),
-            name: "received action".into(),
-            command: "received".into(),
-            ..Action::default()
+            name: "received snippet".into(),
+            body: "received".into(),
+            ..Snippet::default()
         };
         let current = Config {
-            actions: Some(vec![
+            snippets: Some(vec![
                 received.clone(),
-                default_action(1, crate::i18n::Lang::system()),
+                default_snippet(1, crate::i18n::Lang::system()),
             ]),
             ..Config::default()
         };
@@ -6983,70 +7151,70 @@ mod tests {
         assert!(restored.rejected.is_empty());
         // None にはしない。行の項目が無くなると、次の同期が既定の行まで消した記録として書く
         assert_eq!(
-            restored.config.actions,
-            Some(default_actions_for(restored.config.language))
+            restored.config.snippets,
+            Some(default_snippets_for(restored.config.language))
         );
         let removed: Vec<String> = backup_differences(&current, &restored.config)
             .into_iter()
             .filter(|change| change.restored == SyncValue::Deleted)
             .map(|change| change.id)
             .collect();
-        assert_eq!(removed, [row_id('a', &received.id)]);
+        assert_eq!(removed, [row_id('n', &received.id)]);
     }
 
     #[test]
-    fn restoring_an_implicit_default_backup_keeps_an_identical_received_action() {
-        let mut received = default_action(0, crate::i18n::Lang::system());
+    fn restoring_an_implicit_default_backup_keeps_an_identical_received_snippet() {
+        let mut received = default_snippet(0, crate::i18n::Lang::system());
         received.id = "e".repeat(32);
         let current = Config {
-            actions: Some(vec![
+            snippets: Some(vec![
                 received.clone(),
-                default_action(1, crate::i18n::Lang::system()),
+                default_snippet(1, crate::i18n::Lang::system()),
             ]),
             ..Config::default()
         };
         let restored = restore_config(&current, &Config::default());
         assert!(restored.rejected.is_empty());
-        assert_eq!(restored.config.actions, current.actions);
+        assert_eq!(restored.config.snippets, current.snippets);
         assert!(backup_differences(&current, &restored.config).is_empty());
     }
 
     #[test]
-    fn restoring_an_implicit_default_backup_keeps_different_actions_separate() {
-        let mut received = default_action(0, crate::i18n::Lang::system());
+    fn restoring_an_implicit_default_backup_keeps_different_snippets_separate() {
+        let mut received = default_snippet(0, crate::i18n::Lang::system());
         received.id = "e".repeat(32);
-        received.command.push_str(" --different");
-        let default_id = default_action(0, crate::i18n::Lang::system()).id;
+        received.body.push_str(" --different");
+        let default_id = default_snippet(0, crate::i18n::Lang::system()).id;
         let current = Config {
-            actions: Some(vec![
+            snippets: Some(vec![
                 received.clone(),
-                default_action(1, crate::i18n::Lang::system()),
+                default_snippet(1, crate::i18n::Lang::system()),
             ]),
             ..Config::default()
         };
         let restored = restore_config(&current, &Config::default());
         assert!(restored.rejected.is_empty());
         assert_eq!(
-            restored.config.actions,
-            Some(default_actions_for(restored.config.language))
+            restored.config.snippets,
+            Some(default_snippets_for(restored.config.language))
         );
         let changes = backup_differences(&current, &restored.config);
         assert!(changes
             .iter()
-            .any(|change| change.id == row_id('a', &received.id)));
+            .any(|change| change.id == row_id('n', &received.id)));
         assert!(changes
             .iter()
-            .any(|change| change.id == row_id('a', &default_id)));
+            .any(|change| change.id == row_id('n', &default_id)));
     }
 
     #[test]
     fn restoring_a_backup_keeps_an_identical_snippet_with_a_different_id() {
         let backup = Config {
-            snippets: vec![snippet('a', "body".into())],
+            snippets: Some(vec![snippet('a', "body".into())]),
             ..Config::default()
         };
         let current = Config {
-            snippets: vec![snippet('b', "body".into())],
+            snippets: Some(vec![snippet('b', "body".into())]),
             ..Config::default()
         };
         let restored = restore_config(&current, &backup);
@@ -7059,7 +7227,7 @@ mod tests {
     fn restoring_an_implicit_default_backup_from_defaults_changes_nothing() {
         let current = Config::default();
         let restored = restore_config(&current, &Config::default());
-        assert_eq!(restored.config.actions, None);
+        assert_eq!(restored.config.snippets, None);
         assert!(restored.rejected.is_empty());
         assert!(backup_differences(&current, &restored.config).is_empty());
     }

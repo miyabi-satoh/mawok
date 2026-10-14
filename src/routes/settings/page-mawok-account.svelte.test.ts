@@ -76,7 +76,7 @@ describe('設定画面の Mawok のアカウント', () => {
 	it('ウィンドウに戻ると、答えが来るまで前の残りを出したまま問い合わせ直す', async () => {
 		signedIn = true;
 		setSettings();
-		const screen = await renderAt(m.settings_category_account);
+		const screen = await renderAt(m.settings_category_ai);
 		await expect
 			.element(screen.getByText(m.settings_mawok_remaining({ percent: 42 })))
 			.toBeVisible();
@@ -93,7 +93,7 @@ describe('設定画面の Mawok のアカウント', () => {
 			.toBeVisible();
 	});
 
-	it('サインインを始めるとブラウザでの手順を出し、結ばれたらアカウントと残りを出す', async () => {
+	it('サインインを始めるとブラウザでの手順を出し、結ばれたらアカウントを出す。残りと買い足しは「AI」に出す', async () => {
 		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_mawok_sign_in() }).click();
 		await expect.element(screen.getByText(m.settings_mawok_signing_in())).toBeVisible();
@@ -103,6 +103,10 @@ describe('設定画面の Mawok のアカウント', () => {
 
 		signInEnded(true);
 		await expect.element(screen.getByText('me@example.com')).toBeVisible();
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_mawok_buy() }))
+			.not.toBeInTheDocument();
+		await screen.getByRole('tab', { name: m.settings_category_ai() }).click();
 		await expect
 			.element(screen.getByText(m.settings_mawok_remaining({ percent: 42 })))
 			.toBeVisible();
@@ -226,16 +230,16 @@ describe('設定画面の Mawok のアカウント', () => {
 			if (command === 'mawok_account_status') return Promise.reject('account.unreachable');
 			return Promise.resolve(undefined);
 		});
-		const screen = await renderAt(m.settings_category_account);
+		const screen = await renderAt(m.settings_category_ai);
 		await expect.element(screen.getByText(m.settings_mawok_status_unknown())).toBeVisible();
 		// 裏の確かめ直しなので、どの区分を開いていても出る画面のエラーにはしない
 		await expect.element(screen.getByText(m.account_error_unreachable())).not.toBeInTheDocument();
 	});
 
-	it('アクションからアカウントを開ける', async () => {
+	it('AI サービスの欄からアカウントを開ける', async () => {
 		const screen = await render(Page);
-		await screen.getByRole('tab', { name: m.settings_category_actions() }).click();
-		await expect.element(screen.getByText(m.settings_actions_mawok_sign_in())).toBeVisible();
+		await screen.getByRole('tab', { name: m.settings_category_ai() }).click();
+		await expect.element(screen.getByText(m.settings_ai_mawok_sign_in())).toBeVisible();
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_mawok_sign_in() }))
 			.not.toBeInTheDocument();

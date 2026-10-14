@@ -6,6 +6,7 @@ import type { SyncConflict } from '$lib/bindings/SyncConflict';
 import type { SyncBackup } from '$lib/bindings/SyncBackup';
 import { m } from '$lib/paraglide/messages';
 import { settings } from '$lib/settings.svelte';
+import { newSnippet } from '$lib/snippets';
 import { sideName } from '$lib/sync-choices';
 import { callsOf } from '$lib/test-support/calls';
 import { settingsView } from '$lib/test-support/settings-view';
@@ -89,14 +90,12 @@ describe('設定画面の同期', () => {
 		await screen.getByRole('switch', { name: m.settings_sync_keys() }).click();
 		await screen.getByRole('switch', { name: m.settings_sync_replacements() }).click();
 		await screen.getByRole('switch', { name: m.settings_sync_snippets() }).click();
-		await screen.getByRole('switch', { name: m.settings_sync_actions() }).click();
 		await screen.getByRole('switch', { name: m.settings_sync_history() }).click();
 		expect(callsOf(invoked, 'set_sync_kind')).toEqual(
 			expect.arrayContaining([
 				['set_sync_kind', { kind: 'keys', enabled: false }],
 				['set_sync_kind', { kind: 'replacements', enabled: false }],
 				['set_sync_kind', { kind: 'snippets', enabled: false }],
-				['set_sync_kind', { kind: 'actions', enabled: false }],
 				['set_sync_kind', { kind: 'history', enabled: false }]
 			])
 		);
@@ -167,6 +166,38 @@ describe('設定画面の同期', () => {
 			.toHaveAttribute('aria-pressed', 'false');
 	});
 
+	it('「文字を揃える」は行ごとに雲の印を出し、押した行だけを外す', async () => {
+		settings.current = settingsView({ proAvailable: true });
+		const screen = await renderAt(m.settings_category_copy);
+		for (const name of [
+			m.settings_char_width_punctuation(),
+			m.settings_char_width_alphabet(),
+			m.settings_char_width_digit(),
+			m.settings_char_width_space(),
+			m.settings_char_width_symbol(),
+			m.settings_char_width_katakana()
+		]) {
+			await expect
+				.element(screen.getByRole('button', { name: m.settings_sync_item({ name }) }))
+				.toBeVisible();
+		}
+		await expect
+			.element(
+				screen.getByRole('button', {
+					name: m.settings_sync_item({ name: m.settings_char_width() })
+				})
+			)
+			.not.toBeInTheDocument();
+		await screen
+			.getByRole('button', {
+				name: m.settings_sync_item({ name: m.settings_char_width_digit() })
+			})
+			.click();
+		expect(callsOf(invoked, 'set_sync_excluded_setting')).toEqual([
+			['set_sync_excluded_setting', { name: 'digit_width', sync: false }]
+		]);
+	});
+
 	it('設定の同期がオフ、または Pro でなければ、設定の雲の印を出さない', async () => {
 		settings.current = settingsView({
 			proAvailable: true,
@@ -175,7 +206,6 @@ describe('設定画面の同期', () => {
 				keys: true,
 				replacements: true,
 				snippets: true,
-				actions: true,
 				history: true
 			}
 		});
@@ -202,7 +232,8 @@ describe('設定画面の同期', () => {
 		for (const label of [
 			m.settings_category_draft(),
 			m.settings_category_copy(),
-			m.settings_category_actions()
+			m.settings_category_snippets(),
+			m.settings_category_ai()
 		]) {
 			await screen.getByRole('tab', { name: label }).click();
 			collect();
@@ -220,10 +251,9 @@ describe('設定画面の同期', () => {
 				keys: true,
 				replacements: true,
 				snippets: false,
-				actions: true,
 				history: true
 			},
-			snippets: [{ id: 'a', name: '挨拶', body: 'こんにちは', sync: true }]
+			snippets: [newSnippet('挨拶', 'こんにちは')]
 		});
 		const screen = await render(Page);
 		await screen.getByRole('tab', { name: m.settings_category_snippets() }).click();

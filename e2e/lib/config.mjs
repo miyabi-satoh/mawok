@@ -9,7 +9,7 @@ import {
 	recoverStaleAppsThemeIfAny,
 	recoverStaleAutostartBackupIfAny
 } from './os.mjs';
-import { APP_IDENTIFIER } from './app-conf.mjs';
+import { PROFILE_IDENTIFIER } from './app-conf.mjs';
 import {
 	fileExists,
 	readBackupRecord,
@@ -18,6 +18,8 @@ import {
 	writeJsonAtomic
 } from './files.mjs';
 
+// 自動の確認は、プロファイル `e2e` で起動する (tauri-driver.mjs の startTauriDriver が MAWOK_PROFILE を渡す。src-tauri/src/profile.rs)。
+// 設定・履歴・ログのフォルダーは識別子の後ろに `.e2e` が付き、常用の Mawok のものとは別になる。
 // src-tauri/src/lib.rs の app_config_dir() は Tauri (dirs crate 経由の SHGetKnownFolderPath) が
 // 決める場所で、環境変数とは厳密には別経路。ただし通常 %APPDATA% とほぼ一致するので、
 // home からの組み立て (フォルダーリダイレクト環境だと食い違い、別のファイルを「復元」しかねない)
@@ -28,7 +30,7 @@ if (!appData) {
 		'%APPDATA% が読めませんでした。config.toml の場所を解決できないため E2E を続行できません。'
 	);
 }
-const CONFIG_DIR = path.join(appData, APP_IDENTIFIER);
+const CONFIG_DIR = path.join(appData, PROFILE_IDENTIFIER);
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.toml');
 // 下書きの履歴は、src-tauri/src/lib.rs の app_local_data_dir() の下（Windows は Roaming ではなく %LOCALAPPDATA%）
 const localAppData = process.env.LOCALAPPDATA;
@@ -40,14 +42,14 @@ if (!localAppData) {
 /** 設定 (%APPDATA%) と、履歴・ログ・WebView2 のデータ (%LOCALAPPDATA%) の置き場所 */
 export const APP_DATA_DIRS = Object.freeze({
 	roaming: CONFIG_DIR,
-	local: path.join(localAppData, APP_IDENTIFIER)
+	local: path.join(localAppData, PROFILE_IDENTIFIER)
 });
 const HISTORY_PATH = path.join(APP_DATA_DIRS.local, 'history.json');
 // window-state プラグインが、下書きと設定ウィンドウの位置と大きさを記録するファイル。位置や大きさを変えるテストが
-// ユーザーの記録を書き換えるので、config.toml と一緒に控えて戻す
+// 前のテストの記録に引きずられないよう、config.toml と一緒に控えて戻す
 export const WINDOW_STATE_PATH = path.join(CONFIG_DIR, '.window-state.json');
 
-// テストが落ちた・Ctrl+C で中断された場合でも、常用の config.toml を壊れたまま残さないための
+// テストが落ちた・Ctrl+C で中断された場合でも、設定をテスト用のまま残さないための
 // 退避ファイル。テストプロセスの外 (e2e/ 直下) に置き、次回実行時に残骸があれば先に復元する
 const BACKUP_PATH = recordPath('.config-backup.json');
 
@@ -115,15 +117,10 @@ const DEFAULT_CONFIG = {
 // draft_keys.rs の既定のキーの写し
 const DEFAULT_DRAFT_KEYS = {
 	copy: 'CommandOrControl+Enter',
-	send: 'CommandOrControl+Shift+Enter',
 	settings: 'CommandOrControl+Comma',
-	snippets: 'CommandOrControl+KeyJ',
-	actions: 'CommandOrControl+KeyK',
+	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	sendTargets: 'CommandOrControl+KeyL',
-	insertReceived: 'CommandOrControl+KeyI',
-	discardReceived: 'CommandOrControl+Shift+Backspace',
 	changeFolder: 'CommandOrControl+KeyD'
 };
 
@@ -527,6 +524,9 @@ export async function beginTestConfig(overrides) {
 	// (テストは Ctrl+Shift+Space や Ctrl+Enter などを押す前提)。変えるテストは overrides で渡す
 	const testConfig = {
 		...base,
+		// 旧版の項目。残っていると、アプリが読み込みで定型文へ移して、テストの定型文に行が増える
+		actions: null,
+		syncActions: null,
 		autostart: false,
 		hotkey: DEFAULT_HOTKEY,
 		textWindowKeys: null,
