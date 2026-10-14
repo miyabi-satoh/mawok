@@ -7,6 +7,7 @@ import {
 	SYNC_TOTAL_BYTES,
 	getSync,
 	putSync,
+	putSyncKey,
 	purgeSync,
 	resetSync,
 	shouldReset
@@ -150,6 +151,10 @@ describe('sync', () => {
 			ok: false,
 			error: 'key_mismatch'
 		});
+		// パスワードの変更 (包み直し) でも、包んだ鍵を付けて始めさせない。
+		expect(await putSyncKey(env, account, { key_id: KEY, wrapped_key: 'wrapped' })).toBe(
+			'key_mismatch'
+		);
 	});
 
 	it('starts only a copy without a wrapped key, and resets one that has it', async () => {

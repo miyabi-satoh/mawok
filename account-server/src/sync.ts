@@ -430,7 +430,8 @@ export async function putSyncKey(
 	const request = keyRequest(body);
 	if (!request) return 'invalid_request';
 	const result = await env.DB.prepare(
-		'UPDATE sync_accounts SET wrapped_key = ? WHERE account_id = ? AND key_id = ?'
+		// 包んだ鍵の無い (始めていない・前の版が置いた) key_id には付けない。付けると、パスワードの変更で同期が始まるため
+		'UPDATE sync_accounts SET wrapped_key = ? WHERE account_id = ? AND key_id = ? AND wrapped_key IS NOT NULL'
 	)
 		.bind(request.wrapped_key, accountId, request.key_id)
 		.run();

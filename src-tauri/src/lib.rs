@@ -2662,6 +2662,13 @@ async fn refresh_mawok_account_status(
                 .as_ref()
                 .is_some_and(|old| old.account_id != status.account_id);
             if changed_account {
+                // 前のアカウントの鍵は、資格情報管理からも消す。残すと、続く鍵の確かめが読み直して使うため
+                match run_blocking(account_credentials::clear_key).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) | Err(error) => {
+                        warn!("couldn't clear the previous account's sync key: {error}")
+                    }
+                }
                 forget_sync_key(app).await;
             }
             remember_pro_state(app, &status, generation).await;
@@ -3049,13 +3056,22 @@ async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(
             drop(refresh);
             Err(recheck_sync_key(&app).await)
         }
-        // 窓口が受けたか分からない（つながらない・窓口の不調）。窓口は新しい鍵のことがあるので戻さず、
-        // 鍵の状態を窓口と照らし直して合わせる（受けていなければ、作成か入力の欄になる）
+        // 窓口が受けたか分からない（つながらない・窓口の不調）。窓口の今の key_id を読めて、新しい鍵なら受けていたので
+        // 新しい鍵で続ける。違う・読めないなら前の鍵に戻す。新しい鍵を残すのは、窓口が受けたと分かったときだけにし、
+        // 手元と窓口の鍵が食い違ったまま再起動して、新しいパスワードが黙って無くなるのを防ぐ
         Err(error @ (account::AccountError::Other(_) | account::AccountError::Http(500..))) => {
-            drop(refresh);
-            if let Err(detail) = refresh_mawok_account_status(&app).await {
-                info!("couldn't recheck the sync key: {detail}");
+            let new_key_id = sync_key::key_id(&key);
+            match account::sync_key(&client, &token).await {
+                Ok(server) if server.key_id.as_deref() == Some(new_key_id.as_str()) => {
+                    info!("sync was started although the answer was lost");
+                    adopt_sync_key(&app, key).await;
+                    return Ok(());
+                }
+                Ok(_) => {}
+                Err(detail) => info!("couldn't check whether sync was started: {detail:?}"),
             }
+            restore_sync_key(previous).await;
+            drop(refresh);
             Err(account_failure(&app, "couldn't start sync", error).await)
         }
         // 窓口が断った（受けていない）。置く前の鍵に戻す。サインアウトは、トークンと一緒に鍵も消える
