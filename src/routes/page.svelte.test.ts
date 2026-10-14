@@ -1443,7 +1443,7 @@ describe('宛先へ出す', () => {
 		await expect.element(textarea).toHaveValue('あいう');
 	});
 
-	it('Cmd+K で一覧を出し、宛先で始まる定型文を選ぶと全体を送り、届いたら差し替えて前の文を履歴に積む', async () => {
+	it('Cmd+K で一覧を出し、宛先で始まる定型文を選ぶと全体を渡して実行し、結果で差し替えて前の文を履歴に積む', async () => {
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'えーと、明日なんですけど');
 
@@ -1466,7 +1466,7 @@ describe('宛先へ出す', () => {
 		await expect.element(textarea).toHaveValue('えーと、明日なんですけど');
 	});
 
-	it('範囲を選んでいたら、その範囲だけを送って差し替える', async () => {
+	it('範囲を選んでいたら、その範囲だけを渡して差し替える', async () => {
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいうえお', 1, 3);
 

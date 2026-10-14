@@ -57,7 +57,7 @@ impl DraftAction {
     }
 }
 
-/// 操作ごとのキー。ホットキーと同じ書き方（`CommandOrControl+Shift+Enter`）で、空文字は割り当てなし
+/// 操作ごとのキー。ホットキーと同じ書き方（`CommandOrControl+Enter`）で、空文字は割り当てなし
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
