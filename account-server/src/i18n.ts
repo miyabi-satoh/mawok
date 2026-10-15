@@ -304,9 +304,9 @@ const en: typeof ja = {
 	proCancelLabel: 'Cancellation and refunds',
 	proCancel: {
 		domestic: (tokushoho: string) =>
-			`You can cancel at any time from Manage billing on your account page. Cancel before the next renewal date and you will not be charged for the next period. After cancellation, you can keep using Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})).`,
+			`You can cancel at any time from “Manage billing” on your account page. Cancel before the next renewal date and you will not be charged for the next period. After cancellation, you can keep using Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})).`,
 		overseas: (tokushoho: string) =>
-			`You can cancel at any time from Manage billing on your account page. Cancel before the next renewal date and you will not be charged for the next period. After cancellation, you can keep using Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})). Within 60 days of purchase, you may get a refund under [Link's refund policy](${LINK_REFUND_POLICY}).`
+			`You can cancel at any time from “Manage billing” on your account page. Cancel before the next renewal date and you will not be charged for the next period. After cancellation, you can keep using Pro until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side (see the [Specified Commercial Transactions Act notice](${tokushoho})). Within 60 days of purchase, you may get a refund under [Link's refund policy](${LINK_REFUND_POLICY}).`
 	},
 	proCheckoutNote:
 		'It renews automatically until you cancel. You can cancel from your Mawok account page and continue using it until the end of the paid period. Paid periods are not refunded, except in cases such as billing errors on our side.',
