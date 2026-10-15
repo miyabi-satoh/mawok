@@ -10,11 +10,21 @@ const BREAKABLE_NUMBER_UNIT = new RegExp(
 	`\\d (?=[一-龠々ぁ-んァ-ヶ]|${UNIT})|\\{\\w+\\} (?=${UNIT})`
 );
 
+/** 文言の文字列をすべて返す。plural の文言は配列の中のオブジェクトに文字列を持つので、葉まで辿る */
+function texts(value: unknown): string[] {
+	if (typeof value === 'string') return [value];
+	if (value && typeof value === 'object') return Object.values(value).flatMap(texts);
+	return [];
+}
+
 describe('日本語の文言', () => {
 	// 数字と単位の間は、そこで折り返さないようノーブレークスペースにする
 	it('数字と単位の間に、ふつうの空白を置かない', () => {
 		const breakable = Object.entries(ja)
-			.filter(([key, value]) => key !== '$schema' && BREAKABLE_NUMBER_UNIT.test(String(value)))
+			.filter(
+				([key, value]) =>
+					key !== '$schema' && texts(value).some((text) => BREAKABLE_NUMBER_UNIT.test(text))
+			)
 			.map(([key]) => key);
 		expect(breakable).toEqual([]);
 	});
@@ -31,7 +41,9 @@ describe('文言の書き方', () => {
 	// 書いた \ が画面で減るので、要る所は引数で渡す（$lib/folder-errors）
 	it('文言に \\ を書かない', () => {
 		const withBackslash = [...Object.entries(ja), ...Object.entries(en)]
-			.filter(([key, value]) => key !== '$schema' && String(value).includes('\\'))
+			.filter(
+				([key, value]) => key !== '$schema' && texts(value).some((text) => text.includes('\\'))
+			)
 			.map(([key]) => key);
 		expect(withBackslash).toEqual([]);
 	});

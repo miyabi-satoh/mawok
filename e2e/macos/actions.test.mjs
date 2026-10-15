@@ -113,7 +113,7 @@ test.describe('macOS: コマンドの定型文', () => {
 	test('実行している間に Esc で取り消すと、すぐ元の文のまま書き換えられる状態に戻り、コマンドが残らない (24.)', async () => {
 		await showDraftWith('abc', { paste: true });
 		await runAction('wait');
-		await waitFor(readStatus, (status) => status?.startsWith('waitを実行しています'), {
+		await waitFor(readStatus, (status) => status?.startsWith('「wait」を実行しています'), {
 			label: '実行している間の知らせ'
 		});
 		await waitFor(
@@ -199,7 +199,7 @@ test.describe('macOS: コマンドの定型文', () => {
 		const text = `mawok-macos-${STAMP}`;
 		await showDraftWith(text, { paste: true });
 		await runAction('record');
-		await waitFor(readStatus, (status) => status === 'recordを実行しました', {
+		await waitFor(readStatus, (status) => status === '「record」を実行しました。', {
 			label: '実行したことの知らせ'
 		});
 		assert.equal(await draftValue(), text);

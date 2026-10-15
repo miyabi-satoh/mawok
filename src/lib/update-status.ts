@@ -22,7 +22,7 @@ export function updateStatusText(status: UpdateStatus): string {
 }
 
 /**
- * 更新の行のボタン。check は「今すぐ確認」、install は「更新して再起動」、installing は押せない「更新して再起動」。
+ * 更新の行のボタン。check は「今すぐ確認」、install は「更新して再起動する」、installing は押せない「更新して再起動する」。
  * 確かめている間は出さない
  */
 export type UpdateButton = 'check' | 'install' | 'installing' | null;

@@ -354,7 +354,7 @@ describe('設定画面の置き換え辞書', () => {
 });
 
 describe('設定画面の下書きの履歴', () => {
-	it('履歴を消すボタンで履歴を消すコマンドを呼ぶ', async () => {
+	it('「履歴を削除する」で履歴を消すコマンドを呼ぶ', async () => {
 		const screen = await renderAt(m.settings_category_general);
 
 		await screen.getByRole('button', { name: m.settings_draft_history_clear() }).click();
@@ -1961,7 +1961,7 @@ describe('設定画面の更新（Mac）', () => {
 		);
 	});
 
-	it('新しい版があれば「更新して再起動」で入れる', async () => {
+	it('新しい版があれば「更新して再起動する」で入れる', async () => {
 		const screen = await renderAt(m.settings_category_about);
 
 		await expect

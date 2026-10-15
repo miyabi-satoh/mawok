@@ -22,7 +22,7 @@ describe('更新の行', () => {
 		]).toEqual([m.settings_update_check_failed(), 'check']);
 	});
 
-	it('新しい版があれば、版を添えて「更新して再起動」を出し、入れられなければもう一度押せる', () => {
+	it('新しい版があれば、版を添えて「更新して再起動する」を出し、入れられなければもう一度押せる', () => {
 		const version = '1.0.1';
 		expect([
 			updateStatusText({ state: 'available', version }),

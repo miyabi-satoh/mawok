@@ -10,21 +10,21 @@ When voice input cannot type directly into an app, or when it is easy to forget 
 3. Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} to copy and close the text window, then paste it in the app you returned to.
 
 You can also insert snippets and rewrite the text with AI or commands.
-Mawok stays in the {macos:menu bar}{windows:system tray} and starts automatically when you log in (you can turn this off under "General" in Settings).
+Mawok stays in the {macos:menu bar}{windows:system tray} and starts automatically when you log in (you can turn this off under “General” in Settings).
 
 ## Write and copy
 
-- Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} or click "Copy" to copy the text and return to the previous app. The hotkey does the same when the text window is in front.
+- Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} or click “Copy” to copy the text and return to the previous app. The hotkey does the same when the text window is in front.
 - To return without copying, press `Esc`. Your unfinished text remains there the next time you bring up the window.
-- Clicking another app also hides the window without copying (you can turn this off under "General" in Settings).
+- Clicking another app also hides the window without copying, and your unfinished text remains (you can turn this off under “General” in Settings).
 
 ## Use text you copied earlier
 
 Copied text is kept in history.
 
 - Press `↑` at the start of the text box or `↓` at its end to show the previous or next text.
-- Change how many are kept under "General" in Settings. Set it to 0 to keep no history.
-- While history is synced, selecting "Clear history" in Settings or setting the number to 0 also clears the history on your other devices (see "Sync settings and history").
+- Change how many are kept under “General” in Settings. Set it to 0 to keep no history.
+- While history is synced, selecting “Clear history” in Settings or setting the number to 0 also clears the history on your other devices (see “Sync settings and history”).
 
 ## Use snippets
 
@@ -34,15 +34,15 @@ Save text you use often, and instructions that send the text to AI or a command,
 2. Type to filter, then press Enter to pick one.
 
 - An ordinary snippet is inserted at the cursor.
-- A one-line snippet that starts with `@ai` or `@sh` sends the text to that addressee (see the next section, "Write an addressee and run"). A selection is used if you have one; otherwise, all of the text is used. The result appears in the text box. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`} to undo it.
+- A one-line snippet that starts with `@ai` or `@sh` sends the text to that addressee (see the next section, “Write an addressee and run”). A selection is used if you have one; otherwise, all of the text is used. The result appears in the text box. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`} to undo it.
 
-At first, "Translate to English" (`@ai`) and "Sort lines" (`@sh sort`) are included. Translating requires AI service setup (see "Use AI").
+At first, “Translate to English” (`@ai`) and “Sort lines” (`@sh sort`) are included. Translating requires AI service setup (see “Use AI”).
 
-Add snippets under "Snippets" in Settings. You can also save the text you are writing from "Save the text as a snippet" at the end of the list.
+Add snippets under “Snippets” in Settings. You can also save the text you are writing from “Save the text as a snippet” at the end of the list.
 
 ## Write an addressee and run
 
-Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} or select the "Run" button. When the first line is an addressee, the key runs it instead of copying. The lines below the first are what the addressee receives.
+Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} or select the “Run” button. When the first line is an addressee, the key runs it instead of copying. The lines below the first are what the addressee receives.
 
 | First line | What it does |
 | --- | --- |
@@ -56,7 +56,7 @@ Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}
 - If a command is not found, write its full path.
 :::
 
-Commands run in your home folder. The folder button at the bottom left shows the current folder. To run commands in another folder, select the button and choose a folder. Folders you have used appear in the button menu so you can choose them again. Choose "Back to Home Folder" in the menu to go back.
+Commands run in your home folder. The folder button at the bottom left shows the current folder. To run commands in another folder, select the button and choose a folder. Folders you have used appear in the button menu so you can choose them again. Choose “Back to home folder” in the menu to go back.
 
 From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and press `Enter`.
 
@@ -68,33 +68,33 @@ From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and p
 
 ## Use AI
 
-1. Under "AI" in Settings, choose a service under "AI service".
-2. If you choose Mawok, select "Sign in" under "Account" in Settings, sign in on the page that opens, then click "Link this device". For another service, enter its API key.
-3. Under "AI" in Settings, read the explanation of what is sent, then select "Agree".
+1. Under “AI” in Settings, choose a service under “AI service”.
+2. If you choose Mawok, select “Sign in” under “Account” in Settings, sign in on the page that opens, then click “Link this device”. For another service, enter its API key.
+3. Under “AI” in Settings, read the explanation of what is sent, then select “Agree”.
 
-When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select "Buy credits" under "AI" in Settings to open the purchase page in your browser.
+When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select “Buy credits” under “AI” in Settings to open the purchase page in your browser.
 
 ## Sync settings and history
 
 With Pro, your settings and history stay the same across the devices on your account.
 
-1. Sign in to Mawok under "Account" in Settings.
-2. Under "Create sync password", enter a password twice and select "Start syncing".
-3. Sign in on your other devices too, enter the same password under "Enter sync password", and select "Start syncing".
+1. Sign in to Mawok under “Account” in Settings.
+2. Under “Create sync password”, enter a password twice and select “Start syncing”.
+3. Sign in on your other devices too, enter the same password under “Enter sync password”, and select “Start syncing”.
 
-To change the password, select "Change" next to "Sync password" under "Account" in Settings. You don't need to enter it again on your other devices.
+To change the password, select “Change” next to “Sync password” under “Account” in Settings. You don't need to enter it again on your other devices.
 
-If you forget your password, it can't be recovered. Select "Forgot password?" or "Reset sync..." to start over with a new password. Your sync data on the Mawok server is deleted, but the data on each device is kept. Enter the new password on your other devices.
+If you forget your password, it can't be recovered. Select “Forgot password?” or “Reset sync...” to start over with a new password. Your sync data on the Mawok server is deleted, but the data on each device is kept. Enter the new password on your other devices.
 
 To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. Right after copying, it may not have arrived yet. Wait a moment and show the text window again.
 
-- Synced: settings, keyboard shortcuts, replacements, snippets, and history. Turn each kind on or off under "Account" in Settings.
+- Synced: settings, keyboard shortcuts, replacements, snippets, and history. Turn each kind on or off under “Account” in Settings.
 - Kept per device: launch at login and API keys for AI services. The hotkey and keyboard shortcuts sync only between {macos:Macs}{windows:Windows devices}.
 - For settings, replacements, and snippets, turn off the cloud mark to stop syncing just that item or row. To stop syncing a whole kind, turn it off.
 
-If you change the same setting on different devices, "Choose Which to Use..." appears under "Account" in Settings. Select it, choose "This device" or "Other device" for each item, then select "Apply Selected Settings". You can also open it from "Choose Which Settings to Use…" in the {macos:menu bar}{windows:system tray} menu.
+If you change the same setting on different devices, “Choose which to use...” appears under “Account” in Settings. Select it, choose “This device” or “Other device” for each item, then select “Apply selected settings”. You can also open it from “Choose Which Settings to Use…” in the {macos:menu bar}{windows:system tray} menu.
 
-To go back to settings from before sync changed them, select "Restore settings from before a sync..." under "Account" in Settings. Choose the date you want, then select "Restore these settings".
+To go back to settings from before sync changed them, select “Restore settings from before a sync...” under “Account” in Settings. Choose the date you want, then select “Restore these settings”.
 
 ## Keyboard shortcuts
 
@@ -110,33 +110,43 @@ To go back to settings from before sync changed them, select "Restore settings f
 | Cancel a run (while it is running) | `Esc` |
 | Open Settings | {macos:`Cmd+,`}{windows:`Ctrl+,`} |
 
-You can change the keys under "Keyboard" in Settings.
+You can change the keys under “Keyboard shortcuts” in Settings.
 
 ## Settings
 
-Choose "Settings…" in the {macos:menu bar}{windows:system tray} menu, or press {macos:`Cmd+,`}{windows:`Ctrl+,`} in the text window.
+Choose “Settings…” in the {macos:menu bar}{windows:system tray} menu, or press {macos:`Cmd+,`}{windows:`Ctrl+,`} in the text window.
 You can change the hotkey, the text's appearance, and the cleanup applied when copying (such as removing trailing whitespace, unifying full-width and half-width characters, and replacements). Changes take effect immediately.
 Settings you've changed from the default show a vertical line at the left edge of the row.
 
 ## If something does not work
 
-- **The hotkey does not work**: Another app uses the same key. ⚠ appears in the {macos:menu bar}{windows:system tray} menu. Choose a different key under "Keyboard" in Settings.
+- **The hotkey does not work**: Another app uses the same key. ⚠ appears in the {macos:menu bar}{windows:system tray} menu. Choose a different key under “Keyboard shortcuts” in Settings.
 ::: macos
-- **"Couldn't read the API key" appears**: After you reinstall the app, you will be asked to allow access to the Keychain. Allow it.
+- **“Couldn't read the API key” appears**: After you reinstall the app, you will be asked to allow access to the Keychain. Allow it. If that doesn't help, enter the key again under “AI” in Settings.
+:::
+::: windows
+- **“Couldn't read the API key” appears**: Enter the key again under “AI” in Settings.
+:::
+- **“Couldn't connect...”, “Couldn't reach...”, or a similar message appears and trying again doesn't help**: Check that you are connected to the network. If you are, the Mawok server or the AI service may be having problems. Try again after a while.
+- **“Your Mawok account has no credit left” appears**: Select “Buy credits” under “AI” in Settings to add more.
+- **“The AI service's spending or credit limit was reached” appears**: Trying again won't help. Check the balance and limits in your AI service account.
+- **“Couldn't find the current folder” appears**: The folder was moved or deleted. Use “Go to folder” to choose a folder again.
+::: macos
+- **“The command wasn't found” appears**: Write the command with its full path.
 :::
 
-When reporting a problem, attach the log. It does not contain your text. Open its location from "About" in Settings.
+When reporting a problem, attach the log. It does not contain your text. Open its location from “About” in Settings.
 
 ## What is sent and privacy
 
 - Mawok does not send usage statistics or error reports.
 - It sends your text outside the app only when you run an AI action with `@ai` (to the AI service you chose) or sync with Pro.
 - While you sync with Pro, what you sync is encrypted and stored on Mawok's server. Mawok's server cannot read it.
-- Before you choose an AI service and select "Agree", the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
+- Before you choose an AI service and select “Agree”, the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
 
 ## Settings file
 
-Settings are saved in `config.toml`. Open its location from "About" in Settings.
+Settings are saved in `config.toml`. Open its location from “About” in Settings.
 Changes you make directly take effect after you restart the app. The file contains only values that differ from the defaults.
 
 | Item                             | Default                          | Description                                                              |
@@ -168,7 +178,7 @@ Changes you make directly take effect after you restart the app. The file contai
 | `text_color_light`               | `""`                             | Text color (light; `#rrggbb`; empty uses the default)                    |
 | `text_color_dark`                | `""`                             | Text color (dark; `#rrggbb`; empty uses the default)                     |
 | `input_guidance`                 | None                             | Input hint. If omitted, the default hint; an empty string shows none     |
-| `[text_window_keys]`             | The default keys in "Keyboard shortcuts" | Keys in the text window, per action, such as `copy` and `history_older`. An empty string means unassigned |
+| `[text_window_keys]`             | The default keys in “Keyboard shortcuts” | Keys in the text window, per action, such as `copy` and `history_older`. An empty string means unassigned |
 | `[[replacements]]`               | None                             | One replacement entry (`from`, `to`, `enabled`)                          |
 | `[[snippets]]`                   | Default snippets for the display language | One snippet (`name`, `body`, `output` [`"replace"`, `"insert"`, `"none"`], `encoding` [`"utf-8"`, `"shift_jis"`, and so on], `enabled`) |
 | `ai_service`                     | `"none"`                         | AI service used for AI actions (`@ai`) (`"none"`, `"mawok"`, `"gemini"`, `"anthropic"`, `"openai"`) |
@@ -178,12 +188,12 @@ Changes you make directly take effect after you restart the app. The file contai
 ## Uninstalling
 
 ::: macos
-1. Under "AI" in Settings, choose "Remove" if you entered an API key. Under "Account", choose "Sign out" if you signed in to Mawok.
-2. Choose "Quit" in the menu bar menu, then move `/Applications/Mawok.app` to the Trash.
+1. Under “AI” in Settings, choose “Remove” if you entered an API key. Under “Account”, choose “Sign out” if you signed in to Mawok.
+2. Choose “Quit” in the menu bar menu, then move `/Applications/Mawok.app` to the Trash.
 3. To also remove settings and history, delete `~/Library/Application Support/com.amiiby.mawok/` and `~/Library/Logs/com.amiiby.mawok/`.
 :::
 
 ::: windows
-1. Under "AI" in Settings, choose "Remove" if you entered an API key. Under "Account", choose "Sign out" if you signed in to Mawok.
-2. Uninstall Mawok from "Apps" in Windows "Settings". The Microsoft Store version also removes settings and history.
+1. Under “AI” in Settings, choose “Remove” if you entered an API key. Under “Account”, choose “Sign out” if you signed in to Mawok.
+2. Uninstall Mawok from “Apps” in Windows “Settings”. The Microsoft Store version also removes settings and history.
 :::

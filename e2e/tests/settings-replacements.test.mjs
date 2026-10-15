@@ -129,7 +129,7 @@ test.describe('設定 (置き換え辞書) → 下書きへの反映', () => {
 
 		// 開き直すと「一般」の分類に戻っている
 		await selectCopyCategory(client);
-		const removeButtons = await client.$$('button[aria-label="この行を削除"]');
+		const removeButtons = await client.$$('button[aria-label="この行を削除する"]');
 		await removeButtons[removeButtons.length - 1].click();
 		await waitFor(
 			tryReadConfig,

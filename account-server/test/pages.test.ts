@@ -41,13 +41,13 @@ describe('checkingPurchasePage', () => {
 	});
 
 	it('reloads while it waits, and offers a manual check once it gives up', async () => {
-		expect(await checking(false, true)).toContain('支払いを確かめています');
-		expect(await checking(true, true)).toContain('申し込みを確かめています');
+		expect(await checking(false, true)).toContain('支払いを確認しています');
+		expect(await checking(true, true)).toContain('申し込みを確認しています');
 		for (const pro of [false, true]) {
 			expect(await checking(pro, true)).toContain('http-equiv="refresh"');
 			const gaveUp = await checking(pro, false);
 			expect(gaveUp).not.toContain('http-equiv="refresh"');
-			expect(gaveUp).toContain('もう一度確かめる');
+			expect(gaveUp).toContain('もう一度確認');
 		}
 	});
 
@@ -55,7 +55,7 @@ describe('checkingPurchasePage', () => {
 	it('points to the receipt email only for a credit purchase', async () => {
 		expect(await checking(false, false)).toContain('買い直す前に、領収のメール');
 		const pro = await checking(true, false);
-		expect(pro).toContain('申し込みをまだ確かめられていません');
+		expect(pro).toContain('申し込みをまだ確認できていません');
 		expect(pro).not.toContain('領収のメール');
 	});
 });
@@ -73,12 +73,12 @@ describe('proConfirmPage', () => {
 					const amount = plan === 'yearly' ? '4,800 円' : '480 円';
 					const interval = plan === 'yearly' ? '1 年' : '1 か月';
 
-					expect(page).toContain(`Mawok Pro（${plan === 'yearly' ? '年額' : '月額'}）。`);
+					expect(page).toContain(`Mawok Pro (${plan === 'yearly' ? '年額' : '月額'})。`);
 					expect(page).toContain(`解約するまで、${interval}ごとに自動で更新します。`);
 					expect(page).toContain(amount);
 					expect(page).toContain(`その後は ${interval}ごとに同じ額を支払います。`);
 					expect(page).toContain(
-						'解約はアカウントのページの「支払いを管理する」からいつでもできます。'
+						'解約はアカウントのページの「支払いを管理」からいつでもできます。'
 					);
 					expect(page).toContain('次の更新日より前に解約すれば、次の期間の請求はありません。');
 

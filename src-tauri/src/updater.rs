@@ -40,7 +40,7 @@ pub struct UpdateState {
 #[derive(Default)]
 struct Inner {
     status: UpdateStatus,
-    /// 見つけた新しい版。「更新して再起動」で入れる
+    /// 見つけた新しい版。「更新して再起動する」で入れる
     update: Option<Update>,
     /// 最後に確かめ始めた時刻（壁時計）
     last_checked: Option<SystemTime>,
@@ -258,7 +258,7 @@ pub async fn check_for_update(app: AppHandle) {
     check(&app, true).await;
 }
 
-/// 「更新して再起動」。うまくいけば戻らずに再起動し、失敗は update-changed で届く
+/// 「更新して再起動する」。うまくいけば戻らずに再起動し、失敗は update-changed で届く
 #[tauri::command]
 pub async fn install_update(app: AppHandle) {
     install(&app).await;

@@ -49,11 +49,13 @@ ci-app: fmt-check lint check licenses-check pinned-deps-check test bindings-chec
 fmt-check:
     cargo fmt --manifest-path {{ cargo_manifest }} --check
 
-[doc('lint を流す (clippy・prettier・eslint)')]
+[doc('lint を流す (clippy・prettier・eslint・文言の括弧と長音)')]
 [group('検査')]
 lint:
     cargo clippy --manifest-path {{ cargo_manifest }} --all-targets -- -D warnings
     pnpm run lint
+    node scripts/check-parentheses.mjs
+    node scripts/check-long-vowel.mjs
 
 # Rust 側の型検査は lint の clippy が兼ねる
 [doc('画面の型検査を流す (svelte-check)')]

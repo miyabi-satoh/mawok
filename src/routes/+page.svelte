@@ -229,7 +229,7 @@
 	let historyStarted = false;
 	let historyReady = false;
 	let historySavePending = false;
-	// 「履歴を消す」の回数。読み込みの最中に消されたら、その読み込みの結果は捨てる
+	// 「履歴を削除する」の回数。読み込みの最中に消されたら、その読み込みの結果は捨てる
 	let historyClearedCount = 0;
 	// 読み込み・読み直しの最中に、同期で履歴が替わった知らせが届いた。終わってから読み直す
 	let historyReloadPending = false;

@@ -38,7 +38,7 @@ const pressNewCopyKey = () => keyCode(KEY.g, ['command down']);
 /** メニューから設定を開き、「キー操作」の分類を出す */
 const openKeySettings = () => openSettings('キー操作', 'ホットキーを変更');
 
-/** 「〈prefix〉（今は …）」のボタンを押して記録を始め、`press` で送ったキーが記録されて名前が `expected` になるまで待つ */
+/** 「〈prefix〉 (今は …)」のボタンを押して記録を始め、`press` で送ったキーが記録されて名前が `expected` になるまで待つ */
 async function record(prefix, press, expected) {
 	await pressInSettings('AXButton', prefix);
 	// 記録を始めると、ボタンは「キーを押してください」の表示に替わる
@@ -52,7 +52,7 @@ async function record(prefix, press, expected) {
 	await press();
 	await waitFor(
 		() => elementName(SETTINGS_TITLE, 'AXButton', prefix),
-		(name) => name?.includes(`（今は ${expected}）`),
+		(name) => name?.includes(`(今は ${expected})`),
 		{ label: `${prefix} が ${expected} になる` }
 	);
 }
@@ -87,7 +87,7 @@ test.describe('macOS: ホットキーと下書きのキーの変更', () => {
 		await openKeySettings();
 		assert.match(
 			await elementName(SETTINGS_TITLE, 'AXButton', 'ホットキーを変更'),
-			/（今は ⌘⌥⇧J）/,
+			/\(今は ⌘⌥⇧J\)/,
 			'既定でない組み合わせから始める'
 		);
 		await record('ホットキーを変更', pressHotkey, '⌘⇧Space');
@@ -121,14 +121,14 @@ test.describe('macOS: ホットキーと下書きのキーの変更', () => {
 		// 既定のままだと「既定に戻す」は押せず、押しても何も起きないまま通ってしまう
 		assert.match(
 			await elementName(SETTINGS_TITLE, 'AXButton', '「コピーして閉じる・実行」のキーを変更'),
-			/（今は ⌘G）/,
+			/\(今は ⌘G\)/,
 			'既定でないキーから始める'
 		);
 		await pressInSettings('AXButton', '「コピーして閉じる・実行」のキーを変更');
 		await pressInSettings('AXButton', '既定に戻す');
 		await waitFor(
 			() => elementName(SETTINGS_TITLE, 'AXButton', '「コピーして閉じる・実行」のキーを変更'),
-			(name) => name?.includes('（今は ⌘Enter）'),
+			(name) => name?.includes('(今は ⌘Enter)'),
 			{ label: '「コピーして閉じる」が既定に戻る' }
 		);
 		await closeSettings();

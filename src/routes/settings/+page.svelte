@@ -661,8 +661,7 @@
 								'hide-draft-on-blur',
 								m.settings_hide_draft_on_blur(),
 								view.hideTextWindowOnBlur,
-								'set_hide_draft_on_blur',
-								m.settings_hide_draft_on_blur_description()
+								'set_hide_draft_on_blur'
 							)}
 							{@render switchRow(
 								'show_text_window_buttons',
@@ -1205,9 +1204,6 @@
 										: m.settings_reveal_windows()}
 								</Button>
 							</Field.Field>
-							<Field.Description class="leading-snug">
-								{m.settings_config_file_description()}
-							</Field.Description>
 						</SettingsRow>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
