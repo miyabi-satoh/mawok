@@ -52,6 +52,7 @@
   | `@ai` で AI に頼むこと | AI アクション | AI action |
   | コピーしたテキストの記録 | 履歴 | history |
   | テキストウィンドウを出すキー | ホットキー | hotkey |
+  | テキストウィンドウの中で割り当てたキー | キー操作 | keyboard shortcuts |
   | 利用者の PC など | デバイス | device |
   | AI アクションに使う残高 | クレジット | credit |
 

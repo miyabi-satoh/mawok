@@ -110,7 +110,7 @@ To go back to settings from before sync changed them, select “Restore settings
 | Cancel a run (while it is running) | `Esc` |
 | Open Settings | {macos:`Cmd+,`}{windows:`Ctrl+,`} |
 
-You can change the keys under “Keyboard” in Settings.
+You can change the keys under “Keyboard shortcuts” in Settings.
 
 ## Settings
 
@@ -120,7 +120,7 @@ Settings you've changed from the default show a vertical line at the left edge o
 
 ## If something does not work
 
-- **The hotkey does not work**: Another app uses the same key. ⚠ appears in the {macos:menu bar}{windows:system tray} menu. Choose a different key under “Keyboard” in Settings.
+- **The hotkey does not work**: Another app uses the same key. ⚠ appears in the {macos:menu bar}{windows:system tray} menu. Choose a different key under “Keyboard shortcuts” in Settings.
 ::: macos
 - **“Couldn't read the API key” appears**: After you reinstall the app, you will be asked to allow access to the Keychain. Allow it. If that doesn't help, enter the key again under “AI” in Settings.
 :::
