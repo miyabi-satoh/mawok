@@ -126,7 +126,6 @@
 	"settings_licenses": "第三者のソフトウェア",
 	"settings_licenses_show": "ライセンスを表示",
 	"licenses_title": "第三者のソフトウェア",
-	"licenses_lead": "Mawok には次のソフトウェアが含まれています。行を開くと、著作権表示とライセンスの本文、ソースの置き場所が出ます。",
 	"licenses_source": "ソース",
 	"licenses_section_app": "アプリ本体",
 	"licenses_section_frontend": "画面",

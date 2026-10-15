@@ -56,7 +56,6 @@
 
 <main class="h-dvh overflow-y-auto px-6 py-6" {@attach showWindow}>
 	<h1 class="text-lg font-semibold">{m.licenses_title()}</h1>
-	<p class="mt-2 text-sm leading-snug text-muted-foreground">{m.licenses_lead()}</p>
 
 	{#each sections as section (section.key)}
 		<section class="mt-8">
