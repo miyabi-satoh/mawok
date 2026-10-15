@@ -16,7 +16,7 @@ Mawok stays in the {macos:menu bar}{windows:system tray} and starts automaticall
 
 - Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`} or click “Copy” to copy the text and return to the previous app. The hotkey does the same when the text window is in front.
 - To return without copying, press `Esc`. Your unfinished text remains there the next time you bring up the window.
-- Clicking another app also hides the window without copying (you can turn this off under “General” in Settings).
+- Clicking another app also hides the window without copying, and your unfinished text remains (you can turn this off under “General” in Settings).
 
 ## Use text you copied earlier
 
@@ -127,7 +127,7 @@ Settings you've changed from the default show a vertical line at the left edge o
 ::: windows
 - **“Couldn't read the API key” appears**: Enter the key again under “AI” in Settings.
 :::
-- **“Please try again later.” appears and trying again doesn't help**: Check that you are connected to the network.
+- **“Please try again later.” appears and trying again doesn't help**: Check that you are connected to the network. If you are, the Mawok server or the AI service may be having problems. Try again after a while.
 - **“The AI service's spending or credit limit was reached” appears**: Trying again won't help. Check the balance and limits in your AI service account.
 - **“Couldn't find the current folder” appears**: The folder was moved or deleted. Use “Go to folder” to choose a folder again.
 ::: macos

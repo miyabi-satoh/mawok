@@ -15,7 +15,7 @@ describe('draftGuidance', () => {
 	it('設定がなければ、既定の案内を今のキーで作る', () => {
 		inLocale('ja');
 		expect(draftGuidance(null, HOTKEY, DEFAULT_DRAFT_KEYS, 'macos')).toBe(
-			'ここに書いて ⌘Enter を押すと、コピーして元のアプリに戻ります。あとは貼るだけです。1 行目を @ で始めると、AI やコマンドに通せます。\n⌘⇧Space でいつでも呼び出せます。この案内は設定（⌘,）で変えたり消したりできます。'
+			'ここに書いて ⌘Enter を押すと、コピーして元のアプリに戻ります。あとは貼るだけです。1 行目を @ で始めると、AI やコマンドに通せます。\n⌘⇧Space でいつでも呼び出せます。この案内は設定 (⌘,) で変えたり消したりできます。'
 		);
 	});
 
@@ -32,7 +32,7 @@ describe('draftGuidance', () => {
 			draftGuidance(null, hotkey, { ...DEFAULT_DRAFT_KEYS, copy, settings }, 'macos');
 
 		expect(without(HOTKEY, '', DEFAULT_DRAFT_KEYS.settings)).toBe(
-			'ここに書いてコピーすると、元のアプリに戻ります。あとは貼るだけです。1 行目を @ で始めると、AI やコマンドに通せます。\n⌘⇧Space でいつでも呼び出せます。この案内は設定（⌘,）で変えたり消したりできます。'
+			'ここに書いてコピーすると、元のアプリに戻ります。あとは貼るだけです。1 行目を @ で始めると、AI やコマンドに通せます。\n⌘⇧Space でいつでも呼び出せます。この案内は設定 (⌘,) で変えたり消したりできます。'
 		);
 		expect(without(HOTKEY, DEFAULT_DRAFT_KEYS.copy, '')).toBe(
 			'ここに書いて ⌘Enter を押すと、コピーして元のアプリに戻ります。あとは貼るだけです。1 行目を @ で始めると、AI やコマンドに通せます。\n⌘⇧Space でいつでも呼び出せます。この案内は設定で変えたり消したりできます。'
