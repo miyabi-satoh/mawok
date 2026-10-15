@@ -130,6 +130,9 @@ Settings you've changed from the default show a vertical line at the left edge o
 - **“Couldn't connect...” or “Couldn't reach...” appears**: Check that you are connected to the network, and try again later.
 - **“The AI service's spending or credit limit was reached” appears**: Trying again won't help. Check the balance and limits in your AI service account.
 - **“Couldn't find the current folder” appears**: The folder was moved or deleted. Use “Go to folder” to choose a folder again.
+::: macos
+- **“The command wasn't found” appears**: Write the command with its full path.
+:::
 
 When reporting a problem, attach the log. It does not contain your text. Open its location from “About” in Settings.
 
