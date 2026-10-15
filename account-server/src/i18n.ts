@@ -72,7 +72,7 @@ const ja = {
 	email: 'メールアドレス',
 	sendLink: 'リンクを送信する',
 	invalidEmail: 'メールアドレスを確かめてください。',
-	tooManyLinks: 'リンクを送った回数が多すぎます。しばらくしてから再度お試しください。',
+	tooManyLinks: 'リンクを送った回数が多すぎます。しばらくしてからもう一度お試しください。',
 	mailSentTitle: 'メールを送りました',
 	mailSent: (email: string, minutes: number) =>
 		`${email} に届いたリンクを開いてください。リンクは ${minutes} 分で切れます。`,
