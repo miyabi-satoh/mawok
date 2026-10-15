@@ -291,7 +291,7 @@
 	"settings_sync_password_hint": "{count} 文字以上",
 	"settings_sync_password_warning": "パスワードを忘れた場合は復元できません。このデバイスのデータには影響しません。",
 	"settings_sync_start": "同期を開始する",
-	"settings_sync_password_forgot": "パスワードを忘れましたか？",
+	"settings_sync_password_forgot": "パスワードをお忘れですか？",
 	"settings_sync_password_save": "保存する",
 	"settings_sync_password_changed": "パスワードを変更しました。",
 	"settings_sync_password_row": "同期のパスワード",
