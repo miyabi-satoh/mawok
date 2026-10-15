@@ -127,7 +127,7 @@ Settings you've changed from the default show a vertical line at the left edge o
 ::: windows
 - **“Couldn't read the API key” appears**: Enter the key again under “AI” in Settings.
 :::
-- **“Please try again later.” appears and trying again doesn't help**: Check that you are connected to the network. If you are, the Mawok server or the AI service may be having problems. Try again after a while.
+- **“Couldn't connect...”, “Couldn't reach...”, or a similar message appears and trying again doesn't help**: Check that you are connected to the network. If you are, the Mawok server or the AI service may be having problems. Try again after a while.
 - **“The AI service's spending or credit limit was reached” appears**: Trying again won't help. Check the balance and limits in your AI service account.
 - **“Couldn't find the current folder” appears**: The folder was moved or deleted. Use “Go to folder” to choose a folder again.
 ::: macos
