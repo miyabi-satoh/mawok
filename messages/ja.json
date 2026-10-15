@@ -74,7 +74,7 @@
 	"settings_replacements_from": "置き換える前の文字列",
 	"settings_replacements_to": "置き換えた後の文字列",
 	"settings_replacements_enabled": "この行を使う",
-	"settings_replacements_remove": "この行を削除",
+	"settings_replacements_remove": "この行を削除する",
 	"settings_sync": "同期する",
 	"settings_modified": "既定の値から変更しています",
 	"settings_sync_on": "同期オン",
