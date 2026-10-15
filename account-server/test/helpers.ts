@@ -91,7 +91,7 @@ export function linkPath(fields: Record<string, string>) {
 	return `/account/link?${new URLSearchParams(fields)}`;
 }
 
-/** 「このデバイスを登録」を押し、Mawok の待ち受けへ戻された先のコードを返す。 */
+/** 「このデバイスを登録する」を押し、Mawok の待ち受けへ戻された先のコードを返す。 */
 export async function approve(fields: Record<string, string>, cookie: string) {
 	const res = await postForm('/account/link', fields, cookie);
 	expect(res.status).toBe(303);

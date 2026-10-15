@@ -192,7 +192,7 @@ describe('buying credit', () => {
 		await addSubscription(account, { id: 'sub_pro_status', customer: 'cus_pro_status' });
 		let page = await (await request('/account/', { cookie })).text();
 		expect(page).toContain('から課金が始まります');
-		expect(page).toContain('「支払いを管理する」から解約');
+		expect(page).toContain('「支払いを管理」から解約');
 		await env.DB.prepare('UPDATE subscriptions SET cancel_at_period_end = 1 WHERE id = ?')
 			.bind('sub_pro_status')
 			.run();
@@ -216,14 +216,14 @@ describe('buying credit', () => {
 			.bind('sub_pro_status')
 			.run();
 		page = await (await request('/account/', { cookie })).text();
-		expect(page).toContain('まで使えます（更新されません）');
+		expect(page).toContain('まで使えます (更新されません)');
 		await env.DB.prepare(
 			'UPDATE subscriptions SET cancel_at_period_end = 0, status = ? WHERE id = ?'
 		)
 			.bind('canceled', 'sub_pro_status')
 			.run();
 		page = await (await request('/account/', { cookie })).text();
-		expect(page).toContain('まで使えます（更新されません）');
+		expect(page).toContain('まで使えます (更新されません)');
 	});
 
 	it('shows cancel_at instead of the paid-through date when Stripe set it', async () => {
@@ -246,7 +246,7 @@ describe('buying credit', () => {
 			.run();
 		const page = await (await request('/account/', { cookie })).text();
 		const date = new Date(cancelAt * 1000).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
-		expect(page).toContain(`${date} まで使えます（更新されません）`);
+		expect(page).toContain(`${date} まで使えます (更新されません)`);
 	});
 
 	it('does not grant Pro credit from balance while the account is in its trial', async () => {
@@ -650,8 +650,8 @@ describe('buying credit', () => {
 		const confirmation = await (await request('/account/buy', { cookie })).text();
 		// 最終確認画面に要る事項を、確定ボタンより上に出す。
 		expect(confirmation).toContain('お申し込み内容の最終確認');
-		expect(confirmation).toContain('Mawok の AI アクションのクレジット（期限なし）');
-		expect(confirmation).toContain('300 円（税込み）');
+		expect(confirmation).toContain('Mawok の AI アクションのクレジット (期限なし)');
+		expect(confirmation).toContain('300 円 (税込み)');
 		expect(confirmation).toContain('自動の更新はありません');
 		expect(confirmation).toContain('返金');
 		expect(confirmation).toContain('href="https://amiiby.com/tokushoho/"');

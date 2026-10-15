@@ -86,7 +86,7 @@ const SNIPPETS = [
 	sh('終了まで待つ', QUIT_PING)
 ];
 
-/** 入力欄の下の知らせ (実行している間の「…を実行しています」、終わった後の「…を実行しました」)。出ていなければ null */
+/** 入力欄の下の知らせ (実行している間の「「…」を実行しています」、終わった後の「「…」を実行しました。」)。出ていなければ null */
 async function readStatus(client) {
 	return client.execute(
 		() => document.querySelector('main p[role="status"]')?.textContent.trim() ?? null
@@ -317,7 +317,7 @@ test.describe('@sh のコマンド', () => {
 		await runSnippet(client, '待つ');
 		await waitFor(
 			() => readStatus(client),
-			(status) => status?.includes('待つを実行しています'),
+			(status) => status?.includes('「待つ」を実行しています'),
 			{
 				label: '実行している間の知らせ'
 			}
@@ -421,7 +421,7 @@ test.describe('@sh のコマンド', () => {
 		await runSnippet(client, '記録');
 		await waitFor(
 			() => readStatus(client),
-			(status) => status === '記録を実行しました',
+			(status) => status === '「記録」を実行しました。',
 			{
 				label: '実行したことの知らせ',
 				timeout: 10000

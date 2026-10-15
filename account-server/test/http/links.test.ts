@@ -25,7 +25,7 @@ describe('linking Mawok', () => {
 
 		const page = await (await request(location!, { cookie })).text();
 		expect(page).toContain('「Taro の MacBook」を owner@example.com のアカウントに登録します');
-		expect(page).toContain('このデバイスを登録');
+		expect(page).toContain('このデバイスを登録する');
 
 		const code = await approve(fields, cookie);
 		const answer = await exchange(code, verifier);
@@ -39,7 +39,7 @@ describe('linking Mawok', () => {
 		// 答えの形は test/http/balance.test.ts が見る。ここは、替えたトークンでこのアカウントに届くことだけを見る。
 		expect(await (await app('/v1/balance', token)).json()).toMatchObject({ email });
 		// 窓口の画面で、どのデバイスの Mawok かが分かる。
-		expect(await (await request('/account/', { cookie })).text()).toContain('Taro の MacBook（');
+		expect(await (await request('/account/', { cookie })).text()).toContain('Taro の MacBook (');
 	});
 
 	it('asks to open the mail link on the same computer only while linking', async () => {
@@ -104,7 +104,7 @@ describe('linking Mawok', () => {
 		const { verifier, fields: unnamed } = await newLink('  ');
 		const code = await approve(unnamed, cookie);
 		expect((await exchange(code, verifier)).status).toBe(200);
-		expect(await (await request('/account/', { cookie })).text()).toContain('Mawok（');
+		expect(await (await request('/account/', { cookie })).text()).toContain('Mawok (');
 	});
 });
 

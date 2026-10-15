@@ -70,33 +70,33 @@ const ja = {
 	appleConflict:
 		'このメールアドレスのアカウントは、別の Apple アカウントでサインインするようになっています。そちらの Apple アカウントか、メールアドレスに送るリンクでサインインしてください。',
 	email: 'メールアドレス',
-	sendLink: 'リンクを送る',
+	sendLink: 'リンクを送信する',
 	invalidEmail: 'メールアドレスを確かめてください。',
-	tooManyLinks: 'リンクを送った回数が多すぎます。しばらくしてから試してください。',
+	tooManyLinks: 'リンクを送った回数が多すぎます。しばらくしてから再度お試しください。',
 	mailSentTitle: 'メールを送りました',
 	mailSent: (email: string, minutes: number) =>
 		`${email} に届いたリンクを開いてください。リンクは ${minutes} 分で切れます。`,
-	mailSentHint: '届かないときは、迷惑メールのフォルダも確かめてください。',
+	mailSentHint: '届かないときは、迷惑メールのフォルダーも確かめてください。',
 	mailSentSameComputer:
 		'リンクは、Mawok を使っているこのデバイスで開いてください。ほかのデバイスで開くと、このデバイスを登録できません。',
 	signIn: 'サインインする',
 	linkUnusableTitle: 'リンクが使えません',
 	linkUnusable: 'リンクの期限が切れたか、もう使われています。サインインをやり直してください。',
 	signedInAs: (email: string) => `${email} でサインインしています。`,
-	signOut: 'サインアウト',
+	signOut: 'サインアウトする',
 	linkTitle: 'デバイスを登録',
 	linkConfirm: (name: string, email: string) =>
 		`「${name}」を ${email} のアカウントに登録します。登録したデバイスの Mawok は、アカウントのクレジットで AI アクションを使えます。`,
-	approve: 'このデバイスを登録',
+	approve: 'このデバイスを登録する',
 	linkInvalidTitle: 'このページは開けません',
 	linkInvalid: 'Mawok の設定の「アカウント」で「サインイン」を押して、もう一度開いてください。',
 	buyTitle: 'クレジットを購入',
 	// 価格は本番の Stripe の Price と、紹介・規約類に合わせる。
 	confirmTitle: 'お申し込み内容の最終確認',
 	confirmItemLabel: '買うもの',
-	confirmItem: 'Mawok の AI アクションのクレジット（期限なし）',
+	confirmItem: 'Mawok の AI アクションのクレジット (期限なし)',
 	confirmPriceLabel: '価格',
-	confirmPrice: '300 円（税込み）',
+	confirmPrice: '300 円 (税込み)',
 	confirmPaymentLabel: '支払い',
 	confirmPayment: {
 		domestic: '1 回だけの支払いで、自動の更新はありません。次の画面 (Stripe) でカードで払います。',
@@ -119,20 +119,20 @@ const ja = {
 		`支払いが済むとすぐ、Mawok のアカウントにクレジットが付きます。購入後の返金は、原則としてできません。詳しくは[特定商取引法に基づく表記](${tokushoho})をご覧ください。`,
 	notForSale: 'いまはクレジットを買えません。',
 	buyBusy: '支払いの画面を用意しています。少ししてから、もう一度押してください。',
-	checkingPurchase: '支払いを確かめています。このままお待ちください。',
+	checkingPurchase: '支払いを確認しています。このままお待ちください。',
 	purchaseNotYet:
-		'支払いをまだ確かめられていません。少ししてから確かめ直してください。買い直す前に、領収のメールが届いていないかも確かめてください。',
-	checkingPro: '申し込みを確かめています。このままお待ちください。',
-	proNotYet: '申し込みをまだ確かめられていません。少ししてから確かめ直してください。',
-	checkAgain: 'もう一度確かめる',
+		'支払いをまだ確認できていません。少ししてから、もう一度確認してください。買い直す前に、領収のメールが届いていないかも確かめてください。',
+	checkingPro: '申し込みを確認しています。このままお待ちください。',
+	proNotYet: '申し込みをまだ確認できていません。少ししてから、もう一度確認してください。',
+	checkAgain: 'もう一度確認',
 	bought: 'クレジットを購入しました。Mawok の設定に戻ると、残りに反映されます。',
 	proTitle: 'Mawok Pro',
 	proUnavailable: 'いまは Pro を申し込めません。',
 	proSubscribe: 'Pro の料金を見る',
 	proItem: (plan: ProPlan) =>
-		`Mawok Pro（${plan === 'yearly' ? '年額' : '月額'}）。解約するまで、${plan === 'yearly' ? '1 年' : '1 か月'}ごとに自動で更新します。`,
+		`Mawok Pro (${plan === 'yearly' ? '年額' : '月額'})。解約するまで、${plan === 'yearly' ? '1 年' : '1 か月'}ごとに自動で更新します。`,
 	proPrice: (plan: ProPlan): string =>
-		plan === 'yearly' ? '4,800 円/年（税込み）' : '480 円/月（税込み）',
+		plan === 'yearly' ? '4,800 円/年 (税込み)' : '480 円/月 (税込み)',
 	proPayment: (
 		plan: ProPlan,
 		trial: boolean,
@@ -157,27 +157,27 @@ const ja = {
 	proCancelLabel: '解約と返金',
 	proCancel: {
 		domestic: (tokushoho: string) =>
-			`解約はアカウントのページの「支払いを管理する」からいつでもできます。次の更新日より前に解約すれば、次の期間の請求はありません。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。`,
+			`解約はアカウントのページの「支払いを管理」からいつでもできます。次の更新日より前に解約すれば、次の期間の請求はありません。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。`,
 		overseas: (tokushoho: string) =>
-			`解約はアカウントのページの「支払いを管理する」からいつでもできます。次の更新日より前に解約すれば、次の期間の請求はありません。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。購入から 60 日以内は、[Link の返金ポリシー](${LINK_REFUND_POLICY})で返金されることがあります。`
+			`解約はアカウントのページの「支払いを管理」からいつでもできます。次の更新日より前に解約すれば、次の期間の請求はありません。解約後も、支払い済みの期間の終わりまで Pro を使えます。支払い済みの期間は返金できません (こちらの誤りによる請求などを除きます。詳しくは[特定商取引法に基づく表記](${tokushoho}))。購入から 60 日以内は、[Link の返金ポリシー](${LINK_REFUND_POLICY})で返金されることがあります。`
 	} as Record<SaleRegion, (tokushoho: string) => string>,
 	proCheckoutNote:
 		'解約するまで自動で更新します。解約は Mawok のアカウントのページからでき、支払い済みの期間の終わりまで使えます。支払い済みの期間は、こちらの誤りによる請求などを除き、返金できません。',
 	proUntil: (plan: ProPlan, date: string) =>
-		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} に自動で更新されます。`,
+		`Pro (${plan === 'yearly' ? '年額' : '月額'}): ${date} に自動で更新されます。`,
 	proCanceledUntil: (plan: ProPlan, date: string) =>
-		`Pro（${plan === 'yearly' ? '年額' : '月額'}）: ${date} まで使えます（更新されません）。`,
+		`Pro (${plan === 'yearly' ? '年額' : '月額'}): ${date} まで使えます (更新されません)。`,
 	proTrialCanceledUntil: (date: string) => `試用は ${date} までです。課金はされません。`,
 	proTrialUntil: (date: string) =>
-		`${date} から課金が始まります。止めるときは「支払いを管理する」から解約してください。`,
-	manageBilling: '支払いを管理する',
+		`${date} から課金が始まります。止めるときは「支払いを管理」から解約してください。`,
+	manageBilling: '支払いを管理',
 	accountTitle: 'アカウント',
 	balance: (percent: number) => `AI アクションのクレジット: 残り ${percent}%`,
 	noBalance: 'AI アクションのクレジットはありません。',
 	appsTitle: '登録しているデバイス',
 	appsNone: '登録しているデバイスはありません。',
-	appLinkedAt: (name: string, date: string) => `${name}（${date} に登録）`,
-	unlink: '登録を解除',
+	appLinkedAt: (name: string, date: string) => `${name} (${date} に登録)`,
+	unlink: '登録を解除する',
 	tooManyConnectsTitle: 'しばらくお待ちください',
 	tooManyConnects:
 		'デバイスを登録しようとした回数が多すぎます。1 分ほどしてから、Mawok の設定でサインインし直してください。',
