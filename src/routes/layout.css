@@ -144,8 +144,12 @@
 			legend,
 			th,
 			dt,
-			[role='menuitem'],
+			option,
+			[role^='menuitem'],
 			[role='option'],
+			[role='tab'],
+			[data-slot='toggle-group-item'],
+			[data-slot$='-heading'],
 			[data-slot='button'],
 			[data-slot$='-title'],
 			[data-slot$='-label']
