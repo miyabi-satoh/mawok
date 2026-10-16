@@ -64,6 +64,9 @@ function page(lang: Lang, title: string, body: Body) {
 						color: var(--fg);
 						font-family: system-ui, sans-serif;
 						line-height: 1.7;
+					}
+					/* 題・ボタン・ラベルなどの短い文だけ、文節の切れ目で折る。説明文は文節で折ると右端がでこぼこになるので、通常の折り返しのままにする */
+					:is(h1, h2, button, label, dt, a.action, a.google, a.apple) {
 						word-break: auto-phrase;
 					}
 					main {

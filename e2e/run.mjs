@@ -1,4 +1,4 @@
-// `just e2e` の入口。画面がロック・スタンバイ中でないことを確かめ、終わるまで画面を点けたまま、
+// `just e2e` の入口。画面がロック中でないことを確かめ (消えていれば起こし)、終わるまで画面を点けたまま、
 // リリース版をビルドし直してからテストを回す。
 //
 // 引数でテストファイルを選べる。`draft-clipboard` のように名前だけなら `tests/<名前>.test.mjs`、
@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { ensureSessionReady, keepDisplayOn } from './lib/power.mjs';
 import {
 	AUTOSTART_HELD_ENV,
+	restartMawok,
+	stopRunningMawok,
 	clearAutostartEntry,
 	recoverStaleAutostartBackupIfAny,
 	snapshotAutostartEntry,
@@ -100,10 +102,14 @@ try {
 waitForChildOnInterrupt();
 
 await ensureSessionReady();
+// 常用版が動いていると single-instance でテストのアプリを起動できないので、頼まずに終了し、終わったら戻す。
+// 書きかけの下書きは失われるが、開発に使う機の常用版のデータは維持しない決め
+const stoppedMawok = await stopRunningMawok();
 // テストは別のプロセスで回るので、ここで立ち上げた PowerShell はビルドとテストのあいだ使わない
-await stopPowerShell();
-const display = await keepDisplayOn();
+let display;
 try {
+	await stopPowerShell();
+	display = await keepDisplayOn();
 	let code = 0;
 	if (options.flags.has('--no-build')) {
 		if (!(await reportBuild())) code = 2;
@@ -128,5 +134,15 @@ try {
 	}
 	process.exitCode = code;
 } finally {
-	await display.release();
+	// 片方が投げても、もう片方は行う。起動し直しの失敗は、テストの結果を隠さないようログだけにする
+	try {
+		await display?.release();
+	} catch (error) {
+		console.warn(`[e2e] 画面を点けておく要求を取り消せませんでした: ${error.message}`);
+	}
+	try {
+		await restartMawok(stoppedMawok, APP_PATH);
+	} catch (error) {
+		console.warn(`[e2e] 終了した mawok.exe を起動し直せませんでした: ${error.message}`);
+	}
 }

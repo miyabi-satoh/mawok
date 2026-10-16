@@ -31,8 +31,7 @@ const LOG_PATH = path.join(APP_DATA_DIRS.local, 'logs', 'Mawok.log');
  * - 実行の排他ロックを取る (2つの `just e2e` が同時に config.toml を取り合わないため)
  * - 前回の実行が中断されて config.toml やログイン時の起動の登録の控えが残っていれば書き戻し、以後の中断にも備える。
  *   登録の控えと書き戻しは、run.mjs を通さずに回すときだけ行う (`just e2e` では run.mjs が全体の前後で1度だけ行う)
- * - 常用の Mawok が動いていないことを確認する (動いていれば、書きかけの下書きを消さないよう
- *   黙って終了せず、手動で閉じてもらうようはっきり失敗する)
+ * - 常用の Mawok が動いていないことを確認する (動いていれば終了する。起動し直すのは run.mjs だけ)
  * - tauri-driver を起動する
  * - テストごとに新しい Mawok インスタンスを起動して WebDriver セッションに繋ぎ、画面の読み込みを待つ
  *
@@ -54,8 +53,8 @@ export function createSuite() {
 		} catch {
 			// セッションが既に切れていてもよい
 		}
-		// deleteSession() で Mawok プロセスも終了するはず。残っていたら
-		// 後始末が失敗しているということなので、次のテストに進む前に気づけるようにする
+		// deleteSession() で Mawok プロセスも終了するはず。終了が遅れて残っていたら、
+		// 次のテストのアプリが single-instance で起動できないので、少し待ってから終了させる
 		await ensureMawokNotRunning();
 	}
 
@@ -93,8 +92,8 @@ export function createSuite() {
 		 * 起動した直後の振る舞いを、読み込みを待つ前から見るときに使う
 		 */
 		async newClient({ waitForPage = true } = {}) {
-			// 前のテストの後始末 (closeClient) が確実に終わっている前提だが、
-			// 万一まだ残っていたら黙って殺さずここで気づけるようにする
+			// 前のテストの後始末 (closeClient) が終わっている前提だが、まだ残っていたり、
+			// テストを node で直接回して常用版が動いていたりしたら、ここで終了させる
 			await ensureMawokNotRunning();
 			// 前面をシェルが握ったままだと、起動したアプリの前面化が通らない。テストの頭でニュートラルにしておく
 			await neutralizeForeground();
