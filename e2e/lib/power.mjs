@@ -94,8 +94,13 @@ export async function ensureSessionReady() {
 	// ロックは外から解除できないので、ロック中は下で失敗させる
 	if (state.inputDesktop === 'Default' && state.displayState === 0) {
 		await runPowerShell(WAKE_DISPLAY_SCRIPT);
-		await new Promise((resolve) => setTimeout(resolve, 2000));
-		state = await readSessionState();
+		// Modern Standby からの戻りは遅いことがあるので、点くまで期限つきで読み直す
+		const deadline = Date.now() + 10_000;
+		for (;;) {
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			state = await readSessionState();
+			if (state.displayState !== 0 || Date.now() > deadline) break;
+		}
 	}
 	const { inputDesktop, displayState } = state;
 	if (inputDesktop !== 'Default') {
