@@ -153,7 +153,7 @@ AI アクションのクレジットを購入するときと、Pro を申し込�
 ## このサイトのアクセス解析
 
 このサイト（mawok.amiiby.com。アカウントのサービスの画面を含みます）は、Cloudflare, Inc. のアクセス解析サービス「Cloudflare Web Analytics」を使います。
-Cloudflare Web Analytics は、Cookie などのブラウザーに保存する仕組みを使わず、訪問者を個人として識別しません。集めた情報は、このサイトの利用状況を知り、改善するために使います。Cloudflare での扱いは、[Cloudflare のプライバシーポリシー](https://www.cloudflare.com/privacypolicy/)をご覧ください。
+Cloudflare Web Analytics は、Cookie などのブラウザーに保存する仕組みを使わず、IP アドレスを保存せず、訪問者を個人として識別しません。集めた情報は、このサイトの利用状況を知り、改善するために使います。Cloudflare での扱いは、[Cloudflare のプライバシーポリシー](https://www.cloudflare.com/privacypolicy/)をご覧ください。
 
 このサイトのページを表示すると、ブラウザーから次の事業者に情報が送られます（電気通信事業法の外部送信規律に基づく表示）。
 

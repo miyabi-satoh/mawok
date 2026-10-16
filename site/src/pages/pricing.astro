@@ -93,7 +93,7 @@ const { data } = (await getEntry('product', 'index'))!;
   }
 
   /* 題とラベルの短い文だけ、文節の切れ目で折る。説明の段落は文節で折ると右端がでこぼこになるので、通常の折り返しのままにする */
-  .pricing :is(h1, h2, h3, dt, button) {
+  .pricing :is(h1, h2, h3, dt, button, .buy) {
     word-break: auto-phrase;
   }
 
