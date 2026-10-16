@@ -54,7 +54,7 @@
 		]
 	},
 	"vars": {
-		"MAIL_FROM": "Mawok <noreply@mawok.amiiby.com>",
+		"MAIL_FROM": "Mawok <noreply@amiiby.com>",
 		// 国内の支払いに付ける手動の税率「消費税 10%・税込み」(→ src/stripe.ts)。秘密ではないので vars に置く。
 		"STRIPE_TAX_RATE_ID": "txr_1UM7mJPXESUJaYKotwoV79Pu"
 	},
@@ -94,7 +94,7 @@
 			},
 			// メールは送らず、サインインのリンクをログに出す (`wrangler tail --env staging` で読む)。
 			"vars": {
-				"MAIL_FROM": "Mawok <noreply@mawok.amiiby.com>",
+				"MAIL_FROM": "Mawok <noreply@amiiby.com>",
 				"MAIL_LOG_ONLY": "1",
 				// サンドボックスの税率。
 				"STRIPE_TAX_RATE_ID": "txr_1UM7jvBdeu1RIibiRtWDeFKZ"

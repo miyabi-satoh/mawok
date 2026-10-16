@@ -128,12 +128,31 @@
 	body {
 		@apply bg-background text-foreground;
 	}
-	/* 日本語を語の途中で折り返さず、文節の切れ目で折る。
+	/* 題・ボタン・ラベルなどの短い文だけ、語の途中で折り返さず文節の切れ目で折る。説明文などのまとまった文は、
+	 * 文節で折ると行ごとに右端が空いてでこぼこになるので、通常の折り返しのままにする。
 	 * auto-phrase は WebView2 (Chromium) だけが効き、WKWebView は通常の折り返しのまま。 */
-	:where(:lang(ja)) {
+	:where(:lang(ja))
+		:where(
+			h1,
+			h2,
+			h3,
+			h4,
+			h5,
+			h6,
+			button,
+			label,
+			legend,
+			th,
+			dt,
+			[role='menuitem'],
+			[role='option'],
+			[data-slot='button'],
+			[data-slot$='-title'],
+			[data-slot$='-label']
+		) {
 		word-break: auto-phrase;
 	}
-	/* 打っている欄は、打つたびに行の切れ目が動かないよう、ふつうの折り返しのままにする */
+	/* 打っている欄は、打つたびに行の切れ目が動かないよう、label の中にあってもふつうの折り返しのままにする */
 	textarea,
 	input,
 	[contenteditable] {
