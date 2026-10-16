@@ -15,8 +15,7 @@
   `cargo install --git https://github.com/chippers/msedgedriver-tool` などで入れた `msedgedriver-tool`
   を実行すると、入っている WebView2 に合わせて自動でダウンロードしてくれる。
 - 常用の Mawok が起動していると、グローバルホットキーと、`mawok.exe` を数える後始末の確認がかち合う。
-  書きかけのテキストを消さないよう、自動では終了せず `ensureMawokNotRunning()` がはっきり
-  失敗する (`lib/os.mjs`)。実行前に、書きかけのテキストがあれば確定させたうえで手動で終了しておく。
+  `run.mjs` が始めに終了し、終わったら起動し直す (下の「常用版が動いていても、頼まずに終了して回す」)。
 
 ## 実行
 

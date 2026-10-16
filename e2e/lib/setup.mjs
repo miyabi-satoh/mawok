@@ -54,8 +54,8 @@ export function createSuite() {
 		} catch {
 			// セッションが既に切れていてもよい
 		}
-		// deleteSession() で Mawok プロセスも終了するはず。残っていたら
-		// 後始末が失敗しているということなので、次のテストに進む前に気づけるようにする
+		// deleteSession() で Mawok プロセスも終了するはず。終了が遅れて残っていたら、
+		// 次のテストのアプリが single-instance で起動できないので、少し待ってから終了させる
 		await ensureMawokNotRunning();
 	}
 
@@ -93,8 +93,8 @@ export function createSuite() {
 		 * 起動した直後の振る舞いを、読み込みを待つ前から見るときに使う
 		 */
 		async newClient({ waitForPage = true } = {}) {
-			// 前のテストの後始末 (closeClient) が確実に終わっている前提だが、
-			// 万一まだ残っていたら黙って殺さずここで気づけるようにする
+			// 前のテストの後始末 (closeClient) が終わっている前提だが、まだ残っていたり、
+			// テストを node で直接回して常用版が動いていたりしたら、ここで終了させる
 			await ensureMawokNotRunning();
 			// 前面をシェルが握ったままだと、起動したアプリの前面化が通らない。テストの頭でニュートラルにしておく
 			await neutralizeForeground();
