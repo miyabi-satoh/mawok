@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { ensureSessionReady, keepDisplayOn } from './lib/power.mjs';
 import {
 	AUTOSTART_HELD_ENV,
+	restartMawok,
+	stopRunningMawok,
 	clearAutostartEntry,
 	recoverStaleAutostartBackupIfAny,
 	snapshotAutostartEntry,
@@ -100,6 +102,9 @@ try {
 waitForChildOnInterrupt();
 
 await ensureSessionReady();
+// 常用版が動いていると single-instance でテストのアプリを起動できないので、頼まずに終了し、終わったら戻す。
+// 書きかけの下書きは失われるが、開発に使う機の常用版のデータは維持しない決め
+const stoppedMawok = await stopRunningMawok();
 // テストは別のプロセスで回るので、ここで立ち上げた PowerShell はビルドとテストのあいだ使わない
 await stopPowerShell();
 const display = await keepDisplayOn();
@@ -129,4 +134,5 @@ try {
 	process.exitCode = code;
 } finally {
 	await display.release();
+	await restartMawok(stoppedMawok, APP_PATH);
 }

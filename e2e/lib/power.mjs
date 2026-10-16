@@ -71,16 +71,33 @@ $state.Close()
 [PSCustomObject]@{ inputDesktop = [E2ESessionState]::InputDesktopName(); displayState = $displayState } | ConvertTo-Json -Compress
 `;
 
+async function readSessionState() {
+	return JSON.parse((await runPowerShell(SESSION_STATE_SCRIPT)).trim());
+}
+
+// MOUSEEVENTF_MOVE で相対 1px 動かして戻す。画面が消えているとき、入力があれば点く
+const WAKE_DISPLAY_SCRIPT = `
+Add-Type -Name E2EWake -Namespace E2E -MemberDefinition '[DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);'
+[E2E.E2EWake]::mouse_event(1, 1, 0, 0, [UIntPtr]::Zero)
+[E2E.E2EWake]::mouse_event(1, -1, 0, 0, [UIntPtr]::Zero)
+`;
+
 /**
- * 画面がロックされていたり、消えていたり (Modern Standby の機ではスタンバイに入っている) したら、
- * テストを始める前にはっきり失敗させる。
+ * 画面が消えていたら (Modern Standby の機ではスタンバイに入っている) マウスを動かして起こす。
+ * ロックされていたり、起こしても消えたままだったりしたら、テストを始める前にはっきり失敗させる。
  * ロック中はホットキーの送信 (SendKeys) が「Access is denied」で落ち、スタンバイ中は WebView2 が
  * ウィンドウを作れないなど、原因の分かりにくい落ち方になるため
  */
 export async function ensureSessionReady() {
-	const { inputDesktop, displayState } = JSON.parse(
-		(await runPowerShell(SESSION_STATE_SCRIPT)).trim()
-	);
+	let state = await readSessionState();
+	// 画面が消えているだけなら、マウスを1px 動かして起こす (ユーザーは回している間触らないので、頼まずに自分で整える)。
+	// ロックは外から解除できないので、ロック中は下で失敗させる
+	if (state.inputDesktop === 'Default' && state.displayState === 0) {
+		await runPowerShell(WAKE_DISPLAY_SCRIPT);
+		await new Promise((resolve) => setTimeout(resolve, 2000));
+		state = await readSessionState();
+	}
+	const { inputDesktop, displayState } = state;
 	if (inputDesktop !== 'Default') {
 		throw new Error(
 			'画面がロックされているため E2E を始められません (入力を受けているデスクトップ: ' +

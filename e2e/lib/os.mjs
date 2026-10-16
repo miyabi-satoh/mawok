@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { DRAFT_TITLE } from './app-conf.mjs';
 import { readBackupRecord, recordPath, writeJsonAtomic } from './files.mjs';
@@ -196,26 +197,62 @@ export async function isMawokRunning() {
 }
 
 /**
- * mawok.exe が動いていないことを確認する。動いていたら、はっきり失敗させる。
+ * 動いている mawok.exe を終了し、終了前の実行ファイルのパスを返す (終わってから `restartMawok` で戻す)。
  *
- * 常用のアプリが起動中の可能性がある (書きかけの下書きがメモリ上にあるかもしれない) ので、
- * ここで黙って `taskkill` するとユーザーの入力が消える。E2E は single-instance のため
- * 動かせないのは事実だが、対処は「先に閉じてもらう」以外に安全な方法がない。
- *
- * `deleteSession()` 直後などは終了が一瞬遅れることがあるため、すぐに諦めず少し待ってから
- * 判定する (それでも動いていれば、常用のアプリと区別が付かないので同じ扱いで失敗させる)。
+ * 常用版は E2E が回っている間は要らない (single-instance のため同時には動かせない) し、ユーザーは
+ * テスト中に触らないので、手動で閉じてもらう形にはせず E2E 自身が終了する。書きかけの下書きは
+ * 失われるが、承知のうえ (開発に使う機の常用版のデータは維持しない決め)。
  * `isMawokRunning()` 自体が失敗した場合 (powershell が見つからない等) は、それを
  * 「動いている」に読み替えず、元のエラーをそのまま投げる (原因が分からなくなるため)
+ *
+ * @returns {Promise<string[]>} 終了した mawok.exe の実行ファイルのパス (重複なし)
+ */
+export async function stopRunningMawok() {
+	const stdout = await runPowerShell(
+		`$procs = @(Get-Process -Name mawok -ErrorAction SilentlyContinue)
+$procs | ForEach-Object { $_.Path } | Where-Object { $_ } | Select-Object -Unique
+$procs | Stop-Process -Force -ErrorAction SilentlyContinue`
+	);
+	const paths = stdout
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean);
+	const deadline = Date.now() + 5000;
+	while (await isMawokRunning()) {
+		if (Date.now() > deadline) throw new Error('mawok.exe を終了できませんでした。');
+		await new Promise((resolve) => setTimeout(resolve, 150));
+	}
+	return paths;
+}
+
+/**
+ * `stopRunningMawok` で終了したアプリを起動し直す。MSIX 版 (パスが WindowsApps の下) は
+ * パッケージの AUMID で起動する。`skip` の実行ファイル (E2E がビルドしたもの) は戻さない
+ *
+ * @param {string[]} paths `stopRunningMawok` が返したパス
+ * @param {string} skip 戻さない実行ファイルのパス
+ */
+export async function restartMawok(paths, skip) {
+	const normalize = (value) => path.resolve(value).toLowerCase();
+	for (const exe of paths) {
+		if (normalize(exe) === normalize(skip)) continue;
+		const target = /\\WindowsApps\\/i.test(exe)
+			? 'shell:AppsFolder\\amiiby.Mawok_tv82n7df3ay6j!Mawok'
+			: exe;
+		await runPowerShell(`Start-Process -FilePath '${target.replace(/'/g, "''")}'`);
+	}
+}
+
+/**
+ * mawok.exe が動いていないことを確認する。前のテストのアプリの終了が一瞬遅れることがあるので、
+ * 少し待ってから、まだ動いていれば (常用版が起動し直された場合など) 終了する
  */
 export async function ensureMawokNotRunning() {
 	const deadline = Date.now() + 3000;
-	for (;;) {
-		if (!(await isMawokRunning())) return;
+	while (await isMawokRunning()) {
 		if (Date.now() > deadline) {
-			throw new Error(
-				'mawok.exe が既に起動しています。E2E は single-instance のため、' +
-					'常用のアプリを (下書きが書きかけなら確定させてから) 手動で終了して再実行してください。'
-			);
+			await stopRunningMawok();
+			return;
 		}
 		await new Promise((resolve) => setTimeout(resolve, 150));
 	}
