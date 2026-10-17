@@ -476,8 +476,8 @@ pub fn classify_anthropic_error(status: u16, body: &str) -> ActionError {
 
 /// 成功の返事から、書き直した文を取り出す。
 /// 形は `{ "choices": [{ "message": { "content": "…", "refusal": null }, "finish_reason": "stop" }] }`。使うのは最初の choice だけ（n は送らない）。
-/// finish_reason が stop でないもの（length は出力の上限、content_filter は安全上の理由で止めた）と、断ったとき（refusal）は、途中までの文を使わない。
-/// 互換のサービスには finish_reason を入れないものがあるので、無ければ文を読む
+/// finish_reason が length（出力の上限）と content_filter（安全上の理由で止めた）のときと、断ったとき（refusal）は、途中までの文を使わない。
+/// ほかの値は文を読む。互換のサービスには、finish_reason を入れないものや、stop でない値で書き終えたと返すものがあるため
 pub fn read_openai_response(body: &str) -> Result<String, ActionError> {
     let value = parse_response(body)?;
     let Some(choice) = value
@@ -488,14 +488,11 @@ pub fn read_openai_response(body: &str) -> Result<String, ActionError> {
         return Err(ActionError::new(Failure::Unexpected, "no choices"));
     };
     let finish_reason = choice.get("finish_reason").and_then(Value::as_str);
-    match finish_reason {
-        Some("stop") | None => {}
-        Some(other) => {
-            return Err(ActionError::new(
-                Failure::Unexpected,
-                format!("finish reason {other}"),
-            ))
-        }
+    if let Some(reason @ ("length" | "content_filter")) = finish_reason {
+        return Err(ActionError::new(
+            Failure::Unexpected,
+            format!("finish reason {reason}"),
+        ));
     }
     let message = choice.get("message");
     if message
@@ -887,9 +884,13 @@ mod tests {
             }]
         }"#;
         assert_eq!(read_openai_response(body).unwrap(), "リライトした文です。");
-        // finish_reason を入れない互換のサービス
-        let body = r#"{ "choices": [{ "message": { "content": "文" } }] }"#;
-        assert_eq!(read_openai_response(body).unwrap(), "文");
+        // finish_reason を入れない・stop でない値で書き終えたと返す互換のサービス
+        for body in [
+            r#"{ "choices": [{ "message": { "content": "文" } }] }"#,
+            r#"{ "choices": [{ "message": { "content": "文" }, "finish_reason": "eos" }] }"#,
+        ] {
+            assert_eq!(read_openai_response(body).unwrap(), "文", "{body}");
+        }
     }
 
     #[test]
