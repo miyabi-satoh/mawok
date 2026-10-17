@@ -2076,16 +2076,25 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
     let backed_up = run_blocking(move || read_backup(&dir, &name))
         .await?
         .map_err(|error| error.to_string())?;
-    back_up_now(&app).await?;
     let state = app.state::<AppState>();
     // 排他を待つ間に同期の結果が入ると世代が進むので、今の設定から作り直して、もう一度保存する
     for _ in 0..RESTORE_ATTEMPTS {
+        let (current, _) = config_with_generation(&state);
+        let ai_service_changes =
+            sync::restore_backup(&current, &backed_up).ai_service != current.ai_service;
+        let _commit = lock_sync_commit(&app, ai_service_changes).await;
+        // 同期の排他の中で、戻す直前の設定を残す。外で残すと、その後に入った同期の結果が戻す前の設定から漏れ、
+        // 戻したことを戻せない
+        back_up_now(&app).await?;
         let (current, generation) = config_with_generation(&state);
         let next = sync::restore_backup(&current, &backed_up);
         if next == current {
             return Ok(());
         }
-        let _commit = lock_sync_commit(&app, next.ai_service != current.ai_service).await;
+        // 排他を取った後に AI サービスの替わりが入った。AI サービスを替えるコマンドの排他も取り直す
+        if next.ai_service != current.ai_service && !ai_service_changes {
+            continue;
+        }
         if let Some(rejected) = save_synced_config(&app, generation, true, next)? {
             // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
             apply_synced_config(&app);
@@ -4054,9 +4063,10 @@ fn open_store(path: &std::path::Path) -> (store::Store, Option<ConfigProblem>) {
             Some(ConfigProblem::Unsaved(error.message)),
         );
     }
+    // 書きかけの記録を先に消す。本体を消した後に失敗すると、作り直せないうえ元のファイルも残らない
     let reset = atomic_file::back_up(path, SystemTime::now())
-        .and_then(|copy| std::fs::remove_file(path).map(|()| copy))
         .and_then(|copy| store::remove_side_files(path).map(|()| copy))
+        .and_then(|copy| std::fs::remove_file(path).map(|()| copy))
         .map_err(|error| error.to_string())
         .and_then(|copy| {
             store::Store::open(path)
