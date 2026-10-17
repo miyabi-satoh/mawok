@@ -186,6 +186,8 @@
 	let baseUrlInput = $state(untrack(() => view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL));
 	let baseUrlError = $state('');
 	let editingBaseUrl = false;
+	/** 欄に入ったときの中身。打たずに離れたら保存しない（入っている間に同期で届いた URL を、古い中身で上書きしない） */
+	let baseUrlAtFocus = '';
 	$effect(() => {
 		const url = view.aiBaseUrl;
 		if (untrack(() => editingBaseUrl)) return;
@@ -194,6 +196,11 @@
 	});
 
 	async function saveBaseUrl() {
+		if (baseUrlInput === baseUrlAtFocus) {
+			baseUrlInput = view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL;
+			baseUrlError = '';
+			return;
+		}
 		const url = normalizeBaseUrl(baseUrlInput);
 		if (url === null) {
 			baseUrlError = m.settings_ai_base_url_invalid();
@@ -378,7 +385,10 @@
 								spellcheck={false}
 								aria-invalid={baseUrlError !== ''}
 								bind:value={baseUrlInput}
-								onfocus={() => (editingBaseUrl = true)}
+								onfocus={() => {
+									editingBaseUrl = true;
+									baseUrlAtFocus = baseUrlInput;
+								}}
 								onblur={() => {
 									editingBaseUrl = false;
 									saveBaseUrl();

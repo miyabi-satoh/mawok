@@ -550,8 +550,9 @@ pub fn classify_openai_error(status: u16, body: &str, compatible: bool) -> Actio
         // 残高の不足を 402 で返す互換のサービスがある（DeepSeek）
         402 => Failure::Billing,
         401 | 403 => Failure::InvalidKey,
-        // ベース URL を替えてあれば、URL の書き間違い（`/v1` の付け忘れなど）でも返るので、モデルと決めつけない
-        404 if compatible => Failure::EndpointNotFound,
+        // ベース URL を替えてあれば、URL の書き間違い（`/v1` の付け忘れなど）でも返るので、モデルと決めつけない。
+        // OpenAI と同じ code（model_not_found）を返すサービスなら、モデルと分かる
+        404 if compatible && code != "model_not_found" => Failure::EndpointNotFound,
         404 => Failure::ModelNotFound,
         429 if error_type == "insufficient_quota"
             || OPENAI_BILLING_CODES.contains(&code.as_str()) =>
@@ -996,5 +997,10 @@ mod tests {
                 "{status} {compatible}"
             );
         }
+        let model_missing = r#"{ "error": { "code": "model_not_found", "message": "x" } }"#;
+        assert_eq!(
+            classify_openai_error(404, model_missing, true).failure,
+            Failure::ModelNotFound
+        );
     }
 }
