@@ -349,6 +349,8 @@ struct SettingsView {
     ai_models: BTreeMap<AiService, String>,
     /// AI サービスごとの既定のモデル。既定は Rust 側だけで決める
     default_ai_models: BTreeMap<AiService, String>,
+    /// AI サービスが OpenAI のときに送る API の URL。空なら OpenAI（`CONSTANTS.OPENAI_BASE_URL`）
+    ai_base_url: String,
     /// アプリのバージョン。ログの先頭に出しているものと同じ
     version: String,
     /// 表示言語の設定と OS の言語から決めた Paraglide のロケール
@@ -377,6 +379,7 @@ fn settings_view(state: &AppState) -> SettingsView {
         ai_service: config.ai_service,
         ai_consent: config.ai_consent,
         ai_models: config.ai_models,
+        ai_base_url: config.ai_base_url,
         default_ai_models: AiService::ALL
             .into_iter()
             .filter(|service| *service != AiService::None)
@@ -1480,6 +1483,29 @@ fn set_ai_model(app: AppHandle, service: AiService, model: String) -> Result<(),
             config.ai_models.remove(&service);
         } else {
             config.ai_models.insert(service, model);
+        }
+    })
+}
+
+/// AI サービスが OpenAI のときに送る API の URL。空か OpenAI の URL で既定に戻す。
+/// 送り先が変わるので、OpenAI への了解を取り直す（docs/actions.md「AI（`@ai`）」）
+#[tauri::command]
+async fn set_ai_base_url(app: AppHandle, url: String) -> Result<(), String> {
+    let url = ai::normalize_base_url(&url).ok_or_else(|| "invalid base URL".to_string())?;
+    let action_state = app.state::<ActionState>();
+    let _settings = action_state.settings.lock().await;
+    if app.state::<AppState>().config.lock().unwrap().ai_base_url == url {
+        return Ok(());
+    }
+    // 送り先のホストは利用者が選んだもので、送った文は載らないので、ログに残す
+    info!(
+        "set AI base URL: {}",
+        if url.is_empty() { "default" } else { &url }
+    );
+    update_config(&app, |config| {
+        config.ai_base_url = url;
+        if config.ai_consent == Some(AiService::OpenAi) {
+            config.ai_consent = None;
         }
     })
 }
@@ -3191,13 +3217,14 @@ fn start_ai_action(
     prompt: ai::Prompt,
     discard_output: bool,
 ) -> Result<ActionTask, ActionFailure> {
-    let (service, model, available, key_available) = {
+    let (service, model, base_url, available, key_available) = {
         let state = app.state::<AppState>();
         let config = state.config.lock().unwrap().clone();
         let key_available = state.ai_key_available(config.ai_service);
         (
             config.ai_service,
             config.ai_model(),
+            config.openai_base_url().to_string(),
             config.ai_available(key_available),
             key_available,
         )
@@ -3248,7 +3275,7 @@ fn start_ai_action(
         };
         let client = http_client(&task_app)
             .map_err(|error| actions::ActionError::new(actions::Failure::Unexpected, error))?;
-        let output = ai::send(&client, service, &key, &model, &prompt).await?;
+        let output = ai::send(&client, service, &key, &model, &base_url, &prompt).await?;
         Ok(if discard_output {
             String::new()
         } else {
@@ -4497,6 +4524,7 @@ pub fn run() {
             consent_ai,
             set_ai_service,
             set_ai_model,
+            set_ai_base_url,
             default_snippets,
             has_ai_key,
             set_ai_key,

@@ -150,8 +150,9 @@ describe('既定の値から変えた設定の印', () => {
 	it('すべての印の名前に対応する行を出す', async () => {
 		settings.current = settingsView({
 			modifiedSettings: [...CONSTANTS.MODIFIED_SETTINGS],
-			aiService: 'gemini',
-			aiModels: { gemini: 'gemini-3.8-flash' },
+			// ベース URL の行は OpenAI のときだけ出る
+			aiService: 'openai',
+			aiModels: { openai: 'gpt-custom' },
 			mawokAccountSignedIn: true,
 			proAvailable: true
 		});

@@ -99,23 +99,41 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// 止まらない返事を切るための天井で、実際に効くのは `TIMEOUT`（60 秒）のほう。上限まで書くほど長い結果は、先に時間切れになる
 const ANTHROPIC_MAX_TOKENS: u32 = 16000;
 
-/// OpenAI の Responses API（developers.openai.com の api/reference の responses/create、2026-09 に確かめた）。
-/// 新しく作るアプリには、Chat Completions より Responses API を使うよう勧めている
-const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
-/// Responses API に送る本文。`store: false` で、返事を OpenAI 側に保存させない
-/// （保存は既定で有効で、30 日以上残る。止めても、不正利用の監視のための最大 30 日の保持は規約どおり残る）
-/// `max_output_tokens` は送らない。モデルを自由に替えられるので、固定の値だと出力の上限が小さいモデル（gpt-4o は 16,384）と食い違う。
+/// OpenAI の API の URL。ベース URL を替えれば、OpenAI と互換のサービス（DeepSeek・OpenRouter・Ollama など）にも送れる。
+/// ADR: Responses API でなく Chat Completions で送る。互換のサービスが受け付けるのは Chat Completions で、送るコードを1つにできるため。
+/// Responses API でしか得られないもの（会話の続き・組み込みの道具）は、1回送って1回受け取る `@ai` では使わない
+pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+
+/// 設定に置くベース URL に揃える。前後の空白と末尾の `/` を取り、OpenAI の URL と同じなら空（既定）にする。
+/// http・https で、ホストがあり、利用者名・パスワード・問い合わせ・断片の無いものだけを受ける（後ろに `/chat/completions` を足して送るため）。
+/// http も受ける。手元や LAN で動かす Ollama は https で待たないため
+pub fn normalize_base_url(input: &str) -> Option<String> {
+    let trimmed = input.trim().trim_end_matches('/');
+    if trimmed.is_empty() || trimmed == OPENAI_BASE_URL {
+        return Some(String::new());
+    }
+    let url = reqwest::Url::parse(trimmed).ok()?;
+    let valid = matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some_and(|host| !host.is_empty())
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none();
+    valid.then(|| trimmed.to_string())
+}
+
+/// Chat Completions（developers.openai.com の api/reference の chat/create）に送る本文。
+/// `store` は送らない。既定で保存しないうえ、互換のサービスには知らない項目を断るものがある。
+/// 出力の上限（`max_completion_tokens`）も送らない。モデルを自由に替えられるので、固定の値だと出力の上限が小さいモデルと食い違う。
 /// 送らなければモデルの上限まで書け、止まらない返事は `TIMEOUT` で切れる
 fn openai_request_body(model: &str, prompt: &Prompt) -> Value {
-    let mut body = json!({
-        "model": model,
-        "input": prompt.user,
-        "store": false,
-    });
+    let mut messages = Vec::new();
+    // developer でなく system にする。互換のサービスが広く受け付けるのは system で、OpenAI も system を受ける
     if let Some(system) = &prompt.system {
-        body["instructions"] = json!(system);
+        messages.push(json!({ "role": "system", "content": system }));
     }
-    body
+    messages.push(json!({ "role": "user", "content": prompt.user }));
+    json!({ "model": model, "messages": messages })
 }
 
 /// Messages API に送る本文
@@ -177,12 +195,13 @@ fn key_header(key: &str) -> Result<reqwest::header::HeaderValue, ActionError> {
     Ok(key)
 }
 
-/// AI のアクションを実行する。`client` は使い回す
+/// AI のアクションを実行する。`client` は使い回す。`openai_base_url` は、AI サービスが OpenAI のときに送る API の URL
 pub async fn send(
     client: &reqwest::Client,
     service: AiService,
     key: &str,
     model: &str,
+    openai_base_url: &str,
     prompt: &Prompt,
 ) -> Result<String, ActionError> {
     if service == AiService::None {
@@ -207,7 +226,7 @@ pub async fn send(
             .header("anthropic-version", ANTHROPIC_VERSION)
             .json(&anthropic_request_body(model, prompt)),
         AiService::OpenAi => client
-            .post(OPENAI_RESPONSES_URL)
+            .post(format!("{openai_base_url}/chat/completions"))
             .header(
                 reqwest::header::AUTHORIZATION,
                 key_header(&format!("Bearer {key}"))?,
@@ -432,61 +451,41 @@ pub fn classify_anthropic_error(status: u16, body: &str) -> ActionError {
 }
 
 /// 成功の返事から、書き直した文を取り出す。
-/// 形は `{ "status": "completed", "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "…" }] }] }`。
-/// SDK にある output_text は生の返事には無いので、message の output_text をつなぐ。推論（reasoning）などほかの項目は使わない。
-/// 200 でも status が incomplete（出力の上限など）や failed のことがあり、断ったときは content に refusal が入る
+/// 形は `{ "choices": [{ "message": { "content": "…", "refusal": null }, "finish_reason": "stop" }] }`。使うのは最初の choice だけ（n は送らない）。
+/// finish_reason が stop でないもの（length は出力の上限、content_filter は安全上の理由で止めた）と、断ったとき（refusal）は、途中までの文を使わない。
+/// 互換のサービスには finish_reason を入れないものがあるので、無ければ文を読む
 pub fn read_openai_response(body: &str) -> Result<String, ActionError> {
     let value = parse_response(body)?;
-    let status = value.get("status").and_then(Value::as_str);
-    match status {
-        Some("completed") => {}
-        Some("failed") => {
-            let code = value
-                .get("error")
-                .and_then(|error| error.get("code"))
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            return Err(ActionError::new(
-                Failure::ServiceError,
-                format!("status failed, code {code:?}"),
-            ));
-        }
-        // status は必ず入るので、無いものは崩れた返事として扱う
-        None => return Err(ActionError::new(Failure::Unexpected, "status missing")),
-        // incomplete（出力の上限など）、cancelled など。途中までの文は使わない
+    let Some(choice) = value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+    else {
+        return Err(ActionError::new(Failure::Unexpected, "no choices"));
+    };
+    let finish_reason = choice.get("finish_reason").and_then(Value::as_str);
+    match finish_reason {
+        Some("stop") | None => {}
         Some(other) => {
-            let reason = value
-                .get("incomplete_details")
-                .and_then(|details| details.get("reason"))
-                .and_then(Value::as_str)
-                .unwrap_or_default();
             return Err(ActionError::new(
                 Failure::Unexpected,
-                format!("status {other}, reason {reason:?}"),
-            ));
+                format!("finish reason {other}"),
+            ))
         }
     }
-    let parts: Vec<&Value> = value
-        .get("output")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-        .filter_map(|item| item.get("content").and_then(Value::as_array))
-        .flatten()
-        .collect();
-    if parts
-        .iter()
-        .any(|part| part.get("type").and_then(Value::as_str) == Some("refusal"))
+    let message = choice.get("message");
+    if message
+        .and_then(|message| message.get("refusal"))
+        .and_then(Value::as_str)
+        .is_some_and(|refusal| !refusal.is_empty())
     {
         return Err(ActionError::new(Failure::Unexpected, "refused"));
     }
-    let text: String = parts
-        .iter()
-        .filter(|part| part.get("type").and_then(Value::as_str) == Some("output_text"))
-        .filter_map(|part| part.get("text").and_then(Value::as_str))
-        .collect();
-    output_text(&text, format_args!("status {status:?}"))
+    let text = message
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    output_text(text, format_args!("finish reason {finish_reason:?}"))
 }
 
 /// 利用額やクレジットの上限を表す、OpenAI のエラーの code。429 で返るが、やり直しても直らない
@@ -789,65 +788,79 @@ mod tests {
     }
 
     #[test]
-    fn builds_the_openai_request_without_storing_it() {
+    fn builds_the_openai_request() {
         let body = openai_request_body("gpt-5.4-nano", &Prompt::new("指示", "下書き"));
         assert_eq!(
             body,
             json!({
                 "model": "gpt-5.4-nano",
-                "instructions": "指示",
-                "input": "下書き",
-                "store": false,
+                "messages": [
+                    { "role": "system", "content": "指示" },
+                    { "role": "user", "content": "下書き" },
+                ],
             })
         );
+        // 実行する文が空なら、指示文だけを利用者の発言にする
+        let body = openai_request_body("m", &Prompt::new("指示", ""));
+        assert_eq!(
+            body["messages"],
+            json!([{ "role": "user", "content": "指示" }])
+        );
+    }
+
+    #[test]
+    fn normalizes_the_base_url() {
+        for (input, expected) in [
+            ("", Some("")),
+            (" https://api.openai.com/v1/ ", Some("")),
+            (
+                "https://api.deepseek.com/",
+                Some("https://api.deepseek.com"),
+            ),
+            (
+                "http://localhost:11434/v1",
+                Some("http://localhost:11434/v1"),
+            ),
+            ("ftp://example.com", None),
+            ("api.deepseek.com", None),
+            ("https://user:secret@example.com/v1", None),
+            ("https://example.com/v1?key=1", None),
+            ("https://example.com/v1#x", None),
+        ] {
+            assert_eq!(normalize_base_url(input).as_deref(), expected, "{input}");
+        }
     }
 
     #[test]
     fn reads_the_openai_text() {
         let body = r#"{
-            "id": "resp_01",
-            "object": "response",
-            "status": "completed",
-            "error": null,
-            "output": [
-                { "type": "reasoning", "id": "rs_01", "summary": [] },
-                { "type": "message", "role": "assistant", "content": [
-                    { "type": "output_text", "text": "リライトした", "annotations": [] },
-                    { "type": "output_text", "text": "文です。\n", "annotations": [] }
-                ] }
-            ]
+            "id": "chatcmpl-01",
+            "object": "chat.completion",
+            "choices": [{
+                "index": 0,
+                "message": { "role": "assistant", "content": "リライトした文です。\n", "refusal": null },
+                "finish_reason": "stop"
+            }]
         }"#;
         assert_eq!(read_openai_response(body).unwrap(), "リライトした文です。");
+        // finish_reason を入れない互換のサービス
+        let body = r#"{ "choices": [{ "message": { "content": "文" } }] }"#;
+        assert_eq!(read_openai_response(body).unwrap(), "文");
     }
 
     #[test]
     fn treats_an_unfinished_refused_or_empty_openai_response_as_a_failure() {
-        for (body, failure) in [
-            (
-                r#"{ "status": "incomplete", "incomplete_details": { "reason": "max_output_tokens" }, "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "途中" }] }] }"#,
-                Failure::Unexpected,
-            ),
-            (
-                r#"{ "status": "completed", "output": [{ "type": "message", "content": [{ "type": "refusal", "refusal": "できません" }] }] }"#,
-                Failure::Unexpected,
-            ),
-            (
-                r#"{ "status": "failed", "error": { "code": "server_error", "message": "x" }, "output": [] }"#,
-                Failure::ServiceError,
-            ),
-            (
-                r#"{ "status": "completed", "output": [] }"#,
-                Failure::Unexpected,
-            ),
-            (
-                r#"{ "output": [{ "type": "message", "content": [{ "type": "output_text", "text": "文" }] }] }"#,
-                Failure::Unexpected,
-            ),
-            ("not json", Failure::Unexpected),
+        for body in [
+            r#"{ "choices": [{ "message": { "content": "途中" }, "finish_reason": "length" }] }"#,
+            r#"{ "choices": [{ "message": { "content": "途中" }, "finish_reason": "content_filter" }] }"#,
+            r#"{ "choices": [{ "message": { "content": null, "refusal": "できません" }, "finish_reason": "stop" }] }"#,
+            r#"{ "choices": [{ "message": { "content": " " }, "finish_reason": "stop" }] }"#,
+            r#"{ "choices": [] }"#,
+            "not json",
         ] {
             assert_eq!(
                 read_openai_response(body).unwrap_err().failure,
-                failure,
+                Failure::Unexpected,
                 "{body}"
             );
         }

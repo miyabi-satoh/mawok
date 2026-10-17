@@ -116,6 +116,10 @@ aiModels: { [key in AiService]?: string },
  */
 defaultAiModels: { [key in AiService]?: string }, 
 /**
+ * AI サービスが OpenAI のときに送る API の URL。空なら OpenAI（`CONSTANTS.OPENAI_BASE_URL`）
+ */
+aiBaseUrl: string, 
+/**
  * アプリのバージョン。ログの先頭に出しているものと同じ
  */
 version: string, 

@@ -48,6 +48,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		aiService: 'none',
 		aiConsent: null,
 		aiModels: {},
+		aiBaseUrl: '',
 		defaultAiModels: {
 			gemini: 'gemini-3.5-flash-lite',
 			anthropic: 'claude-haiku-4-5',

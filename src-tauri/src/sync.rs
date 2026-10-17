@@ -1589,6 +1589,7 @@ pub fn restore_backup(current: &Config, backup: &Config) -> Config {
     let mut restored = Config {
         autostart: current.autostart,
         ai_consent: current.ai_consent,
+        ai_base_url: current.ai_base_url.clone(),
         sync_settings: current.sync_settings,
         sync_keys: current.sync_keys,
         sync_replacements: current.sync_replacements,

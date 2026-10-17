@@ -183,6 +183,9 @@ pub struct Config {
     pub ai_consent: Option<AiService>,
     /// AI サービスごとのモデル。書いていないサービスは既定のモデルを使う。空文字は持たない
     pub ai_models: BTreeMap<AiService, String>,
+    /// AI サービスが OpenAI のときに送る API の URL（`ai::normalize_base_url` で揃えたもの）。空なら OpenAI。
+    /// OpenAI と互換のサービスに送るときに替える。キーと組で使う送り先で、キーも同期しないので、デバイスごとに持つ
+    pub ai_base_url: String,
 }
 
 impl Config {
@@ -191,6 +194,15 @@ impl Config {
         self.ai_service != AiService::None
             && key_available != Some(false)
             && self.ai_consent == Some(self.ai_service)
+    }
+
+    /// AI サービスが OpenAI のときに送る API の URL
+    pub fn openai_base_url(&self) -> &str {
+        if self.ai_base_url.is_empty() {
+            crate::ai::OPENAI_BASE_URL
+        } else {
+            &self.ai_base_url
+        }
     }
 
     /// 今の AI サービスで使うモデル
@@ -265,6 +277,7 @@ impl Default for Config {
             ai_service: AiService::default(),
             ai_consent: None,
             ai_models: BTreeMap::new(),
+            ai_base_url: String::new(),
         }
     }
 }
@@ -373,6 +386,10 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
         },
     },
     ModifiedSetting::Value {
+        name: key::AI_BASE_URL,
+        differs: |config, defaults| config.ai_base_url != defaults.ai_base_url,
+    },
+    ModifiedSetting::Value {
         name: key::SYNC_SETTINGS,
         differs: |config, defaults| config.sync_settings != defaults.sync_settings,
     },
@@ -467,6 +484,7 @@ pub mod key {
     pub const AI_SERVICE: &str = "ai_service";
     pub const AI_CONSENT: &str = "ai_consent";
     pub const AI_MODELS: &str = "ai_models";
+    pub const AI_BASE_URL: &str = "ai_base_url";
 }
 
 /// 置き場に書く項目。既定と違う値だけを持つ（docs/config.md）。
@@ -517,6 +535,7 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     field!(key::INPUT_GUIDANCE, input_guidance);
     field!(key::AI_SERVICE, ai_service);
     field!(key::AI_CONSENT, ai_consent);
+    field!(key::AI_BASE_URL, ai_base_url);
     // 既定のモデルと同じものは書かない。版を上げて既定のモデルを替えたときに、変えていない人へ届くようにする
     let models: BTreeMap<&AiService, &String> = config
         .ai_models
@@ -668,6 +687,7 @@ const KNOWN_SETTINGS: &[&str] = &[
     key::AI_SERVICE,
     key::AI_CONSENT,
     key::AI_MODELS,
+    key::AI_BASE_URL,
 ];
 
 /// 1つの設定を、画面から変えるときと同じ検査を通して入れる。入れられない値なら何も変えずに false。
@@ -730,6 +750,9 @@ pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> bool {
             models
                 .values()
                 .all(|model| !model.is_empty() && model.trim() == model)
+        }),
+        key::AI_BASE_URL => set_checked(&mut config.ai_base_url, value, |url| {
+            crate::ai::normalize_base_url(url).as_deref() == Some(url.as_str())
         }),
         _ => false,
     }
@@ -877,6 +900,7 @@ mod tests {
             ai_service: AiService::Gemini,
             ai_consent: Some(AiService::Gemini),
             ai_models: BTreeMap::from([(AiService::Gemini, "custom-model".to_string())]),
+            ai_base_url: "http://localhost:11434/v1".to_string(),
             ..Config::default()
         };
         assert_eq!(round_trip(&config), config);
@@ -921,6 +945,11 @@ mod tests {
             ("theme".to_string(), json!(3)),
             ("text_font_size".to_string(), json!(MAX_DRAFT_FONT_SIZE + 1)),
             ("language".to_string(), json!("ja")),
+            // 揃えていない形のベース URL
+            (
+                "ai_base_url".to_string(),
+                json!("https://api.deepseek.com/"),
+            ),
             ("a_setting_of_a_newer_version".to_string(), json!(true)),
             (
                 "replacements".to_string(),
@@ -934,7 +963,7 @@ mod tests {
         assert_eq!(loaded.config.replacements.len(), 1);
         assert_eq!(
             loaded.skipped,
-            ["replacements[1]", "text_font_size", "theme"]
+            ["ai_base_url", "replacements[1]", "text_font_size", "theme"]
         );
         // 行の ID が無かったので振り直し、呼ぶ側が書き戻す
         assert!(loaded.repaired_item_ids);

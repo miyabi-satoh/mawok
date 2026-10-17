@@ -74,6 +74,29 @@ describe('設定画面の AI サービス選択', () => {
 			.toHaveDisplayValue('Anthropic');
 	});
 
+	it('ベース URL は OpenAI のときだけ出し、離れたときに揃えて保存し、受けられない URL は保存せずに知らせる', async () => {
+		settings.current = view('gemini');
+		const screen = await renderAt(m.settings_category_ai);
+		await expect.element(screen.getByLabelText(m.settings_ai_model())).toBeVisible();
+		expect(screen.getByLabelText(m.settings_ai_base_url()).elements()).toHaveLength(0);
+
+		await changeSettings(view('openai'));
+		const input = screen.getByLabelText(m.settings_ai_base_url());
+		await expect.element(input).toHaveValue('https://api.openai.com/v1');
+		await input.fill('api.deepseek.com');
+		await screen.getByLabelText(m.settings_ai_model()).click();
+		await expect.element(screen.getByText(m.settings_ai_base_url_invalid())).toBeVisible();
+		expect(invoked.mock.calls.some(([command]) => command === 'set_ai_base_url')).toBe(false);
+
+		await input.fill('https://api.deepseek.com/');
+		await screen.getByLabelText(m.settings_ai_model()).click();
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('set_ai_base_url', { url: 'https://api.deepseek.com' })
+		);
+		await expect.element(input).toHaveValue('https://api.deepseek.com');
+		expect(screen.getByText(m.settings_ai_base_url_invalid()).elements()).toHaveLength(0);
+	});
+
 	it('サービスを替えたときの古いキー確認で、今の表示を上書きしない', async () => {
 		invoked.mockReset();
 		pending = [];

@@ -27,6 +27,7 @@ export const CONSTANTS = {{\n\
 \tDEFAULT_DRAFT_HISTORY_SIZE: {},\n\
 \tMAX_DRAFT_HISTORY_SIZE: {},\n\
 \tAI_SERVICES: {:?},\n\
+\tOPENAI_BASE_URL: {:?},\n\
 \tDRAFT_ACTIONS: {:?},\n\
 \tSUPPORTED_CODES: {:?},\n\
 \tAI_PREFIX: {:?},\n\
@@ -55,6 +56,7 @@ export const EVENTS = {{\n\
         config::DEFAULT_DRAFT_HISTORY_SIZE,
         config::MAX_DRAFT_HISTORY_SIZE,
         ai_services,
+        ai::OPENAI_BASE_URL,
         action_names,
         draft_keys::SUPPORTED_CODES,
         actions::AI_PREFIX,

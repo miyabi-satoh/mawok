@@ -51,9 +51,44 @@ export const AI_SERVICES = CONSTANTS.AI_SERVICES.map((value) => ({
 	...SERVICE_TEXT[value]
 }));
 
-/** サービスの項目。一覧に無い値は来ない（Rust 側が知らない名前を読まない）が、来たら先頭のものを使う */
-export function aiServiceInfo(service: AiService) {
-	return AI_SERVICES.find(({ value }) => value === service) ?? AI_SERVICES[0];
+/**
+ * サービスの項目。一覧に無い値は来ない（Rust 側が知らない名前を読まない）が、来たら先頭のものを使う。
+ * OpenAI のベース URL を替えてあれば、送り先は OpenAI でなく互換のサービスなので、名前・説明・送り先・扱いをその URL のものにする
+ */
+export function aiServiceInfo(service: AiService, baseUrl = '') {
+	const info = AI_SERVICES.find(({ value }) => value === service) ?? AI_SERVICES[0];
+	if (service !== 'openai' || !baseUrl) return info;
+	const host = new URL(baseUrl).host;
+	return {
+		...info,
+		name: () => host,
+		description: () => m.settings_ai_service_description_openai_compatible({ host }),
+		consentWhere: () => m.settings_ai_consent_where_openai_compatible({ url: baseUrl }),
+		consentHandling: m.settings_ai_consent_handling_openai_compatible
+	};
+}
+
+/**
+ * 入れたベース URL を、設定に置く形に揃える（Rust の ai::normalize_base_url と同じ決まり）。受けられなければ null。
+ * OpenAI の URL と同じなら空（既定）にする
+ */
+export function normalizeBaseUrl(input: string): string | null {
+	const trimmed = input.trim().replace(/\/+$/, '');
+	if (trimmed === '' || trimmed === CONSTANTS.OPENAI_BASE_URL) return '';
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		return null;
+	}
+	const valid =
+		(url.protocol === 'http:' || url.protocol === 'https:') &&
+		url.hostname !== '' &&
+		url.username === '' &&
+		url.password === '' &&
+		!trimmed.includes('?') &&
+		!trimmed.includes('#');
+	return valid ? trimmed : null;
 }
 
 /** AI サービスごとに設定したモデルのうち、そのサービスのもの。書いていなければ空（既定のモデル） */

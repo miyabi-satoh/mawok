@@ -15,7 +15,8 @@
 	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
 	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
-	import { AI_SERVICES, aiServiceInfo } from '$lib/ai-services';
+	import { AI_SERVICES, aiServiceInfo, normalizeBaseUrl } from '$lib/ai-services';
+	import { CONSTANTS } from '$lib/bindings/constants';
 	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import type { AiService, SettingsView } from '$lib/settings.svelte';
 
@@ -143,6 +144,31 @@
 	 */
 	let modelCleared = $state(false);
 
+	/**
+	 * ベース URL の欄。打っている間は保存せず、離れたときか Enter で保存する。送り先が変わると了解を取り直すので、
+	 * 打つたびに保存すると、打ち終える前に了解を求めてしまう。欄は既定のときも OpenAI の URL を値として見せる（モデルの欄と同じ）
+	 */
+	let baseUrlInput = $state(untrack(() => view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL));
+	let baseUrlError = $state('');
+	let editingBaseUrl = false;
+	$effect(() => {
+		const url = view.aiBaseUrl;
+		if (untrack(() => editingBaseUrl)) return;
+		baseUrlInput = url || CONSTANTS.OPENAI_BASE_URL;
+		baseUrlError = '';
+	});
+
+	async function saveBaseUrl() {
+		const url = normalizeBaseUrl(baseUrlInput);
+		if (url === null) {
+			baseUrlError = m.settings_ai_base_url_invalid();
+			return;
+		}
+		baseUrlError = '';
+		baseUrlInput = url || CONSTANTS.OPENAI_BASE_URL;
+		if (url !== view.aiBaseUrl) await editor.call('set_ai_base_url', { url });
+	}
+
 	async function setService(service: AiService) {
 		consentService = null;
 		await editor.call('set_ai_service', { service });
@@ -177,7 +203,7 @@
 			</NativeSelect.Root>
 		</Field.Field>
 		<Field.Description class="leading-snug">
-			{aiServiceInfo(view.aiService).description()}
+			{aiServiceInfo(view.aiService, view.aiBaseUrl).description()}
 		</Field.Description>
 		<!-- キーとモデルは選んだ AI サービスのものなので、サービスの下に字下げして置く。区切りの線は引かない -->
 		{#if view.aiService === 'mawok'}
@@ -289,6 +315,42 @@
 						{m.settings_ai_model_description()}
 					</Field.Description>
 				</Field.Content>
+				{#if view.aiService === 'openai'}
+					{@const baseUrlModified = modifiedName(view, 'ai_base_url')}
+					<Field.Content class="relative" data-modified={baseUrlModified}>
+						{#if baseUrlModified}
+							<SettingsModifiedMark class="inset-y-0 -left-4" />
+						{/if}
+						<Field.Field
+							orientation="horizontal"
+							class="min-h-8 *:data-[slot=field-label]:flex-none!"
+						>
+							<Field.Label for="ai-base-url">{m.settings_ai_base_url()}</Field.Label>
+							<Input
+								id="ai-base-url"
+								class="w-72 min-w-0 font-mono text-sm"
+								autocomplete="off"
+								spellcheck={false}
+								aria-invalid={baseUrlError !== ''}
+								bind:value={baseUrlInput}
+								onfocus={() => (editingBaseUrl = true)}
+								onblur={() => {
+									editingBaseUrl = false;
+									saveBaseUrl();
+								}}
+								onkeydown={(event) => {
+									if (event.key === 'Enter' && !isImeKey(event)) saveBaseUrl();
+								}}
+							/>
+						</Field.Field>
+						{#if baseUrlError}
+							<Field.Error>{baseUrlError}</Field.Error>
+						{/if}
+						<Field.Description class="leading-snug">
+							{m.settings_ai_base_url_description()}
+						</Field.Description>
+					</Field.Content>
+				{/if}
 			</div>
 		{/if}
 	</SettingsRow>
@@ -310,14 +372,14 @@
 		<AlertDialog.Header>
 			<AlertDialog.Title>
 				{m.settings_ai_consent_title({
-					service: aiServiceInfo(consentService ?? view.aiService).name()
+					service: aiServiceInfo(consentService ?? view.aiService, view.aiBaseUrl).name()
 				})}
 			</AlertDialog.Title>
 			<AlertDialog.Description>
 				<div class="flex flex-col gap-2 text-left">
 					<p>{m.settings_ai_consent_what()}</p>
-					<p>{aiServiceInfo(consentService ?? view.aiService).consentWhere()}</p>
-					<p>{aiServiceInfo(consentService ?? view.aiService).consentHandling()}</p>
+					<p>{aiServiceInfo(consentService ?? view.aiService, view.aiBaseUrl).consentWhere()}</p>
+					<p>{aiServiceInfo(consentService ?? view.aiService, view.aiBaseUrl).consentHandling()}</p>
 				</div>
 			</AlertDialog.Description>
 		</AlertDialog.Header>
