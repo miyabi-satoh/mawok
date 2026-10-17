@@ -154,6 +154,37 @@ pub enum Failure {
 }
 
 impl Failure {
+    /// すべての種類。画面へ符号の一覧として書き出す（src-tauri/src/bindings.rs）。種類を足したら、ここにも足す
+    #[cfg(test)]
+    pub const ALL: [Failure; 26] = [
+        Self::Disabled,
+        Self::NoKey,
+        Self::KeyUnreadable,
+        Self::InvalidKey,
+        Self::Rejected,
+        Self::ModelNotFound,
+        Self::EndpointNotFound,
+        Self::RateLimited,
+        Self::Billing,
+        Self::SignInRequired,
+        Self::NoCredit,
+        Self::TextTooLong,
+        Self::PreviousRunning,
+        Self::ServiceError,
+        Self::Network,
+        Self::Timeout,
+        Self::Unexpected,
+        Self::CommandNotStarted,
+        Self::FolderMissing,
+        Self::CommandNotFound,
+        Self::CommandFailed,
+        Self::MultilineCommand,
+        Self::EmptyOutput,
+        Self::OutputTooLarge,
+        Self::TextNotEncodable,
+        Self::OutputUndecodable,
+    ];
+
     /// 画面に渡す符号。画面側のアクションの失敗の文言と揃える（src/lib/action-errors.ts）
     pub fn code(self) -> &'static str {
         match self {

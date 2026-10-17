@@ -1,5 +1,5 @@
 import { errorCode } from '$lib/errors';
-import { CONSTANTS } from '$lib/bindings/constants';
+import { CONSTANTS, ERROR_CODES } from '$lib/bindings/constants';
 import type { DraftAction as GeneratedDraftAction } from '$lib/bindings/DraftAction';
 import type { DraftKeys as GeneratedDraftKeys } from '$lib/bindings/DraftKeys';
 import type { Platform as GeneratedPlatform } from '$lib/bindings/Platform';
@@ -101,10 +101,12 @@ export function keyHint(label: string, key: string, platform: Platform): string 
 export function keyRejectionMessage(error: unknown, key: string, platform: Platform): string {
 	const code = errorCode(error);
 	const keys = formatKeys(key, platform);
-	if (code === 'keys.editing') return m.settings_key_editing({ keys });
-	if (code === 'keys.hotkey') return m.settings_key_used_by_hotkey({ keys });
-	if (code === 'keys.invalid') return m.settings_key_invalid({ keys });
-	const action = code.match(/^keys\.action\.(\w+)$/)?.[1];
+	if (code === ERROR_CODES.KEYS_EDITING) return m.settings_key_editing({ keys });
+	if (code === ERROR_CODES.KEYS_HOTKEY) return m.settings_key_used_by_hotkey({ keys });
+	if (code === ERROR_CODES.KEYS_INVALID) return m.settings_key_invalid({ keys });
+	const action = code.startsWith(ERROR_CODES.KEYS_ACTION_PREFIX)
+		? code.slice(ERROR_CODES.KEYS_ACTION_PREFIX.length)
+		: undefined;
 	if (action && (DRAFT_ACTIONS as readonly string[]).includes(action)) {
 		return m.settings_key_used_by_action({
 			keys,

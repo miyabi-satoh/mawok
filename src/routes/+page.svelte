@@ -40,7 +40,7 @@
 		type DraftAction
 	} from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
-	import { EVENTS } from '$lib/bindings/constants';
+	import { ERROR_CODES, EVENTS } from '$lib/bindings/constants';
 	import type { FolderCompletion } from '$lib/bindings/FolderCompletion';
 	import type { FolderMenu } from '$lib/bindings/FolderMenu';
 	import { coalescedSaver } from '$lib/saver';
@@ -588,7 +588,7 @@
 			// 取り消した後や、次の実行が始まった後に届いた失敗は、知らせない
 			if (running !== session) return;
 			running = null;
-			if (errorCode(e) !== 'action.cancelled') {
+			if (errorCode(e) !== ERROR_CODES.ACTION_CANCELLED) {
 				showError(m.action_failed(), actionErrorMessage(e) ?? errorCode(e), {
 					aiSettings: needsAiSettings(e)
 				});

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config;
+use crate::{config, error_codes};
 
 /// キーで呼べる操作。設定でキーが重なったときは、並びの先の操作にキーを残す（設定画面の並びは画面側の src/lib/keys.ts が持つ）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,11 +152,15 @@ pub enum Rejection {
 impl Rejection {
     pub fn code(self) -> String {
         match self {
-            Rejection::Invalid => "keys.invalid".to_string(),
-            Rejection::EditingKey => "keys.editing".to_string(),
-            Rejection::Hotkey => "keys.hotkey".to_string(),
+            Rejection::Invalid => error_codes::KEYS_INVALID.to_string(),
+            Rejection::EditingKey => error_codes::KEYS_EDITING.to_string(),
+            Rejection::Hotkey => error_codes::KEYS_HOTKEY.to_string(),
             // 画面とのやり取りでの名前（camelCase）。置き場の項目名（`DraftAction::name`）とは書き方が違う
-            Rejection::Action(action) => format!("keys.action.{}", config::choice_name(&action)),
+            Rejection::Action(action) => format!(
+                "{}{}",
+                error_codes::KEYS_ACTION_PREFIX,
+                config::choice_name(&action)
+            ),
         }
     }
 }

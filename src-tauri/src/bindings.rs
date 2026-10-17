@@ -2,7 +2,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use crate::{actions, ai, config, draft_keys, events, sync, sync_key};
+use crate::{actions, ai, config, draft_keys, error_codes, events, sync, sync_key};
 
 #[test]
 fn writes_constants() {
@@ -15,6 +15,10 @@ fn writes_constants() {
     let ai_services: Vec<String> = ai::AiService::ALL
         .into_iter()
         .map(|service| service.name().to_string())
+        .collect();
+    let action_failures: Vec<&str> = actions::Failure::ALL
+        .into_iter()
+        .map(actions::Failure::code)
         .collect();
     let new_snippet =
         serde_json::to_string(&config::Snippet::default()).expect("could not serialize Snippet");
@@ -49,6 +53,19 @@ export const EVENTS = {{\n\
 \tDRAFT_HIDDEN: {:?},\n\
 \tMAWOK_SIGN_IN_ENDED: {:?},\n\
 \tUPDATE_CHANGED: {:?}\n\
+}} as const;\n\n\
+export const ERROR_CODES = {{\n\
+\tACCOUNT_UNREACHABLE: {:?},\n\
+\tACTION_CANCELLED: {:?},\n\
+\tBACKUP_RESTORE_PARTIAL: {:?},\n\
+\tSYNC_WRONG_PASSWORD: {:?},\n\
+\tSYNC_PASSWORD_TOO_SHORT: {:?},\n\
+\tSYNC_STATE_CHANGED: {:?},\n\
+\tKEYS_INVALID: {:?},\n\
+\tKEYS_EDITING: {:?},\n\
+\tKEYS_HOTKEY: {:?},\n\
+\tKEYS_ACTION_PREFIX: {:?},\n\
+\tACTION_FAILURES: {:?}\n\
 }} as const;\n",
         config::DEFAULT_DRAFT_FONT_SIZE,
         config::MIN_DRAFT_FONT_SIZE,
@@ -76,6 +93,17 @@ export const EVENTS = {{\n\
         events::DRAFT_HIDDEN,
         events::MAWOK_SIGN_IN_ENDED,
         events::UPDATE_CHANGED,
+        error_codes::ACCOUNT_UNREACHABLE,
+        error_codes::ACTION_CANCELLED,
+        error_codes::BACKUP_RESTORE_PARTIAL,
+        error_codes::SYNC_WRONG_PASSWORD,
+        error_codes::SYNC_PASSWORD_TOO_SHORT,
+        error_codes::SYNC_STATE_CHANGED,
+        error_codes::KEYS_INVALID,
+        error_codes::KEYS_EDITING,
+        error_codes::KEYS_HOTKEY,
+        error_codes::KEYS_ACTION_PREFIX,
+        action_failures,
     );
     fs::write(export_dir.join("constants.ts"), contents).expect("could not write constants.ts");
 }

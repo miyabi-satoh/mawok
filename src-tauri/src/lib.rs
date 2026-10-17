@@ -12,6 +12,7 @@ mod config;
 mod debounce;
 mod diagnostics;
 mod draft_keys;
+mod error_codes;
 mod events;
 mod focus;
 mod folder;
@@ -2057,9 +2058,6 @@ async fn set_sync_excluded_setting(app: AppHandle, name: String, sync: bool) -> 
     .await
 }
 
-/// 一部の設定をバックアップから戻せなかった（OS がホットキーを登録できない など）。
-const BACKUP_RESTORE_PARTIAL: &str = "backup.restore_partial";
-
 /// バックアップの一覧。新しい順に、戻すと今の設定から変わる所を添える（docs/config.md「バックアップ」）
 #[tauri::command]
 async fn settings_backups(app: AppHandle) -> Result<Vec<sync::Backup>, String> {
@@ -2159,7 +2157,7 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
             return if rejected.is_empty() {
                 Ok(())
             } else {
-                Err(BACKUP_RESTORE_PARTIAL.to_string())
+                Err(error_codes::BACKUP_RESTORE_PARTIAL.to_string())
             };
         }
     }
@@ -2550,7 +2548,7 @@ async fn refresh_mawok_account_status(
             } else {
                 apply_config(app);
             }
-            Err("account.unreachable".to_string())
+            Err(error_codes::ACCOUNT_UNREACHABLE.to_string())
         }
     }
 }
@@ -2769,13 +2767,6 @@ async fn sign_out_mawok(app: AppHandle) -> Result<(), String> {
     forget_mawok_token(&app).await
 }
 
-/// 同期のパスワードの失敗の符号（src/lib/sync-password.ts）
-const WRONG_SYNC_PASSWORD: &str = "sync.wrong_password";
-const SHORT_SYNC_PASSWORD: &str = "sync.password_too_short";
-/// 窓口の同期の状態が、画面を出したときから変わっていた（ほかのデバイスが始めた・リセットした・Pro が終わった）。
-/// 鍵の状態は読み直してあるので、画面はエラーを出さずに、今の状態の欄へ移る
-const SYNC_STATE_CHANGED: &str = "sync.state_changed";
-
 /// 窓口と同期の鍵の状態を照らし直し、画面に「状態が変わった」と返す。鍵の排他（sync_key_refresh）は放してから呼ぶ
 /// 読み直しそのものに失敗したら（つながらない・窓口の不調）、画面の欄は移っていないので、その失敗を返す
 async fn recheck_sync_key(app: &AppHandle) -> String {
@@ -2793,9 +2784,9 @@ async fn recheck_sync_key(app: &AppHandle) -> String {
         // Pro は確かめられたが、鍵を窓口と照らせなかった（refresh_sync_key は一時的な失敗で状態を保つ）
         Ok(Some(status)) if status.pro.active && checks() == before => {
             info!("couldn't recheck the sync key against the account server");
-            "account.unreachable".to_string()
+            error_codes::ACCOUNT_UNREACHABLE.to_string()
         }
-        Ok(_) => SYNC_STATE_CHANGED.to_string(),
+        Ok(_) => error_codes::SYNC_STATE_CHANGED.to_string(),
     }
 }
 
@@ -2805,7 +2796,7 @@ async fn token_in_generation(app: &AppHandle) -> Result<(String, usize), String>
     let generation = current_pro_generation(app);
     let token = mawok_token().await?;
     if !pro_generation_is_current(app, generation) {
-        return Err(SYNC_STATE_CHANGED.to_string());
+        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
     }
     Ok((token, generation))
 }
@@ -2828,7 +2819,7 @@ async fn account_failure(app: &AppHandle, context: &str, error: account::Account
         }
         account::AccountError::Http(status) if status == 429 || status >= 500 => {
             warn!("{context}: HTTP {status}");
-            "account.unreachable".to_string()
+            error_codes::ACCOUNT_UNREACHABLE.to_string()
         }
         // 送った要求の形が窓口と合わない。利用者には直せないので、ログを見るよう案内する
         account::AccountError::Http(status) => {
@@ -2837,7 +2828,7 @@ async fn account_failure(app: &AppHandle, context: &str, error: account::Account
         }
         account::AccountError::Other(detail) => {
             warn!("{context}: {detail}");
-            "account.unreachable".to_string()
+            error_codes::ACCOUNT_UNREACHABLE.to_string()
         }
     }
 }
@@ -2860,7 +2851,9 @@ async fn mawok_token() -> Result<String, String> {
 async fn unwrap_sync_key(wrapped: String, password: String) -> Result<[u8; 32], String> {
     match run_blocking(move || sync_key::unwrap(&wrapped, &password)).await? {
         Ok(key) => Ok(key),
-        Err(sync_key::UnwrapError::WrongPassword) => Err(WRONG_SYNC_PASSWORD.to_string()),
+        Err(sync_key::UnwrapError::WrongPassword) => {
+            Err(error_codes::SYNC_WRONG_PASSWORD.to_string())
+        }
         // 新しい版が包んだ鍵など。この版では開けない
         Err(sync_key::UnwrapError::Unreadable(detail)) => {
             warn!("couldn't read the wrapped sync key: {detail}");
@@ -2905,7 +2898,7 @@ async fn adopt_sync_key(app: &AppHandle, key: [u8; 32]) {
 async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(), String> {
     info!("start sync (replace: {replace})");
     if !sync_key::password_long_enough(&password) {
-        return Err(SHORT_SYNC_PASSWORD.to_string());
+        return Err(error_codes::SYNC_PASSWORD_TOO_SHORT.to_string());
     }
     let state = app.state::<AppState>();
     let refresh = state.sync_key_refresh.lock().await;
@@ -2917,7 +2910,7 @@ async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(
     let client = http_client(&app)?;
     // 包んでいる間（1秒ほど）に、サインアウトや別のアカウントへのサインインが済んでいたら、何も置かない
     if !pro_generation_is_current(&app, generation) {
-        return Err(SYNC_STATE_CHANGED.to_string());
+        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
     }
     // 窓口より先に手元へ置く。窓口が受け付けた後に手元へ置けないと、窓口だけが新しい鍵になり、このデバイスが加われない
     store_sync_key(key).await?;
@@ -3005,7 +2998,7 @@ async fn unlock_sync(app: AppHandle, password: String) -> Result<(), String> {
     }
     // 開いている間に、サインアウトや別のアカウントへのサインインが済んでいたら、置かない
     if !pro_generation_is_current(&app, generation) {
-        return Err(SYNC_STATE_CHANGED.to_string());
+        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
     }
     store_sync_key(key).await?;
     adopt_sync_key(&app, key).await;
@@ -3021,7 +3014,7 @@ async fn change_sync_password(
 ) -> Result<(), String> {
     info!("change the sync password");
     if !sync_key::password_long_enough(&password) {
-        return Err(SHORT_SYNC_PASSWORD.to_string());
+        return Err(error_codes::SYNC_PASSWORD_TOO_SHORT.to_string());
     }
     let state = app.state::<AppState>();
     let refresh = state.sync_key_refresh.lock().await;
@@ -3043,7 +3036,7 @@ async fn change_sync_password(
     }
     let rewrapped = run_blocking(move || sync_key::wrap(&key, &password)).await??;
     if !pro_generation_is_current(&app, generation) {
-        return Err(SYNC_STATE_CHANGED.to_string());
+        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
     }
     match account::put_sync_key(&client, &token, &sync_key::key_id(&key), &rewrapped).await {
         Ok(true) => Ok(()),
@@ -3157,7 +3150,7 @@ async fn run_action(
     let state = app.state::<ActionState>();
     if request <= state.requests.lock().unwrap().settled_through {
         info!("action {request} cancelled before it started");
-        return Err(ACTION_CANCELLED.into());
+        return Err(error_codes::ACTION_CANCELLED.into());
     }
     let stopper = command::Stopper::default();
     let discard_output = output == ActionOutput::None;
@@ -3196,7 +3189,7 @@ async fn run_action(
             stopper.stop();
             abort.abort();
             info!("action {request} cancelled before it started");
-            return Err(ACTION_CANCELLED.into());
+            return Err(error_codes::ACTION_CANCELLED.into());
         }
         requests.settled_through = request;
         // 前のアクションが残っていれば打ち切る（画面は1つずつしか実行しないが、取り消しの知らせが遅れたときのため）
@@ -3236,7 +3229,7 @@ async fn run_action(
             Err(error.into())
         }
         // 打ち切った。取り消しのログは cancel_action と次のアクションが出す
-        Err(error) if error.is_cancelled() => Err(ACTION_CANCELLED.into()),
+        Err(error) if error.is_cancelled() => Err(error_codes::ACTION_CANCELLED.into()),
         Err(error) => {
             error!("action {request} panicked: {error}");
             Err(actions::Failure::Unexpected.into())
@@ -3415,9 +3408,6 @@ impl Drop for ReadingAiKey {
         }
     }
 }
-
-/// アクションを打ち切ったときの符号
-const ACTION_CANCELLED: &str = "action.cancelled";
 
 /// アクションの番号を振る。画面は実行を始める前に呼び、受け取った番号で run_action と cancel_action を呼ぶ。
 /// 番号を受け取る前に取り消したときは、受け取ってから cancel_action を呼ぶ

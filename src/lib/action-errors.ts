@@ -1,12 +1,20 @@
 import { errorCode } from '$lib/errors';
 import type { ActionFailure } from '$lib/bindings/ActionFailure';
+import { ERROR_CODES } from '$lib/bindings/constants';
 import { m } from '$lib/paraglide/messages';
 
+type FailureCode = (typeof ERROR_CODES.ACTION_FAILURES)[number];
+/** 文言の表で引く符号。コマンドの失敗は、終了コードと標準エラーを添えるので表の外で組み立てる */
+type MessageCode =
+	| Exclude<FailureCode, 'action.command_failed' | 'action.command_not_found'>
+	| typeof ERROR_CODES.ACCOUNT_UNREACHABLE
+	| typeof ERROR_CODES.ACTION_CANCELLED;
+
 /**
- * アクションで Rust 側が返す、失敗の種類の符号（src-tauri/src/actions.rs の Failure::code と、lib.rs の action.cancelled）。
+ * アクションで Rust 側が返す、失敗の種類の符号の案内（符号は src-tauri/src/actions.rs の Failure::code と error_codes.rs）。
  * 詳しい中身は Rust 側でログに残し、画面には何をすればよいかの案内だけを出す
  */
-const MESSAGES: Record<string, () => string> = {
+const MESSAGES: Record<MessageCode, () => string> = {
 	'action.disabled': m.action_error_disabled,
 	'action.no_key': m.action_error_no_key,
 	'action.key_unreadable': m.action_error_key_unreadable,
@@ -55,7 +63,7 @@ function commandFailedMessage(error: unknown): string {
 }
 
 /** 設定の「AI」で直す失敗。エラーの帯に、その分類を開く操作を添える */
-const AI_SETTINGS_CODES = new Set([
+const AI_SETTINGS_CODES = new Set<string>([
 	'action.disabled',
 	'action.no_key',
 	'action.key_unreadable',
@@ -63,7 +71,7 @@ const AI_SETTINGS_CODES = new Set([
 	'action.rejected',
 	'action.model_not_found',
 	'action.endpoint_not_found'
-]);
+] satisfies FailureCode[]);
 
 /** 設定の「AI」で直す失敗か */
 export function needsAiSettings(error: unknown): boolean {
@@ -86,7 +94,7 @@ export function actionErrorMessage(error: unknown): string | null {
 		return detail ? `${message}\n${detail}` : message;
 	}
 	if (!Object.hasOwn(MESSAGES, code)) return null;
-	const message = MESSAGES[code]();
+	const message = MESSAGES[code as MessageCode]();
 	const detail = isActionFailure(error) ? error.detail : null;
 	return detail ? message + m.action_error_detail({ detail }) : message;
 }

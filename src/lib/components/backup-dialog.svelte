@@ -3,6 +3,7 @@
 	import { restoreChangeText } from '$lib/backup-changes';
 	import type { Backup } from '$lib/bindings/Backup';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+	import { ERROR_CODES } from '$lib/bindings/constants';
 	import { errorCode } from '$lib/errors';
 	import { OpenLoader } from '$lib/open-loader.svelte';
 	import { m } from '$lib/paraglide/messages';
@@ -35,7 +36,7 @@
 	};
 
 	const failure = (error: unknown) =>
-		errorCode(error) === 'backup.restore_partial'
+		errorCode(error) === ERROR_CODES.BACKUP_RESTORE_PARTIAL
 			? m.backup_restore_partial()
 			: m.settings_failed({ error: errorCode(error) });
 
@@ -65,7 +66,7 @@
 			await load(m.backup_restored());
 		} catch (error) {
 			const message = failure(error);
-			if (errorCode(error) === 'backup.restore_partial') await load(message);
+			if (errorCode(error) === ERROR_CODES.BACKUP_RESTORE_PARTIAL) await load(message);
 			else notice = message;
 		} finally {
 			restoring = false;
