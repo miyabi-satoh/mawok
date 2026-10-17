@@ -50,6 +50,7 @@ Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}
 | `@sh command` | Runs the command and replaces the text with the result. For example: `@sh sort` |
 
 - Type `@` at the start of the first line to see addressee suggestions. Press `Tab` or `Enter` to enter one.
+- On an `@sh` line, type the start of a file or folder name and press `Tab` to complete it. If several match, they appear below the first line. Press `Tab` again to go through them.
 - The text you ran stays in the history, so you can bring it back and edit it.
 - A command receives the lines below the first on standard input and returns its standard output as the result.{macos:}{windows: On Windows, commands run in cmd.}
 ::: macos

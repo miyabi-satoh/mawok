@@ -336,5 +336,16 @@
 	"draft_address_ai": "Ask AI",
 	"draft_address_sh": "Run a command",
 	"draft_run": "Run",
-	"draft_address_empty": "Write an instruction or a command after the addressee."
+	"draft_address_empty": "Write an instruction or a command after the addressee.",
+	"draft_path_candidates": "Matching paths",
+	"draft_path_candidates_count": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "{count} matching file or folder.",
+				"countPlural=other": "{count} matching files and folders."
+			}
+		}
+	]
 }

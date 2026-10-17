@@ -111,7 +111,16 @@ pub struct FolderCompletion {
 /// Windows の隠しとシステムの両方の属性のフォルダーは候補にしない
 pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
     // 末尾の空白は、`Program Files` の `Program ` のように打ちかけの名前の一部なので残す
-    let input = unquote(input.trim_start());
+    complete_entries(current, home, unquote(input.trim_start()), false)
+}
+
+/// `@sh` の行で、打ちかけのパスの最後の名前を、ファイルとフォルダーの名前で補う（docs/actions.md「パスの補完」）。
+/// `input` は、シェルの引用符と `\` を外した後のパス。拾い方は complete と同じで、フォルダーの名前には区切りを付け、ファイルには付けない
+pub fn complete_path(current: &Path, home: &Path, input: &str) -> FolderCompletion {
+    complete_entries(current, home, input, true)
+}
+
+fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> FolderCompletion {
     let split = input
         .rfind(|c| c == '/' || (cfg!(windows) && c == '\\'))
         .map_or(0, |index| index + 1);
@@ -149,9 +158,15 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
-        if !(file_type.is_dir() || file_type.is_symlink() && entry.path().is_dir()) {
+        let is_dir = file_type.is_dir() || file_type.is_symlink() && entry.path().is_dir();
+        if !(is_dir || files) {
             continue;
         }
+        let name = if is_dir {
+            format!("{name}{SEPARATOR}")
+        } else {
+            name
+        };
         match visibility(&name, &entry) {
             Visibility::Protected => {}
             Visibility::Hidden if !prefix.starts_with('.') => hidden.push(name),
@@ -159,21 +174,18 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
         }
     }
     let mut names = if visible.is_empty() { hidden } else { visible };
-    names.sort_by_cached_key(|name| name.to_lowercase());
+    // 区切りは並べ方に入れない（`foo/` を `foo-bar/` より前に）
+    names.sort_by_cached_key(|name| name.trim_end_matches(SEPARATOR).to_lowercase());
     match names.as_slice() {
         [] => unchanged(),
         [name] => FolderCompletion {
-            input: format!("{folder_part}{name}{SEPARATOR}"),
+            input: format!("{folder_part}{name}"),
             ..unchanged()
         },
         _ => FolderCompletion {
             input: format!("{folder_part}{}", completed_part(&names, prefix)),
             total: names.len() as u32,
-            candidates: names
-                .into_iter()
-                .take(CANDIDATE_LIMIT)
-                .map(|name| format!("{name}{SEPARATOR}"))
-                .collect(),
+            candidates: names.into_iter().take(CANDIDATE_LIMIT).collect(),
             ..unchanged()
         },
     }
@@ -599,6 +611,23 @@ mod tests {
         assert_eq!(completion.input, "nowhere/x");
         assert!(completion.candidates.is_empty());
         assert_eq!(completion.total, 0);
+    }
+
+    #[test]
+    fn completes_files_too_for_a_command_line() {
+        let d = completion_dirs("complete-path");
+        // ファイルには区切りを付けない
+        assert_eq!(complete_path(&d.home, &d.home, "docs.").input, "Docs.txt");
+        let completion = complete_path(&d.home, &d.home, "Doc");
+        assert_eq!(completion.input, "Doc");
+        assert_eq!(
+            completion.candidates,
+            ["Docs.txt".into(), sep("Documents/"), sep("Documents-old/")]
+        );
+        // 引用符はシェルの側で外してあるので、そのまま名前の一部として見る
+        assert_eq!(complete_path(&d.home, &d.home, "\"My").input, "\"My");
+        // フォルダーの欄は、ファイルを候補にしない
+        assert_eq!(complete(&d.home, &d.home, "docs.").input, "docs.");
     }
 
     #[test]

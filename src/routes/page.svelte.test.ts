@@ -1380,6 +1380,45 @@ describe('宛先へ出す', () => {
 		await expect.element(candidates).not.toBeInTheDocument();
 	});
 
+	it('@sh の行で Tab を押すとパスを補い、2つ以上なら候補を並べて Tab で順に入れ、Esc で選ぶ前に戻す', async () => {
+		const fallback = invoked.getMockImplementation();
+		invoked.mockImplementation((command, args) => {
+			if (command !== 'complete_path') return fallback?.(command, args);
+			const { input } = args as { input: string };
+			if (input === 'My')
+				return Promise.resolve({
+					input: 'My ',
+					base: '',
+					candidates: ['My Folder/', 'My notes.txt'],
+					total: 2
+				});
+			return Promise.resolve({ input, base: '', candidates: [], total: 0 });
+		});
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.fill('@sh cat M');
+
+		await userEvent.keyboard('y{Tab}');
+
+		expect(callsOf(invoked, 'complete_path').at(-1)?.[1]).toEqual({ input: 'My' });
+		await expect.element(textarea).toHaveValue('@sh cat My\\ ');
+		await expect.element(textarea).toHaveFocus();
+		const list = screen.getByRole('listbox', { name: m.draft_path_candidates() });
+		await expect.element(list).toHaveTextContent('My Folder/My notes.txt');
+
+		await userEvent.keyboard('{Tab}{Tab}');
+		await expect.element(textarea).toHaveValue('@sh cat My\\ notes.txt ');
+		await expect
+			.element(list.getByRole('option', { selected: true }))
+			.toHaveTextContent('My notes.txt');
+
+		await userEvent.keyboard('{Escape}');
+		await expect.element(textarea).toHaveValue('@sh cat My\\ ');
+		await userEvent.keyboard('{Escape}');
+		await expect.element(list).not.toBeInTheDocument();
+		expect(commandsCalled()).not.toContain('dismiss');
+	});
+
 	it('一覧で、1行だけで宛先から始まる定型文を選ぶと実行し、ほかの定型文を選ぶと挿入する。AI サービスが「使わない」でも一覧に出す', async () => {
 		const upper = newSnippet('大文字に', '@sh tr a-z A-Z');
 		const greeting = newSnippet('挨拶', 'お疲れさまです。');

@@ -3551,6 +3551,15 @@ async fn complete_folder(
     Ok(folder::complete(&base, &home, &input))
 }
 
+/// `@sh` の行の打ちかけのパスを、今の作業フォルダーから見て補う（folder.rs の complete_path）。
+/// complete_folder と同じく async にし、フォルダーの名前はログに書かない
+#[tauri::command]
+async fn complete_path(app: AppHandle, input: String) -> Result<folder::FolderCompletion, String> {
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    let base = working_folder(&app, &home);
+    Ok(folder::complete_path(&base, &home, &input))
+}
+
 /// OS のフォルダーを選ぶ画面を今の作業フォルダーから出し、選んだフォルダーへ移る（change_folder と同じく確かめる）。
 /// 選ばずに閉じたら false。画面を出している間は、フォーカスが外れても下書きを隠さず、閉じたら下書きにフォーカスを戻す
 #[tauri::command]
@@ -4564,6 +4573,7 @@ pub fn run() {
             run_action,
             change_folder,
             complete_folder,
+            complete_path,
             folder_menu,
             pick_folder,
             current_folder,
