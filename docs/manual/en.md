@@ -74,7 +74,7 @@ From the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}, type the path, and p
 
 When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select “Buy credits” under “AI” in Settings to open the purchase page in your browser.
 
-To use a service compatible with OpenAI (such as DeepSeek, OpenRouter, or Ollama), choose “OpenAI” under “AI service”, then change “Base URL” to that service's API URL and enter that service's API key. For a service that needs no key (such as Ollama on your computer), still enter something as the API key.
+To use a service compatible with OpenAI (such as DeepSeek, OpenRouter, or Ollama), choose “OpenAI” under “AI service”, then change “Base URL” to that service's API URL and enter that service's API key and “Model”. For a service that needs no key (such as Ollama on your computer), still enter something as the API key.
 
 ## Sync settings and history
 
