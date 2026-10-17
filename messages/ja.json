@@ -45,7 +45,7 @@
 	"settings_hotkey_unavailable": "{keys} は登録できません。ほかのアプリで使われている可能性があります。ホットキーは {current} のままです。",
 	"settings_trim_trailing": "末尾の空白文字を取り除く",
 	"settings_exclude_history": "クリップボードの履歴に残さない",
-	"settings_exclude_history_description": "コピーしたテキストを、クリップボードの履歴から貼り直せなくなります。",
+	"settings_exclude_history_description": "Mawok でコピーしたテキストを、クリップボードの履歴から貼り直せなくなります。",
 	"settings_char_width": "文字を揃える",
 	"settings_char_width_punctuation": "句読点",
 	"settings_char_width_alphabet": "英字",
