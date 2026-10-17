@@ -18,7 +18,7 @@
 技術の説明:
 
 - [宛先へ出す（@ai・@sh）と定型文](docs/actions.md)
-- [設定ファイル](docs/config.md)
+- [設定の置き場](docs/config.md)
 - [設定と履歴の同期](docs/sync.md)
 - [OS ごとの作り](docs/platform.md)
 - [第三者のソフトウェア](docs/third-party-licenses.md)
@@ -57,7 +57,7 @@ just licenses   # Rust の依存のライセンス表示を作り直す（依存
 
 `just test`（`just ci` にも含まれます）で次の3つを実行します。
 
-- Rust の単体テスト（`cargo test`）: 文字列の加工、設定ファイルの読み書き、ウィンドウの位置決めなど。
+- Rust の単体テスト（`cargo test`）: 文字列の加工、設定の読み書き、ウィンドウの位置決めなど。
 - 画面のロジックのテスト（vitest の `node` プロジェクト）: キーの判定など、DOM の要らないもの。
 - 画面の部品のテスト（vitest の `client` プロジェクト）: Chromium（Playwright）で実際に描いて操作する。`pnpm exec playwright install chromium` が要ります。
 
@@ -97,7 +97,7 @@ just release-mac publish
 
 ## 設定とデータの置き場所
 
-設定ファイルの形と置き場所は [設定ファイル](docs/config.md)、Microsoft Store（MSIX）版の置き場所は [OS ごとの作り](docs/platform.md)「Windows の MSIX 版」にあります。
+設定の置き場の形と場所は [設定の置き場](docs/config.md)、Microsoft Store（MSIX）版の置き場所は [OS ごとの作り](docs/platform.md)「Windows の MSIX 版」にあります。
 
 ## その他のコマンド
 

@@ -175,7 +175,7 @@ test.describe('AI を使えないとき', () => {
 			assert.equal(draft.value, 'abc');
 			assert.equal(draft.focused, true, '入力欄にフォーカスがあるはず');
 		} finally {
-			// 設定ファイルに書かれ、このファイルのほかのテストに残るので戻す
+			// 設定の置き場に書かれ、このファイルのほかのテストに残るので戻す
 			await invokeApp(client, 'set_snippets', { snippets: [BUSINESS] });
 		}
 	});

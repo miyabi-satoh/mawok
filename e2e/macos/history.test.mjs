@@ -33,7 +33,7 @@ async function pressAndWaitCaret(code, value, moved, label) {
 test.describe('macOS: 下書きの履歴', () => {
 	test.before(async () => {
 		await holdUserState();
-		await relaunchWithTestConfig('', { clearHistory: true });
+		await relaunchWithTestConfig({}, { clearHistory: true });
 		// 古い方から git status、折り返す長い文の順に履歴に入れる
 		for (const text of ['git status', LONG]) {
 			await showDraftWith(text, { paste: true });

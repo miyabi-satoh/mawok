@@ -28,7 +28,7 @@ import { expectStays, waitFor } from '../lib/wait.mjs';
 
 // 定型文。絞り込みと差し込む位置は部品テストで見ているので、ここでは実際の WebView での
 // キー (本物の入力の Ctrl+K・Enter・Esc・Ctrl+Z)、IME、ほかのアプリに移ったときを見る。
-// 定型文は設定画面ではなく config.toml で登録する (設定画面の表の操作は部品テストで見ている)。
+// 定型文は設定画面ではなく 設定の置き場で登録する (設定画面の表の操作は部品テストで見ている)。
 // IME で絞り込む名前はひらがなにする。漢字だと変換の結果しだいで絞り込みに当たらなくなるため
 
 const suite = createSuite();
@@ -194,7 +194,7 @@ test.describe('定型文', () => {
 			const palette = await openPalette(client);
 			assert.equal(palette.options[2], 'あいう', JSON.stringify(palette.options));
 		} finally {
-			// 設定ファイルに書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
+			// 設定の置き場に書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
 			await invokeApp(client, 'set_snippets', { snippets: SNIPPETS });
 		}
 	});

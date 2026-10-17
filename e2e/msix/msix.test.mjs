@@ -306,10 +306,7 @@ describe('EXE 版のファイルがある環境', () => {
 		await writeStartupTaskState(pkg, STARTUP_TASK_STATE.disabled);
 	});
 
-	test('「設定ファイルを表示」「ログを表示」が、EXE 版と同じ場所の実物を選んで開く', async () => {
-		const config = await revealAndRead(CDP_PORT, 'reveal_config_file');
-		assert.equal(config.folder, APP_DATA_DIRS.roaming);
-		assert.deepEqual(config.selected, [path.join(APP_DATA_DIRS.roaming, 'config.toml')]);
+	test('「ログを表示」が、EXE 版と同じ場所の実物を選んで開く', async () => {
 		const log = await revealAndRead(CDP_PORT, 'reveal_log_file');
 		assert.equal(log.folder, path.join(APP_DATA_DIRS.local, 'logs'));
 		assert.deepEqual(log.selected, [path.join(APP_DATA_DIRS.local, 'logs', 'Mawok.log')]);
@@ -356,7 +353,7 @@ describe('EXE 版のファイルが無い環境', () => {
 		await stopMawok();
 		held = await holdAppData();
 		await launchInPackage(pkg, CDP_PORT);
-		// 設定を1つ変えて、設定ファイルを作らせる
+		// 設定を1つ変えて、設定の置き場を作らせる
 		await invokeOrThrow(CDP_PORT, 'set_language', { language: 'ja' });
 	});
 
@@ -374,20 +371,17 @@ describe('EXE 版のファイルが無い環境', () => {
 	test('設定・ログは、パッケージごとの場所に回され、EXE 版の場所には何もできない', async () => {
 		const redirected = redirectedDataDirs(pkg);
 		await waitFor(
-			() => fs.existsSync(path.join(redirected.roaming, 'config.toml')),
+			() => fs.existsSync(path.join(redirected.roaming, 'settings.db')),
 			(exists) => exists,
-			{ label: '回された先の config.toml' }
+			{ label: '回された先の settings.db' }
 		);
 		assert.ok(fs.existsSync(path.join(redirected.local, 'logs', 'Mawok.log')));
 		assert.equal(fs.existsSync(APP_DATA_DIRS.roaming), false);
 		assert.equal(fs.existsSync(APP_DATA_DIRS.local), false);
 	});
 
-	test('「設定ファイルを表示」「ログを表示」が、回された先を選んで開く', async () => {
+	test('「ログを表示」が、回された先を選んで開く', async () => {
 		const redirected = redirectedDataDirs(pkg);
-		const config = await revealAndRead(CDP_PORT, 'reveal_config_file');
-		assert.equal(config.folder, redirected.roaming);
-		assert.deepEqual(config.selected, [path.join(redirected.roaming, 'config.toml')]);
 		const log = await revealAndRead(CDP_PORT, 'reveal_log_file');
 		assert.equal(log.folder, path.join(redirected.local, 'logs'));
 		assert.deepEqual(log.selected, [path.join(redirected.local, 'logs', 'Mawok.log')]);

@@ -66,7 +66,7 @@ async function openLicenses() {
 test.describe('macOS: 第三者のソフトウェア', () => {
 	test.before(async () => {
 		await holdUserState();
-		await relaunchWithTestConfig('language = "ja"\n');
+		await relaunchWithTestConfig({ language: 'ja' });
 		await openSettings('このアプリについて', 'ライセンスを表示');
 	});
 

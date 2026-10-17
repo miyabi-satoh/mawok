@@ -92,9 +92,7 @@ To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{win
 - Kept per device: launch at login and API keys for AI services. The hotkey and keyboard shortcuts sync only between {macos:Macs}{windows:Windows devices}.
 - For settings, replacements, and snippets, turn off the cloud mark to stop syncing just that item or row. To stop syncing a whole kind, turn it off.
 
-If you change the same setting on different devices, “Choose which to use...” appears under “Account” in Settings. Select it, choose “This device” or “Other device” for each item, then select “Apply selected settings”. You can also open it from “Choose Which Settings to Use…” in the {macos:menu bar}{windows:system tray} menu.
-
-To go back to settings from before sync changed them, select “Restore settings from before a sync...” under “Account” in Settings. Choose the date you want, then select “Restore these settings”.
+If you change the same setting on different devices, the one changed last is used. To go back to earlier settings, restore them from a backup.
 
 ## Keyboard shortcuts
 
@@ -117,6 +115,8 @@ You can change the keys under “Keyboard shortcuts” in Settings.
 Choose “Settings…” in the {macos:menu bar}{windows:system tray} menu, or press {macos:`Cmd+,`}{windows:`Ctrl+,`} in the text window.
 You can change the hotkey, the text's appearance, and the cleanup applied when copying (such as removing trailing whitespace, unifying full-width and half-width characters, and replacements). Changes take effect immediately.
 Settings you've changed from the default show a vertical line at the left edge of the row.
+
+Settings are backed up automatically every day. To go back to earlier settings, select “Restore from backup...” under “About” in Settings, choose the date you want, then select “Restore these settings”. Select “Back up now” to keep the settings as they are now.
 
 ## If something does not work
 
@@ -143,47 +143,6 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 - It sends your text outside the app only when you run an AI action with `@ai` (to the AI service you chose) or sync with Pro.
 - While you sync with Pro, what you sync is encrypted and stored on Mawok's server. Mawok's server cannot read it.
 - Before you choose an AI service and select “Agree”, the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
-
-## Settings file
-
-Settings are saved in `config.toml`. Open its location from “About” in Settings.
-Changes you make directly take effect after you restart the app. The file contains only values that differ from the defaults.
-
-| Item                             | Default                          | Description                                                              |
-| -------------------------------- | -------------------------------- | ------------------------------------------------------------------------ |
-| `hotkey`                         | `"CommandOrControl+Shift+Space"` | Hotkey that brings up the text window; empty for none                    |
-| `autostart`                      | `true`                           | Launch at login                                                          |
-| `sync_settings`                  | `true`                           | With Pro, sync settings with your other devices                          |
-| `sync_keys`                      | `true`                           | With Pro, sync keyboard shortcuts with your other devices                |
-| `sync_replacements`              | `true`                           | With Pro, sync replacements with your other devices                      |
-| `sync_snippets`                  | `true`                           | With Pro, sync snippets with your other devices                          |
-| `sync_history`                   | `true`                           | With Pro, sync history with your other devices                           |
-| `sync_excluded_settings`         | `[]`                             | Setting-file item names to exclude from settings sync                    |
-| `language`                       | `"system"`                       | Language (`"system"`, `"ja"`, `"en"`)                                    |
-| `theme`                          | `"system"`                       | Theme (`"system"`, `"light"`, `"dark"`)                                  |
-| `text_window_always_on_top`      | `true`                           | Keep the text window on top                                              |
-| `hide_text_window_on_blur`       | `true`                           | Hide the text window when you switch apps                                |
-| `show_text_window_buttons`       | `true`                           | Show buttons in the text window                                          |
-| `text_history_size`              | `50`                             | History size (0 to 100)                                                  |
-| `trim_trailing_whitespace`       | `true`                           | Remove trailing whitespace when copying                                  |
-| `punctuation_style`              | `"keep"`                         | Unify punctuation (`"keep"`, `"kutouten"`, `"comma"`)                    |
-| `alphabet_width`                 | `"keep"`                         | Unify the width of letters (`"keep"`, `"full"`, `"half"`)                |
-| `digit_width`                    | `"keep"`                         | Unify the width of digits (`"keep"`, `"full"`, `"half"`)                 |
-| `space_width`                    | `"keep"`                         | Unify the width of spaces (`"keep"`, `"full"`, `"half"`)                 |
-| `symbol_width`                   | `"keep"`                         | Unify the width of symbols (`"keep"`, `"full"`, `"half"`)                |
-| `katakana_width`                 | `"keep"`                         | Make half-width katakana full-width (`"keep"`, `"full"`)                 |
-| `exclude_from_clipboard_history` | `true`                           | Keep out of clipboard history                                            |
-| `text_font_family`               | `""`                             | Text font (CSS font-family; empty uses the OS default)                   |
-| `text_font_size`                 | `16`                             | Text font size (10 to 32)                                                |
-| `text_color_light`               | `""`                             | Text color (light; `#rrggbb`; empty uses the default)                    |
-| `text_color_dark`                | `""`                             | Text color (dark; `#rrggbb`; empty uses the default)                     |
-| `input_guidance`                 | None                             | Input hint. If omitted, the default hint; an empty string shows none     |
-| `[text_window_keys]`             | The default keys in “Keyboard shortcuts” | Keys in the text window, per action, such as `copy` and `history_older`. An empty string means unassigned |
-| `[[replacements]]`               | None                             | One replacement entry (`from`, `to`, `enabled`)                          |
-| `[[snippets]]`                   | Default snippets for the display language | One snippet (`name`, `body`, `output` [`"replace"`, `"insert"`, `"none"`], `encoding` [`"utf-8"`, `"shift_jis"`, and so on], `enabled`) |
-| `ai_service`                     | `"none"`                         | AI service used for AI actions (`@ai`) (`"none"`, `"mawok"`, `"gemini"`, `"anthropic"`, `"openai"`) |
-| `ai_consent`                     | None                             | AI services whose notice about what is sent and how it is handled you accepted |
-| `[ai_models]`                    | Default model for each AI service | AI model, per AI service (`gemini = "…"`, `anthropic = "…"`, and so on)  |
 
 ## Uninstalling
 

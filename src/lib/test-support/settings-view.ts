@@ -64,7 +64,6 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 			history: true
 		},
 		syncExcludedSettings: [],
-		syncConflicts: 0,
 		version: '0.1.0',
 		locale: 'ja',
 		platform: 'macos',

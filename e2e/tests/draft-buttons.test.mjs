@@ -184,7 +184,7 @@ test.describe('下書きのボタン', () => {
 				{ label: '登録を促す文' }
 			);
 		} finally {
-			// 設定ファイルに書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
+			// 設定の置き場に書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
 			await invokeApp(client, 'set_snippets', { snippets: SNIPPETS });
 		}
 	});
@@ -204,7 +204,7 @@ test.describe('下書きのボタン', () => {
 			await toggle.waitForDisplayed({ timeout: 5000 });
 			await toggle.click();
 			await waitFor(tryReadConfig, (config) => config?.showTextWindowButtons === false, {
-				label: 'config.toml の showTextWindowButtons'
+				label: '設定の置き場の showTextWindowButtons'
 			});
 
 			// ボタンの一覧は隠れていても読めるので、出し直されたことをネイティブウィンドウで見てから読む

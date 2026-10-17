@@ -38,7 +38,7 @@ async function toggleAutostart(expected) {
 test.describe('macOS: ログイン時の起動', () => {
 	test.before(async () => {
 		await holdUserState();
-		await relaunchWithConfig('language = "ja"\nautostart = false\n');
+		await relaunchWithConfig({ language: 'ja', autostart: false });
 	});
 
 	test.after(async () => {

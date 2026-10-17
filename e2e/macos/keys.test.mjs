@@ -60,7 +60,7 @@ async function record(prefix, press, expected) {
 test.describe('macOS: ホットキーと下書きのキーの変更', () => {
 	test.before(async () => {
 		await holdUserState();
-		await relaunchWithTestConfig('language = "ja"\n');
+		await relaunchWithTestConfig({ language: 'ja' });
 	});
 
 	test.after(async () => {

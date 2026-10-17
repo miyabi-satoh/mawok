@@ -19,16 +19,16 @@ import { tryReadConfig, beginTestConfig } from '../lib/config.mjs';
 import { launchPasteTarget, expectPasted } from '../lib/paste-target.mjs';
 
 // 設定と加工の組み合わせの通し: Ctrl+, で設定を開く (下書きは隠れる) → 置き換え辞書に1行足す
-// (この時点で config.toml に書かれる) → 設定を閉じる (下書きが出し直される) → 下書きで
+// (この時点で 設定の置き場に書かれる) → 設定を閉じる (下書きが出し直される) → 下書きで
 // 同じ語を書いてコピー → 置き換わっていて、戻り先の貼り付け先にも置き換えた後の文字が届く。
-// 最後に、足した行を設定画面から (テストが直接 config.toml を書き換えるのではなく、
+// 最後に、足した行を設定画面から (テストが直接 設定の置き場を書き換えるのではなく、
 // ユーザーがするのと同じ操作で) 削除する。
 //
 // 設定ウィンドウを開いている間は下書きが隠れ、閉じると出し直される (`lib.rs` の
 // `hide_draft_for_settings` / `show_again`) ので、下書きへの入力は設定を閉じた後で行う。
 // 隠れる・出し直されること自体もこのテストで押さえる。
 //
-// 設定ファイルは常用のものを直接読み書きするため、テストの前後で退避・復元する
+// 設定の置き場は常用のものを直接読み書きするため、テストの前後で退避・復元する
 // (中断されたときの保険は createSuite / beginTestConfig 側で見ている)。
 
 const suite = createSuite();
@@ -74,11 +74,11 @@ test.describe('設定 (置き換え辞書) → 下書きへの反映', () => {
 		}
 	});
 
-	test('置き換え辞書に登録した内容が config.toml に書かれ、下書きのコピーと貼り付け先に反映される', async () => {
+	test('置き換え辞書に登録した内容が 設定の置き場に書かれ、下書きのコピーと貼り付け先に反映される', async () => {
 		const from = `E2Eフロム${Date.now()}`;
 		const to = `E2Eトゥ${Date.now()}`;
 
-		// 設定を開くと下書きは隠れる (config.toml を書き換えるためではなく、
+		// 設定を開くと下書きは隠れる (設定の置き場を書き換えるためではなく、
 		// 並べて見る場面がないための仕様)
 		const draftHandle = await openSettingsFromDraft(client);
 
@@ -92,11 +92,11 @@ test.describe('設定 (置き換え辞書) → 下書きへの反映', () => {
 		await lastTo.setValue(to);
 
 		// 入力のたびに保存される実装 (bind:value の setter で saveReplacements() を呼ぶ) なので、
-		// ウィンドウを閉じなくても config.toml に反映されるはず
+		// ウィンドウを閉じなくても 設定の置き場に反映されるはず
 		const config = await waitFor(
 			tryReadConfig,
 			(cfg) => cfg?.replacements?.some((r) => r.from === from && r.to === to && r.enabled),
-			{ label: 'config.toml の replacements' }
+			{ label: '設定の置き場の replacements' }
 		);
 		assert.ok(config.replacements.some((r) => r.from === from && r.to === to));
 
@@ -115,8 +115,8 @@ test.describe('設定 (置き換え辞書) → 下書きへの反映', () => {
 		assert.equal(clipboard, `${to}のテスト`);
 		assert.equal(await expectPasted(pasteTarget, `${to}のテスト`), `${to}のテスト`);
 
-		// 足した行を、直接 config.toml を書き換えるのではなく設定画面から削除する。
-		// config.toml 自体はテスト終了時に丸ごと復元するが、途中で落ちた場合の残骸を
+		// 足した行を、直接 設定の置き場を書き換えるのではなく設定画面から削除する。
+		// 設定の置き場自体はテスト終了時に丸ごと復元するが、途中で落ちた場合の残骸を
 		// できるだけ小さくするための後始末。下書きは隠れているので Ctrl+, では開けず、
 		// トレイと同じ入口 (open_settings_window) を invoke で呼ぶ
 		await invokeApp(client, 'open_settings_window');
@@ -136,7 +136,7 @@ test.describe('設定 (置き換え辞書) → 下書きへの反映', () => {
 			// cfg が undefined (読み取り中の一時的な失敗) のときは「まだ削除できていない」扱いにする。
 			// `!cfg?.replacements?.some(...)` だと undefined を「削除済み」と誤判定してしまう
 			(cfg) => cfg !== undefined && !cfg.replacements?.some((r) => r.from === from && r.to === to),
-			{ label: 'config.toml の replacements (削除後)' }
+			{ label: '設定の置き場の replacements (削除後)' }
 		);
 	});
 });

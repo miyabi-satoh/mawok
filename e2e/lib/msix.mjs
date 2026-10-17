@@ -339,7 +339,7 @@ public static class E2EMsixWindow {
 }
 
 /**
- * `command` (reveal_config_file・reveal_log_file) を送り、新しく開いたエクスプローラーの窓の場所と選ばれた項目を返す。
+ * `command` (reveal_log_file) を送り、新しく開いたエクスプローラーの窓の場所と選ばれた項目を返す。
  * 開いた窓は閉じる。選ばれた項目は、窓が開いてから少し遅れて付くので、付くまで待つ
  *
  * @returns {Promise<{ folder: string | null, selected: string[] }>}

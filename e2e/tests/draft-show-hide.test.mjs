@@ -146,7 +146,7 @@ test.describe('下書きを出す・隠す', () => {
 			await pasteTarget.activate();
 			await expectDraftStaysVisible('ほかのアプリをクリックした後');
 		} finally {
-			// 設定ファイルに書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
+			// 設定の置き場に書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
 			await invokeApp(client, 'set_hide_draft_on_blur', { enabled: true });
 		}
 	});

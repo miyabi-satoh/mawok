@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{atomic_file, config};
+use crate::atomic_file;
 
 pub const FILE_NAME: &str = "history.json";
 /// 本文だけを置いていた版。時刻は、読むときに付ける（docs/sync.md「履歴の同期」）。
@@ -337,7 +337,7 @@ pub fn save(path: &Path, history: &History) -> io::Result<()> {
 /// 空で始めると次のコピーで上書きするので、先に写す。元を残すと、コピーせずに起動し直すたびに
 /// 同じ中身の写しが増える。写した先を返す。元がなければ何もせず None
 pub fn set_aside(path: &Path, now: SystemTime) -> io::Result<Option<PathBuf>> {
-    let Some(backup) = config::back_up(path, now)? else {
+    let Some(backup) = atomic_file::back_up(path, now)? else {
         return Ok(None);
     };
     atomic_file::remove(path)?;

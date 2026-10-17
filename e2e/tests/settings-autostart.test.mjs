@@ -28,7 +28,7 @@ test.describe('ログイン時の起動', () => {
 		testConfig = await beginTestConfig({ autostart: false });
 	});
 	test.after(async () => {
-		// 設定ファイルの書き戻しが失敗しても、登録の書き戻しと tauri-driver の終了は必ず行う
+		// 設定の置き場の書き戻しが失敗しても、登録の書き戻しと tauri-driver の終了は必ず行う
 		try {
 			await testConfig?.restore();
 		} finally {
@@ -68,7 +68,7 @@ test.describe('ログイン時の起動', () => {
 				'オンにしたら、タスクマネージャーでも有効になるはず'
 			);
 			const config = await waitFor(tryReadConfig, (cfg) => cfg?.autostart === true, {
-				label: 'config.toml の autostart (オン)'
+				label: '設定の置き場の autostart (オン)'
 			});
 			assert.equal(config.autostart, true);
 
@@ -84,7 +84,7 @@ test.describe('ログイン時の起動', () => {
 				'オフにしても、オン・オフの印は有効のまま残るはず (一覧から消えるのは Run の値が消えるため)'
 			);
 			await waitFor(tryReadConfig, (cfg) => cfg?.autostart === false, {
-				label: 'config.toml の autostart (オフ)'
+				label: '設定の置き場の autostart (オフ)'
 			});
 		} finally {
 			await suite.closeClient(client);

@@ -44,7 +44,7 @@ const waitPolicy = (policy, label) =>
 test.describe('macOS: 使い方', () => {
 	test.before(async () => {
 		await holdUserState();
-		await relaunchWithTestConfig('language = "ja"\n');
+		await relaunchWithTestConfig({ language: 'ja' });
 	});
 
 	test.after(async () => {

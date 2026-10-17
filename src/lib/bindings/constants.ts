@@ -22,7 +22,6 @@ export const EVENTS = {
 	DRAFT_HISTORY_SYNCED: "draft-history-synced",
 	SNIPPET_ADDED: "snippet-added",
 	SYNC_APPLIED: "sync-applied",
-	SYNC_CHOICE_REQUESTED: "sync-choice-requested",
 	AI_SETTINGS_REQUESTED: "ai-settings-requested",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested",

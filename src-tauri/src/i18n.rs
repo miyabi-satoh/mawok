@@ -56,15 +56,6 @@ impl Lang {
         }
     }
 
-    /// トレイの、ほかのデバイスと別々に変えた設定のどちらを使うか選ぶ画面を開く項目。
-    /// 選ぶものがあるあいだだけ出す
-    pub fn sync_choice(self) -> &'static str {
-        match self {
-            Lang::En => "Choose Which Settings to Use…",
-            Lang::Ja => "どちらの設定を使うか選ぶ…",
-        }
-    }
-
     pub fn settings_title(self) -> &'static str {
         match self {
             Lang::En => "Settings",
@@ -94,41 +85,19 @@ impl Lang {
         }
     }
 
-    pub fn config_unreadable(self, error: &str) -> String {
+    /// 設定の置き場を読めず、元のファイルを写してから既定の設定で作り直した
+    pub fn settings_reset(self, file_name: &str) -> String {
         match self {
-            Lang::En => format!("Couldn't read the settings file: {error}"),
-            Lang::Ja => format!("設定ファイルを読めません: {error}"),
+            Lang::En => format!("Couldn't read the settings, so started with the defaults. The original file was copied to {file_name}"),
+            Lang::Ja => format!("設定を読めなかったため、元のファイルを {file_name} に写して、既定の設定で始めました"),
         }
     }
 
-    /// 既定値に直した項目や、重なって外したキーの名前（設定ファイルでの書き方）。多いときは先頭の数件だけを出し、すべてはログに残す
-    pub fn config_repaired(self, keys: &[String]) -> String {
-        const SHOWN: usize = 3;
-        let shown = keys
-            .iter()
-            .take(SHOWN)
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-            .join(", ");
-        let rest = keys.len().saturating_sub(SHOWN);
+    /// 設定の置き場を開けず、作り直せもしなかった。変えた設定は保存されない
+    pub fn settings_unsaved(self, error: &str) -> String {
         match self {
-            Lang::En if rest > 0 => {
-                format!("Fixed unreadable settings and conflicting keys: {shown} and {rest} more")
-            }
-            Lang::En => format!("Fixed unreadable settings and conflicting keys: {shown}"),
-            Lang::Ja if rest > 0 => {
-                format!(
-                    "設定ファイルの読めない値と重なったキーを直しました: {shown} ほか {rest} 件"
-                )
-            }
-            Lang::Ja => format!("設定ファイルの読めない値と重なったキーを直しました: {shown}"),
-        }
-    }
-
-    pub fn config_backed_up(self, file_name: &str) -> String {
-        match self {
-            Lang::En => format!("Saved a copy of the original settings file as {file_name}"),
-            Lang::Ja => format!("元の設定ファイルを {file_name} に写しました"),
+            Lang::En => format!("Couldn't save the settings: {error}"),
+            Lang::Ja => format!("設定を保存できません: {error}"),
         }
     }
 
@@ -224,27 +193,6 @@ mod tests {
     fn system_language_setting_follows_os_language() {
         assert_eq!(Lang::resolve(Language::System, Lang::Ja), Lang::Ja);
         assert_eq!(Lang::resolve(Language::System, Lang::En), Lang::En);
-    }
-
-    #[test]
-    fn lists_only_the_first_repaired_keys() {
-        let keys = |count: usize| {
-            (0..count)
-                .map(|index| format!("replacements[{index}]"))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            Lang::Ja.config_repaired(&keys(3)),
-            "設定ファイルの読めない値と重なったキーを直しました: replacements[0], replacements[1], replacements[2]"
-        );
-        assert_eq!(
-            Lang::Ja.config_repaired(&keys(5)),
-            "設定ファイルの読めない値と重なったキーを直しました: replacements[0], replacements[1], replacements[2] ほか 2 件"
-        );
-        assert_eq!(
-            Lang::En.config_repaired(&keys(4)),
-            "Fixed unreadable settings and conflicting keys: replacements[0], replacements[1], replacements[2] and 1 more"
-        );
     }
 
     /// 数字と単位の間は、そこで折り返さないようノーブレークスペースにする。

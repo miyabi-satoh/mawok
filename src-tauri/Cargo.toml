@@ -23,8 +23,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "~2.11", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
-# 設定ファイル（config.rs）。手で書いたコメントや並びを残したまま、変わった値だけを書き換えるため。0.x なのでマイナー版で固定する
-toml_edit = "0.25.15"
+# 設定の置き場（store.rs）。設定と同期の oplog を同じトランザクションで書くため。
+# SQLite は同梱してビルドする（Windows には OS の SQLite の開発用の入口が無いため）
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 tauri-plugin-global-shortcut = "2.3.2"
 # 文字列しか書かないので、画像を扱う既定の feature は要らない
 arboard = { version = "3.6.1", default-features = false }

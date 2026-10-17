@@ -13,6 +13,7 @@
 	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import { errorCode } from '$lib/errors';
 	import SyncToggle from '$lib/components/sync-toggle.svelte';
+	import BackupDialog from '$lib/components/backup-dialog.svelte';
 	import SettingsAi from '$lib/components/settings-ai.svelte';
 	import SettingsSnippets from '$lib/components/settings-snippets.svelte';
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
@@ -136,20 +137,17 @@
 		return onEvent(EVENTS.AI_SETTINGS_REQUESTED, show);
 	});
 
-	/** ほかのデバイスと別々に変えた設定の、どちらを使うか選ぶ画面を出しているか */
-	let syncChoiceOpen = $state(false);
+	/** バックアップから戻す窓を出しているか */
+	let backupOpen = $state(false);
+	/** 「今すぐバックアップ」の結果。次にバックアップするまで出しておく */
+	let backupNotice = $state('');
 
-	// トレイから頼まれたら、「アカウント」に移って選ぶ画面を出す。設定ウィンドウを作る前の頼みは、
-	// イベントでは届かないので、載せたときに Rust 側に尋ねる
-	$effect(() => {
-		const show = async () => {
-			if (!(await invoke<boolean>('take_sync_choice_request').catch(() => false))) return;
-			category = 'account';
-			syncChoiceOpen = true;
-		};
-		void show();
-		return onEvent(EVENTS.SYNC_CHOICE_REQUESTED, show);
-	});
+	async function backUp() {
+		backupNotice = '';
+		const written = okValue(await callSettings<boolean>('back_up_settings'));
+		if (written !== undefined)
+			backupNotice = written ? m.settings_backup_done() : m.settings_backup_unchanged();
+	}
 
 	/** 設定を変えるコマンドを呼び、できたかを返す。変わった設定は settings-changed で届き、画面に反映される */
 	async function run(command: string, args?: Record<string, unknown>) {
@@ -452,7 +450,7 @@
 	/** キーの記録中でないときのキー。記録中の Esc は記録の中止なので、そちらが受け取る */
 	function onKeydown(event: KeyboardEvent) {
 		const platform = settings.current?.platform;
-		// 確かめや選ぶ画面のダイアログ（AI の了解・鍵の作り直し・同期）を出している間は、Esc で設定画面を閉じない
+		// 確かめや選ぶ画面のダイアログ（AI の了解・同期のリセット・バックアップから戻す）を出している間は、Esc で設定画面を閉じない
 		if (document.querySelector('[role="alertdialog"]')) return;
 		// 行の「…」メニューなど、開いている部品が受け持った Esc（bits-ui が preventDefault する）では、設定画面は閉じない。
 		// フォーカスの位置では、開いた直後のまだメニューに移っていない間を見分けられず、
@@ -1151,12 +1149,7 @@
 								</SettingsRow>
 							</SettingsSection>
 							{#if view.proAvailable}
-								<SettingsSync
-									{view}
-									call={callSettings}
-									onfailure={showActionError}
-									bind:choiceOpen={syncChoiceOpen}
-								/>
+								<SettingsSync {view} call={callSettings} onfailure={showActionError} />
 							{/if}
 							{#if view.mawokAccountSignedIn}
 								<SettingsMawokDevices call={callActions} />
@@ -1196,14 +1189,21 @@
 							</Field.Field>
 						</SettingsRow>
 						<SettingsRow>
+							<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
 							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-								<Field.Title>{m.settings_config_file()}</Field.Title>
-								<Button variant="outline" size="sm" onclick={() => run('reveal_config_file')}>
-									{view.platform === 'macos'
-										? m.settings_reveal_macos()
-										: m.settings_reveal_windows()}
-								</Button>
+								<Field.Title>{m.settings_backup()}</Field.Title>
+								<div class="flex items-center gap-2">
+									<Button variant="outline" size="sm" onclick={backUp}>
+										{m.settings_backup_now()}
+									</Button>
+									<Button variant="outline" size="sm" onclick={() => (backupOpen = true)}>
+										{m.settings_backup_restore_open()}
+									</Button>
+								</div>
 							</Field.Field>
+							{#if backupNotice}
+								<Field.Description role="status">{backupNotice}</Field.Description>
+							{/if}
 						</SettingsRow>
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
@@ -1224,6 +1224,7 @@
 			</div>
 		</Tabs.Root>
 	</main>
+	<BackupDialog bind:open={backupOpen} locale={view.locale} />
 {/if}
 
 <style>

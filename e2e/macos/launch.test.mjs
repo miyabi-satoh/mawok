@@ -93,7 +93,7 @@ test.describe('macOS: 多重起動と OS ごとの見え方', () => {
 		assert.ok((await draftWindowLayer()) > 0, '既定では、ふつうのウィンドウより上の層にある');
 		await hideDraft();
 
-		await relaunchWithTestConfig('text_window_always_on_top = false\n');
+		await relaunchWithTestConfig({ textWindowAlwaysOnTop: false });
 		await showDraft();
 		assert.equal(await draftWindowLayer(), 0, 'オフなら、ふつうのウィンドウと同じ層にある');
 		await hideDraft();

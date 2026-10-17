@@ -19,7 +19,7 @@ import { beginTestConfig, tryReadConfig } from '../lib/config.mjs';
 // 案内は画面側 (`src/lib/guidance.ts`) が今の言語とホットキーから作る共通の作りなので、
 // ここで見ているのは両 OS に共通の振る舞い。キーの並べ方だけが OS ごとに変わる (Windows は Ctrl+…)。
 //
-// 設定ファイルの input_guidance は、書いていなければ既定の案内、空文字なら案内を出さない、
+// 設定の置き場の input_guidance は、書いていなければ既定の案内、空文字なら案内を出さない、
 // 文字列ならその文をそのまま出す (`src-tauri/src/config.rs`)。テストでは camelCase の inputGuidance で読み書きする (`lib/config.mjs`)
 
 const suite = createSuite();
@@ -114,7 +114,7 @@ test.describe('下書きの入力欄の案内', () => {
 			);
 			assert.equal(guidance, defaultGuidance('Ctrl+Alt+J'));
 		} finally {
-			// 設定ファイルに書かれ、このファイルのほかのテストに残るので戻す
+			// 設定の置き場に書かれ、このファイルのほかのテストに残るので戻す
 			await invokeApp(client, 'set_hotkey', { accelerator: DEFAULT_HOTKEY });
 		}
 	});
@@ -137,7 +137,7 @@ test.describe('下書きの入力欄の案内', () => {
 		let draftHandle = await openDraftAppearanceSettings();
 		await client.$('#draft-guidance').setValue(own);
 		await waitFor(tryReadConfig, (cfg) => cfg?.inputGuidance === own, {
-			label: 'config.toml の inputGuidance (書き換えた後)'
+			label: '設定の置き場の inputGuidance (書き換えた後)'
 		});
 
 		await closeSettings(draftHandle);
@@ -157,7 +157,7 @@ test.describe('下書きの入力欄の案内', () => {
 		await client.keys(['Control', 'a']);
 		await client.keys(['Backspace']);
 		await waitFor(tryReadConfig, (cfg) => cfg?.inputGuidance === '', {
-			label: 'config.toml の inputGuidance (空にした後)'
+			label: '設定の置き場の inputGuidance (空にした後)'
 		});
 
 		await closeSettings(draftHandle);
@@ -177,9 +177,9 @@ test.describe('下書きの入力欄の案内', () => {
 		const reset = await client.$('//button[normalize-space()="既定に戻す"]');
 		await reset.click();
 
-		// 既定に戻すと、設定ファイルには書かれなくなる (Rust 側が既定のときは書き出さない)
+		// 既定に戻すと、設定の置き場には書かれなくなる (Rust 側が既定のときは書き出さない)
 		await waitFor(tryReadConfig, (cfg) => cfg !== undefined && cfg.inputGuidance === undefined, {
-			label: 'config.toml の inputGuidance (既定に戻した後)'
+			label: '設定の置き場の inputGuidance (既定に戻した後)'
 		});
 		assert.equal(
 			await client.$('#draft-guidance').getValue(),

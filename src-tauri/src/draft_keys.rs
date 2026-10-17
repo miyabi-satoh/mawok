@@ -2,11 +2,11 @@
 //! どの操作をどのキーで呼ぶかを決め、キーの重なりを見る。押したキーとの照らし合わせは画面側（src/lib/keys.ts）で行う
 
 use serde::{Deserialize, Serialize};
-use toml_edit::Item;
+use serde_json::Value;
 
 use crate::config;
 
-/// キーで呼べる操作。設定ファイルでキーが重なったときは、並びの先の操作にキーを残す（設定画面の並びは画面側の src/lib/keys.ts が持つ）
+/// キーで呼べる操作。設定でキーが重なったときは、並びの先の操作にキーを残す（設定画面の並びは画面側の src/lib/keys.ts が持つ）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -30,7 +30,7 @@ impl DraftAction {
         DraftAction::ChangeFolder,
     ];
 
-    /// 設定ファイルでの項目名
+    /// 設定の置き場と同期での項目名
     pub fn name(self) -> &'static str {
         match self {
             DraftAction::Copy => "copy",
@@ -155,7 +155,7 @@ impl Rejection {
             Rejection::Invalid => "keys.invalid".to_string(),
             Rejection::EditingKey => "keys.editing".to_string(),
             Rejection::Hotkey => "keys.hotkey".to_string(),
-            // 画面とのやり取りでの名前（camelCase）。設定ファイルの項目名（`DraftAction::name`）とは書き方が違う
+            // 画面とのやり取りでの名前（camelCase）。置き場の項目名（`DraftAction::name`）とは書き方が違う
             Rejection::Action(action) => format!("keys.action.{}", config::choice_name(&action)),
         }
     }
@@ -406,8 +406,8 @@ pub fn check(
     }
 }
 
-/// ホットキーを、下書きの操作のキーと比べられる書き方にする。設定ファイルに手で書いたホットキーは並びが揃っていないことがあり、
-/// OS への登録は並びを問わないので、揃えてから比べる。揃えられない書き方ならそのまま比べる
+/// ホットキーを、下書きの操作のキーと比べられる書き方にする。ホットキーは修飾キーの並びや別名が違っても
+/// OS に登録できるので、揃えてから比べる。揃えられない書き方ならそのまま比べる
 fn normalized_hotkey(hotkey: &str, platform: Platform) -> String {
     normalize(hotkey, platform)
         .filter(|key| !key.is_empty())
@@ -415,7 +415,7 @@ fn normalized_hotkey(hotkey: &str, platform: Platform) -> String {
         .unwrap_or_else(|| hotkey.to_string())
 }
 
-/// 設定ファイルに手で書いたホットキーの別名（`Cmd+Shift+Enter`・`Ctrl+Shift+K`・小文字など）を、下書きのキーの書き方に揃える。
+/// ホットキーの別名（`Cmd+Shift+Enter`・`Ctrl+Shift+K`・小文字など）を、下書きのキーの書き方に揃える。
 /// ホットキーを登録する global-hotkey はこうした別名も受け付けるので、揃えないと下書きのキーとの重なりを見落とす
 fn hotkey_alias(hotkey: &str, platform: Platform) -> Option<String> {
     use tauri_plugin_global_shortcut::{Modifiers, Shortcut};
@@ -469,18 +469,18 @@ pub fn check_hotkey(keys: &DraftKeys, hotkey: &str, platform: Platform) -> Resul
     }
 }
 
-/// 設定ファイルの `text_window_keys` を読んだ結果
+/// 設定の `text_window_keys` を読んだ結果
 pub struct Parsed {
     pub keys: DraftKeys,
     /// 読めなかった項目名（`text_window_keys.copy` など）。その操作は既定のキーのまま
     pub repaired: Vec<String>,
-    /// 設定ファイルにキーが書いてあった操作。書いてない操作は既定のキーを使う
+    /// キーが書いてあった操作。書いてない操作は既定のキーを使う
     pub written: Vec<DraftAction>,
 }
 
-/// 設定ファイルの `text_window_keys` を読む。`[text_window_keys]` の表でも、インラインの表でもよい。
-/// `text_window_keys` がなければ None を渡す（キーを変えていない設定ファイル）
-pub fn parse(item: Option<&Item>, platform: Platform) -> Parsed {
+/// 設定の `text_window_keys`（操作の名前からキーへの JSON のオブジェクト）を読む。
+/// `text_window_keys` がなければ None を渡す（キーを変えていない設定）
+pub fn parse(item: Option<&Value>, platform: Platform) -> Parsed {
     let mut parsed = Parsed {
         keys: DraftKeys::default(),
         repaired: Vec::new(),
@@ -489,7 +489,7 @@ pub fn parse(item: Option<&Item>, platform: Platform) -> Parsed {
     let Some(item) = item else {
         return parsed;
     };
-    let Some(table) = item.as_table_like() else {
+    let Some(table) = item.as_object() else {
         parsed.repaired.push("text_window_keys".to_string());
         return parsed;
     };
@@ -508,8 +508,8 @@ pub fn parse(item: Option<&Item>, platform: Platform) -> Parsed {
         }
     }
     let unknown: Vec<&str> = table
-        .iter()
-        .map(|(name, _)| name)
+        .keys()
+        .map(String::as_str)
         .filter(|name| DraftAction::ALL.iter().all(|action| action.name() != *name))
         .collect();
     if !unknown.is_empty() {
@@ -521,7 +521,7 @@ pub fn parse(item: Option<&Item>, platform: Platform) -> Parsed {
 /// `resolve_conflicts` で外した操作
 #[derive(Debug, Default, PartialEq)]
 pub struct Resolved {
-    /// 設定ファイルに書いてあった（`written`）操作の項目名。知らせる
+    /// 書いてあった（`written`）操作の項目名。ログに出す
     pub removed: Vec<String>,
     /// 書いてなかった操作。黙って外したので、保存するときも書かない（重なりが解ければ、次の起動で既定のキーに戻る）
     pub yielded: Vec<DraftAction>,
@@ -571,14 +571,7 @@ pub fn resolve_conflicts(
 mod tests {
     use super::*;
 
-    /// テスト用に、TOML の文字列から `text_window_keys` の項目を作る
-    fn item(toml: &str) -> Item {
-        toml.parse::<toml_edit::DocumentMut>()
-            .unwrap()
-            .into_table()
-            .remove("text_window_keys")
-            .unwrap()
-    }
+    use serde_json::json;
 
     #[test]
     fn names_platforms_for_the_screen() {
@@ -747,7 +740,7 @@ mod tests {
 
     #[test]
     fn hotkey_aliases_still_conflict_with_draft_keys() {
-        // 設定ファイルに手で書いた別名でも、下書きのキーと重なれば断る
+        // 別名で書いたホットキーでも、下書きのキーと重なれば断る
         let keys = DraftKeys::default();
         for (hotkey, platform) in [
             ("Cmd+Enter", MAC),
@@ -788,16 +781,14 @@ mod tests {
             repaired,
             written,
         } = parse(
-            Some(&item(
-                r#"[text_window_keys]
-                copy = "Shift+CommandOrControl+KeyJ"
-                settings = 1
-                snippets = ""
-                history_older = "KeyK"
-                send = "CommandOrControl+KeyL"
-                send_targets = 1
-                "#,
-            )),
+            Some(&json!({
+                "copy": "Shift+CommandOrControl+KeyJ",
+                "settings": 1,
+                "snippets": "",
+                "history_older": "KeyK",
+                "send": "CommandOrControl+KeyL",
+                "send_targets": 1,
+            })),
             MAC,
         );
         assert_eq!(keys.copy, "CommandOrControl+Shift+KeyJ");
@@ -815,22 +806,9 @@ mod tests {
         // 知らない項目（この版に無い操作の `send` など）は、読めない値でも読み捨て、どの操作のキーにもしない
         assert_eq!(keys.action_for("CommandOrControl+KeyL"), None);
 
-        let parsed = parse(
-            Some(&item(r#"text_window_keys = "CommandOrControl+KeyJ""#)),
-            MAC,
-        );
+        let parsed = parse(Some(&json!("CommandOrControl+KeyJ")), MAC);
         assert_eq!(parsed.keys, DraftKeys::default());
         assert_eq!(parsed.repaired, ["text_window_keys"]);
-
-        // インラインの表でも読む
-        let parsed = parse(
-            Some(&item(
-                r#"text_window_keys = { copy = "CommandOrControl+KeyJ" }"#,
-            )),
-            MAC,
-        );
-        assert_eq!(parsed.keys.copy, "CommandOrControl+KeyJ");
-        assert_eq!(parsed.written, [DraftAction::Copy]);
 
         let parsed = parse(None, MAC);
         assert_eq!(parsed.keys, DraftKeys::default());

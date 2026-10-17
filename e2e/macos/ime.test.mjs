@@ -39,7 +39,7 @@ test.describe('macOS: 日本語入力の変換中のキー', () => {
 	test.before(async () => {
 		other = await launchOtherApp();
 		await holdUserState();
-		await relaunchWithTestConfig('language = "ja"\n', { clearHistory: true });
+		await relaunchWithTestConfig({ language: 'ja' }, { clearHistory: true });
 	});
 
 	test.after(async () => {

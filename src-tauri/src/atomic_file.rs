@@ -1,14 +1,15 @@
-//! ファイルを、書きかけで壊さないように書く。設定ファイル・下書きの履歴・このデバイスの鍵で使う
+//! ファイルを、書きかけで壊さないように書く。下書きの履歴・Pro の状態などで使う。読めなかったファイルの写しも作る
 
 use std::{
     fs,
     io::{self, Write as _},
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 /// 同じフォルダーの一時ファイルに書き切ってから差し替える。置き場所のフォルダーがなければ作る。
 /// fs::write は先にファイルを切り詰めるので、ディスクの空きがないなどで書き込みが途中で失敗すると、元のファイルが壊れてしまう。
-/// ディスクへの書き切り（sync_all）は待たない。設定ファイルは打つたびにメインスレッドで保存するので、待つと入力が引っかかる
+/// ディスクへの書き切り（sync_all）は待たない。下書きの履歴は打つたびに保存するので、待つと入力が引っかかる
 pub fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     write_with(path, contents, false)
 }
@@ -27,7 +28,7 @@ pub fn remove(path: &Path) -> io::Result<()> {
     }
 }
 
-/// 一時ファイルの場所。`config.toml` なら `config.toml.tmp`
+/// 一時ファイルの場所。`history.json` なら `history.json.tmp`
 fn temp_path(path: &Path) -> PathBuf {
     match path.extension() {
         Some(extension) => {
@@ -73,6 +74,81 @@ fn write_with(path: &Path, contents: &[u8], private: bool) -> io::Result<()> {
     result
 }
 
+/// そのまま読めなかったファイルを、上書きする前に同じフォルダーの `<名前>.broken-YYYYMMDD-HHMMSS.<拡張子>` へ写す
+/// （設定の置き場なら `settings.broken-….db`、下書きの履歴なら `history.broken-….json`）。
+/// 写した先を返す。写す元がなければ何もせず None
+pub fn back_up(path: &Path, now: SystemTime) -> io::Result<Option<PathBuf>> {
+    let contents = match fs::read(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .expect("the file to back up has a stem");
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .expect("the file to back up has an extension");
+    let stamp = utc_stamp(now);
+    // 同じ秒に写したものがあっても上書きしないよう、あれば番号を付ける
+    for attempt in 0.. {
+        let name = match attempt {
+            0 => format!("{stem}.broken-{stamp}.{extension}"),
+            _ => format!("{stem}.broken-{stamp}-{attempt}.{extension}"),
+        };
+        let target = path.with_file_name(name);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        // 写しは持ち主が見るためのもの。下書きの履歴も写すので、unix では所有者だけが読めるようにする
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        match options.open(&target) {
+            Ok(mut file) => {
+                // 書きかけの写しを残すと、元の内容が残っているように見えてしまう
+                if let Err(error) = file.write_all(&contents) {
+                    drop(file);
+                    if let Err(remove_error) = fs::remove_file(&target) {
+                        log::warn!(
+                            "couldn't remove the incomplete backup {}: {remove_error}",
+                            target.display()
+                        );
+                    }
+                    return Err(error);
+                }
+                return Ok(Some(target));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the attempts never run out")
+}
+
+/// UTC の `YYYYMMDD-HHMMSS`。ログの時刻に揃えて UTC にする。日付の計算は Howard Hinnant の civil_from_days
+pub fn utc_stamp(time: SystemTime) -> String {
+    let seconds = time
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let (hour, minute, second) = (seconds / 3600 % 24, seconds / 60 % 60, seconds % 60);
+    let days = (seconds / 86_400) as i64 + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_from_march = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
+    let month = if month_from_march < 10 {
+        month_from_march + 3
+    } else {
+        month_from_march - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}{month:02}{day:02}-{hour:02}{minute:02}{second:02}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,8 +159,8 @@ mod tests {
     #[test]
     fn names_the_temporary_file_after_the_extension() {
         assert_eq!(
-            temp_path(Path::new("dir/config.toml")),
-            Path::new("dir/config.toml.tmp")
+            temp_path(Path::new("dir/history.json")),
+            Path::new("dir/history.json.tmp")
         );
         assert_eq!(
             temp_path(Path::new("dir/history.json")),

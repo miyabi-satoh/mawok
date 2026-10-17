@@ -4,6 +4,7 @@ mod actions;
 mod ai;
 mod atomic_file;
 mod autostart;
+mod backup;
 #[cfg(test)]
 mod bindings;
 mod command;
@@ -26,6 +27,7 @@ mod placement;
 mod pro;
 mod profile;
 mod secrets;
+mod store;
 mod sync;
 mod sync_key;
 #[cfg(test)]
@@ -66,7 +68,7 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use crate::{
     ai::AiService,
-    config::{ActionEncoding, ActionOutput, Config, Language, LoadProblem, Snippet, Theme},
+    config::{ActionEncoding, ActionOutput, Config, Language, Snippet, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     hotkey::Registrar as _,
     i18n::Lang,
@@ -158,11 +160,13 @@ struct ActionRequests {
 /// アクションの実行を打ち切る関数
 type AbortAction = Box<dyn Fn() + Send>;
 
-/// 設定と、トレイに出す問題。設定画面から変えると、ここと設定ファイルの両方を更新する
+/// 設定と、トレイに出す問題。設定画面から変えると、ここと設定の置き場の両方を更新する
 struct AppState {
-    config_path: PathBuf,
+    /// 設定・同期の oplog・同期の記録の置き場（store.rs）
+    store: Mutex<store::Store>,
+    /// 設定のバックアップの置き場（backup.rs）
+    backups_dir: PathBuf,
     pro_state_path: PathBuf,
-    sync_state_path: PathBuf,
     /// アプリのバージョン。ログの先頭に出しているものと同じ出どころにして、突き合わせられるようにする
     version: String,
     /// OS の言語設定から決めた言語。表示言語が「システム」のときに使う
@@ -179,7 +183,7 @@ struct AppState {
     mawok_account_signed_in: AtomicBool,
     /// Pro の状態を消すたびに進める。問い合わせている間にサインアウトやアカウントの替わりがあったら、その答えを捨てる。
     pro_generation: AtomicUsize,
-    /// 資格情報管理にある同期の鍵（docs/sync.md「同期のパスワード」）。設定ファイルには置かない。
+    /// 資格情報管理にある同期の鍵（docs/sync.md「同期のパスワード」）。設定の置き場には置かない。
     sync_key: Mutex<Option<[u8; 32]>>,
     /// 同期に使う鍵の見分け。Pro で窓口と照らした後だけある。
     sync_key_id: Mutex<Option<String>>,
@@ -197,12 +201,8 @@ struct AppState {
     sync_commit: tokio::sync::Mutex<()>,
     sync_schedule: Mutex<SyncSchedule>,
     sync_debounce: debounce::Debounce,
-    /// 同期の記録にある、利用者が選ぶのを待っている食い違いの数（docs/sync.md「食い違い」）
-    sync_conflicts: AtomicUsize,
     /// テキストウィンドウを出したことをきっかけに、最後に同期を頼んだ時刻
     synced_on_show: Mutex<Option<Instant>>,
-    /// トレイから食い違いを選ぶ画面を頼まれた。設定ウィンドウが、開いたときに受け取る
-    sync_choice_requested: AtomicBool,
     /// テキストウィンドウから AI の設定を頼まれた。設定ウィンドウが、開いたときに受け取る
     ai_settings_requested: AtomicBool,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
@@ -268,12 +268,12 @@ struct Problems {
     autostart_failed: Option<autostart::SetError>,
 }
 
-/// 設定ファイルについてトレイに出すこと
+/// 設定の置き場についてトレイに出すこと。次に起動し直すまで出す
 enum ConfigProblem {
-    /// 起動時にそのまま読めなかった。設定画面から保存するときは、上書きする前に元のファイルを写す
-    Load(LoadProblem),
-    /// 読めなかった設定ファイルを、上書きする前に写した。写した先のファイル名を、次に起動し直すまで知らせる
-    BackedUp(String),
+    /// 置き場を読めなかったので、元のファイルを写してから既定の設定で作り直した。写した先のファイル名
+    Reset(String),
+    /// 置き場を開けず、作り直せもしなかった。設定は保存されない
+    Unsaved(String),
 }
 
 impl Problems {
@@ -316,7 +316,7 @@ struct SettingsView {
     text_history_size: u16,
     trim_trailing_whitespace: bool,
     replacements: Vec<Replacement>,
-    /// 定型文。登録した順。設定ファイルに書いていなければ、今の表示言語の既定の定型文
+    /// 定型文。登録した順。変えていなければ、今の表示言語の既定の定型文
     snippets: Vec<Snippet>,
     /// 同期を使える Pro か
     pro_available: bool,
@@ -326,10 +326,8 @@ struct SettingsView {
     mawok_account_signed_in: bool,
     /// デバイスごとに選ぶ同期する種類
     sync_kinds: sync::Kinds,
-    /// 種類「設定」から外した設定ファイルの項目名
+    /// 種類「設定」から外した設定の項目名
     sync_excluded_settings: Vec<String>,
-    /// ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
-    sync_conflicts: u32,
     punctuation_style: PunctuationStyle,
     char_widths: CharWidths,
     /// コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
@@ -375,7 +373,6 @@ fn settings_view(state: &AppState) -> SettingsView {
         revision,
         sync_kinds: sync::kinds(&config),
         sync_excluded_settings: config.sync_excluded_settings.clone(),
-        sync_conflicts: shown_sync_conflicts(state, pro_available),
         locale: lang.code(),
         ai_service: config.ai_service,
         ai_consent: config.ai_consent,
@@ -416,14 +413,6 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_color_dark: config.text_color_dark,
         version: state.version.clone(),
     }
-}
-
-/// 画面とトレイに出す食い違いの数。止めた種類・項目の分は、数えるときに除いてある
-fn shown_sync_conflicts(state: &AppState, pro_available: bool) -> u32 {
-    if !pro_available {
-        return 0;
-    }
-    u32::try_from(state.sync_conflicts.load(Ordering::Relaxed)).unwrap_or(u32::MAX)
 }
 
 fn window_state_flags() -> StateFlags {
@@ -714,10 +703,10 @@ fn should_hide_on_blur(check: BlurCheck) -> bool {
         && !check.picking_folder
 }
 
-/// 初めての起動として下書きを出すか。設定ファイルがなかったうえで、作れたときだけ。
-/// 作れなかったら、次の起動でもファイルがなく、起動のたびに出てしまうため
-fn is_first_launch(config_missing: bool, config_problem: Option<&LoadProblem>) -> bool {
-    config_missing && config_problem.is_none()
+/// 初めての起動として下書きを出すか。設定の置き場がなかったうえで、作れたときだけ。
+/// 作れなかったら、次の起動でも置き場がなく、起動のたびに出てしまうため
+fn is_first_launch(store_missing: bool, problem: Option<&ConfigProblem>) -> bool {
+    store_missing && !matches!(problem, Some(ConfigProblem::Unsaved(_)))
 }
 
 /// 下書きウィンドウからフォーカスが外れたときに呼ぶ。知らせが落ち着いてから、まだ外れたままなら隠す
@@ -854,71 +843,46 @@ fn get_settings(state: tauri::State<'_, AppState>) -> SettingsView {
 }
 
 /// 設定を変えて保存する。保存できなければ何も変えない。画面とトレイへの反映は `apply_config` で行う。
-/// 起動時に設定ファイルをそのまま読めなかった場合と、起動した後に壊されていた場合は、上書きする前に元のファイルを写す。
-/// トレイに出す設定ファイルの問題が、この保存で変わったかどうかを返す
-fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<bool, String> {
-    Ok(save_config_if_current(app, None, false, change)?.expect("unconditional save"))
+/// 変えた同期の項目は、手元で変えたものとして oplog に積む
+fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
+    save_config_if_current(app, None, true, change).map(|saved| saved.expect("unconditional save"))
 }
 
 /// `expected_generation` を指定した同期だけ、利用者の保存と競合していない設定を保存する。
+/// `record_changes` は、変えた同期の項目を oplog に積むか。同期で届いた値は手元で変えたものではないので積まない。
+/// 設定と oplog は、置き場の同じトランザクションで書く
 fn save_config_if_current(
     app: &AppHandle,
     expected_generation: Option<usize>,
-    sync_backup: bool,
+    record_changes: bool,
     change: impl FnOnce(&mut Config),
-) -> Result<Option<bool>, String> {
+) -> Result<Option<()>, String> {
     let state = app.state::<AppState>();
-    // 起動時の問題を見るのも直すのも、設定のロックの中で行う。ロックの外で見ると、別のスレッドの保存と重なったときに
-    // 両方が「起動時に読めなかった」と見て、先の保存が直したファイルを後の保存がもう一度写してしまう。
-    // ロックは設定、問題の順に取る
     let mut config = state.config.lock().unwrap();
     if expected_generation
         .is_some_and(|generation| state.sync_generation.load(Ordering::SeqCst) != generation)
     {
         return Ok(None);
     }
-    // 起動時に読めなかったか、型を直した項目があるか
-    let load_problem = match &state.problems.lock().unwrap().config {
-        Some(ConfigProblem::Load(problem)) => Some(problem.clone()),
-        _ => None,
-    };
     let mut next = config.clone();
     change(&mut next);
-    let loaded = match &load_problem {
-        Some(LoadProblem::Unreadable(_)) => config::Loaded::Unreadable,
-        Some(LoadProblem::Repaired(keys)) => config::Loaded::Read {
-            old: &config,
-            repaired: keys,
-        },
-        None => config::Loaded::Read {
-            old: &config,
-            repaired: &[],
-        },
+    let changed = if record_changes {
+        let at = now_millis();
+        sync::changed_items(&config, &next)
+            .into_iter()
+            .map(|name| (name, at))
+            .collect()
+    } else {
+        Vec::new()
     };
-    if sync_backup && next != *config {
-        match config::save_sync_backup(&state.config_path, SystemTime::now()) {
-            Ok(Some(path)) => info!("saved settings before sync to {}", path.display()),
-            Ok(None) => {}
-            Err(error) => warn!("couldn't save settings before sync: {error}"),
-        }
-    }
-    let backed_up = config::save_with_backup(&state.config_path, &next, loaded, SystemTime::now())
-        .map_err(|error| error.to_string())?;
-    if let Some(path) = &backed_up {
-        info!("backed up the settings file to {}", path.display());
-    }
+    state.store.lock().unwrap().commit(&store::Commit {
+        entries: Some(&config::stored_entries(&next)),
+        changed,
+        ..store::Commit::default()
+    })?;
     *config = next;
     state.sync_generation.fetch_add(1, Ordering::SeqCst);
-    // 起動した後に壊されていたファイルを写したときも、写した先を知らせる
-    if load_problem.is_none() && backed_up.is_none() {
-        return Ok(Some(false));
-    }
-    // 保存できたので、読めなかった問題は解消した。写したなら、写した先を知らせる
-    state.problems.lock().unwrap().config = backed_up.and_then(|path| {
-        path.file_name()
-            .map(|name| ConfigProblem::BackedUp(name.to_string_lossy().into_owned()))
-    });
-    Ok(Some(true))
+    Ok(Some(()))
 }
 
 /// 今の設定と問題を、開いているウィンドウとトレイに反映する
@@ -935,30 +899,29 @@ fn emit_settings(app: &AppHandle) {
     );
 }
 
-/// 打つたびに呼ばれる設定を保存する。トレイは作り直さず、設定ファイルの問題が変わったときだけ作り直す
-/// （起動時に設定ファイルを読めなかった警告が、写した知らせに変わらないまま残らないようにする）
+/// 打つたびに呼ばれる設定を保存する。トレイは作り直さない
 fn save_as_typed(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
-    if save_config(app, change)? {
-        refresh_tray(app);
-    }
+    save_config(app, change)?;
     schedule_sync_after_change(app);
     Ok(())
 }
 
 /// 設定を変えて保存し、開いているウィンドウとトレイに反映する。保存できなければ何も変えない
 fn update_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
-    let _ = save_config(app, change)?;
+    save_config(app, change)?;
     apply_config(app);
     schedule_sync_after_change(app);
     Ok(())
 }
 
-/// 同期で届いた設定を保存し、画面から変えるコマンドと同じ反映を通す（docs/sync.md「1回の同期」）。
-/// OS に断られて反映できなかった項目は、手元の値のままにして返す。呼び出し元が読み捨ての記録に置く。
-/// 通信の間に設定が変わっていたら、何も変えずに None を返す
+/// 同期で届いた設定・バックアップから戻す設定を保存し、画面から変えるコマンドと同じ反映を通す（docs/sync.md「1回の同期」）。
+/// OS に断られて反映できなかった項目は、手元の値のままにして返す。同期では、呼び出し元が読み捨ての記録に置く。
+/// `record_changes` は、変えた同期の項目を oplog に積むか（バックアップから戻すときは、ほかのデバイスにも届けるので積む）。
+/// 読んでいる間に設定が変わっていたら、何も変えずに None を返す
 fn save_synced_config(
     app: &AppHandle,
     generation: usize,
+    record_changes: bool,
     mut next: Config,
 ) -> Result<Option<Vec<sync::ItemKey>>, String> {
     let state = app.state::<AppState>();
@@ -988,8 +951,9 @@ fn save_synced_config(
             }
         }
     }
-    let saved =
-        save_config_if_current(app, Some(generation), true, |config| *config = next.clone());
+    let saved = save_config_if_current(app, Some(generation), record_changes, |config| {
+        *config = next.clone()
+    });
     if !matches!(saved, Ok(Some(_))) {
         // 保存しなかったので、先に当てたものを設定に残る値へ戻す
         if next.hotkey != current.hotkey {
@@ -1060,7 +1024,7 @@ fn retitle_windows(app: &AppHandle) {
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     info!("set autostart: {enabled}");
     // 保存できたときだけ OS のログイン項目を変える。順番が逆だと、保存に失敗したときに OS 側だけ変わって残る
-    let _ = save_config(&app, |config| config.autostart = enabled)?;
+    save_config(&app, |config| config.autostart = enabled)?;
     let failed = apply_autostart(&app, enabled);
     let state = app.state::<AppState>();
     // 設定は保存できているので、OS への登録に失敗したことはトレイの ⚠ にも出す
@@ -1097,7 +1061,7 @@ fn set_draft_always_on_top(app: AppHandle, enabled: bool) -> Result<(), String> 
         .lock()
         .unwrap()
         .text_window_always_on_top;
-    // 画面・設定ファイルと実際のウィンドウが食い違わないよう、先にウィンドウへ当て、当てられなければ保存しない
+    // 画面・設定と実際のウィンドウが食い違わないよう、先にウィンドウへ当て、当てられなければ保存しない
     set_draft_window_always_on_top(&app, enabled)?;
     update_config(&app, |config| config.text_window_always_on_top = enabled).inspect_err(|_| {
         // 保存できなければ、ウィンドウも元の値に戻す
@@ -1149,8 +1113,8 @@ fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join(history_store::FILE_NAME))
 }
 
-/// 履歴に付ける今の時刻。UNIX のミリ秒
-fn history_now() -> u64 {
+/// 今の時刻。UNIX のミリ秒。履歴と同期の oplog に付ける
+fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_millis() as u64)
@@ -1214,7 +1178,7 @@ fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String
         warn!("couldn't read draft history before saving: {error}");
         history_store::History::default()
     });
-    let next = screen.saved(&file, texts, size, history_now());
+    let next = screen.saved(&file, texts, size, now_millis());
     // 画面は、読み込んだ履歴をそのまま保存し直すことがある。変わっていなければ、書かず、同期もさせない
     if next == file {
         return Ok(());
@@ -1245,7 +1209,7 @@ fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String>
     if !always && matches!(&file, Ok(history) if history.entries.is_empty()) {
         return Ok(());
     }
-    let cleared = file.unwrap_or_default().cleared(history_now());
+    let cleared = file.unwrap_or_default().cleared(now_millis());
     history_store::save(&path, &cleared).map_err(|error| error.to_string())?;
     info!("cleared draft history");
     drop(screen);
@@ -1568,7 +1532,7 @@ async fn set_ai_key(app: AppHandle, key: String) -> Result<(), String> {
     }
     // 了解の記録を消す保存を先にする。キーの保存の後で終了しても、入れ直したキーが了解なしで使われないようにするため。
     // キーの保存が失敗しても、記録は消えたまま（了解のダイアログをもう一度出すだけ）なので、画面には知らせる
-    let _ = save_config(&app, |config| config.ai_consent = None)?;
+    save_config(&app, |config| config.ai_consent = None)?;
     let written = run_blocking(move || secrets::write(service.credential_user(), &key))
         .await
         .and_then(|result| result.inspect_err(|error| error!("couldn't save the AI key: {error}")));
@@ -1762,22 +1726,34 @@ fn config_with_generation(state: &AppState) -> (Config, usize) {
     (config.clone(), state.sync_generation.load(Ordering::SeqCst))
 }
 
-/// 同期の記録を読む。別の鍵の記録は、無いものとして扱う
-async fn load_sync_record(app: &AppHandle, key_id: &str) -> Option<sync::State> {
-    let path = app.state::<AppState>().sync_state_path.clone();
-    run_blocking(move || sync::load(&path))
-        .await
-        .ok()
-        .flatten()
-        .filter(|state| state.key_id == key_id)
+/// 置き場にある同期の記録。読めなければ、記録が無いものとして初めての同期からやり直す
+fn read_sync_record(state: &AppState) -> Option<sync::State> {
+    let text = match state.store.lock().unwrap().sync_state() {
+        Ok(text) => text?,
+        Err(error) => {
+            warn!("couldn't read the sync state: {error}");
+            return None;
+        }
+    };
+    sync::parse_state(&text)
 }
 
-/// 選ぶのを待っている食い違いの数を覚え、変わっていたら画面とトレイに反映する
-fn remember_sync_conflicts(app: &AppHandle, count: usize) {
-    let state = app.state::<AppState>();
-    if state.sync_conflicts.swap(count, Ordering::Relaxed) != count {
-        apply_config(app);
-    }
+/// 同期の記録を読む。別の鍵の記録は、無いものとして扱う
+fn load_sync_record(app: &AppHandle, key_id: &str) -> Option<sync::State> {
+    read_sync_record(&app.state::<AppState>()).filter(|state| state.key_id == key_id)
+}
+
+/// まだ窓口へ送っていない手元の変更（oplog）。読めなければ空にして、記録の無い項目だけを書く
+fn load_outbox(app: &AppHandle) -> BTreeMap<String, u64> {
+    app.state::<AppState>()
+        .store
+        .lock()
+        .unwrap()
+        .outbox()
+        .unwrap_or_else(|error| {
+            warn!("couldn't read the sync outbox: {error}");
+            BTreeMap::new()
+        })
 }
 
 async fn run_sync(app: &AppHandle) {
@@ -1807,11 +1783,13 @@ async fn run_sync(app: &AppHandle) {
         .flatten(),
         _ => None,
     };
-    let before = load_sync_record(app, key_id).await;
+    let before = load_sync_record(app, key_id);
+    let outbox = load_outbox(app);
     let synced = sync::sync_once(
         access.transport(),
         &config,
         before.clone(),
+        &outbox,
         local_history.as_ref(),
     )
     .await;
@@ -1834,7 +1812,7 @@ async fn run_sync(app: &AppHandle) {
             let mut discard = app_state.sync_generation.load(Ordering::SeqCst) != generation;
             let mut retry = discard;
             if !discard && result.changed {
-                match save_synced_config(app, generation, result.config.clone()) {
+                match save_synced_config(app, generation, false, result.config.clone()) {
                     Ok(Some(rejected)) => {
                         let previous = before.as_ref().filter(|_| !result.reset);
                         for item in &rejected {
@@ -1859,18 +1837,18 @@ async fn run_sync(app: &AppHandle) {
                     Err(error) => warn!("couldn't save draft history received by sync: {error}"),
                 }
             }
-            let record = if discard {
-                sync::merge_written(before, &result.written, result.reset, key_id)
+            // 窓口の値を入れた項目は、入れたときだけ oplog から外す。書けた項目は、捨てる回も外す
+            let (record, settled) = if discard {
+                (
+                    sync::merge_written(before, &result.written, result.reset, key_id),
+                    result.sent,
+                )
             } else {
-                result.state
+                let mut settled = result.accepted;
+                settled.append(&mut result.sent);
+                (result.state, settled)
             };
-            // 通信の間に止められた種類・項目の食い違いを数えないよう、今の設定で数える
-            let conflicts = {
-                let current = app_state.config.lock().unwrap();
-                record.active_conflict_count(&current)
-            };
-            let _ = save_sync_record(app, record).await;
-            remember_sync_conflicts(app, conflicts);
+            let _ = save_sync_record(app, record, settled).await;
             if retry {
                 request_sync(app);
             }
@@ -1883,7 +1861,7 @@ async fn run_sync(app: &AppHandle) {
                 if app_state.sync_record_generation.load(Ordering::SeqCst) == record_generation {
                     let record =
                         sync::merge_written(before, &failure.written, failure.reset, key_id);
-                    let _ = save_sync_record(app, record).await;
+                    let _ = save_sync_record(app, record, failure.sent).await;
                 }
             }
             match failure.error {
@@ -1906,7 +1884,7 @@ async fn run_sync(app: &AppHandle) {
 /// 同期する種類を変える（docs/sync.md 冒頭）。オンにした種類は、すぐに同期する。
 /// オフにした種類の記録は消さないので、オンに戻すと続きから合わせる
 async fn change_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
-    let _ = save_config(app, change)?;
+    save_config(app, change)?;
     apply_config(app);
     mark_paused_sync_kinds(app).await;
     request_sync(app);
@@ -1919,24 +1897,18 @@ async fn change_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> 
 async fn mark_paused_sync_kinds(app: &AppHandle) {
     let state = app.state::<AppState>();
     let _commit = state.sync_commit.lock().await;
-    let path = state.sync_state_path.clone();
     let config = state.config.lock().unwrap().clone();
-    let saved = run_blocking(move || {
-        let Some(mut record) = sync::load(&path) else {
-            return Ok(None);
-        };
-        if record.pause(&config) {
-            sync::save(&path, &record)?;
+    let Some(mut record) = read_sync_record(&state) else {
+        return;
+    };
+    if record.pause(&config) {
+        let text = sync::state_text(&record);
+        if let Err(error) = state.store.lock().unwrap().commit(&store::Commit {
+            sync_state: Some(Some(&text)),
+            ..store::Commit::default()
+        }) {
+            warn_unsaved_sync_record(&error);
         }
-        Ok(Some(record.active_conflict_count(&config)))
-    })
-    .await;
-    match saved {
-        // 止めた・戻した種類と項目の食い違いを、次の同期を待たずに知らせへ反映する
-        // （全部オフの間と、つながらない間は、同期の回が来ない）
-        Ok(Ok(Some(conflicts))) => remember_sync_conflicts(app, conflicts),
-        Ok(Ok(None)) => {}
-        Ok(Err(error)) | Err(error) => warn_unsaved_sync_record(&error),
     }
 }
 
@@ -1944,17 +1916,23 @@ fn warn_unsaved_sync_record(error: &str) {
     warn!("couldn't save sync state: {error}");
 }
 
-/// 同期の記録を保存する。通信の間にスイッチがオフになった種類は、前の記録から作った結果で
-/// オフの印を上書きしないよう、保存する前に置き直す。`sync_commit` の中で呼ぶ。
+/// 同期の記録を保存し、窓口と揃った項目を oplog から外す。通信の間にスイッチがオフになった種類は、
+/// 前の記録から作った結果でオフの印を上書きしないよう、保存する前に置き直す。`sync_commit` の中で呼ぶ。
 /// 保存できなければ、警告を出してからその理由を返す
-async fn save_sync_record(app: &AppHandle, mut record: sync::State) -> Result<(), String> {
+async fn save_sync_record(
+    app: &AppHandle,
+    mut record: sync::State,
+    settled: Vec<(String, u64)>,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     let config = state.config.lock().unwrap().clone();
     record.pause(&config);
-    let path = state.sync_state_path.clone();
-    let saved = run_blocking(move || sync::save(&path, &record))
-        .await
-        .and_then(|saved| saved);
+    let text = sync::state_text(&record);
+    let saved = state.store.lock().unwrap().commit(&store::Commit {
+        settled,
+        sync_state: Some(Some(&text)),
+        ..store::Commit::default()
+    });
     if let Err(error) = &saved {
         warn_unsaved_sync_record(error);
     }
@@ -1992,26 +1970,6 @@ fn apply_synced_config(app: &AppHandle) {
     );
 }
 
-/// 食い違いを選ぶ画面のために、同期の記録と、窓口の今の値を読む。まだ同期していなければ None
-async fn read_sync_conflicts(
-    app: &AppHandle,
-    config: &Config,
-) -> Result<Option<(sync::State, Vec<sync::RemoteItem>)>, String> {
-    let access = sync_access(app)
-        .await
-        .ok_or_else(|| SYNC_UNREACHABLE.to_string())?;
-    let Some(record) = load_sync_record(app, &access.key_id).await else {
-        return Ok(None);
-    };
-    let remote = sync::read_conflicts(access.transport(), config, &record)
-        .await
-        .map_err(|error| {
-            warn!("couldn't read the settings changed on both devices: {error}");
-            SYNC_UNREACHABLE.to_string()
-        })?;
-    Ok(Some((record, remote)))
-}
-
 #[tauri::command]
 async fn set_sync_kind(app: AppHandle, kind: sync::SyncKind, enabled: bool) -> Result<(), String> {
     info!("set sync kind {kind:?}: {enabled}");
@@ -2041,185 +1999,30 @@ async fn set_sync_excluded_setting(app: AppHandle, name: String, sync: bool) -> 
     .await
 }
 
-/// 食い違いを選ぶ画面で、窓口と話せなかった。
-const SYNC_UNREACHABLE: &str = "sync.unreachable";
-const SYNC_RESTORE_PARTIAL: &str = "sync.restore_partial";
+/// 一部の設定をバックアップから戻せなかった（OS がホットキーを登録できない など）。
+const BACKUP_RESTORE_PARTIAL: &str = "backup.restore_partial";
 
-/// 選ぶ画面に出す一覧。
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(rename_all = "camelCase")]
-struct SyncConflictList {
-    items: Vec<sync::SyncConflict>,
-    /// ほかのデバイスの値をこの版では出せず、一覧に入れなかった項目があるか
-    unreadable: bool,
-}
-
-/// 食い違っている設定と、窓口から読んだほかのデバイスの値（docs/sync.md「食い違い」）。
+/// バックアップの一覧。新しい順に、戻すと今の設定から変わる所を添える（docs/config.md「バックアップ」）
 #[tauri::command]
-async fn sync_conflicts(app: AppHandle) -> Result<SyncConflictList, String> {
-    hold_sync(&app).await;
-    let result = sync_conflicts_held(&app).await;
-    release_sync(&app);
-    result
-}
-
-async fn sync_conflicts_held(app: &AppHandle) -> Result<SyncConflictList, String> {
-    let none = || SyncConflictList {
-        items: Vec::new(),
-        unreadable: false,
-    };
-    let app_state = app.state::<AppState>();
-    let (mut config, generation) = config_with_generation(&app_state);
-    let record_generation = app_state.sync_record_generation.load(Ordering::SeqCst);
-    let Some((mut record, remote)) = read_sync_conflicts(app, &config).await? else {
-        return Ok(none());
-    };
-    // ほかのデバイスが同期から外した行は、選ばせずに、こちらでも同期しない行にする
-    if let Some((next, released)) = sync::release_detached(&config, &record, &remote) {
-        let change = SyncChange {
-            config: &config,
-            generation,
-            record_generation,
-            before: &record,
-        };
-        if commit_sync_change(app, change, next.clone(), released.clone())
-            .await?
-            .is_some()
-        {
-            (config, record) = (next, released);
-        }
-    }
-    let items = sync::conflicts(&config, &record, &remote);
-    Ok(SyncConflictList {
-        unreadable: record.active_conflict_count(&config) > items.len(),
-        items,
-    })
-}
-
-/// 食い違いを選んだ結果。
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(rename_all = "camelCase")]
-struct SyncResolution {
-    /// 選ぶ画面を出した後に、窓口の値か手元の設定が変わっていた。何も変えていないので、選び直してもらう
-    stale: bool,
-    /// 「ほかのデバイス」を選んだが、このデバイスでは使えない値で、入れられなかった項目の id
-    rejected: Vec<String>,
-}
-
-/// 同期が走っていない間を取る。選んだ結果を記録に置く間に同期が走ると、同期が、前の記録から作った結果で
-/// 上書きする。取った後は `release_sync` で返す
-async fn hold_sync(app: &AppHandle) {
-    loop {
-        {
-            let state = app.state::<AppState>();
-            let mut schedule = state.sync_schedule.lock().unwrap();
-            if !schedule.running {
-                schedule.running = true;
-                return;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
-
-/// `hold_sync` で取った間を返し、待たせていた分も含めて同期する。
-fn release_sync(app: &AppHandle) {
-    {
-        let state = app.state::<AppState>();
-        let mut schedule = state.sync_schedule.lock().unwrap();
-        schedule.running = false;
-        schedule.pending = false;
-    }
-    request_sync(app);
-}
-
-/// 食い違っている設定について、利用者が選んだ側を使う（docs/sync.md「食い違い」）。
-#[tauri::command]
-async fn resolve_sync_conflicts(
-    app: AppHandle,
-    choices: Vec<sync::SyncChoice>,
-) -> Result<SyncResolution, String> {
-    info!("resolve sync conflicts: {} chosen", choices.len());
-    hold_sync(&app).await;
-    let result = resolve_sync_conflicts_held(&app, &choices).await;
-    release_sync(&app);
-    result
-}
-
-async fn resolve_sync_conflicts_held(
-    app: &AppHandle,
-    choices: &[sync::SyncChoice],
-) -> Result<SyncResolution, String> {
-    let stale = || SyncResolution {
-        stale: true,
-        rejected: Vec::new(),
-    };
-    let app_state = app.state::<AppState>();
-    let (config, generation) = config_with_generation(&app_state);
-    let record_generation = app_state.sync_record_generation.load(Ordering::SeqCst);
-    let Some((before, remote)) = read_sync_conflicts(app, &config).await? else {
-        return Ok(stale());
-    };
-    let Some(sync::Resolution {
-        config: next,
-        state: record,
-        mut rejected,
-    }) = sync::resolve(&config, &before, &remote, choices)
-    else {
-        return Ok(stale());
-    };
-    let change = SyncChange {
-        config: &config,
-        generation,
-        record_generation,
-        before: &before,
-    };
-    Ok(match commit_sync_change(app, change, next, record).await? {
-        Some(unapplied) => {
-            rejected.extend(unapplied);
-            SyncResolution {
-                stale: false,
-                rejected,
-            }
-        }
-        None => stale(),
-    })
-}
-
-/// 同期が手元を書き換える前の控え。今と同じ内容の控えは、選ぶ手がかりにならないので出さない。
-#[tauri::command]
-async fn sync_backups(app: AppHandle) -> Result<Vec<sync::SyncBackup>, String> {
+async fn settings_backups(app: AppHandle) -> Result<Vec<sync::Backup>, String> {
     let state = app.state::<AppState>();
-    let (current, _) = config_with_generation(&state);
-    let path = state.config_path.clone();
+    let current = state.config.lock().unwrap().clone();
+    let dir = state.backups_dir.clone();
     run_blocking(move || {
         let mut backups = Vec::new();
-        for backup in config::sync_backup_paths(&path)? {
-            if backups.len() == config::SYNC_BACKUP_LIST_LIMIT {
-                break;
-            }
-            let Some(name) = backup.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            let backup_config = match config::load_sync_backup(&path, name) {
-                Ok(backup) => backup,
+        for name in backup::names(&dir)?.into_iter().take(backup::LIST_LIMIT) {
+            let backed_up = match read_backup(&dir, &name) {
+                Ok(config) => config,
                 Err(error) => {
-                    warn!("couldn't read sync backup {name}: {error}");
+                    warn!("couldn't read settings backup {name}: {error}");
                     continue;
                 }
             };
-            let restored = sync::restore_config(&current, &backup_config);
-            let changes = sync::backup_differences(&current, &restored.config);
-            if !changes.is_empty() {
-                backups.push(sync::SyncBackup {
-                    name: name.to_string(),
-                    changes,
-                });
-            }
+            let restored = sync::restore_backup(&current, &backed_up);
+            backups.push(sync::Backup {
+                changes: sync::backup_differences(&current, &restored),
+                name,
+            });
         }
         Ok::<_, std::io::Error>(backups)
     })
@@ -2227,107 +2030,88 @@ async fn sync_backups(app: AppHandle) -> Result<Vec<sync::SyncBackup>, String> {
     .map_err(|error| error.to_string())
 }
 
-/// 選んだ控えの同期する設定を手元へ入れる。保存と反映は同期で届いた設定と同じ経路を通す。
+fn read_backup(dir: &std::path::Path, name: &str) -> std::io::Result<Config> {
+    let entries = backup::read(dir, name)?;
+    config::from_entries(&entries)
+        .map(|loaded| loaded.config)
+        .map_err(std::io::Error::other)
+}
+
+/// 今の設定をバックアップに書く。いちばん新しいバックアップと同じ中身なら書かずに false
 #[tauri::command]
-async fn restore_sync_backup(app: AppHandle, name: String) -> Result<(), String> {
-    if !config::valid_sync_backup_name(&name) {
-        return Err("invalid sync backup name".to_string());
+async fn back_up_settings(app: AppHandle) -> Result<bool, String> {
+    info!("back up settings");
+    back_up_now(&app).await.map(|written| written.is_some())
+}
+
+async fn back_up_now(app: &AppHandle) -> Result<Option<String>, String> {
+    let state = app.state::<AppState>();
+    let entries = config::stored_entries(&state.config.lock().unwrap());
+    let dir = state.backups_dir.clone();
+    let written = run_blocking(move || backup::write(&dir, &entries, SystemTime::now()))
+        .await?
+        .map_err(|error| error.to_string())?;
+    if let Some(name) = &written {
+        info!("backed up settings to {name}");
     }
-    info!("restore sync backup {name}");
-    hold_sync(&app).await;
-    let result = async {
-        let state = app.state::<AppState>();
-        let (current, generation) = config_with_generation(&state);
-        let path = state.config_path.clone();
-        let backup = run_blocking(move || config::load_sync_backup(&path, &name))
-            .await?
-            .map_err(|error| error.to_string())?;
-        let sync::RestoreConfig {
-            config: next,
-            rejected: locally_rejected,
-        } = sync::restore_config(&current, &backup);
-        if next == current {
-            return if locally_rejected.is_empty() {
+    Ok(written)
+}
+
+/// 選んだバックアップの設定に戻す。戻す前の設定もバックアップに書くので、戻したことを戻せる。
+/// 保存と反映は同期で届いた設定と同じ経路を通し、戻した値は手元で変えた値として、ほかのデバイスにも届ける
+#[tauri::command]
+async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), String> {
+    if !backup::valid_name(&name) {
+        return Err("invalid backup name".to_string());
+    }
+    info!("restore settings backup {name}");
+    let dir = app.state::<AppState>().backups_dir.clone();
+    let backed_up = run_blocking(move || read_backup(&dir, &name))
+        .await?
+        .map_err(|error| error.to_string())?;
+    back_up_now(&app).await?;
+    let state = app.state::<AppState>();
+    let (current, generation) = config_with_generation(&state);
+    let next = sync::restore_backup(&current, &backed_up);
+    if next == current {
+        return Ok(());
+    }
+    let _commit = lock_sync_commit(&app, next.ai_service != current.ai_service).await;
+    match save_synced_config(&app, generation, true, next)? {
+        Some(rejected) => {
+            // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
+            apply_synced_config(&app);
+            request_sync(&app);
+            if rejected.is_empty() {
                 Ok(())
             } else {
-                Err(SYNC_RESTORE_PARTIAL.to_string())
-            };
-        }
-        let _commit = lock_sync_commit(&app, next.ai_service != current.ai_service).await;
-        match save_synced_config(&app, generation, next)? {
-            Some(mut rejected) => {
-                rejected.extend(locally_rejected);
-                // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
-                apply_synced_config(&app);
-                if rejected.is_empty() {
-                    Ok(())
-                } else {
-                    Err(SYNC_RESTORE_PARTIAL.to_string())
-                }
+                Err(BACKUP_RESTORE_PARTIAL.to_string())
             }
-            None => Err("settings changed while restoring the backup".to_string()),
         }
+        None => Err("settings changed while restoring the backup".to_string()),
     }
-    .await;
-    release_sync(&app);
-    result
 }
 
-/// 同期の外で設定と記録を変えるときの、変える前に読んだもの。
-struct SyncChange<'a> {
-    config: &'a Config,
-    generation: usize,
-    record_generation: usize,
-    before: &'a sync::State,
-}
-
-/// `hold_sync` の中で作った次の設定と記録を置く。反映できずに止め直した項目の id を返す。
-/// 読んでいる間に設定か記録が変わっていたら、何も変えずに None を返す
-async fn commit_sync_change(
-    app: &AppHandle,
-    change: SyncChange<'_>,
-    next: Config,
-    mut record: sync::State,
-) -> Result<Option<Vec<String>>, String> {
-    let app_state = app.state::<AppState>();
-    let _commit = lock_sync_commit(app, next.ai_service != change.config.ai_service).await;
-    if app_state.sync_record_generation.load(Ordering::SeqCst) != change.record_generation {
-        return Ok(None);
-    }
-    let mut rejected = Vec::new();
-    if next != *change.config {
-        match save_synced_config(app, change.generation, next)? {
-            Some(unapplied) => {
-                for item in &unapplied {
-                    sync::hold_again(&mut record, change.before, item);
-                    rejected.push(item.id.clone());
+/// 毎日の自動のバックアップ（docs/config.md「バックアップ」）。起動したときと、その後は1時間ごとに、
+/// いちばん新しいバックアップから1日たっていれば書く。常駐したまま日をまたぐので、起動のときだけでは足りない
+fn start_daily_backups(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60 * 60));
+        loop {
+            interval.tick().await;
+            let dir = app.state::<AppState>().backups_dir.clone();
+            match run_blocking(move || backup::due(&dir, SystemTime::now())).await {
+                Ok(Ok(true)) => {
+                    if let Err(error) = back_up_now(&app).await {
+                        warn!("couldn't back up settings: {error}");
+                    }
                 }
-                apply_synced_config(app);
+                Ok(Ok(false)) => {}
+                Ok(Err(error)) => warn!("couldn't list settings backups: {error}"),
+                Err(error) => warn!("couldn't list settings backups: {error}"),
             }
-            // 読んでいる間に、画面から設定が変わった。変わる前の設定から作った値を重ねて入れない
-            None => return Ok(None),
         }
-    }
-    let conflicts = record.active_conflict_count(change.config);
-    save_sync_record(app, record).await?;
-    remember_sync_conflicts(app, conflicts);
-    Ok(Some(rejected))
-}
-
-/// トレイから食い違いを選ぶ画面を頼まれていたかを返し、頼みを受け取ったことにする
-#[tauri::command]
-fn take_sync_choice_request(state: tauri::State<'_, AppState>) -> bool {
-    state.sync_choice_requested.swap(false, Ordering::SeqCst)
-}
-
-/// 設定ウィンドウを「アカウント」で開き、食い違いを選ぶ画面を出させる。
-/// 開いている設定ウィンドウにはイベントで、これから作る設定ウィンドウには目印で伝える
-fn open_sync_choice(app: &AppHandle) {
-    app.state::<AppState>()
-        .sync_choice_requested
-        .store(true, Ordering::SeqCst);
-    open_settings(app);
-    let _ = app.emit_to(SETTINGS_WINDOW, events::SYNC_CHOICE_REQUESTED, ());
+    });
 }
 
 /// サインインを待つ長さ。メールのリンクの期限（送ってから15分）より、送るまでの分だけ長く
@@ -2794,12 +2578,13 @@ async fn clear_sync_state(app: &AppHandle) {
     let state = app.state::<AppState>();
     let _commit = state.sync_commit.lock().await;
     state.sync_record_generation.fetch_add(1, Ordering::SeqCst);
-    let path = state.sync_state_path.clone();
-    match run_blocking(move || sync::clear(&path)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) | Err(error) => warn!("couldn't clear the sync state: {error}"),
+    let cleared = state.store.lock().unwrap().commit(&store::Commit {
+        sync_state: Some(None),
+        ..store::Commit::default()
+    });
+    if let Err(error) = cleared {
+        warn!("couldn't clear the sync state: {error}");
     }
-    remember_sync_conflicts(app, 0);
 }
 
 /// サインアウトとアカウントの替わりで、同期の鍵の状態と進みを消す。
@@ -2833,8 +2618,7 @@ fn start_periodic_pro_checks(app: AppHandle) {
 
 fn start_periodic_sync(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        // アプリを止めて設定ファイルで同期をオフにしたときは、スイッチを切り替えた時点が無いので、
-        // 起動のときに置く
+        // スイッチを切り替えた後、記録を置く前にアプリが止まったときのため、起動のときにも置く
         mark_paused_sync_kinds(&app).await;
         let mut interval = tokio::time::interval(SYNC_INTERVAL);
         loop {
@@ -3837,7 +3621,7 @@ fn set_draft_key(app: AppHandle, action: DraftAction, key: String) -> Result<(),
         .map_err(|rejection| rejection.code())?;
     update_config(&app, |config| {
         *config.text_window_keys.get_mut(action) = key;
-        // 割り当てを決めたので、黙って外した扱いをやめて、設定ファイルに書く
+        // 割り当てを決めたので、黙って外した扱いをやめて、設定に書く
         config
             .yielded_draft_keys
             .retain(|yielded| *yielded != action);
@@ -3998,13 +3782,6 @@ fn build_hidden_window(
     // 描画プロセスが落ちたら、下書きと同じく立て直す
     diagnostics::watch_webview_process(&window);
     Ok(window)
-}
-
-/// 設定ファイルを Finder やエクスプローラーで選んだ状態にする。.toml に関連付けられたアプリに左右されないよう、直接は開かない
-#[tauri::command]
-fn reveal_config_file(app: AppHandle) -> Result<(), String> {
-    let path = app.state::<AppState>().config_path.clone();
-    reveal_item_in_dir(&app, path)
 }
 
 /// ログファイルを、置き場所のフォルダーで選んだ状態で表示する。
@@ -4229,7 +4006,7 @@ enum AutostartAtLaunch {
 /// 起動したときのログイン項目の扱いを、設定（configured）と OS の登録（registered）から決める。
 /// 初めての起動では設定のとおりに登録する。2回目からは、どちらかがオフならオフにそろえる。
 /// タスクマネージャーやシステム設定で切ったのを、起動のたびに有効へ戻さないため（利用者が OS で選んだ状態を尊重する）。
-/// 設定ファイルでオフにしたときは、OS の登録を外す。どちらもオンなら、登録先を今の実行ファイルにそろえる
+/// 設定がオフで登録が残っていたら、OS の登録を外す。どちらもオンなら、登録先を今の実行ファイルにそろえる
 fn autostart_at_launch(
     configured: bool,
     registered: bool,
@@ -4246,6 +4023,75 @@ fn autostart_at_launch(
 
 /// 起動したときに、ログイン項目と設定をそろえる（`autostart_at_launch`）。合わせられなければ、トレイの ⚠ に出す理由を返す。
 /// 設定をオフにしたときは、ファイルには書かない。保存は変わった項目だけを書くので、ファイルはオンのまま残るが、起動のたびに同じくオフにそろう
+/// 設定の置き場を開く。読めなければ、元のファイルを写して退けてから作り直す（docs/config.md「読めないとき」）。
+/// 作り直せもしなければ、保存しない置き場で動かす
+fn open_store(path: &std::path::Path) -> (store::Store, Option<ConfigProblem>) {
+    let opened = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .map_err(|error| error.to_string())
+        .and_then(|()| store::Store::open(path))
+        .and_then(|store| store.entries().map(|_| store));
+    let error = match opened {
+        Ok(store) => return (store, None),
+        Err(error) => error,
+    };
+    warn!("couldn't open the settings store: {error}");
+    let reset = atomic_file::back_up(path, SystemTime::now())
+        .and_then(|copy| std::fs::remove_file(path).map(|()| copy))
+        .map_err(|error| error.to_string())
+        .and_then(|copy| store::Store::open(path).map(|store| (store, copy)));
+    match reset {
+        Ok((store, copy)) => {
+            let name = copy
+                .and_then(|copy| {
+                    copy.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
+                .unwrap_or_default();
+            info!("moved the unreadable settings store to {name}");
+            (store, Some(ConfigProblem::Reset(name)))
+        }
+        Err(error) => {
+            warn!("couldn't recreate the settings store: {error}");
+            (
+                store::Store::in_memory(),
+                Some(ConfigProblem::Unsaved(error)),
+            )
+        }
+    }
+}
+
+/// 置き場から設定を読む。読めない項目は既定のままにしてログにだけ出す。振り直した行の ID は、次も同じ行を
+/// 見分けられるよう書き戻す
+fn load_config(store: &mut store::Store) -> Config {
+    let loaded = store
+        .entries()
+        .and_then(|entries| config::from_entries(&entries));
+    let loaded = match loaded {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            warn!("couldn't read the settings: {error}");
+            return Config::default();
+        }
+    };
+    if !loaded.skipped.is_empty() {
+        warn!(
+            "reset unreadable settings to defaults: {}",
+            loaded.skipped.join(", ")
+        );
+    }
+    if loaded.repaired_item_ids {
+        if let Err(error) = store.commit(&store::Commit {
+            entries: Some(&config::stored_entries(&loaded.config)),
+            ..store::Commit::default()
+        }) {
+            warn!("couldn't save repaired row ids: {error}");
+        }
+    }
+    loaded.config
+}
+
 fn settle_autostart(
     app: &AppHandle,
     config: &mut Config,
@@ -4424,15 +4270,8 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         let problems = state.problems.lock().unwrap();
         let mut texts = Vec::new();
         match &problems.config {
-            Some(ConfigProblem::Load(LoadProblem::Unreadable(error))) => {
-                texts.push(lang.config_unreadable(error));
-            }
-            Some(ConfigProblem::Load(LoadProblem::Repaired(keys))) => {
-                texts.push(lang.config_repaired(keys));
-            }
-            Some(ConfigProblem::BackedUp(file_name)) => {
-                texts.push(lang.config_backed_up(file_name));
-            }
+            Some(ConfigProblem::Reset(file_name)) => texts.push(lang.settings_reset(file_name)),
+            Some(ConfigProblem::Unsaved(error)) => texts.push(lang.settings_unsaved(error)),
             None => {}
         }
         if problems.hotkey_unavailable {
@@ -4458,13 +4297,6 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let accelerator = (!hotkey_unavailable).then_some(hotkey.as_str());
     let show_item = MenuItem::with_id(app, "show", lang.toggle_draft(), true, accelerator)?;
     let settings_item = MenuItem::with_id(app, "settings", lang.settings(), true, None::<&str>)?;
-    let pro_available = state.pro_available();
-    let sync_conflicts = shown_sync_conflicts(&state, pro_available);
-    // 設定を開かない利用者にも気づけるよう、食い違いがあるあいだだけ出す（docs/sync.md「食い違い」）
-    let sync_choice_item = (sync_conflicts > 0)
-        .then(|| MenuItem::with_id(app, "sync-choice", lang.sync_choice(), true, None::<&str>))
-        .transpose()?;
-    let sync_choice_separator = PredefinedMenuItem::separator(app)?;
     let manual_item = MenuItem::with_id(app, "manual", lang.manual(), true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", lang.quit(), true, None::<&str>)?;
@@ -4475,10 +4307,6 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .collect();
     if !items.is_empty() {
         items.push(&problem_separator);
-    }
-    if let Some(item) = &sync_choice_item {
-        items.push(item);
-        items.push(&sync_choice_separator);
     }
     items.extend([
         &show_item as &dyn IsMenuItem<Wry>,
@@ -4511,7 +4339,6 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             match event.id.as_ref() {
                 "show" => toggle_draft(app),
                 "settings" => open_settings(app),
-                "sync-choice" => open_sync_choice(app),
                 "manual" => open_manual(app),
                 "quit" => app.exit(0),
                 _ => {}
@@ -4604,11 +4431,9 @@ pub fn run() {
             get_settings,
             set_sync_kind,
             set_sync_excluded_setting,
-            sync_backups,
-            restore_sync_backup,
-            sync_conflicts,
-            resolve_sync_conflicts,
-            take_sync_choice_request,
+            settings_backups,
+            back_up_settings,
+            restore_settings_backup,
             open_ai_settings,
             take_ai_settings_request,
             open_settings_window,
@@ -4664,7 +4489,6 @@ pub fn run() {
             reset_draft_key,
             pause_hotkey,
             resume_hotkey,
-            reveal_config_file,
             reveal_log_file,
             open_terms_page,
             open_privacy_page,
@@ -4782,9 +4606,8 @@ pub fn run() {
                 None => error!("setup: main window not found"),
             }
 
-            let config_path = app.path().app_config_dir()?.join(config::FILE_NAME);
-            let pro_state_path = app.path().app_config_dir()?.join(pro::STATE_FILE_NAME);
-            let sync_state_path = app.path().app_config_dir()?.join(sync::STATE_FILE_NAME);
+            let config_dir = app.path().app_config_dir()?;
+            let pro_state_path = config_dir.join(pro::STATE_FILE_NAME);
             let pro_state = match pro::load(&pro_state_path) {
                 Ok(state) => state,
                 Err(error) => {
@@ -4792,30 +4615,16 @@ pub fn run() {
                     None
                 }
             };
-            // 読むとファイルができるので、その前に見る
-            let config_missing = config::is_missing(&config_path);
-            let (mut config, config_problem) = config::load_or_create(&config_path);
-            if let Err(error) = config::clean_sync_backups(&config_path, SystemTime::now()) {
-                warn!("couldn't clean old sync backups: {error}");
-            }
-            // つながらないまま起動しても、今このデバイスで同期する食い違いだけを知らせる
-            let sync_conflicts = sync::load(&sync_state_path)
-                .map_or(0, |record| record.active_conflict_count(&config));
-            let first_launch = is_first_launch(config_missing, config_problem.as_ref());
-            let mut problems = Problems::default();
-            match &config_problem {
-                Some(LoadProblem::Unreadable(error)) => {
-                    warn!("couldn't read the settings file: {error}");
-                }
-                Some(LoadProblem::Repaired(keys)) => {
-                    warn!(
-                        "reset settings with unreadable values to defaults: {}",
-                        keys.join(", ")
-                    );
-                }
-                None => {}
-            }
-            problems.config = config_problem.map(ConfigProblem::Load);
+            let store_path = config_dir.join(store::FILE_NAME);
+            // 開くとファイルができるので、その前に見る
+            let store_missing = !store_path.exists();
+            let (mut store, config_problem) = open_store(&store_path);
+            let mut config = load_config(&mut store);
+            let first_launch = is_first_launch(store_missing, config_problem.as_ref());
+            let mut problems = Problems {
+                config: config_problem,
+                ..Problems::default()
+            };
 
             // 登録できなければ、ensure_registered がログに残す
             problems.hotkey_unavailable =
@@ -4833,9 +4642,9 @@ pub fn run() {
             }
 
             app.manage(AppState {
-                config_path,
+                store: Mutex::new(store),
+                backups_dir: backup::dir_in(&config_dir),
                 pro_state_path,
-                sync_state_path,
                 version: app.package_info().version.to_string(),
                 system_lang: Lang::system(),
                 config: Mutex::new(config),
@@ -4855,9 +4664,7 @@ pub fn run() {
                 sync_commit: tokio::sync::Mutex::new(()),
                 sync_schedule: Mutex::new(SyncSchedule::default()),
                 sync_debounce: debounce::Debounce::default(),
-                sync_conflicts: AtomicUsize::new(sync_conflicts),
                 synced_on_show: Mutex::new(None),
-                sync_choice_requested: AtomicBool::new(false),
                 ai_settings_requested: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
@@ -4875,6 +4682,7 @@ pub fn run() {
             }
             start_periodic_pro_checks(app.handle().clone());
             start_periodic_sync(app.handle().clone());
+            start_daily_backups(app.handle().clone());
             #[cfg(target_os = "macos")]
             updater::start_periodic_checks(app.handle());
             // 初めての起動では下書きを一度出す。常駐するだけで何も出ないと、入ったのか分からず、
@@ -5015,7 +4823,7 @@ mod tests {
             (true, true, true, Refresh),
             // タスクマネージャーやシステム設定で切った
             (true, false, false, TurnOffSetting),
-            // 設定ファイルでオフにした
+            // 設定はオフなのに登録が残っていた
             (false, true, false, Unregister),
             (true, true, false, Refresh),
             (false, false, false, Nothing),
@@ -5054,12 +4862,47 @@ mod tests {
     }
 
     #[test]
-    fn shows_draft_only_when_settings_file_was_created() {
+    fn an_unreadable_settings_store_is_copied_aside_and_recreated() {
+        let dir = test_support::TempDir::new("lib-broken-store");
+        let path = dir.join(store::FILE_NAME);
+        std::fs::write(&path, "not a database").unwrap();
+        let (mut store, problem) = open_store(&path);
+        let Some(ConfigProblem::Reset(copy)) = problem else {
+            panic!("the store should be recreated");
+        };
+        assert!(copy.starts_with("settings.broken-") && copy.ends_with(".db"));
+        assert_eq!(std::fs::read(dir.join(&copy)).unwrap(), b"not a database");
+        assert_eq!(load_config(&mut store), Config::default());
+        // 作り直した置き場は、次の起動でそのまま開ける
+        drop(store);
+        assert!(open_store(&path).1.is_none());
+    }
+
+    #[test]
+    fn row_ids_repaired_on_loading_are_written_back() {
+        let mut store = store::Store::in_memory();
+        let entries = std::collections::BTreeMap::from([(
+            "replacements".to_string(),
+            serde_json::json!([{ "from": "a", "to": "b" }]),
+        )]);
+        store
+            .commit(&store::Commit {
+                entries: Some(&entries),
+                ..store::Commit::default()
+            })
+            .unwrap();
+        let first = load_config(&mut store);
+        // 振り直した ID を書き戻したので、読み直しても同じ行として見分けられる
+        assert_eq!(load_config(&mut store).replacements, first.replacements);
+    }
+
+    #[test]
+    fn shows_draft_only_when_settings_store_was_created() {
         assert!(is_first_launch(true, None));
         // 2回目以降の起動
         assert!(!is_first_launch(false, None));
-        // 作れなかったら、次の起動でもファイルがないので出さない
-        let unwritable = LoadProblem::Unreadable("permission denied".to_string());
+        // 作れなかったら、次の起動でも置き場がないので出さない
+        let unwritable = ConfigProblem::Unsaved("permission denied".to_string());
         assert!(!is_first_launch(true, Some(&unwritable)));
     }
 
