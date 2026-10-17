@@ -1575,6 +1575,9 @@ describe('設定画面の AI サービス', () => {
 		const service = screen.getByRole('combobox', { name: m.settings_ai_service() });
 		await expect.element(service).toHaveValue('none');
 		await expect.element(service).toHaveDisplayValue(m.settings_ai_service_none());
+		expect(
+			service.element().closest('[data-slot=field]')?.nextElementSibling?.getAttribute('data-slot')
+		).not.toBe('field-description');
 
 		settings.current = { ...view(), aiService: 'anthropic' };
 		await expect.element(service).toHaveDisplayValue('Anthropic');

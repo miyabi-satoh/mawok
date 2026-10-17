@@ -45,7 +45,7 @@
 	"settings_hotkey_unavailable": "Couldn't register {keys}. Another app may be using it. The hotkey is still {current}.",
 	"settings_trim_trailing": "Trim trailing whitespace",
 	"settings_exclude_history": "Keep out of clipboard history",
-	"settings_exclude_history_description": "You can't paste it again from clipboard history.",
+	"settings_exclude_history_description": "Copied text can't be pasted again from clipboard history.",
 	"settings_char_width": "Unify characters",
 	"settings_char_width_punctuation": "Punctuation",
 	"settings_char_width_alphabet": "Letters",
