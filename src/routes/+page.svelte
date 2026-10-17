@@ -819,18 +819,20 @@
 		const completion = await invoke<FolderCompletion>('complete_path', { input: word.path }).catch(
 			() => null
 		);
-		if (!completion || requested !== pathRequests || text !== typed || caret !== at || busy) return;
+		if (!completion || requested !== pathRequests || text !== typed || caret !== at) return;
+		// 待つ間に実行を始めた・変換を始めた・一覧や欄を開いたなら、入れない（入れるとフォーカスを入力欄に取り戻してしまう）
+		if (busy || composing || snippetsOpen || folderOpen) return;
 		if (completion.candidates.length === 0) {
 			if (completion.input === word.path) return;
-			const completed = completedWord(completion.input, word, platform);
-			// 後ろがもう空白なら、ファイルの後ろに空白を重ねない
-			replaceInLine(word.start, at, /\s/.test(line[at] ?? '') ? completed.trimEnd() : completed);
+			const followed = /\s/.test(line[at] ?? '');
+			replaceInLine(word.start, at, completedWord(completion.input, word, platform, followed));
 			return;
 		}
 		const common = quotePath(completion.input, word, platform, false);
 		if (line.slice(word.start, at) !== common) replaceInLine(word.start, at, common);
 		pathList = {
-			top: firstLineHeight(textarea) + 12,
+			// 宛先の候補と同じく1行目の下端から 12px 下げ、入力欄をスクロールした分を引く
+			top: firstLineHeight(textarea) + 12 - textarea.scrollTop,
 			word,
 			base: completion.base,
 			candidates: completion.candidates,
@@ -839,17 +841,23 @@
 			end: word.start + common.length,
 			selected: -1,
 			before: common,
-			text
+			text: textarea.value
 		};
 	}
 
 	/** 並べた候補を選んで、1行目の語を置き換える。-1 は選ぶ前の語に戻す */
 	function selectPath(selected: number) {
 		if (!pathList || !platform || !textarea) return;
+		const followed = /\s/.test(textarea.value[pathList.end] ?? '');
 		const word =
 			selected < 0
 				? pathList.before
-				: completedWord(pathList.base + pathList.candidates[selected], pathList.word, platform);
+				: completedWord(
+						pathList.base + pathList.candidates[selected],
+						pathList.word,
+						platform,
+						followed
+					);
 		replaceInLine(pathList.start, pathList.end, word);
 		pathList = { ...pathList, selected, end: pathList.start + word.length, text: textarea.value };
 	}

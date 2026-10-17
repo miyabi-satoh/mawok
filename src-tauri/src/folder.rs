@@ -162,32 +162,42 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
         if !(is_dir || files) {
             continue;
         }
-        let name = if is_dir {
-            format!("{name}{SEPARATOR}")
-        } else {
-            name
-        };
-        match visibility(&name, &entry) {
+        let entry_name = (name, is_dir);
+        match visibility(&entry_name.0, &entry) {
             Visibility::Protected => {}
-            Visibility::Hidden if !prefix.starts_with('.') => hidden.push(name),
-            _ => visible.push(name),
+            Visibility::Hidden if !prefix.starts_with('.') => hidden.push(entry_name),
+            _ => visible.push(entry_name),
         }
     }
-    let mut names = if visible.is_empty() { hidden } else { visible };
-    // 区切りは並べ方に入れない（`foo/` を `foo-bar/` より前に）
-    names.sort_by_cached_key(|name| name.trim_end_matches(SEPARATOR).to_lowercase());
-    match names.as_slice() {
+    let mut entries = if visible.is_empty() { hidden } else { visible };
+    entries.sort_by_cached_key(|(name, _)| name.to_lowercase());
+    // 区切りは、共通する所を求めた後に付ける。付けてから求めると、大文字と小文字だけが違うフォルダー（`Foo` と `foo`）で区切りまで共通になる
+    let with_separator = |(name, is_dir): &(String, bool)| {
+        if *is_dir {
+            format!("{name}{SEPARATOR}")
+        } else {
+            name.clone()
+        }
+    };
+    match entries.as_slice() {
         [] => unchanged(),
-        [name] => FolderCompletion {
-            input: format!("{folder_part}{name}"),
+        [entry] => FolderCompletion {
+            input: format!("{folder_part}{}", with_separator(entry)),
             ..unchanged()
         },
-        _ => FolderCompletion {
-            input: format!("{folder_part}{}", completed_part(&names, prefix)),
-            total: names.len() as u32,
-            candidates: names.into_iter().take(CANDIDATE_LIMIT).collect(),
-            ..unchanged()
-        },
+        _ => {
+            let names: Vec<String> = entries.iter().map(|(name, _)| name.clone()).collect();
+            FolderCompletion {
+                input: format!("{folder_part}{}", completed_part(&names, prefix)),
+                total: entries.len() as u32,
+                candidates: entries
+                    .iter()
+                    .take(CANDIDATE_LIMIT)
+                    .map(with_separator)
+                    .collect(),
+                ..unchanged()
+            }
+        }
     }
 }
 

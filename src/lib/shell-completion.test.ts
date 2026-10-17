@@ -115,5 +115,8 @@ describe('completedWord', () => {
 		);
 		expect(completedWord('My Folder/', word('My', { quote: '"' }), 'macos')).toBe('"My Folder/');
 		expect(completedWord('Program Files\\', word('Pro'), 'windows')).toBe('"Program Files\\');
+		// 後ろがもう空白なら空白を重ねず、名前の末尾の逃がした空白は残す
+		expect(completedWord('notes.txt', word('no'), 'macos', true)).toBe('notes.txt');
+		expect(completedWord('foo ', word('fo'), 'macos', true)).toBe('foo\\ ');
 	});
 });

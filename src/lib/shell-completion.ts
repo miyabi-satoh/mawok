@@ -158,9 +158,15 @@ export function isFolderPath(path: string, platform: Platform): boolean {
 
 /**
  * 1つに決まったパスを、1行目に入れる語にする。ファイルなら引用符を閉じて空白を足し、続けて次の引数を打てるようにする。
- * フォルダーなら、続けてその中を補えるよう、区切りのところで止める（ターミナルの補完と同じ）
+ * フォルダーなら、続けてその中を補えるよう、区切りのところで止める（ターミナルの補完と同じ）。
+ * `followed` は、語の後ろがもう空白か。そのときは空白を重ねない
  */
-export function completedWord(path: string, word: PathWord, platform: Platform): string {
+export function completedWord(
+	path: string,
+	word: PathWord,
+	platform: Platform,
+	followed = false
+): string {
 	const folder = isFolderPath(path, platform);
-	return quotePath(path, word, platform, !folder) + (folder ? '' : ' ');
+	return quotePath(path, word, platform, !folder) + (folder || followed ? '' : ' ');
 }
