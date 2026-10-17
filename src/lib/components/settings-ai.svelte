@@ -41,9 +41,18 @@
 	 * キーがあるかを確かめた結果と、どの AI サービスのものか。hasKey は確かめられなかったとき null。
 	 * 替える前のサービスの結果を、今のサービスのものとして出さないよう、サービスと組にして持つ
 	 */
-	let keyState = $state<{ service: AiService; hasKey: boolean | null } | null>(null);
-	/** 今の AI サービスのキーがあるか。まだ確かめていなければ undefined、確かめられなかったときは null */
-	const hasKey = $derived(keyState?.service === view.aiService ? keyState.hasKey : undefined);
+	let keyState = $state<{ service: AiService; baseUrl: string; hasKey: boolean | null } | null>(
+		null
+	);
+	/**
+	 * 今の AI サービスのキーがあるか。まだ確かめていなければ undefined、確かめられなかったときは null。
+	 * OpenAI のキーはベース URL ごとに置くので、ベース URL も合わせて見る
+	 */
+	const hasKey = $derived(
+		keyState?.service === view.aiService && keyState.baseUrl === view.aiBaseUrl
+			? keyState.hasKey
+			: undefined
+	);
 
 	/**
 	 * キーを確かめるたびに振る番号。後から確かめ始めていれば、先の確かめの返事は古いので捨てる
@@ -57,9 +66,10 @@
 			return;
 		}
 		const request = ++keyRequest;
+		const baseUrl = view.aiBaseUrl;
 		const result = await editor.call<boolean>('has_ai_key', undefined, options);
-		if (request !== keyRequest || service !== view.aiService) return;
-		keyState = { service, hasKey: result.ok ? result.value : null };
+		if (request !== keyRequest || service !== view.aiService || baseUrl !== view.aiBaseUrl) return;
+		keyState = { service, baseUrl, hasKey: result.ok ? result.value : null };
 	}
 
 	/**
@@ -77,6 +87,22 @@
 		if (editingKeyFor !== null && editingKeyFor !== service) cancelEditingKey();
 		if (editor.modelService !== service) editor.switchService(view.aiModels, service);
 		checkKey(service);
+	});
+	/**
+	 * ベース URL が替わったら（この画面からでも、同期やバックアップから戻したことでも）、キーは URL ごとに置くので確かめ直す。
+	 * 前の URL への了解を求めているダイアログはやめる
+	 */
+	let shownBaseUrl: string | null = null;
+	$effect(() => {
+		const url = view.aiBaseUrl;
+		if (url === shownBaseUrl) return;
+		const first = shownBaseUrl === null;
+		shownBaseUrl = url;
+		if (first) return;
+		untrack(() => {
+			if (consentService !== null && consentBaseUrl !== url) consentService = null;
+			checkKey(view.aiService);
+		});
 	});
 	$effect(() => {
 		const service = view.aiService;
@@ -98,7 +124,7 @@
 	 */
 	let consentService = $state<AiService | null>(null);
 	/** 了解を求めている送り先のベース URL。出している間に替わっても、読んでもらった送り先への了解として送る */
-	let consentBaseUrl = '';
+	let consentBaseUrl = $state('');
 	const editingKey = $derived(editingKeyFor === view.aiService);
 	let keyInput = $state('');
 
@@ -173,10 +199,7 @@
 		// 保存できなければ、欄を今の送り先に戻す。打った URL のままだと、送り先が替わったように見える
 		if (!(await editor.call('set_ai_base_url', { url })).ok) {
 			baseUrlInput = view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL;
-			return;
 		}
-		// キーは送り先ごとに置くので、替えた先のキーを確かめ直す
-		await checkKey(view.aiService);
 	}
 
 	async function setService(service: AiService) {
@@ -388,14 +411,14 @@
 		<AlertDialog.Header>
 			<AlertDialog.Title>
 				{m.settings_ai_consent_title({
-					service: aiServiceInfo(consentService ?? view.aiService, view.aiBaseUrl).name()
+					service: aiServiceInfo(consentService ?? view.aiService, consentBaseUrl).name()
 				})}
 			</AlertDialog.Title>
 			<AlertDialog.Description>
 				<div class="flex flex-col gap-2 text-left">
 					<p>{m.settings_ai_consent_what()}</p>
-					<p>{aiServiceInfo(consentService ?? view.aiService, view.aiBaseUrl).consentWhere()}</p>
-					<p>{aiServiceInfo(consentService ?? view.aiService, view.aiBaseUrl).consentHandling()}</p>
+					<p>{aiServiceInfo(consentService ?? view.aiService, consentBaseUrl).consentWhere()}</p>
+					<p>{aiServiceInfo(consentService ?? view.aiService, consentBaseUrl).consentHandling()}</p>
 				</div>
 			</AlertDialog.Description>
 		</AlertDialog.Header>

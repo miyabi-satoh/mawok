@@ -1517,10 +1517,11 @@ async fn set_ai_base_url(app: AppHandle, url: String) -> Result<(), String> {
         .ok()
         .and_then(|url| url.host_str().map(str::to_string));
     info!("set AI base URL: {}", host.as_deref().unwrap_or("default"));
+    // 了解は送り先の URL と組で記録しているので、替えた先には了解していないことになる（Config::ai_consented）
+    update_config(&app, |config| config.ai_base_url = url)?;
     // キーは送り先ごとに置くので、替えた先のキーを確かめ直す
     app.state::<AppState>().forget_ai_key();
-    // 了解は送り先の URL と組で記録しているので、替えた先には了解していないことになる（Config::ai_consented）
-    update_config(&app, |config| config.ai_base_url = url)
+    Ok(())
 }
 
 /// 今の表示言語の既定の定型文。設定画面は、打っている途中の定型文を消さないよう、並びを自分で持ち、
@@ -1849,7 +1850,7 @@ async fn run_sync(app: &AppHandle) {
             let app_state = app.state::<AppState>();
             let _commit = lock_sync_commit(
                 app,
-                result.changed && result.config.ai_service != config.ai_service,
+                result.changed && ai_destination_changes(&config, &result.config),
             )
             .await;
             if app_state.sync_record_generation.load(Ordering::SeqCst) != record_generation {
@@ -1987,7 +1988,14 @@ async fn save_sync_record(
     saved
 }
 
-/// 同期の結果や、同期の外で作った設定と記録を置く間の排他。AI サービスが替わるなら、AI サービスを替えるコマンドと同じ排他も取る。
+/// AI の送り先（AI サービスか、OpenAI のベース URL）が替わるか。キーの置き場の名前が替わるので、
+/// キーを扱うコマンドと同じ排他（`ActionState.settings`）の中で替える
+fn ai_destination_changes(before: &Config, after: &Config) -> bool {
+    before.ai_service != after.ai_service || before.ai_base_url != after.ai_base_url
+}
+
+/// 同期の結果や、同期の外で作った設定と記録を置く間の排他。AI の送り先が替わるなら（`ai_destination_changes`）、
+/// AI サービスを替えるコマンドと同じ排他も取る。
 /// サインアウトは、その排他の中で同期の記録を消すので、記録の排他より先に取る
 async fn lock_sync_commit(app: &AppHandle, ai_service_changes: bool) -> SyncCommitGuard<'_> {
     let settings = if ai_service_changes {
@@ -2127,7 +2135,7 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
     for _ in 0..RESTORE_ATTEMPTS {
         let (current, _) = config_with_generation(&state);
         let ai_service_changes =
-            sync::restore_backup(&current, &backed_up).ai_service != current.ai_service;
+            ai_destination_changes(&current, &sync::restore_backup(&current, &backed_up));
         let _commit = lock_sync_commit(&app, ai_service_changes).await;
         // 同期の排他の中で、戻す直前の設定を残す。外で残すと、その後に入った同期の結果が戻す前の設定から漏れ、
         // 戻したことを戻せない
@@ -2137,8 +2145,8 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
         if next == current {
             return Ok(());
         }
-        // 排他を取った後に AI サービスの替わりが入った。AI サービスを替えるコマンドの排他も取り直す
-        if next.ai_service != current.ai_service && !ai_service_changes {
+        // 排他を取った後に AI の送り先の替わりが入った。AI サービスを替えるコマンドの排他も取り直す
+        if ai_destination_changes(&current, &next) && !ai_service_changes {
             continue;
         }
         if let Some(rejected) = save_synced_config(&app, generation, true, next)? {
