@@ -42,7 +42,7 @@ export const EVENTS = {{\n\
 \tDRAFT_HISTORY_CLEARED: {:?},\n\
 \tDRAFT_HISTORY_SYNCED: {:?},\n\
 \tSNIPPET_ADDED: {:?},\n\
-\tSYNC_APPLIED: {:?},\n\
+\tCONFIG_REPLACED: {:?},\n\
 \tAI_SETTINGS_REQUESTED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?},\n\
@@ -69,7 +69,7 @@ export const EVENTS = {{\n\
         events::DRAFT_HISTORY_CLEARED,
         events::DRAFT_HISTORY_SYNCED,
         events::SNIPPET_ADDED,
-        events::SYNC_APPLIED,
+        events::CONFIG_REPLACED,
         events::AI_SETTINGS_REQUESTED,
         events::SHOWN,
         events::HIDE_REQUESTED,

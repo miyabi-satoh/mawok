@@ -423,11 +423,11 @@
 		if (textColorInputs[theme].trim() === '') textColorInputs[theme] = DEFAULT_TEXT_COLORS[theme];
 	}
 
-	// 同期が設定を変えたら、画面側で持っている一覧と欄を、届いた設定から写し直す。
+	// 同期やバックアップから戻すことで設定が替わったら、画面側で持っている一覧と欄を、新しい設定から写し直す。
 	// 写し直さないと、次に画面で直したときに、届く前の並びや値で保存して、届いた分を消してしまう。
 	// Rust 側は、通信の間に画面からの保存が無かったときだけ知らせるので、打った内容は届いた設定に入っている
 	$effect(() =>
-		onEvent<SettingsView>(EVENTS.SYNC_APPLIED, (view) => {
+		onEvent<SettingsView>(EVENTS.CONFIG_REPLACED, (view) => {
 			replacements.recopy(view.replacements, true);
 			snippetsEditor.recopy(view);
 			fontFamily = view.textFontFamily;

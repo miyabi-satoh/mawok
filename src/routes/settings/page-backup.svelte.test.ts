@@ -15,6 +15,7 @@ const invoked = vi.mocked(invoke);
 const backups: Backup[] = [
 	{
 		name: '20261017T123456Z.json',
+		createdAt: Date.UTC(2026, 9, 17, 12, 34, 56),
 		changes: [
 			{
 				id: 's_theme',
@@ -23,7 +24,7 @@ const backups: Backup[] = [
 			}
 		]
 	},
-	{ name: '20261016T000000Z.json', changes: [] }
+	{ name: '20261016T000000Z.json', createdAt: Date.UTC(2026, 9, 16), changes: [] }
 ];
 
 const dateOf = (

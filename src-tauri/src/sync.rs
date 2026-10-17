@@ -1576,6 +1576,9 @@ pub struct BackupDifference {
 #[serde(rename_all = "camelCase")]
 pub struct Backup {
     pub name: String,
+    /// 作った時刻（UNIX 時刻のミリ秒）。名前から読めなければ null
+    #[cfg_attr(test, ts(type = "number | null"))]
+    pub created_at: Option<u64>,
     pub changes: Vec<BackupDifference>,
 }
 

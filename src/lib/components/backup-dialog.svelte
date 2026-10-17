@@ -22,10 +22,8 @@
 		() => load()
 	);
 
-	const date = (name: string) => {
-		const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\.json$/.exec(name);
-		if (!match) return name;
-		const [, year, month, day, hour, minute, second] = match;
+	const date = (backup: Backup) => {
+		if (backup.createdAt === null) return backup.name;
 		return new Intl.DateTimeFormat(locale === 'ja' ? 'ja-JP' : 'en-US', {
 			year: 'numeric',
 			month: 'numeric',
@@ -33,7 +31,7 @@
 			hour: 'numeric',
 			minute: '2-digit',
 			second: '2-digit'
-		}).format(new Date(Date.UTC(+year, +month - 1, +day, +hour, +minute, +second)));
+		}).format(new Date(backup.createdAt));
 	};
 
 	const failure = (error: unknown) =>
@@ -109,7 +107,7 @@
 						bind:group={selected}
 					/>
 					<span class="flex min-w-0 flex-col gap-1">
-						<span>{date(backup.name)}</span>
+						<span>{date(backup)}</span>
 						{#if same}<span>{m.backup_restore_same()}</span>{/if}
 						{#if changes.changes}<span class="text-muted-foreground">{changes.changes}</span>{/if}
 						{#if changes.removes}<span class="text-muted-foreground">{changes.removes}</span>{/if}
