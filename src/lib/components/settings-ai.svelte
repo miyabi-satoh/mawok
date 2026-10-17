@@ -279,6 +279,52 @@
 		{:else if view.aiService !== 'none'}
 			{@const modified = modifiedName(view, 'ai_models')}
 			<div class="mt-2 flex flex-col gap-5 pl-4">
+				<!-- 互換のサービスは、送り先を先に決める。キーは送り先ごとに置くので、先にキーを入れると OpenAI の分に入る -->
+				{#if view.aiService === 'openai'}
+					{@const baseUrlModified = modifiedName(view, 'ai_base_url')}
+					<Field.Content class="relative" data-modified={baseUrlModified}>
+						{#if baseUrlModified}
+							<SettingsModifiedMark class="inset-y-0 -left-4" />
+						{/if}
+						<Field.Field
+							orientation="horizontal"
+							class="min-h-8 *:data-[slot=field-label]:flex-none!"
+						>
+							<Field.Label for="ai-base-url">{m.settings_ai_base_url()}</Field.Label>
+							<SettingSyncToggle
+								{view}
+								name="ai_base_url"
+								label={m.settings_ai_base_url()}
+								call={editor.call}
+							/>
+							<Input
+								id="ai-base-url"
+								class="w-72 min-w-0 font-mono text-sm"
+								autocomplete="off"
+								spellcheck={false}
+								aria-invalid={baseUrlError !== ''}
+								bind:value={baseUrlInput}
+								onfocus={() => {
+									editingBaseUrl = true;
+									baseUrlAtFocus = baseUrlInput;
+								}}
+								onblur={() => {
+									editingBaseUrl = false;
+									saveBaseUrl();
+								}}
+								onkeydown={(event) => {
+									if (event.key === 'Enter' && !isImeKey(event)) saveBaseUrl();
+								}}
+							/>
+						</Field.Field>
+						{#if baseUrlError}
+							<Field.Error>{baseUrlError}</Field.Error>
+						{/if}
+						<Field.Description class="leading-snug">
+							{m.settings_ai_base_url_description()}
+						</Field.Description>
+					</Field.Content>
+				{/if}
 				<Field.Content>
 					<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
 					<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
@@ -366,51 +412,6 @@
 						{m.settings_ai_model_description()}
 					</Field.Description>
 				</Field.Content>
-				{#if view.aiService === 'openai'}
-					{@const baseUrlModified = modifiedName(view, 'ai_base_url')}
-					<Field.Content class="relative" data-modified={baseUrlModified}>
-						{#if baseUrlModified}
-							<SettingsModifiedMark class="inset-y-0 -left-4" />
-						{/if}
-						<Field.Field
-							orientation="horizontal"
-							class="min-h-8 *:data-[slot=field-label]:flex-none!"
-						>
-							<Field.Label for="ai-base-url">{m.settings_ai_base_url()}</Field.Label>
-							<SettingSyncToggle
-								{view}
-								name="ai_base_url"
-								label={m.settings_ai_base_url()}
-								call={editor.call}
-							/>
-							<Input
-								id="ai-base-url"
-								class="w-72 min-w-0 font-mono text-sm"
-								autocomplete="off"
-								spellcheck={false}
-								aria-invalid={baseUrlError !== ''}
-								bind:value={baseUrlInput}
-								onfocus={() => {
-									editingBaseUrl = true;
-									baseUrlAtFocus = baseUrlInput;
-								}}
-								onblur={() => {
-									editingBaseUrl = false;
-									saveBaseUrl();
-								}}
-								onkeydown={(event) => {
-									if (event.key === 'Enter' && !isImeKey(event)) saveBaseUrl();
-								}}
-							/>
-						</Field.Field>
-						{#if baseUrlError}
-							<Field.Error>{baseUrlError}</Field.Error>
-						{/if}
-						<Field.Description class="leading-snug">
-							{m.settings_ai_base_url_description()}
-						</Field.Description>
-					</Field.Content>
-				{/if}
 			</div>
 		{/if}
 	</SettingsRow>
