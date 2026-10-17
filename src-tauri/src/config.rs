@@ -205,6 +205,17 @@ impl Config {
         }
     }
 
+    /// 今の AI サービスのキーを資格情報管理に置くときの名前。OpenAI のベース URL を替えてあれば、その URL ごとに分ける。
+    /// 分けないと、OpenAI のキーを入れたまま送り先を替えたときに、OpenAI のキーを別のサービスへ送ってしまう
+    pub fn ai_credential_user(&self) -> String {
+        let user = self.ai_service.credential_user();
+        if self.ai_service == AiService::OpenAi && !self.ai_base_url.is_empty() {
+            format!("{user} {}", self.ai_base_url)
+        } else {
+            user.to_string()
+        }
+    }
+
     /// 今の AI サービスで使うモデル
     pub fn ai_model(&self) -> String {
         self.ai_models

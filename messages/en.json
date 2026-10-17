@@ -243,6 +243,7 @@
 	"action_error_key_unreadable": "Couldn't read the API key.",
 	"action_error_invalid_key": "The API key is invalid or lacks permission. Check the key under AI in Settings.",
 	"action_error_rejected": "The AI service rejected the request. Check the key and the model name under AI in Settings.",
+	"action_error_endpoint_not_found": "The destination or the model wasn't found. Check the base URL and the model name under AI in Settings.",
 	"action_error_model_not_found": "The model wasn't found. Check the model name under AI in Settings.",
 	"action_error_rate_limited": "The AI service's rate or usage limit was reached. Please try again later.",
 	"action_error_billing": "The AI service's spending or credit limit was reached.",

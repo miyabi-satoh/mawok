@@ -58,7 +58,13 @@ export const AI_SERVICES = CONSTANTS.AI_SERVICES.map((value) => ({
 export function aiServiceInfo(service: AiService, baseUrl = '') {
 	const info = AI_SERVICES.find(({ value }) => value === service) ?? AI_SERVICES[0];
 	if (service !== 'openai' || !baseUrl) return info;
-	const host = new URL(baseUrl).host;
+	// 設定に置く URL は Rust が検査してあるが、読めなければ URL のまま出す（画面を落とさない）
+	let host = baseUrl;
+	try {
+		host = new URL(baseUrl).host;
+	} catch {
+		// 上のまま
+	}
 	return {
 		...info,
 		name: () => host,
@@ -74,13 +80,15 @@ export function aiServiceInfo(service: AiService, baseUrl = '') {
  */
 export function normalizeBaseUrl(input: string): string | null {
 	const trimmed = input.trim().replace(/\/+$/, '');
-	if (trimmed === '' || trimmed === CONSTANTS.OPENAI_BASE_URL) return '';
+	if (trimmed === '') return '';
 	let url: URL;
 	try {
 		url = new URL(trimmed);
 	} catch {
 		return null;
 	}
+	// ホストの大文字などの書き方の違いでは、OpenAI を互換のサービスと取り違えない
+	if (url.href.replace(/\/+$/, '') === CONSTANTS.OPENAI_BASE_URL) return '';
 	const valid =
 		(url.protocol === 'http:' || url.protocol === 'https:') &&
 		url.hostname !== '' &&

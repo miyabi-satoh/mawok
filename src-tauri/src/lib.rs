@@ -1433,10 +1433,11 @@ async fn run_blocking<T: Send + 'static>(
 }
 
 /// AI サービスのキーがあるかを、キーチェーンを待つ間メインスレッドを止めずに確かめる
-async fn ai_key_exists(service: AiService) -> Result<bool, String> {
+/// `user` は資格情報管理に置くときの名前（`Config::ai_credential_user`）
+async fn ai_key_exists(service: AiService, user: String) -> Result<bool, String> {
     run_blocking(move || match service {
         AiService::Mawok => account_credentials::has_token(),
-        _ => secrets::exists(service.credential_user()),
+        _ => secrets::exists(&user),
     })
     .await?
     .inspect_err(|error| warn!("couldn't check the AI key: {error}"))
@@ -1502,6 +1503,8 @@ async fn set_ai_base_url(app: AppHandle, url: String) -> Result<(), String> {
         "set AI base URL: {}",
         if url.is_empty() { "default" } else { &url }
     );
+    // キーは送り先ごとに置くので、替えた先のキーを確かめ直す
+    app.state::<AppState>().forget_ai_key();
     update_config(&app, |config| {
         config.ai_base_url = url;
         if config.ai_consent == Some(AiService::OpenAi) {
@@ -1517,18 +1520,25 @@ fn default_snippets(app: AppHandle) -> Vec<Snippet> {
     actions::default_snippets(app.state::<AppState>().lang())
 }
 
+/// 今の AI サービスと、そのキーを資格情報管理に置くときの名前
+fn ai_service_and_user(app: &AppHandle) -> (AiService, String) {
+    let state = app.state::<AppState>();
+    let config = state.config.lock().unwrap();
+    (config.ai_service, config.ai_credential_user())
+}
+
 /// 今の AI サービスのキーがあるか。中身は読まない
 #[tauri::command]
 async fn has_ai_key(app: AppHandle) -> Result<bool, String> {
     // 確かめている間に、キーの保存・削除やサービスの切り替えがキャッシュを書き換えて、古い結果で上書きしないようにする
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    let service = app.state::<AppState>().config.lock().unwrap().ai_service;
+    let (service, user) = ai_service_and_user(&app);
     if service == AiService::None {
         app.state::<AppState>().forget_ai_key();
         return Ok(false);
     }
-    let available = match ai_key_exists(service).await {
+    let available = match ai_key_exists(service, user).await {
         Ok(available) => available,
         Err(error) => {
             app.state::<AppState>().forget_ai_key();
@@ -1546,7 +1556,7 @@ async fn has_ai_key(app: AppHandle) -> Result<bool, String> {
 async fn set_ai_key(app: AppHandle, key: String) -> Result<(), String> {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    let service = app.state::<AppState>().config.lock().unwrap().ai_service;
+    let (service, user) = ai_service_and_user(&app);
     // Mawok はキーを入れず、アカウントと結んで受け取る（start_mawok_sign_in）
     if service == AiService::None || service == AiService::Mawok {
         return Err(actions::Failure::Disabled.code().to_string());
@@ -1559,7 +1569,7 @@ async fn set_ai_key(app: AppHandle, key: String) -> Result<(), String> {
     // 了解の記録を消す保存を先にする。キーの保存の後で終了しても、入れ直したキーが了解なしで使われないようにするため。
     // キーの保存が失敗しても、記録は消えたまま（了解のダイアログをもう一度出すだけ）なので、画面には知らせる
     save_config(&app, |config| config.ai_consent = None)?;
-    let written = run_blocking(move || secrets::write(service.credential_user(), &key))
+    let written = run_blocking(move || secrets::write(&user, &key))
         .await
         .and_then(|result| result.inspect_err(|error| error!("couldn't save the AI key: {error}")));
     if written.is_ok() {
@@ -1574,13 +1584,13 @@ async fn set_ai_key(app: AppHandle, key: String) -> Result<(), String> {
 async fn delete_ai_key(app: AppHandle) -> Result<(), String> {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    let service = app.state::<AppState>().config.lock().unwrap().ai_service;
+    let (service, user) = ai_service_and_user(&app);
     // Mawok はキーを持たない。トークンはサインアウトで消す（sign_out_mawok）
     if service == AiService::None || service == AiService::Mawok {
         return Err(actions::Failure::Disabled.code().to_string());
     }
     info!("delete the AI key for {}", service.name());
-    run_blocking(move || secrets::delete(service.credential_user()))
+    run_blocking(move || secrets::delete(&user))
         .await?
         .inspect_err(|error| error!("couldn't delete the AI key: {error}"))?;
     app.state::<AppState>().remember_ai_key(service, false);
@@ -3217,7 +3227,7 @@ fn start_ai_action(
     prompt: ai::Prompt,
     discard_output: bool,
 ) -> Result<ActionTask, ActionFailure> {
-    let (service, model, base_url, available, key_available) = {
+    let (service, model, base_url, user, available, key_available) = {
         let state = app.state::<AppState>();
         let config = state.config.lock().unwrap().clone();
         let key_available = state.ai_key_available(config.ai_service);
@@ -3225,6 +3235,7 @@ fn start_ai_action(
             config.ai_service,
             config.ai_model(),
             config.openai_base_url().to_string(),
+            config.ai_credential_user(),
             config.ai_available(key_available),
             key_available,
         )
@@ -3246,7 +3257,7 @@ fn start_ai_action(
         let reading = ReadingAiKey::start(&task_app);
         let read = run_blocking(move || match service {
             AiService::Mawok => account_credentials::read_token(),
-            _ => secrets::read(service.credential_user()),
+            _ => secrets::read(&user),
         })
         .await;
         drop(reading);

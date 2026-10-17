@@ -109,10 +109,14 @@ pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 /// http も受ける。手元や LAN で動かす Ollama は https で待たないため
 pub fn normalize_base_url(input: &str) -> Option<String> {
     let trimmed = input.trim().trim_end_matches('/');
-    if trimmed.is_empty() || trimmed == OPENAI_BASE_URL {
+    if trimmed.is_empty() {
         return Some(String::new());
     }
     let url = reqwest::Url::parse(trimmed).ok()?;
+    // ホストの大文字などの書き方の違いでは、OpenAI を互換のサービスと取り違えない
+    if url.as_str().trim_end_matches('/') == OPENAI_BASE_URL {
+        return Some(String::new());
+    }
     let valid = matches!(url.scheme(), "http" | "https")
         && url.host_str().is_some_and(|host| !host.is_empty())
         && url.username().is_empty()
@@ -243,7 +247,11 @@ pub async fn send(
         (AiService::Anthropic, true) => read_anthropic_response(&body),
         (AiService::Anthropic, false) => Err(classify_anthropic_error(status, &body)),
         (AiService::OpenAi, true) => read_openai_response(&body),
-        (AiService::OpenAi, false) => Err(classify_openai_error(status, &body)),
+        (AiService::OpenAi, false) => Err(classify_openai_error(
+            status,
+            &body,
+            openai_base_url != OPENAI_BASE_URL,
+        )),
     }
 }
 
@@ -499,15 +507,17 @@ const OPENAI_BILLING_CODES: [&str; 4] = [
 
 /// 失敗の返事（HTTP のエラー）を分類する。Gemini・Anthropic と同じく、公式の文書の表にある HTTP ステータスで分ける
 /// （OpenAI の error-codes のガイド。400・401・403・429・500・503）。
-/// - 400 は断られた（Rejected）
+/// `compatible` は、ベース URL を替えて OpenAI と互換のサービスへ送ったか。互換のサービスの分け方は、主なものの返し方に合わせて足す。
+/// - 400（互換のサービスの 422 も）は断られた（Rejected）
 /// - 401 はキーが無効。403 は、キーに権限がない（権限を絞ったキー）か、対応していない地域から呼んだ
-/// - 404 はモデルが見つからない（公式のガイドには無いが、存在しないか使えないモデルでこれが返る）
+/// - 402 は残高の不足（互換のサービス。OpenAI は 429 で返す）
+/// - 404 はモデルが見つからない（公式のガイドには無いが、存在しないか使えないモデルでこれが返る）。互換のサービスでは、送り先の URL の誤りとも分けない
 /// - 429 は回数や量の上限。ただし公式のガイドが code で見分けるよう書いている、利用額やクレジットの上限は Billing
 /// - 5xx は AI サービス側
 ///
 /// 詳しい中身（ログに残るほう）には、エラーの type と code だけを入れ、message は入れない（送った文の一部を含むことがありうるため）。
 /// Rejected（400）のときだけ、message を画面向けの screen_detail に持たせる（Gemini と同じ理由。classify_gemini_error を参照）
-pub fn classify_openai_error(status: u16, body: &str) -> ActionError {
+pub fn classify_openai_error(status: u16, body: &str, compatible: bool) -> ActionError {
     let error = error_object(body);
     let field = |name: &str| {
         error
@@ -519,8 +529,13 @@ pub fn classify_openai_error(status: u16, body: &str) -> ActionError {
     };
     let (error_type, code) = (field("type"), field("code"));
     let failure = match status {
-        400 => Failure::Rejected,
+        // 互換のサービスは、断るのに 422 を使うものがある
+        400 | 422 => Failure::Rejected,
+        // 残高の不足を 402 で返す互換のサービスがある（DeepSeek）
+        402 => Failure::Billing,
         401 | 403 => Failure::InvalidKey,
+        // ベース URL を替えてあれば、URL の書き間違い（`/v1` の付け忘れなど）でも返るので、モデルと決めつけない
+        404 if compatible => Failure::EndpointNotFound,
         404 => Failure::ModelNotFound,
         429 if error_type == "insufficient_quota"
             || OPENAI_BILLING_CODES.contains(&code.as_str()) =>
@@ -813,6 +828,7 @@ mod tests {
         for (input, expected) in [
             ("", Some("")),
             (" https://api.openai.com/v1/ ", Some("")),
+            ("https://API.OpenAI.com/v1", Some("")),
             (
                 "https://api.deepseek.com/",
                 Some("https://api.deepseek.com"),
@@ -921,7 +937,7 @@ mod tests {
             ),
             (418, openai("something_new", ""), Failure::Unexpected),
         ] {
-            let error = classify_openai_error(status, &body);
+            let error = classify_openai_error(status, &body, false);
             assert_eq!(error.failure, failure, "{status} {body}");
             assert!(
                 !error.detail.contains("送った文"),
@@ -936,6 +952,22 @@ mod tests {
             } else {
                 assert_eq!(error.screen_detail, None, "{status} {body}");
             }
+        }
+    }
+
+    #[test]
+    fn classifies_errors_from_compatible_services() {
+        for (status, compatible, failure) in [
+            (404, true, Failure::EndpointNotFound),
+            (404, false, Failure::ModelNotFound),
+            (402, true, Failure::Billing),
+            (422, true, Failure::Rejected),
+        ] {
+            assert_eq!(
+                classify_openai_error(status, "{}", compatible).failure,
+                failure,
+                "{status} {compatible}"
+            );
         }
     }
 }

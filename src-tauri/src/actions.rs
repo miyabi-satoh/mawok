@@ -109,6 +109,8 @@ pub enum Failure {
     Rejected,
     /// モデルが見つからない（モデルの名前の書き間違い、提供が終わったモデルなど）
     ModelNotFound,
+    /// 送り先かモデルが見つからない（OpenAI のベース URL を替えたときの HTTP 404。URL の書き間違いでも、モデルの名前の誤りでも返る）
+    EndpointNotFound,
     /// 回数や量の上限
     RateLimited,
     /// 利用額やクレジットの上限（やり直しても直らない。AI サービスのアカウントの側で直す）
@@ -161,6 +163,7 @@ impl Failure {
             Self::InvalidKey => "action.invalid_key",
             Self::Rejected => "action.rejected",
             Self::ModelNotFound => "action.model_not_found",
+            Self::EndpointNotFound => "action.endpoint_not_found",
             Self::RateLimited => "action.rate_limited",
             Self::Billing => "action.billing",
             Self::SignInRequired => "action.sign_in_required",

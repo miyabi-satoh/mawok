@@ -2891,12 +2891,14 @@ mod tests {
             sync_settings: false,
             sync_history: false,
             yielded_draft_keys: crate::draft_keys::DraftAction::ALL.to_vec(),
+            ai_base_url: "http://localhost:11434/v1".to_string(),
             ..Config::default()
         };
         let items = config_items(&config);
         for name in [
             "autostart",
             "ai_consent",
+            "ai_base_url",
             "sync_settings",
             "sync_history",
             "yielded_draft_keys",

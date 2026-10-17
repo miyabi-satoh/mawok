@@ -74,7 +74,7 @@ Mawok は{macos:メニューバー}{windows:タスクトレイ}に常駐し、�
 
 Mawok を選ぶと API キーは要らず、使った分だけアカウントのクレジットから減ります。クレジットは設定の「AI」の「クレジットを購入」から料金ページを開いて足せます。
 
-OpenAI と互換のサービス (DeepSeek・OpenRouter・Ollama など) を使うときは、「AI サービス」で「OpenAI」を選び、「ベース URL」をそのサービスの API の URL に替えます。キーの要らないサービス (手元で動かす Ollama など) でも、API キーには何か入れてください。
+OpenAI と互換のサービス (DeepSeek・OpenRouter・Ollama など) を使うときは、「AI サービス」で「OpenAI」を選び、「ベース URL」をそのサービスの API の URL に替えて、そのサービスの API キーを入れます。API キーはベース URL ごとに分けて置きます。キーの要らないサービス (手元で動かす Ollama など) でも、API キーには何か入れてください。
 
 ## 設定と履歴を同期する
 

@@ -243,6 +243,7 @@
 	"action_error_key_unreadable": "API キーを読めませんでした。",
 	"action_error_invalid_key": "API キーが無効か、キーに権限がありません。設定の「AI」でキーを確かめてください。",
 	"action_error_rejected": "AI サービスに断られました。設定の「AI」でキーとモデルの名前を確かめてください。",
+	"action_error_endpoint_not_found": "送り先かモデルが見つかりません。設定の「AI」で、ベース URL とモデルの名前を確かめてください。",
 	"action_error_model_not_found": "モデルが見つかりません。設定の「AI」でモデルの名前を確かめてください。",
 	"action_error_rate_limited": "AI サービスの回数や量の上限に達しました。しばらくしてからもう一度お試しください。",
 	"action_error_billing": "AI サービスの利用額かクレジットの上限に達しました。",

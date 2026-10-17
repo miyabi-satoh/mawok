@@ -166,7 +166,10 @@
 		}
 		baseUrlError = '';
 		baseUrlInput = url || CONSTANTS.OPENAI_BASE_URL;
-		if (url !== view.aiBaseUrl) await editor.call('set_ai_base_url', { url });
+		if (url === view.aiBaseUrl) return;
+		await editor.call('set_ai_base_url', { url });
+		// キーは送り先ごとに置くので、替えた先のキーを確かめ直す
+		await checkKey(view.aiService);
 	}
 
 	async function setService(service: AiService) {

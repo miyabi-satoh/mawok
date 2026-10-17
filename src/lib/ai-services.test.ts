@@ -23,6 +23,7 @@ describe('normalizeBaseUrl', () => {
 		const cases: [string, string | null][] = [
 			['', ''],
 			[' https://api.openai.com/v1/ ', ''],
+			['https://API.OpenAI.com/v1', ''],
 			['https://api.deepseek.com/', 'https://api.deepseek.com'],
 			['http://localhost:11434/v1', 'http://localhost:11434/v1'],
 			['ftp://example.com', null],
