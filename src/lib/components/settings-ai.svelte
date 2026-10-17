@@ -208,11 +208,16 @@
 		}
 		baseUrlError = '';
 		baseUrlInput = url || CONSTANTS.OPENAI_BASE_URL;
-		if (url === view.aiBaseUrl) return;
+		if (url === view.aiBaseUrl) {
+			baseUrlAtFocus = baseUrlInput;
+			return;
+		}
 		// 保存できなければ、欄を今の送り先に戻す。打った URL のままだと、送り先が替わったように見える
 		if (!(await editor.call('set_ai_base_url', { url })).ok) {
 			baseUrlInput = view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL;
 		}
+		// Enter で保存して欄に残ったときは、保存した中身から先を打った分とみなす
+		baseUrlAtFocus = baseUrlInput;
 	}
 
 	async function setService(service: AiService) {

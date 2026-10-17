@@ -1297,7 +1297,6 @@ describe('宛先へ出す', () => {
 		settings.current = {
 			...view(),
 			aiService: 'gemini',
-			aiConsent: 'gemini',
 			snippets: [business, fix]
 		};
 	});
@@ -1387,7 +1386,6 @@ describe('宛先へ出す', () => {
 		settings.current = {
 			...settings.current!,
 			aiService: 'none',
-			aiConsent: null,
 			snippets: [business, upper, greeting]
 		};
 		const screen = await render(Page);
@@ -1429,7 +1427,7 @@ describe('宛先へ出す', () => {
 	});
 
 	it('AI が使えない状態で @ai の定型文を選ぶと、失敗の帯で AI を使える状態にするよう知らせ、入力欄は元のまま', async () => {
-		settings.current = { ...settings.current!, aiService: 'none', aiConsent: null };
+		settings.current = { ...settings.current!, aiService: 'none' };
 		const screen = await render(Page);
 		const textarea = await openAt(screen, 'あいう');
 

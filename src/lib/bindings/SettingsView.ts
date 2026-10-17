@@ -104,10 +104,6 @@ textColorLight: string,
  */
 textColorDark: string, aiService: AiService, 
 /**
- * 送る内容と扱いを了解した AI サービス
- */
-aiConsent: AiService | null, 
-/**
  * 今の AI サービスと送り先（OpenAI ならベース URL も）に了解しているか
  */
 aiConsented: boolean, 

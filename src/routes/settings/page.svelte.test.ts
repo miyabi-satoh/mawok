@@ -1607,11 +1607,11 @@ describe('設定画面の AI サービス', () => {
 		invoked.mockImplementation((command, args) => {
 			if (command === 'set_ai_key') {
 				responses.has_ai_key = true;
-				settings.current = { ...settings.current!, aiConsent: null, aiConsented: false };
+				settings.current = { ...settings.current!, aiConsented: false };
 				return Promise.resolve(undefined);
 			}
 			if (command === 'consent_ai') {
-				settings.current = { ...settings.current!, aiConsent: 'gemini', aiConsented: true };
+				settings.current = { ...settings.current!, aiConsented: true };
 				return Promise.resolve(undefined);
 			}
 			return command in responses
@@ -1646,7 +1646,7 @@ describe('設定画面の AI サービス', () => {
 	});
 
 	it('キーがあり了解の記録が無ければ、分類を開いたときに了解を求める', async () => {
-		settings.current = { ...view(), aiService: 'gemini', aiConsent: null, aiConsented: false };
+		settings.current = { ...view(), aiService: 'gemini', aiConsented: false };
 		responses.has_ai_key = true;
 		const screen = await renderAt(m.settings_category_ai);
 
@@ -1662,14 +1662,13 @@ describe('設定画面の AI サービス', () => {
 		settings.current = {
 			...view(),
 			aiService: 'gemini',
-			aiConsent: 'gemini',
 			aiConsented: true,
 			aiModels: { gemini: 'custom-model' }
 		};
 		responses.has_ai_key = true;
 		invoked.mockImplementation((command, args) => {
 			if (command === 'set_ai_key') {
-				settings.current = { ...settings.current!, aiConsent: null, aiConsented: false };
+				settings.current = { ...settings.current!, aiConsented: false };
 				return Promise.resolve(undefined);
 			}
 			return command in responses

@@ -343,8 +343,6 @@ struct SettingsView {
     /// 下書きの入力欄の文字色（ダーク）。小文字の #rrggbb。空なら標準の色
     text_color_dark: String,
     ai_service: AiService,
-    /// 送る内容と扱いを了解した AI サービス
-    ai_consent: Option<AiService>,
     /// 今の AI サービスと送り先（OpenAI ならベース URL も）に了解しているか
     ai_consented: bool,
     /// AI サービスごとに設定したモデル。書いていないサービスは既定のモデル
@@ -379,7 +377,6 @@ fn settings_view(state: &AppState) -> SettingsView {
         sync_excluded_settings: config.sync_excluded_settings.clone(),
         locale: lang.code(),
         ai_service: config.ai_service,
-        ai_consent: config.ai_consent,
         ai_consented: config.ai_consented(),
         ai_models: config.ai_models,
         ai_base_url: config.ai_base_url,

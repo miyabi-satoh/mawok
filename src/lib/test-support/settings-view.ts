@@ -46,7 +46,6 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		textColorDark: '',
 		inputGuidance: null,
 		aiService: 'none',
-		aiConsent: null,
 		aiConsented: false,
 		aiModels: {},
 		aiBaseUrl: '',
