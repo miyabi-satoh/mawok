@@ -2013,7 +2013,7 @@ async fn settings_backups(app: AppHandle) -> Result<Vec<sync::Backup>, String> {
     let dir = state.backups_dir.clone();
     run_blocking(move || {
         let mut backups = Vec::new();
-        for name in backup::names(&dir)?.into_iter().take(backup::LIST_LIMIT) {
+        for name in backup::names(&dir)? {
             let backed_up = match read_backup(&dir, &name) {
                 Ok(config) => config,
                 Err(error) => {
@@ -2074,26 +2074,30 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
         .map_err(|error| error.to_string())?;
     back_up_now(&app).await?;
     let state = app.state::<AppState>();
-    let (current, generation) = config_with_generation(&state);
-    let next = sync::restore_backup(&current, &backed_up);
-    if next == current {
-        return Ok(());
-    }
-    let _commit = lock_sync_commit(&app, next.ai_service != current.ai_service).await;
-    match save_synced_config(&app, generation, true, next)? {
-        Some(rejected) => {
+    // 排他を待つ間に同期の結果が入ると世代が進むので、今の設定から作り直して、もう一度保存する
+    for _ in 0..RESTORE_ATTEMPTS {
+        let (current, generation) = config_with_generation(&state);
+        let next = sync::restore_backup(&current, &backed_up);
+        if next == current {
+            return Ok(());
+        }
+        let _commit = lock_sync_commit(&app, next.ai_service != current.ai_service).await;
+        if let Some(rejected) = save_synced_config(&app, generation, true, next)? {
             // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
             apply_synced_config(&app);
             request_sync(&app);
-            if rejected.is_empty() {
+            return if rejected.is_empty() {
                 Ok(())
             } else {
                 Err(BACKUP_RESTORE_PARTIAL.to_string())
-            }
+            };
         }
-        None => Err("settings changed while restoring the backup".to_string()),
     }
+    Err("settings kept changing while restoring the backup".to_string())
 }
+
+/// 戻す間に設定が変わったときに、作り直して保存し直す回数。続けて変わるのは同期の結果が重なったときだけで、数回で揃う
+const RESTORE_ATTEMPTS: usize = 3;
 
 /// 毎日の自動のバックアップ（docs/config.md「バックアップ」）。起動したときと、その後は1時間ごとに、
 /// いちばん新しいバックアップから1日たっていれば書く。常駐したまま日をまたぐので、起動のときだけでは足りない
@@ -4024,8 +4028,6 @@ fn autostart_at_launch(
     }
 }
 
-/// 起動したときに、ログイン項目と設定をそろえる（`autostart_at_launch`）。合わせられなければ、トレイの ⚠ に出す理由を返す。
-/// 設定をオフにしたときは、ファイルには書かない。保存は変わった項目だけを書くので、ファイルはオンのまま残るが、起動のたびに同じくオフにそろう
 /// 設定の置き場を開く。読めなければ、元のファイルを写して退けてから作り直す（docs/config.md「読めないとき」）。
 /// 作り直せもしなければ、保存しない置き場で動かす
 fn open_store(path: &std::path::Path) -> (store::Store, Option<ConfigProblem>) {
@@ -4096,6 +4098,8 @@ fn load_config(store: &mut store::Store) -> Config {
     loaded.config
 }
 
+/// 起動したときに、ログイン項目と設定をそろえる（`autostart_at_launch`）。合わせられなければ、トレイの ⚠ に出す理由を返す。
+/// 設定をオフにしたときは、ここでは保存しない。次に設定を保存するまでは置き場にオンが残るが、起動のたびに同じくオフにそろう
 fn settle_autostart(
     app: &AppHandle,
     config: &mut Config,

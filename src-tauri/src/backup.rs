@@ -18,8 +18,6 @@ pub const DAILY: Duration = Duration::from_secs(24 * 60 * 60);
 /// VS Code の設定同期の控えと同じく、30 日より古いものは消す。ただし最近の 10 件は、続けて書いた直後でも戻れるよう残す
 const RETENTION_DAYS: u64 = 30;
 const MIN_COUNT: usize = 10;
-/// 戻す画面に並べる数。残す決まりで溜まる数より少し多い程度にして、選ぶ手間を増やさない
-pub const LIST_LIMIT: usize = 20;
 const VERSION: u64 = 1;
 
 #[derive(Serialize, Deserialize)]

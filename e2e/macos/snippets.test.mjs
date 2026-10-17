@@ -208,7 +208,7 @@ test.describe('macOS: 定型文', () => {
 			savedSnippets,
 			(current) => current.length === SNIPPETS.length + 1,
 			{
-				label: '設定ファイルに足された定型文'
+				label: '設定の置き場に足された定型文'
 			}
 		);
 		assert.deepEqual(saved, [...SNIPPETS, { name: '', body: 'abc' }]);

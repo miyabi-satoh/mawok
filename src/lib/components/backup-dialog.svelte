@@ -63,7 +63,8 @@
 		notice = '';
 		try {
 			await invoke('restore_settings_backup', { name: selected });
-			open = false;
+			// 閉じずに一覧を読み直し、戻せたことと、戻す前の設定がいちばん上に増えたことを見せる
+			await load(m.backup_restored());
 		} catch (error) {
 			const message = failure(error);
 			if (errorCode(error) === 'backup.restore_partial') await load(message);

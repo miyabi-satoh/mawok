@@ -113,6 +113,7 @@
 	"backup_restore_brings_back": "Brings back: {names}",
 	"backup_restore_more": "{count} more",
 	"backup_restore_confirm": "Restore these settings",
+	"backup_restored": "Restored. The settings from before are backed up at the top.",
 	"backup_restore_partial": "Some settings couldn't be restored.",
 	"backup_label_sub": "{group} ({item})",
 	"backup_row_replacement": "Replacement “{name}”",

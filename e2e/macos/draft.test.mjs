@@ -203,13 +203,13 @@ test.describe('macOS: 出す・書く・コピーする', () => {
 		}
 	});
 
-	test('1. の 13.: 設定ファイルが無い初めての起動で出てフォーカスが入り、2回目は出ない', async () => {
+	test('1. の 13.: 設定の置き場が無い初めての起動で出てフォーカスが入り、2回目は出ない', async () => {
 		await relaunchWithConfig(null);
 		const shown = await waitDraftFocused(
 			'初めての起動で、下書きウィンドウが出て入力欄にフォーカスが入る'
 		);
 		assert.ok(shown.placeholder, '入力欄の案内がある');
-		// 起動した設定ファイルのまま、もう一度起動する
+		// 起動した設定の置き場のまま、もう一度起動する
 		await relaunchWithConfig();
 		await expectStays(isDraftVisible, false, { label: '2回目の起動', duration: 3000 });
 	});

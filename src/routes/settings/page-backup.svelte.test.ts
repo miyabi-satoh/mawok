@@ -73,6 +73,8 @@ describe('設定のバックアップ', () => {
 		expect(callsOf(invoked, 'restore_settings_backup')).toEqual([
 			['restore_settings_backup', { name: '20261017T123456Z.json' }]
 		]);
+		// 閉じずに読み直し、戻せたことを出す
+		await expect.element(dialog.getByText(m.backup_restored())).toBeVisible();
 	});
 
 	it('バックアップが無ければ、無いことを出す', async () => {

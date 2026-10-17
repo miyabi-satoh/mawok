@@ -2589,7 +2589,18 @@ pub async fn sync_once(
 /// 手元で変えた同期の項目（oplog に積む名前）。保存の前と後の設定を、窓口に置く粒度で比べる。
 /// 同期を止めている種類の項目も積む。後でオンにしたときに、止めていた間に変えたものとして送る
 pub fn changed_items(before: &Config, after: &Config) -> Vec<String> {
-    let (before, after) = (config_items(before), config_items(after));
+    // 既定の定型文のまま（None）の側は、既定の行を持つものとして比べる。初めて定型文を変えたときに、
+    // 触っていない既定の行まで今の時刻で積むと、ほかのデバイスで先に直した既定の行を後勝ちで巻き戻す
+    let items = |config: &Config| {
+        if config.snippets.is_some() {
+            return config_items(config);
+        }
+        config_items(&Config {
+            snippets: Some(default_snippets_for(config.language)),
+            ..config.clone()
+        })
+    };
+    let (before, after) = (items(before), items(after));
     before
         .keys()
         .chain(after.keys())
@@ -3707,6 +3718,20 @@ mod tests {
             ]
         );
         assert!(changed_items(&before, &before).is_empty());
+    }
+
+    #[test]
+    fn editing_one_default_snippet_names_only_that_row() {
+        let before = Config::default();
+        let mut snippets = default_snippets_for(before.language);
+        let edited = snippets.iter().position(|snippet| snippet.sync).unwrap();
+        snippets[edited].body.push('!');
+        let key = ItemKey::new(SETTINGS, row_id('n', &snippets[edited].id));
+        let after = Config {
+            snippets: Some(snippets),
+            ..before.clone()
+        };
+        assert_eq!(changed_items(&before, &after), [key.name()]);
     }
 
     #[test]

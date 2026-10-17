@@ -139,8 +139,12 @@
 
 	/** バックアップから戻す窓を出しているか */
 	let backupOpen = $state(false);
-	/** 「今すぐバックアップ」の結果。戻す窓を開くと、戻した後の設定と食い違うので消す */
+	/** 「今すぐバックアップ」の結果。設定が変わると今の設定のことでなくなるので消す */
 	let backupNotice = $state('');
+	$effect(() => {
+		void settings.current;
+		backupNotice = '';
+	});
 
 	async function backUp() {
 		backupNotice = '';

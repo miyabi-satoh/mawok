@@ -113,6 +113,7 @@
 	"backup_restore_brings_back": "戻るもの: {names}",
 	"backup_restore_more": "ほか {count} 件",
 	"backup_restore_confirm": "この設定に戻す",
+	"backup_restored": "戻しました。戻す前の設定は、いちばん上にバックアップしてあります。",
 	"backup_restore_partial": "一部の設定を戻せませんでした。",
 	"backup_label_sub": "{group} ({item})",
 	"backup_row_replacement": "置き換え辞書「{name}」",
