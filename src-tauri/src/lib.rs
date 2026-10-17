@@ -936,7 +936,7 @@ fn save_received_config(
         && set_draft_window_always_on_top(app, next.text_window_always_on_top).is_err()
     {
         next.text_window_always_on_top = current.text_window_always_on_top;
-        rejected.push(sync::setting_item("text_window_always_on_top"));
+        rejected.push(sync::setting_item(config::key::TEXT_WINDOW_ALWAYS_ON_TOP));
     }
     if next.hotkey != current.hotkey {
         if let Err(error) =
