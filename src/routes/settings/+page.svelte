@@ -1196,7 +1196,10 @@
 									<Button variant="outline" size="sm" onclick={backUp}>
 										{m.settings_backup_now()}
 									</Button>
-									<Button variant="outline" size="sm" onclick={() => {
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => {
 											backupNotice = '';
 											backupOpen = true;
 										}}

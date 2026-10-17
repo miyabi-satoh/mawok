@@ -1418,8 +1418,9 @@ fn reconcile_as(
                 key_of(name).is_some_and(|key| is_order(&key))
                     && hashes.get(*name) == Some(&seen.hash)
             }
-            None => key_of(name)
-                .is_none_or(|key| kind(&key).is_none() || !present.contains_key(&key)),
+            None => {
+                key_of(name).is_none_or(|key| kind(&key).is_none() || !present.contains_key(&key))
+            }
         })
         .cloned()
         .collect();

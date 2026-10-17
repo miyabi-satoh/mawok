@@ -210,7 +210,9 @@ mod tests {
         let dir = TempDir::new("backup-same-second");
         let backups = dir.join(DIR_NAME);
         let first = write(&backups, &entries("dark"), at(DAY)).unwrap().unwrap();
-        let second = write(&backups, &entries("light"), at(DAY)).unwrap().unwrap();
+        let second = write(&backups, &entries("light"), at(DAY))
+            .unwrap()
+            .unwrap();
         assert_ne!(first, second);
         assert_eq!(read(&backups, &first).unwrap(), entries("dark"));
         // 後に書いた方が、いちばん新しいものとして並ぶ
