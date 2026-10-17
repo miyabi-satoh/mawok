@@ -7,7 +7,7 @@ import { m } from '$lib/paraglide/messages';
 export const MIN_SYNC_PASSWORD_CHARS = CONSTANTS.MIN_SYNC_PASSWORD_CHARS;
 
 /** 同期のパスワードの欄。エラーを、どの欄の下に出すかに使う */
-export type SyncPasswordField = 'current' | 'password' | 'confirm';
+type SyncPasswordField = 'current' | 'password' | 'confirm';
 export type SyncPasswordErrors = Partial<Record<SyncPasswordField, string>>;
 
 function tooShort(): string {
