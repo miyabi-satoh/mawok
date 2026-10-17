@@ -1406,6 +1406,21 @@ fn reconcile_as(
     state
         .too_large
         .retain(|name, hash| hashes.get(name) == Some(hash));
+    // 手元にも記録にも無い項目（窓口に一度も書かないまま消した行など）は、書くものが無いので oplog から外す
+    let present = config_items(&config);
+    let stale: Vec<String> = pending
+        .keys()
+        .filter(|name| {
+            !state.items.contains_key(*name)
+                && key_of(name)
+                    .is_none_or(|key| kind(&key).is_none() || !present.contains_key(&key))
+        })
+        .cloned()
+        .collect();
+    for name in stale {
+        let at = pending.remove(&name).expect("the stale name is pending");
+        accepted.push((name, at));
+    }
     let held = |state: &State, name: &str| state.ignored.contains_key(name);
     let at = |name: &str| pending.get(name).copied().unwrap_or(0);
     let mut writes = Vec::new();
@@ -3709,6 +3724,18 @@ mod tests {
         assert_eq!(result.sent, [(name, 7)]);
         assert!(result.accepted.is_empty());
         assert_eq!(transport.written("s_theme")[0].at, 7);
+    }
+
+    #[test]
+    fn a_change_with_nothing_to_write_leaves_the_oplog() {
+        let config = Config::default();
+        let gone = row_key('r', 'a').name();
+        let kept = setting_item("theme").name();
+        let outbox = BTreeMap::from([(gone.clone(), 3), (kept.clone(), 4)]);
+        let result = super::reconcile(&config, Some(recorded(&config)), &outbox, &[], "key", 1);
+        // 足して消した行は窓口に一度も書いていないので、送るものが無い。設定の項目は書く
+        assert_eq!(result.accepted, [(gone, 3)]);
+        assert_eq!(result.pending, BTreeMap::from([(kept, 4)]));
     }
 
     #[test]
