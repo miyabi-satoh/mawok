@@ -61,7 +61,7 @@ sha2 = "0.10.9"
 # 同期の鍵から、使い道ごとの鍵を導く（sync_key.rs）
 hkdf = "0.12.4"
 # 同期する項目の暗号と、同期の鍵を包む暗号 (docs/sync.md「暗号」「同期のパスワード」)
-chacha20poly1305 = "0.10.1"
+chacha20poly1305 = "0.11.0"
 # 同期のパスワードから、同期の鍵を包む鍵を作る (sync_key.rs)。PHC 文字列は使わないので password-hash の feature は入れない
 argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
 base64 = "0.22.1"
