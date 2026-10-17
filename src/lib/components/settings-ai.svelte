@@ -14,7 +14,8 @@
 	import { mawokRemainingText } from '$lib/mawok-account';
 	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
-	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
+	import type { AiModelEditor } from '$lib/ai-model-editor.svelte';
+	import type { Call } from '$lib/call';
 	import { AI_SERVICES, aiServiceInfo, normalizeBaseUrl } from '$lib/ai-services';
 	import { CONSTANTS } from '$lib/bindings/constants';
 	import type { AccountStatus } from '$lib/bindings/AccountStatus';
@@ -27,12 +28,14 @@
 	 */
 	let {
 		view,
-		editor,
+		call,
+		model,
 		mawokAccountStatus,
 		onopenaccount
 	}: {
 		view: SettingsView;
-		editor: SnippetsEditor;
+		call: Call;
+		model: AiModelEditor;
 		mawokAccountStatus: AccountStatus | null | undefined;
 		onopenaccount: () => void;
 	} = $props();
@@ -68,7 +71,7 @@
 		}
 		const request = ++keyRequest;
 		const baseUrl = view.aiBaseUrl;
-		const result = await editor.call<boolean>('has_ai_key', undefined, options);
+		const result = await call<boolean>('has_ai_key', undefined, options);
 		if (request !== keyRequest || service !== view.aiService) return;
 		if (service === 'openai' && baseUrl !== view.aiBaseUrl) return;
 		keyState = { service, baseUrl, hasKey: result.ok ? result.value : null };
@@ -87,7 +90,7 @@
 		// 了解を求めているサービスと表示中のサービスが替わったら、前のダイアログをやめる
 		if (consentService !== null && consentService !== service) consentService = null;
 		if (editingKeyFor !== null && editingKeyFor !== service) cancelEditingKey();
-		if (editor.modelService !== service) editor.switchService(view.aiModels, service);
+		if (model.service !== service) model.switchService(view.aiModels, service);
 		checkKey(service);
 	});
 	/**
@@ -154,13 +157,13 @@
 		const key = keyInput.trim();
 		if (!key) return;
 		const service = view.aiService;
-		const saved = (await editor.call('set_ai_key', { key })).ok;
+		const saved = (await call('set_ai_key', { key })).ok;
 		if (saved && service === view.aiService) cancelEditingKey();
 		await checkKey(service, { keepError: !saved });
 	}
 
 	async function deleteKey() {
-		const deleted = (await editor.call('delete_ai_key')).ok;
+		const deleted = (await call('delete_ai_key')).ok;
 		await checkKey(view.aiService, { keepError: !deleted });
 	}
 
@@ -168,11 +171,11 @@
 		const service = consentService;
 		consentService = null;
 		if (!service || service === 'none' || service !== view.aiService) return;
-		await editor.call('consent_ai', { service, baseUrl: consentBaseUrl });
+		await call('consent_ai', { service, baseUrl: consentBaseUrl });
 	}
 
 	/** 今の AI サービスの既定のモデル */
-	const defaultModel = $derived(view.defaultAiModels[editor.modelService] ?? '');
+	const defaultModel = $derived(view.defaultAiModels[model.service] ?? '');
 	/**
 	 * モデルの欄を打って空にしている途中か。欄は既定のときも既定のモデルを値として見せる（空の欄では、既定が効いているのか分からないため）が、
 	 * 打って消している途中にまで既定を出すと、消した端から戻って打ち直せない。離れたら既定を出す
@@ -213,7 +216,7 @@
 			return;
 		}
 		// 保存できなければ、欄を今の送り先に戻す。打った URL のままだと、送り先が替わったように見える
-		if (!(await editor.call('set_ai_base_url', { url })).ok) {
+		if (!(await call('set_ai_base_url', { url })).ok) {
 			baseUrlInput = view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL;
 		}
 		// Enter で保存して欄に残ったときは、保存した中身から先を打った分とみなす
@@ -222,7 +225,7 @@
 
 	async function setService(service: AiService) {
 		consentService = null;
-		await editor.call('set_ai_service', { service });
+		await call('set_ai_service', { service });
 	}
 </script>
 
@@ -231,12 +234,7 @@
 		<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 			<div class="flex flex-auto items-center gap-1">
 				<Field.Title id="ai-service">{m.settings_ai_service()}</Field.Title>
-				<SettingSyncToggle
-					{view}
-					name="ai_service"
-					label={m.settings_ai_service()}
-					call={editor.call}
-				/>
+				<SettingSyncToggle {view} name="ai_service" label={m.settings_ai_service()} {call} />
 			</div>
 			<!-- 5つ並べると最小の幅に収まらないので、ボタンの並びではなく一覧から選ぶ -->
 			<NativeSelect.Root
@@ -265,7 +263,7 @@
 						<!-- クレジットは Mawok の AI を使うときだけのものなので、残りと買い足しはここにだけ出す -->
 						{#if view.mawokAccountSignedIn}
 							<Field.Title>{mawokRemainingText(mawokAccountStatus)}</Field.Title>
-							<Button variant="outline" onclick={() => editor.call('open_mawok_buy_page')}>
+							<Button variant="outline" onclick={() => call('open_mawok_buy_page')}>
 								{m.settings_mawok_buy()}
 							</Button>
 						{:else}
@@ -296,7 +294,7 @@
 								{view}
 								name="ai_base_url"
 								label={m.settings_ai_base_url()}
-								call={editor.call}
+								{call}
 							/>
 							<Input
 								id="ai-base-url"
@@ -387,23 +385,18 @@
 						class="min-h-8 *:data-[slot=field-label]:flex-none!"
 					>
 						<Field.Label for="ai-model">{m.settings_ai_model()}</Field.Label>
-						<SettingSyncToggle
-							{view}
-							name="ai_models"
-							label={m.settings_ai_model()}
-							call={editor.call}
-						/>
+						<SettingSyncToggle {view} name="ai_models" label={m.settings_ai_model()} {call} />
 						<Input
 							id="ai-model"
 							class="w-56 min-w-0 font-mono text-sm"
 							autocomplete="off"
 							spellcheck={false}
 							bind:value={
-								() => editor.model || (modelCleared ? '' : defaultModel),
+								() => model.model || (modelCleared ? '' : defaultModel),
 								(value) => {
 									modelCleared = value === '';
 									// 既定と同じ名前は、既定として保存する。既定が替わったときに付いていけるように
-									editor.setModel(value === defaultModel ? '' : value);
+									model.set(value === defaultModel ? '' : value);
 								}
 							}
 							onblur={() => (modelCleared = false)}

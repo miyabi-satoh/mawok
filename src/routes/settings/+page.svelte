@@ -40,6 +40,7 @@
 	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '$lib/history.svelte';
 	import { modifiedName } from '$lib/modified-settings';
 	import { onEvent } from '$lib/on-event';
+	import { AiModelEditor } from '$lib/ai-model-editor.svelte';
 	import { SnippetsEditor } from '$lib/snippets-editor.svelte';
 	import KeyCaps from '$lib/components/key-caps.svelte';
 	import ListFilter from '$lib/components/list-filter.svelte';
@@ -270,8 +271,9 @@
 		isBlankReplacement
 	);
 
-	/** 定型文とモデル。定型文の分類は開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
+	/** 定型文と AI のモデル。どちらの分類も開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
 	const snippetsEditor = new SnippetsEditor(settings.current, callActions);
+	const aiModel = new AiModelEditor(settings.current, callActions);
 	$effect(() => {
 		if (settings.current) snippetsEditor.followLocale(settings.current);
 	});
@@ -430,6 +432,7 @@
 		onEvent<SettingsView>(EVENTS.CONFIG_REPLACED, (view) => {
 			replacements.recopy(view.replacements, true);
 			snippetsEditor.recopy(view);
+			aiModel.switchService(view.aiModels, view.aiService);
 			fontFamily = view.textFontFamily;
 			fontSize = view.textFontSize;
 			// 保存の前の、打っている途中の値（離れるまで保存しない件数、読めない色）は消さない
@@ -1128,7 +1131,8 @@
 					{#if category === 'ai'}
 						<SettingsAi
 							{view}
-							editor={snippetsEditor}
+							call={callActions}
+							model={aiModel}
 							{mawokAccountStatus}
 							onopenaccount={openAccount}
 						/>
