@@ -128,6 +128,10 @@ pub fn normalize_base_url(input: &str) -> Option<String> {
         .strip_suffix("/chat/completions")
         .unwrap_or(normalized)
         .trim_end_matches('/');
+    // 重ねて貼ったものまでは直さない。直すと、置いた値をもう一度揃えたときに違う値になる
+    if normalized.ends_with("/chat/completions") {
+        return None;
+    }
     if !valid {
         return None;
     }
@@ -859,6 +863,7 @@ mod tests {
                 "https://openrouter.ai/api/v1/chat/completions",
                 Some("https://openrouter.ai/api/v1"),
             ),
+            ("https://x.com/v1/chat/completions/chat/completions", None),
             // 解釈した後の形で置く
             (
                 "https://API.DeepSeek.com/v1/",

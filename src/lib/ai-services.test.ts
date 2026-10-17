@@ -33,6 +33,7 @@ describe('normalizeBaseUrl', () => {
 			['https://example.com/v1#x', null],
 			['https://example.com/v1?', null],
 			['https://openrouter.ai/api/v1/chat/completions', 'https://openrouter.ai/api/v1'],
+			['https://x.com/v1/chat/completions/chat/completions', null],
 			['https://API.DeepSeek.com/v1/', 'https://api.deepseek.com/v1']
 		];
 		for (const [input, expected] of cases) expect(normalizeBaseUrl(input), input).toBe(expected);

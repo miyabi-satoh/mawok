@@ -99,6 +99,8 @@ export function normalizeBaseUrl(input: string): string | null {
 		.replace(/\/+$/, '')
 		.replace(/\/chat\/completions$/, '')
 		.replace(/\/+$/, '');
+	// 重ねて貼ったものまでは直さない（Rust と同じ）
+	if (normalized.endsWith('/chat/completions')) return null;
 	return normalized === CONSTANTS.OPENAI_BASE_URL ? '' : normalized;
 }
 

@@ -49,7 +49,8 @@
 	 * OpenAI のキーはベース URL ごとに置くので、ベース URL も合わせて見る
 	 */
 	const hasKey = $derived(
-		keyState?.service === view.aiService && keyState.baseUrl === view.aiBaseUrl
+		keyState?.service === view.aiService &&
+			(view.aiService !== 'openai' || keyState.baseUrl === view.aiBaseUrl)
 			? keyState.hasKey
 			: undefined
 	);
@@ -68,7 +69,8 @@
 		const request = ++keyRequest;
 		const baseUrl = view.aiBaseUrl;
 		const result = await editor.call<boolean>('has_ai_key', undefined, options);
-		if (request !== keyRequest || service !== view.aiService || baseUrl !== view.aiBaseUrl) return;
+		if (request !== keyRequest || service !== view.aiService) return;
+		if (service === 'openai' && baseUrl !== view.aiBaseUrl) return;
 		keyState = { service, baseUrl, hasKey: result.ok ? result.value : null };
 	}
 
@@ -100,6 +102,8 @@
 		shownBaseUrl = url;
 		if (first) return;
 		untrack(() => {
+			// ベース URL を使うのは OpenAI だけ
+			if (view.aiService !== 'openai') return;
 			if (consentService !== null && consentBaseUrl !== url) consentService = null;
 			// 打ちかけのキーは前の送り先のものなので、欄を閉じる
 			if (editingKeyFor !== null) cancelEditingKey();
