@@ -64,7 +64,7 @@ hkdf = "0.12.4"
 chacha20poly1305 = "0.10.1"
 # 同期のパスワードから、同期の鍵を包む鍵を作る (sync_key.rs)。PHC 文字列は使わないので password-hash の feature は入れない
 argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
-base64 = "0.22.1"
+base64 = "0.23.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
