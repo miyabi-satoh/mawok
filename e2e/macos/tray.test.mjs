@@ -38,7 +38,7 @@ test.describe('macOS: メニューバー', () => {
 	test.before(async () => {
 		other = await launchOtherApp();
 		await holdUserState();
-		await relaunchWithTestConfig('language = "ja"\n');
+		await relaunchWithTestConfig({ language: 'ja' });
 	});
 
 	test.after(async () => {
@@ -131,7 +131,7 @@ test.describe('macOS: メニューバー', () => {
 	});
 
 	test('ほかのアプリに移っても隠さない設定で、出したままほかのアプリに移ってからメニューで隠すと、そのアプリが前面のまま', async () => {
-		await relaunchWithTestConfig('language = "ja"\nhide_text_window_on_blur = false\n');
+		await relaunchWithTestConfig({ language: 'ja', hideTextWindowOnBlur: false });
 		await showDraft();
 		await other.clickWindow();
 		assert.equal(
@@ -144,7 +144,7 @@ test.describe('macOS: メニューバー', () => {
 		await expectStays(frontmostApp, other.name, {
 			label: '隠した後も、ほかのアプリが前面のままか'
 		});
-		await relaunchWithTestConfig('language = "ja"\n');
+		await relaunchWithTestConfig({ language: 'ja' });
 	});
 
 	test('メニューの「設定…」で設定ウィンドウが出て、「終了」で終了する', async () => {

@@ -33,7 +33,7 @@ impl AiService {
         AiService::OpenAi,
     ];
 
-    /// 設定ファイルと画面とのやり取りでの名前
+    /// 設定・画面とのやり取りでの名前
     pub fn name(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -42,10 +42,6 @@ impl AiService {
             Self::Anthropic => "anthropic",
             Self::OpenAi => "openai",
         }
-    }
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|service| service.name() == name)
     }
 
     /// 既定のモデル。軽くて速い安定版にする（2026-09 の時点で、Gemini API の docs/models で安定版として出ているもの、
@@ -928,15 +924,5 @@ mod tests {
                 assert_eq!(error.screen_detail, None, "{status} {body}");
             }
         }
-    }
-
-    #[test]
-    fn service_names_round_trip() {
-        for service in AiService::ALL {
-            assert_eq!(AiService::from_name(service.name()), Some(service));
-        }
-        assert_eq!(AiService::from_name("mistral"), None);
-        assert_eq!(AiService::from_name("OpenAI"), None);
-        assert_eq!(AiService::from_name("Anthropic"), None);
     }
 }

@@ -97,7 +97,7 @@ test.describe('ホットキーの変更', () => {
 			await startRecording();
 			await sendKeySequence([[VK.CONTROL, VK.SHIFT, VK.J]]);
 			await waitFor(tryReadConfig, (config) => config?.hotkey === OTHER_HOTKEY, {
-				label: 'config.toml のホットキーが変わる'
+				label: '設定の置き場のホットキーが変わる'
 			});
 			// 登録したその場で効くことを、設定を閉じる前に見る。設定を閉じるときには設定のホットキーを
 			// 登録し直すので、閉じた後だけで見ると、記録で登録し損ねていても通ってしまう
@@ -125,7 +125,7 @@ test.describe('ホットキーの変更', () => {
 			await startRecording();
 			await sendHotkeyAsKeyInput();
 			await waitFor(tryReadConfig, (config) => config?.hotkey === DEFAULT_HOTKEY, {
-				label: 'config.toml のホットキーが既定に戻る'
+				label: '設定の置き場のホットキーが既定に戻る'
 			});
 			await closeSettings();
 			await sendHotkeyAsKeyInput();

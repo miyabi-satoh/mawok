@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { parse as parseToml, stringify as stringifyToml, TomlError } from 'smol-toml';
 import {
 	AUTOSTART_HELD_ENV,
 	discardPowerShell,
@@ -10,13 +9,14 @@ import {
 	recoverStaleAutostartBackupIfAny
 } from './os.mjs';
 import { PROFILE_IDENTIFIER } from './app-conf.mjs';
+import { readBackupRecord, readTextIfExists, recordPath, writeJsonAtomic } from './files.mjs';
 import {
-	fileExists,
-	readBackupRecord,
-	readTextIfExists,
-	recordPath,
-	writeJsonAtomic
-} from './files.mjs';
+	BROKEN_PREFIX,
+	readSettings,
+	SETTINGS_FILE,
+	settingsExist,
+	writeSettings
+} from './settings-db.mjs';
 
 // 自動の確認は、プロファイル `e2e` で起動する (tauri-driver.mjs の startTauriDriver が MAWOK_PROFILE を渡す。src-tauri/src/profile.rs)。
 // 設定・履歴・ログのフォルダーは識別子の後ろに `.e2e` が付き、常用の Mawok のものとは別になる。
@@ -27,11 +27,11 @@ import {
 const appData = process.env.APPDATA;
 if (!appData) {
 	throw new Error(
-		'%APPDATA% が読めませんでした。config.toml の場所を解決できないため E2E を続行できません。'
+		'%APPDATA% が読めませんでした。設定の置き場の場所を解決できないため E2E を続行できません。'
 	);
 }
 const CONFIG_DIR = path.join(appData, PROFILE_IDENTIFIER);
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.toml');
+const CONFIG_PATH = path.join(CONFIG_DIR, SETTINGS_FILE);
 // 下書きの履歴は、src-tauri/src/lib.rs の app_local_data_dir() の下（Windows は Roaming ではなく %LOCALAPPDATA%）
 const localAppData = process.env.LOCALAPPDATA;
 if (!localAppData) {
@@ -46,52 +46,26 @@ export const APP_DATA_DIRS = Object.freeze({
 });
 const HISTORY_PATH = path.join(APP_DATA_DIRS.local, 'history.json');
 // window-state プラグインが、下書きと設定ウィンドウの位置と大きさを記録するファイル。位置や大きさを変えるテストが
-// 前のテストの記録に引きずられないよう、config.toml と一緒に控えて戻す
+// 前のテストの記録に引きずられないよう、設定の置き場と一緒に控えて戻す
 export const WINDOW_STATE_PATH = path.join(CONFIG_DIR, '.window-state.json');
 
 // テストが落ちた・Ctrl+C で中断された場合でも、設定をテスト用のまま残さないための
 // 退避ファイル。テストプロセスの外 (e2e/ 直下) に置き、次回実行時に残骸があれば先に復元する
 const BACKUP_PATH = recordPath('.config-backup.json');
 
-// 2つの `just e2e` が同時に走ったときに、互いの config.toml を壊し合わないための排他ロック。
+// 2つの `just e2e` が同時に走ったときに、互いの設定の置き場を壊し合わないための排他ロック。
 // バックアップの有無や pid の生存確認 (recoverStaleBackupIfAny) だけでは、確認してから
 // バックアップを作るまでの間に別プロセスが割り込める (TOCTOU) ため、`wx` (排他的な新規作成)
 // で原子的に取り合う専用のロックファイルを別に置く
 const LOCK_PATH = recordPath('.e2e.lock');
 
-export async function readConfigText() {
-	return fs.readFile(CONFIG_PATH, 'utf8');
-}
-
-// 設定ファイル (src-tauri/src/config.rs) は、項目名が snake_case で、既定と違う値だけを書く。
-// テストは画面とのやり取りと同じ camelCase の名前で読み書きするので、ここで名前を揃え、書いていない項目を既定値で埋める
-
-/** `text_window_keys` → `textWindowKeys` */
-function toCamelCase(name) {
-	return name.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-}
-
-/** `textWindowKeys` → `text_window_keys` */
-function toSnakeCase(name) {
-	return name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-}
-
-/** 表の項目名を、入れ子 (text_window_keys や、辞書の行) まで含めて付け替える */
-function renameKeys(value, rename) {
-	if (Array.isArray(value)) return value.map((item) => renameKeys(item, rename));
-	if (value === null || typeof value !== 'object') return value;
-	// 表だけを付け替え、日時 (TomlDate) などはそのまま返す。smol-toml は 1.9 から表をプロトタイプの無いオブジェクトで返す
-	const prototype = Object.getPrototypeOf(value);
-	if (prototype !== Object.prototype && prototype !== null) return value;
-	return Object.fromEntries(
-		Object.entries(value).map(([key, item]) => [rename(key), renameKeys(item, rename)])
-	);
-}
+// 設定の置き場 (src-tauri/src/config.rs) は、既定と違う値だけを持つ。
+// テストは画面とのやり取りと同じ camelCase の名前で読み書きし (settings-db.mjs)、書いていない項目は既定値で埋める
 
 // src-tauri/src/config.rs の DEFAULT_HOTKEY と同じ値
 export const DEFAULT_HOTKEY = 'CommandOrControl+Shift+Space';
 
-// config.rs の既定値の写し。設定ファイルに書いていない項目は、アプリがこの値で動く
+// config.rs の既定値の写し。置き場に書いていない項目は、アプリがこの値で動く
 const DEFAULT_CONFIG = {
 	hotkey: DEFAULT_HOTKEY,
 	autostart: true,
@@ -124,32 +98,17 @@ const DEFAULT_DRAFT_KEYS = {
 };
 
 /**
- * 設定ファイルの中身を、camelCase の名前にし、書いていない項目を既定値で埋めて返す。
+ * 置き場の中身を、書いていない項目を既定値で埋めて返す。置き場が無ければ既定値だけ。
  * `inputGuidance` は、書いていなければ undefined (既定の案内) のまま
  */
-function readConfigFromText(text) {
-	const file = renameKeys(parseToml(text), toCamelCase);
+async function readConfig() {
+	const stored = (await readSettings(CONFIG_PATH)) ?? {};
 	return {
 		...DEFAULT_CONFIG,
-		...file,
-		textWindowKeys: { ...DEFAULT_DRAFT_KEYS, ...file.textWindowKeys },
-		replacements: (file.replacements ?? []).map((row) => ({ enabled: true, ...row }))
+		...stored,
+		textWindowKeys: { ...DEFAULT_DRAFT_KEYS, ...stored.textWindowKeys },
+		replacements: (stored.replacements ?? []).map((row) => ({ enabled: true, ...row }))
 	};
-}
-
-/**
- * camelCase の名前で書いた設定を、設定ファイルの TOML にする。null の項目は書かない
- * (TOML には null がない。inputGuidance: null は既定の案内の意味で、項目を書かないのと同じ)
- */
-export function toConfigText(config) {
-	const written = Object.fromEntries(
-		Object.entries(config).filter(([, value]) => value !== null && value !== undefined)
-	);
-	return stringifyToml(renameKeys(written, toSnakeCase));
-}
-
-async function readConfig() {
-	return readConfigFromText(await readConfigText());
 }
 
 /**
@@ -166,16 +125,14 @@ export function withoutSyncFields(rows) {
 }
 
 /**
- * config.toml をポーリングして待つとき用。アプリは一時ファイルに書いてから差し替えるが、
- * 手で書き換えている最中などで TOML として不完全なことがある。そのタイミングで読んでも
- * テスト全体を失敗させず、単に「まだ条件を満たしていない」として次のポーリングに回す
+ * 置き場をポーリングして待つとき用。アプリが書いている最中で読めなくても、テスト全体を失敗させず、
+ * 単に「まだ条件を満たしていない」として次のポーリングに回す
  */
 export async function tryReadConfig() {
 	try {
 		return await readConfig();
-	} catch (error) {
-		if (error instanceof TomlError) return undefined;
-		throw error;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -199,7 +156,7 @@ function delay(ms) {
  * ロックの所有者の pid が確認できて、それが死んでいる場合だけ、中断で解放し損ねた残骸と
  * 判断してロックを奪い直す。経過時間だけでは奪わない — pid が生きている限りは、どれだけ
  * 古いロックでも「今も設定を操作しているかもしれない」相手として扱う (実行時間を数時間
- * 超えて止まっている場合、時間で奪うと config.toml の競合が起きうるより、手動での復旧を
+ * 超えて止まっている場合、時間で奪うと設定の置き場の取り合いが起きうるより、手動での復旧を
  * 求める方が安全)。
  *
  * `wx` (排他的な新規作成) を使うことで、「既に無いことを確認してから作る」を1操作にまとめ、
@@ -263,7 +220,7 @@ export async function acquireLock() {
 		if (owner.pid !== process.pid && isProcessAlive(owner.pid)) {
 			throw new Error(
 				`別の E2E 実行 (pid=${owner.pid}、${owner.startedAt} 開始) が進行中のようです。` +
-					`config.toml の競合を避けるため、そちらが終わるのを待ってください。本当に残骸で` +
+					`設定の置き場の取り合いを避けるため、そちらが終わるのを待ってください。本当に残骸で` +
 					`あれば、手動で確認したうえで ${LOCK_PATH} を削除してから再実行してください。`
 			);
 		}
@@ -303,23 +260,44 @@ async function restoreOptionalText(file, { existed, text }) {
 	}
 }
 
+/** 設定の置き場 (SQLite のファイル) を、控えに置けるよう base64 で読む。なければ `{ existed: false, text: null }` */
+async function readOptionalDatabase(file) {
+	try {
+		return { existed: true, text: (await fs.readFile(file)).toString('base64') };
+	} catch (error) {
+		if (error.code === 'ENOENT') return { existed: false, text: null };
+		throw error;
+	}
+}
+
+/** base64 で控えた置き場を書き戻す。元々なければ、テスト中にできた置き場を消す */
+async function restoreOptionalDatabase(file, { existed, text }) {
+	// 書きかけのときに SQLite が置く journal は、控えた中身と食い違うので残さない
+	await fs.rm(`${file}-journal`, { force: true });
+	if (existed) {
+		await fs.writeFile(file, Buffer.from(text, 'base64'));
+	} else {
+		await fs.rm(file, { force: true });
+	}
+}
+
 /**
- * config.toml と .window-state.json の今の中身をバックアップファイルに書き、その記録
- * ({ existed, text, windowState: { existed, text } }) を返す。
- * config.toml がまだ存在しない (アプリを一度も起動していないクリーンな環境) 場合も
- * `existed: false` として記録し、復元時にはテスト用に作った config.toml を削除する。
+ * 設定の置き場 (base64)・履歴・.window-state.json の今の中身をバックアップファイルに書き、その記録
+ * ({ existed, database, history, windowState }) を返す。
+ * 置き場がまだ存在しない (アプリを一度も起動していないクリーンな環境) 場合も
+ * `existed: false` として記録し、復元時にはテスト用に作った置き場を削除する。
  *
  * 書き込みは一時ファイルに書いてから rename する (途中で強制終了・電源断が起きても
  * 中途半端な内容がバックアップとして残らないようにするため)
  */
 async function backupConfigText() {
-	const config = await readOptionalText(CONFIG_PATH);
+	const config = await readOptionalDatabase(CONFIG_PATH);
 	const history = await readOptionalText(HISTORY_PATH);
 	const windowState = await readOptionalText(WINDOW_STATE_PATH);
 	const record = {
 		savedAt: new Date().toISOString(),
 		existed: config.existed,
-		text: config.text,
+		database: config.text,
 		history,
 		windowState
 	};
@@ -339,25 +317,36 @@ function isValidFileRecord(record) {
 /** バックアップの記録として最低限の形をしているか (スキーマが不明なものを誤って復元しないため) */
 function isValidBackupRecord(record) {
 	return (
-		isValidFileRecord(record) &&
+		record !== null &&
+		typeof record === 'object' &&
+		isValidFileRecord({ existed: record.existed, text: record.database }) &&
 		typeof record.savedAt === 'string' &&
-		// .window-state.json も控えるようになる前の記録には windowState がない
-		(record.windowState === undefined || isValidFileRecord(record.windowState)) &&
-		(record.history === undefined || isValidFileRecord(record.history))
+		isValidFileRecord(record.windowState) &&
+		isValidFileRecord(record.history)
 	);
 }
 
 /** 記録を書き戻し (または、元々なければ削除し)、バックアップファイルを消す (正常終了時の後始末) */
-async function restoreAndClearBackup({ existed, text, history, windowState }) {
-	await restoreOptionalText(CONFIG_PATH, { existed, text });
+async function restoreAndClearBackup({ existed, database, history, windowState }) {
+	await restoreOptionalDatabase(CONFIG_PATH, { existed, text: database });
 	if (history) await restoreOptionalText(HISTORY_PATH, history);
 	if (windowState) await restoreOptionalText(WINDOW_STATE_PATH, windowState);
 	await fs.rm(BACKUP_PATH, { force: true });
 }
 
-/** config.toml に中身をそのまま書く (壊れた TOML を試すとき用)。beginTestConfig で控えを取ってから呼ぶこと */
-export async function writeConfigText(text) {
-	await fs.writeFile(CONFIG_PATH, text, 'utf8');
+/** 置き場に中身をそのまま書く (SQLite として読めない置き場を試すとき用)。beginTestConfig で控えを取ってから呼ぶこと */
+export async function writeConfigBytes(bytes) {
+	await fs.writeFile(CONFIG_PATH, bytes);
+}
+
+/** 置き場の項目を、camelCase の名前で書いた `settings` にそっくり置き換える。beginTestConfig で控えを取ってから、アプリを止めて呼ぶこと */
+export function writeTestSettings(settings) {
+	writeSettings(CONFIG_PATH, settings);
+}
+
+/** 置き場の中身をそのまま読む */
+export async function readConfigBytes() {
+	return fs.readFile(CONFIG_PATH);
 }
 
 /** E2E のテスト間で下書きの履歴が混ざらないように消す */
@@ -365,21 +354,21 @@ export async function clearHistory() {
 	await fs.rm(HISTORY_PATH, { force: true });
 }
 
-/** 設定フォルダーにある `config.broken-….toml` の名前の一覧 */
+/** 設定フォルダーにある `settings.broken-….db` の名前の一覧 */
 export async function listBrokenConfigCopies() {
 	const names = await fs.readdir(CONFIG_DIR);
-	return names.filter((name) => name.startsWith('config.broken-')).sort();
+	return names.filter((name) => name.startsWith(BROKEN_PREFIX)).sort();
 }
 
-/** 設定フォルダーの `config.broken-….toml` を読む */
+/** 設定フォルダーの `settings.broken-….db` を読む */
 export async function readBrokenConfigCopy(name) {
-	return fs.readFile(path.join(CONFIG_DIR, name), 'utf8');
+	return fs.readFile(path.join(CONFIG_DIR, name));
 }
 
-/** 設定フォルダーの `config.broken-….toml` を消す (テストが作らせたものの後始末) */
+/** 設定フォルダーの `settings.broken-….db` を消す (テストが作らせたものの後始末) */
 export async function removeBrokenConfigCopy(name) {
-	if (!name.startsWith('config.broken-'))
-		throw new Error(`消せるのは config.broken-….toml だけです: ${name}`);
+	if (!name.startsWith(BROKEN_PREFIX))
+		throw new Error(`消せるのは ${BROKEN_PREFIX}….db だけです: ${name}`);
 	await fs.rm(path.join(CONFIG_DIR, name), { force: true });
 }
 
@@ -388,7 +377,7 @@ export async function removeBrokenConfigCopy(name) {
  * 各テストファイルの最初 (acquireLock の後) で呼ぶこと。
  *
  * バックアップの中身が壊れている・想定した形をしていない (書き込み途中で終了した、
- * 前のスキーマのまま残っている等) 場合は、config.toml を誤って書き戻したり消したり
+ * 前のスキーマのまま残っている等) 場合は、設定の置き場を誤って書き戻したり消したり
  * しないよう、復元を試みずにはっきり失敗させる
  */
 export async function recoverStaleBackupIfAny() {
@@ -396,12 +385,12 @@ export async function recoverStaleBackupIfAny() {
 		BACKUP_PATH,
 		isValidBackupRecord,
 		`${BACKUP_PATH} の内容が壊れているか想定した形をしていないため復元できません。` +
-			`config.toml が今どうなっているか手動で確認し、問題なければ ${BACKUP_PATH} を削除してから再実行してください。`
+			`設定の置き場 (${CONFIG_PATH}) が今どうなっているか手動で確認し、問題なければ ${BACKUP_PATH} を削除してから再実行してください。`
 	);
 	if (record === null) return false;
 
 	console.warn(
-		`[e2e] 前回の実行 (${record.savedAt}) の config.toml バックアップが残っていたので復元します。` +
+		`[e2e] 前回の実行 (${record.savedAt}) の設定の置き場の控えが残っていたので復元します。` +
 			'テストが Ctrl+C や強制終了で中断された可能性があります。'
 	);
 	await restoreAndClearBackup(record);
@@ -437,7 +426,7 @@ export function registerCrashRecovery(lockToken) {
 		discardPowerShell();
 		Promise.all([
 			recoverStaleBackupIfAny().catch((error) => {
-				console.error('[e2e] 中断時の config.toml 復元に失敗しました:', error);
+				console.error('[e2e] 中断時の設定の置き場の復元に失敗しました:', error);
 			}),
 			// run.mjs から回すときは、登録の控えは run.mjs のもので、run.mjs が書き戻す (setup.mjs の before と同じ)
 			process.env[AUTOSTART_HELD_ENV] === '1'
@@ -459,9 +448,9 @@ export function registerCrashRecovery(lockToken) {
 }
 
 /**
- * config.toml がない状態 (初めての起動) にする。今の内容は控えに残し、返ってきた `restore` で戻す
+ * 設定の置き場がない状態 (初めての起動) にする。今の内容は控えに残し、返ってきた `restore` で戻す
  * (中断されたときの保険は beginTestConfig と同じ)。
- * config.toml がないと、アプリは既定の設定 (ログイン時の起動がオン) で作り直すので、ログイン時の起動の
+ * 置き場がないと、アプリは既定の設定 (ログイン時の起動がオン) で作り直すので、ログイン時の起動の
  * 登録を書き換えることがある。登録の控えと書き戻しは、`just e2e` では run.mjs が全体の前後で1度、直接回すときは setup.mjs の `createSuite` が受け持つ
  *
  * @returns {Promise<{ restore: () => Promise<void> }>}
@@ -469,14 +458,15 @@ export function registerCrashRecovery(lockToken) {
 export async function beginMissingConfig() {
 	const original = await backupConfigText();
 	await fs.rm(CONFIG_PATH, { force: true });
+	await fs.rm(`${CONFIG_PATH}-journal`, { force: true });
 	return {
 		restore: () => restoreAndClearBackup(original)
 	};
 }
 
-/** config.toml があるか */
+/** 設定の置き場があるか */
 export async function configExists() {
-	return fileExists(CONFIG_PATH);
+	return settingsExist(CONFIG_PATH);
 }
 
 /**
@@ -499,7 +489,7 @@ export async function historyEntryCount() {
  * バックアップファイルにも内容を残す)。`overrides` は今の設定にマージする
  * (language など、テストに関係ない項目はそのまま保つ)。
  *
- * config.toml がまだ存在しない場合は、`overrides` だけからテスト用の設定を作る
+ * 置き場がまだ存在しない場合は、`overrides` だけからテスト用の設定を作る
  * (このとき設定ディレクトリ自体もまだ無いことがあるので、先に作る)。
  *
  * `autostart` は、今の設定によらず `false` にする (オンで見るテストは overrides かコマンドで入れる)。
@@ -517,14 +507,11 @@ export async function historyEntryCount() {
 export async function beginTestConfig(overrides) {
 	const original = await backupConfigText();
 	await clearHistory();
-	const base = original.existed ? renameKeys(parseToml(original.text), toCamelCase) : {};
+	const base = (await readSettings(CONFIG_PATH).catch(() => null)) ?? {};
 	// ホットキーと下書きウィンドウのキーは、ユーザーが変えていても既定のキーで回す
 	// (テストは Ctrl+Shift+Space や Ctrl+Enter などを押す前提)。変えるテストは overrides で渡す
 	const testConfig = {
 		...base,
-		// 旧版の項目。残っていると、アプリが読み込みで定型文へ移して、テストの定型文に行が増える
-		actions: null,
-		syncActions: null,
 		autostart: false,
 		hotkey: DEFAULT_HOTKEY,
 		textWindowKeys: null,
@@ -533,7 +520,7 @@ export async function beginTestConfig(overrides) {
 	if (!original.existed) {
 		await fs.mkdir(CONFIG_DIR, { recursive: true });
 	}
-	await fs.writeFile(CONFIG_PATH, toConfigText(testConfig), 'utf8');
+	writeSettings(CONFIG_PATH, testConfig);
 	return {
 		restore: () => restoreAndClearBackup(original)
 	};

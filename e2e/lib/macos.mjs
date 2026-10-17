@@ -20,14 +20,8 @@ import {
 	SETTINGS_TITLES,
 	TRAY_MENU_JA
 } from './app-conf.mjs';
-import {
-	fileExists,
-	markLog,
-	readLogSince,
-	readTextIfExists,
-	recordPath,
-	writeJsonAtomic
-} from './files.mjs';
+import { fileExists, markLog, readLogSince, recordPath, writeJsonAtomic } from './files.mjs';
+import { BROKEN_PREFIX, readSettings, SETTINGS_FILE, writeSettings } from './settings-db.mjs';
 import { expectStays, waitFor } from './wait.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -39,19 +33,19 @@ const PROCESS_NAME = 'mawok';
 const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', PROFILE_IDENTIFIER);
 // `open` は自分の環境変数を渡さないので、起動のたびに渡す
 const OPEN_APP = ['--env', `${PROFILE_ENV}=${PROFILE}`, APP_BUNDLE];
-const CONFIG_PATH = path.join(DATA_DIR, 'config.toml');
+const CONFIG_PATH = path.join(DATA_DIR, SETTINGS_FILE);
 const HISTORY_PATH = path.join(DATA_DIR, 'history.json');
 const REGULAR_CONFIG_PATH = path.join(
 	os.homedir(),
 	'Library',
 	'Application Support',
 	APP_IDENTIFIER,
-	'config.toml'
+	SETTINGS_FILE
 );
 const REGULAR_LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', APP_IDENTIFIER, 'Mawok.log');
 const LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', PROFILE_IDENTIFIER, 'Mawok.log');
 // 設定・履歴・位置の記録。テストが書き換えるので、まとめて控えて戻す
-const HELD_FILES = ['config.toml', 'history.json', '.window-state.json'];
+const HELD_FILES = [SETTINGS_FILE, 'history.json', '.window-state.json'];
 
 // 控えのフォルダー。次に回したときに残っていれば、先に戻す
 const BACKUP_DIR = recordPath('.macos-backup');
@@ -880,7 +874,7 @@ async function isMawokRunning() {
 	return (await mawokPids()).length > 0;
 }
 
-async function quitMawok() {
+export async function quitMawok() {
 	if (!(await isMawokRunning())) return;
 	await execFileAsync('pkill', ['-x', PROCESS_NAME]).catch(() => {});
 	await waitFor(isMawokRunning, (running) => !running, {
@@ -893,7 +887,7 @@ async function quitMawok() {
  * Finder から開くのと同じく LaunchServices で起動し、メニューバーのアイコンが出るまで待つ。
  * `regular` なら、プロファイルを分けずに常用の Mawok として起動する (控えたときに動いていたものを起動し直すとき)
  */
-async function launchMawok({ regular = false } = {}) {
+export async function launchMawok({ regular = false } = {}) {
 	const mark = markLog(LOG_PATH);
 	// 終了した直後は、LaunchServices がまだ前のプロセスを抱えていて -609 で失敗することがあるので、少し置いてやり直す
 	await waitFor(
@@ -927,32 +921,42 @@ async function launchMawok({ regular = false } = {}) {
 }
 
 /**
- * 設定ファイルを書き換えて起動し直す。`text` が null なら設定ファイルを消して起動する。
- * 省くと、設定ファイルはそのままで起動し直す。`clearHistory` なら、下書きの履歴を消して起動する
+ * 設定の置き場を書き換えて起動し直す。`settings` は camelCase の名前で書いた設定 (settings-db.mjs) で、置き場をそっくり置き換える。
+ * null なら置き場を消して起動する。省くと、置き場はそのままで起動し直す。`clearHistory` なら、下書きの履歴を消して起動する
  */
-export async function relaunchWithConfig(text, { clearHistory = false } = {}) {
+export async function relaunchWithConfig(settings, { clearHistory = false } = {}) {
 	await quitMawok();
-	if (text === null) await fs.rm(CONFIG_PATH, { force: true });
-	else if (text !== undefined) await fs.writeFile(CONFIG_PATH, text);
+	if (settings === null) {
+		await fs.rm(CONFIG_PATH, { force: true });
+		await fs.rm(`${CONFIG_PATH}-journal`, { force: true });
+	} else if (settings !== undefined) {
+		await fs.mkdir(DATA_DIR, { recursive: true });
+		writeSettings(CONFIG_PATH, settings);
+	}
 	if (clearHistory) await fs.rm(HISTORY_PATH, { force: true });
 	await launchMawok();
 }
 
-/** 今の設定ファイルの中身 (無ければ null) */
-export function configText() {
-	return readTextIfExists(CONFIG_PATH);
+/** 置き場をそのままの中身で書き換える (SQLite として読めない置き場を試すとき用)。Mawok を止めてから呼ぶ */
+export async function writeConfigBytes(bytes) {
+	await fs.writeFile(CONFIG_PATH, bytes);
 }
 
-/** 設定フォルダーにある `config.broken-….toml` (読めない設定を直す前に写したもの) の名前の一覧 */
+/** 今の置き場の項目 (camelCase の名前。既定と違う値だけ。無ければ null) */
+export function readConfig() {
+	return readSettings(CONFIG_PATH);
+}
+
+/** 設定フォルダーにある `settings.broken-….db` (読めない置き場を作り直す前に写したもの) の名前の一覧 */
 export async function brokenConfigCopies() {
 	const names = await fs.readdir(DATA_DIR);
-	return names.filter((name) => name.startsWith('config.broken-')).sort();
+	return names.filter((name) => name.startsWith(BROKEN_PREFIX)).sort();
 }
 
-/** 設定フォルダーの `config.broken-….toml` を消す (テストが作らせたものの後始末) */
+/** 設定フォルダーの `settings.broken-….db` を消す (テストが作らせたものの後始末) */
 async function removeBrokenConfigCopy(name) {
-	if (!name.startsWith('config.broken-'))
-		throw new Error(`消せるのは config.broken-….toml だけです: ${name}`);
+	if (!name.startsWith(BROKEN_PREFIX))
+		throw new Error(`消せるのは ${BROKEN_PREFIX}….db だけです: ${name}`);
 	await fs.rm(path.join(DATA_DIR, name), { force: true });
 }
 
@@ -1047,11 +1051,11 @@ export function draftWindowLayer() {
  */
 async function readAutostartOn() {
 	// ログイン項目は OS の上で1つで、プロファイルでは分かれない。利用者の状態は、常用の設定と常用の起動で読む
-	const config = await readTextIfExists(REGULAR_CONFIG_PATH);
-	// 設定ファイルが無いと初めての起動になり、起動すると登録してしまうので、起動せずに効いていないとみなす
+	const config = await readSettings(REGULAR_CONFIG_PATH);
+	// 置き場が無いと初めての起動になり、起動すると登録してしまうので、起動せずに効いていないとみなす
 	// (戻すときに登録を外す。利用者が次に起動したときは初めての起動になり、そこで登録される)
 	if (config === null) return false;
-	if (/^autostart\s*=\s*false\s*$/m.test(config)) return false;
+	if (config.autostart === false) return false;
 	const mark = markLog(REGULAR_LOG_PATH);
 	await launchMawok({ regular: true });
 	await quitMawok();
@@ -1119,7 +1123,7 @@ export async function holdUserState() {
 		}
 	}
 	const clipboard = await readPasteboard(path.join(BACKUP_DIR, 'clipboard'));
-	// 戻すときに、テストが作らせた写し (設定を直す前の config.broken-….toml) だけを消せるよう、前からある分を控える
+	// 戻すときに、テストが作らせた写し (置き場を作り直す前の settings.broken-….db) だけを消せるよう、前からある分を控える
 	const brokenCopies = await brokenConfigCopies();
 	const autostartOn = await readAutostartOn();
 	// 記録は最後に書く。これがあることを、控えが揃った印にする
@@ -1152,11 +1156,11 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	const state = JSON.parse(await fs.readFile(stateFile, 'utf8'));
 	await quitMawok();
 	// ログイン項目の登録を、利用者の状態に戻す。初めての起動を試すと登録され、ログイン時の起動の確認は登録を外すので、
-	// オフならオフの設定で一度起動して外し、オンなら設定ファイルの無い初めての起動で登録する
+	// オフならオフの設定で一度起動して外し、オンなら置き場の無い初めての起動で登録する
 	// (設定がオンで登録が無いと、起動しても登録せず、設定をオフにそろえるため。src-tauri/src/lib.rs の autostart_at_launch)
 	await fs.mkdir(DATA_DIR, { recursive: true });
 	if (state.autostartOn) await fs.rm(CONFIG_PATH, { force: true });
-	else await fs.writeFile(CONFIG_PATH, 'autostart = false\n');
+	else writeSettings(CONFIG_PATH, { autostart: false });
 	// 起動できなくても (プロファイルを見ない版を指していたなど)、控えたファイルとクリップボードは戻す
 	await launchMawok().catch((error) =>
 		console.warn(`ログイン項目を戻せませんでした: ${error.message}`)
@@ -1186,18 +1190,17 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	return state.wasRunning;
 }
 
-/** 控えた設定から、テストで使う設定ファイルを作る。ログイン時の起動だけは、利用者の値を引き継ぐ */
-async function testConfigText(extra = '') {
-	const held = path.join(BACKUP_DIR, 'files', 'config.toml');
-	const text = (await readTextIfExists(held)) ?? '';
+/** 控えた設定から、テストで使う設定を作る。ログイン時の起動だけは、利用者の値を引き継ぐ */
+async function testConfig(extra = {}) {
+	const held = path.join(BACKUP_DIR, 'files', SETTINGS_FILE);
+	const config = (await readSettings(held).catch(() => null)) ?? {};
 	// ログイン項目の登録を書き換えないよう、利用者の値のまま起動する (既定はオン)
-	const autostart = /^autostart\s*=\s*false\s*$/m.test(text) ? 'autostart = false\n' : '';
-	return autostart + extra;
+	return { autostart: config.autostart, ...extra };
 }
 
-/** `testConfigText(extra)` の設定で起動し直す。`opts` は `relaunchWithConfig` と同じ */
-export async function relaunchWithTestConfig(extra = '', opts) {
-	await relaunchWithConfig(await testConfigText(extra), opts);
+/** `testConfig(extra)` の設定で起動し直す。`extra` は camelCase の名前で書く。`opts` は `relaunchWithConfig` と同じ */
+export async function relaunchWithTestConfig(extra = {}, opts) {
+	await relaunchWithConfig(await testConfig(extra), opts);
 }
 
 // ── 前のアプリ ──

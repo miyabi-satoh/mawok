@@ -28,8 +28,8 @@ const LOG_PATH = path.join(APP_DATA_DIRS.local, 'logs', 'Mawok.log');
 
 /**
  * 1テストファイルぶんの前後処理をまとめる。
- * - 実行の排他ロックを取る (2つの `just e2e` が同時に config.toml を取り合わないため)
- * - 前回の実行が中断されて config.toml やログイン時の起動の登録の控えが残っていれば書き戻し、以後の中断にも備える。
+ * - 実行の排他ロックを取る (2つの `just e2e` が同時に 設定の置き場を取り合わないため)
+ * - 前回の実行が中断されて 設定の置き場やログイン時の起動の登録の控えが残っていれば書き戻し、以後の中断にも備える。
  *   登録の控えと書き戻しは、run.mjs を通さずに回すときだけ行う (`just e2e` では run.mjs が全体の前後で1度だけ行う)
  * - 常用の Mawok が動いていないことを確認する (動いていれば終了する。起動し直すのは run.mjs だけ)
  * - tauri-driver を起動する
@@ -70,7 +70,7 @@ export function createSuite() {
 			registerCrashRecovery(lockToken);
 			await ensureMawokNotRunning();
 			// E2E が起動するアプリは、設定や OS の登録しだいで、ログイン時の起動を E2E の実行ファイルのパスで登録し直す
-			// (設定ファイルに autostart がなければ既定はオン)。run.mjs を通さずに回すときは、テストファイルごとに控えて戻す
+			// (設定の置き場に autostart がなければ既定はオン)。run.mjs を通さずに回すときは、テストファイルごとに控えて戻す
 			if (!held) autostart = await snapshotAutostartEntry();
 			driver = await startTauriDriver({ msedgedriverPath: MSEDGEDRIVER_PATH });
 		},

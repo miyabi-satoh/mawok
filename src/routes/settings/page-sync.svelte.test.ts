@@ -2,12 +2,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CONSTANTS } from '$lib/bindings/constants';
-import type { SyncConflict } from '$lib/bindings/SyncConflict';
-import type { SyncBackup } from '$lib/bindings/SyncBackup';
 import { m } from '$lib/paraglide/messages';
 import { settings } from '$lib/settings.svelte';
 import { newSnippet } from '$lib/snippets';
-import { sideName } from '$lib/sync-choices';
 import { callsOf } from '$lib/test-support/calls';
 import { settingsView } from '$lib/test-support/settings-view';
 import Page from './+page.svelte';
@@ -18,55 +15,10 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(()
 
 const invoked = vi.mocked(invoke);
 
-const conflicts: SyncConflict[] = [
-	{
-		id: 's_theme',
-		seq: 7,
-		thisDevice: { type: 'theme', value: 'dark' },
-		otherDevice: { type: 'theme', value: 'light' }
-	},
-	{
-		id: 's_text_history_size',
-		seq: 9,
-		thisDevice: { type: 'text_history_size', value: 50 },
-		otherDevice: { type: 'text_history_size', value: 10 }
-	}
-];
-
-const backups: SyncBackup[] = [
-	{
-		name: '20261011T123456Z.toml',
-		changes: [
-			{
-				id: 's_theme',
-				current: { type: 'theme', value: 'dark' },
-				restored: { type: 'theme', value: 'light' }
-			}
-		]
-	}
-];
-
-/** トレイから、選ぶ画面を頼まれているか */
-let requested: boolean;
-
 describe('設定画面の同期', () => {
 	beforeEach(() => {
 		invoked.mockReset();
-		requested = false;
-		invoked.mockImplementation((command) => {
-			switch (command) {
-				case 'take_sync_choice_request':
-					return Promise.resolve(requested);
-				case 'sync_conflicts':
-					return Promise.resolve({ items: conflicts, unreadable: false });
-				case 'sync_backups':
-					return Promise.resolve(backups);
-				case 'resolve_sync_conflicts':
-					return Promise.resolve({ stale: false, rejected: [] });
-				default:
-					return Promise.resolve(undefined);
-			}
-		});
+		invoked.mockImplementation(() => Promise.resolve(undefined));
 	});
 
 	it('Pro でなければ、同期のまとまりを出さない', async () => {
@@ -99,48 +51,6 @@ describe('設定画面の同期', () => {
 				['set_sync_kind', { kind: 'history', enabled: false }]
 			])
 		);
-		await expect
-			.element(screen.getByRole('button', { name: m.settings_sync_choice_open() }))
-			.not.toBeInTheDocument();
-	});
-
-	it('Pro なら同期前の設定を選んで戻せる', async () => {
-		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
-		const screen = await renderAt(m.settings_category_account);
-		await screen.getByRole('button', { name: m.settings_sync_restore_open() }).click();
-		const dialog = screen.getByRole('alertdialog', { name: m.sync_restore_title() });
-		const backupDate = new Intl.DateTimeFormat('ja', {
-			year: 'numeric',
-			month: 'numeric',
-			day: 'numeric',
-			hour: 'numeric',
-			minute: '2-digit',
-			second: '2-digit'
-		}).format(new Date(Date.UTC(2026, 9, 11, 12, 34, 56)));
-		const backup = dialog.getByRole('radio', {
-			name: new RegExp(`${backupDate}.*${m.sync_restore_changes({ names: m.settings_theme() })}`)
-		});
-		await expect.element(backup).toBeVisible();
-		const confirm = dialog.getByRole('button', { name: m.sync_restore_confirm() });
-		await expect.element(confirm).toBeDisabled();
-		await backup.click();
-		await expect.element(confirm).toBeEnabled();
-		await confirm.click();
-		expect(callsOf(invoked, 'restore_sync_backup')).toEqual([
-			['restore_sync_backup', { name: '20261011T123456Z.toml' }]
-		]);
-	});
-
-	it('戻せる同期前の設定が無ければ、その理由を出す', async () => {
-		settings.current = settingsView({ mawokAccountSignedIn: true, proAvailable: true });
-		invoked.mockImplementation((command) =>
-			Promise.resolve(
-				command === 'sync_backups' ? [] : command === 'take_sync_choice_request' ? false : undefined
-			)
-		);
-		const screen = await renderAt(m.settings_category_account);
-		await screen.getByRole('button', { name: m.settings_sync_restore_open() }).click();
-		await expect.element(screen.getByText(m.sync_restore_empty())).toBeVisible();
 	});
 
 	it('Pro で設定の同期がオンなら、設定の雲の印でその項目を外せる', async () => {
@@ -261,120 +171,6 @@ describe('設定画面の同期', () => {
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_sync_item({ name: '挨拶' }) }))
 			.not.toBeInTheDocument();
-	});
-
-	it('別々に変えた設定があると、選ぶ画面を開いて、選んだ項目だけを適用できる', async () => {
-		settings.current = settingsView({
-			mawokAccountSignedIn: true,
-			proAvailable: true,
-			syncConflicts: 2
-		});
-		const screen = await renderAt(m.settings_category_account);
-		await expect.element(screen.getByText(m.settings_sync_choice_notice())).toBeVisible();
-		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
-		await expect
-			.element(screen.getByRole('alertdialog', { name: m.sync_choice_title() }))
-			.toBeVisible();
-		const apply = screen.getByRole('button', { name: m.sync_choice_apply() });
-		await expect.element(apply).toBeDisabled();
-		await expect
-			.element(screen.getByRole('alertdialog').getByText(m.settings_theme_light(), { exact: true }))
-			.toBeVisible();
-		const side = (name: Parameters<typeof sideName>[1]) =>
-			screen.getByRole('radio', { name: sideName(m.settings_theme(), name) });
-		await expect.element(side('later')).toBeChecked();
-		await expect
-			.element(side('other_device'))
-			.toHaveAccessibleDescription(m.settings_theme_light());
-		// 選んだ項目を「あとで選ぶ」に戻すと、適用するものが無くなる
-		await side('this_device').click();
-		await expect.element(apply).toBeEnabled();
-		await side('later').click();
-		await expect.element(apply).toBeDisabled();
-		await side('other_device').click();
-		await apply.click();
-		expect(callsOf(invoked, 'resolve_sync_conflicts')).toEqual([
-			['resolve_sync_conflicts', { choices: [{ id: 's_theme', seq: 7, side: 'other_device' }] }]
-		]);
-		await expect.element(screen.getByRole('alertdialog')).not.toBeInTheDocument();
-	});
-
-	it('選んでいる間に設定がまた変わっていたら、知らせて読み直す', async () => {
-		settings.current = settingsView({
-			mawokAccountSignedIn: true,
-			proAvailable: true,
-			syncConflicts: 2
-		});
-		invoked.mockImplementation((command) => {
-			if (command === 'sync_conflicts')
-				return Promise.resolve({ items: conflicts, unreadable: false });
-			if (command === 'resolve_sync_conflicts')
-				return Promise.resolve({ stale: true, rejected: [] });
-			return Promise.resolve(undefined);
-		});
-		const screen = await renderAt(m.settings_category_account);
-		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
-		await screen.getByRole('radio', { name: sideName(m.settings_theme(), 'this_device') }).click();
-		await screen.getByRole('button', { name: m.sync_choice_apply() }).click();
-		await expect.element(screen.getByText(m.sync_choice_stale())).toBeVisible();
-		expect(callsOf(invoked, 'sync_conflicts')).toHaveLength(2);
-	});
-
-	it('ほかのデバイスの設定を読めなければ、選ばせずに知らせる', async () => {
-		settings.current = settingsView({
-			mawokAccountSignedIn: true,
-			proAvailable: true,
-			syncConflicts: 1
-		});
-		invoked.mockImplementation((command) =>
-			command === 'sync_conflicts' ? Promise.reject('sync.unreachable') : Promise.resolve(undefined)
-		);
-		const screen = await renderAt(m.settings_category_account);
-		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
-		await expect.element(screen.getByText(m.sync_choice_unreachable())).toBeVisible();
-		await expect.element(screen.getByRole('radio')).not.toBeInTheDocument();
-	});
-
-	it('このバージョンで読めない設定だけが残っていれば、更新を案内する', async () => {
-		settings.current = settingsView({
-			mawokAccountSignedIn: true,
-			proAvailable: true,
-			syncConflicts: 1
-		});
-		invoked.mockImplementation((command) =>
-			Promise.resolve(command === 'sync_conflicts' ? { items: [], unreadable: true } : undefined)
-		);
-		const screen = await renderAt(m.settings_category_account);
-		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
-		await expect.element(screen.getByText(m.sync_choice_unreadable())).toBeVisible();
-	});
-
-	it('開いたときに選ぶものが残っていなければ、閉じる', async () => {
-		settings.current = settingsView({
-			mawokAccountSignedIn: true,
-			proAvailable: true,
-			syncConflicts: 1
-		});
-		invoked.mockImplementation((command) =>
-			Promise.resolve(command === 'sync_conflicts' ? { items: [], unreadable: false } : undefined)
-		);
-		const screen = await renderAt(m.settings_category_account);
-		await screen.getByRole('button', { name: m.settings_sync_choice_open() }).click();
-		await vi.waitFor(() => expect(callsOf(invoked, 'sync_conflicts')).toHaveLength(1));
-		await expect.element(screen.getByRole('alertdialog')).not.toBeInTheDocument();
-	});
-
-	it('トレイから頼まれたら、「アカウント」に移って選ぶ画面を出す', async () => {
-		requested = true;
-		settings.current = settingsView({
-			mawokAccountSignedIn: true,
-			proAvailable: true,
-			syncConflicts: 2
-		});
-		const screen = await render(Page);
-		await expect
-			.element(screen.getByRole('alertdialog', { name: m.sync_choice_title() }))
-			.toBeVisible();
 	});
 });
 

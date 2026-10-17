@@ -102,9 +102,9 @@ mod tests {
     #[test]
     fn roaming_and_local_go_to_the_package_cache() {
         assert_eq!(
-            redirect(r"C:\Users\u\AppData\Roaming\com.amiiby.mawok\config.toml"),
+            redirect(r"C:\Users\u\AppData\Roaming\com.amiiby.mawok\settings.db"),
             Some(PathBuf::from(format!(
-                r"C:\Users\u\AppData\Local\Packages\{FAMILY}\LocalCache\Roaming\com.amiiby.mawok\config.toml"
+                r"C:\Users\u\AppData\Local\Packages\{FAMILY}\LocalCache\Roaming\com.amiiby.mawok\settings.db"
             )))
         );
         assert_eq!(
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn paths_outside_app_data_are_not_redirected() {
-        assert_eq!(redirect(r"C:\Users\u\Documents\config.toml"), None);
+        assert_eq!(redirect(r"C:\Users\u\Documents\settings.db"), None);
         assert_eq!(
             redirect(&format!(
                 r"C:\Users\u\AppData\Local\Packages\{FAMILY}\LocalState\x"

@@ -5,10 +5,8 @@ pub const DRAFT_HISTORY_CLEARED: &str = "draft-history-cleared";
 /// 同期で履歴が替わった。テキストウィンドウは履歴を読み直す。
 pub const DRAFT_HISTORY_SYNCED: &str = "draft-history-synced";
 pub const SNIPPET_ADDED: &str = "snippet-added";
-/// 同期で設定の行一覧が替わった。設定画面は行を新しい設定から写し直す。
+/// 同期かバックアップから戻したことで設定の行一覧が替わった。設定画面は行を新しい設定から写し直す。
 pub const SYNC_APPLIED: &str = "sync-applied";
-/// トレイから、食い違いを選ぶ画面を頼まれた。設定画面は「アカウント」に移って、選ぶ画面を出す。
-pub const SYNC_CHOICE_REQUESTED: &str = "sync-choice-requested";
 /// テキストウィンドウのエラーの帯から、AI の設定を頼まれた。設定画面は「AI」に移る。
 pub const AI_SETTINGS_REQUESTED: &str = "ai-settings-requested";
 pub const SHOWN: &str = "shown";

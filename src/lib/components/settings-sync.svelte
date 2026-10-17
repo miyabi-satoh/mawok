@@ -1,8 +1,6 @@
 <script lang="ts">
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
-	import SyncChoiceDialog from '$lib/components/sync-choice-dialog.svelte';
-	import SyncBackupDialog from '$lib/components/sync-backup-dialog.svelte';
 	import SyncPasswordForm from '$lib/components/sync-password-form.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -15,21 +13,18 @@
 	import { syncPanel } from '$lib/sync-password';
 
 	/**
-	 * アカウントの同期。同期のパスワード（始める・入れる・変える・リセット）と、種類ごとの切り替え、
-	 * 食い違いを選ぶ画面を置く（docs/sync.md「同期のパスワード」）。onfailure は、欄に出さない失敗を画面のエラーの帯に出す
+	 * アカウントの同期。同期のパスワード（始める・入れる・変える・リセット）と、種類ごとの切り替えを置く
+	 * （docs/sync.md「同期のパスワード」）。onfailure は、欄に出さない失敗を画面のエラーの帯に出す
 	 */
 	let {
 		view,
 		call,
-		onfailure,
-		choiceOpen = $bindable(false)
+		onfailure
 	}: {
 		view: SettingsView;
 		call: Call;
 		onfailure: (error: unknown) => void;
-		choiceOpen: boolean;
 	} = $props();
-	let backupOpen = $state(false);
 	let resetOpen = $state(false);
 	/** 「同期をリセット」を確かめて、新しいパスワードを作っている途中か */
 	let resetting = $state(false);
@@ -92,19 +87,6 @@
 				</Field.Field>
 			</SettingsRow>
 		{/each}
-		<SettingsRow>
-			<Button variant="outline" size="sm" class="w-fit" onclick={() => (backupOpen = true)}>
-				{m.settings_sync_restore_open()}
-			</Button>
-		</SettingsRow>
-		{#if view.syncConflicts > 0}
-			<SettingsRow>
-				<p class="text-sm">{m.settings_sync_choice_notice()}</p>
-				<Button variant="outline" size="sm" class="w-fit" onclick={() => (choiceOpen = true)}>
-					{m.settings_sync_choice_open()}
-				</Button>
-			</SettingsRow>
-		{/if}
 		{#if view.syncKeyStatus === 'ready'}
 			<SettingsRow>
 				{#if changing}
@@ -163,5 +145,3 @@
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
 </AlertDialog.Root>
-<SyncChoiceDialog bind:open={choiceOpen} platform={view.platform} />
-<SyncBackupDialog bind:open={backupOpen} locale={view.locale} />

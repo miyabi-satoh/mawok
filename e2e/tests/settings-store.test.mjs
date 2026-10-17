@@ -19,31 +19,30 @@ import {
 import { sendKeySequence, VK } from '../lib/input.mjs';
 import {
 	beginTestConfig,
+	configExists,
 	listBrokenConfigCopies,
 	readBrokenConfigCopy,
-	readConfigText,
 	removeBrokenConfigCopy,
-	toConfigText,
 	tryReadConfig,
 	withoutSyncFields,
-	writeConfigText
+	writeConfigBytes,
+	writeTestSettings
 } from '../lib/config.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
-// 再起動と設定ファイル。設定の変更は、設定画面の表の操作 (部品テストで見ている) ではなく、
+// 再起動と設定の置き場 (docs/config.md)。設定の変更は、設定画面の表の操作 (部品テストで見ている) ではなく、
 // 設定画面と同じコマンドで行う。起動した後の設定は、画面が読むのと同じ get_settings で読む。
-// トレイに出る警告の文言は、トレイのメニューの、選べない「⚠ …」の項目で見る (`lib.rs` の tray_menu)。
-// エクスプローラーで設定ファイルを表示する (2.) は見ない
+// トレイに出る警告の文言は、トレイのメニューの、選べない「⚠ …」の項目で見る (`lib.rs` の tray_menu)
 
 const suite = createSuite();
 const REPLACEMENTS = [{ from: 'E2E前', to: 'E2E後', enabled: true }];
 
-test.describe('再起動と設定ファイル', () => {
+test.describe('再起動と設定の置き場', () => {
 	let testConfig;
 	let client;
 	/** トレイのメニューを出したアプリのプロセス ID (後始末で、残ったメニューを閉じるために持つ) */
 	let trayPid;
-	/** テストの前からあった config.broken-….toml (テストが作らせたものだけを消すため) */
+	/** テストの前からあった settings.broken-….db (テストが作らせたものだけを消すため) */
 	let brokenCopiesBefore;
 
 	test.before(async () => {
@@ -128,41 +127,44 @@ test.describe('再起動と設定ファイル', () => {
 		await waitDraftVisible('残ったホットキーで下書きが出る');
 	});
 
-	test('TOML として読めない設定ファイルでは既定の設定で動き、ファイルは書き換えない', async () => {
-		const broken = `hotkey = "${OTHER_HOTKEY}"\ntheme = "dark"\nlanguage = \n`;
-		await writeConfigText(broken);
+	test('SQLite として読めない置き場は、写してから既定の設定で作り直し、写した先をトレイに出す', async () => {
+		const broken = Buffer.from('not a database');
+		await writeConfigBytes(broken);
+		const copiesBefore = await listBrokenConfigCopies();
 
 		const settings = await launch();
 		assert.equal(settings.hotkey, DEFAULT_HOTKEY, 'ホットキーは既定のはず');
 		assert.equal(settings.theme, 'system', 'テーマは既定のはず');
 		await sendHotkeyAsKeyInput();
 		await waitDraftVisible('既定のホットキーで下書きが出る');
-		assert.equal(await readConfigText(), broken, '起動しただけでは設定ファイルを書き換えないはず');
+		assert.equal(await configExists(), true, '置き場を作り直すはず');
 
-		// TOML として読めないと language も読めないので、文言の言語は OS の地域と言語に従う。
+		const copies = await listBrokenConfigCopies();
+		const created = copies.find((name) => !copiesBefore.includes(name));
+		assert.ok(created, 'settings.broken-….db ができるはず');
+		assert.deepEqual(await readBrokenConfigCopy(created), broken, '写しは元の中身のはず');
+
+		// 置き場を読めないと language も読めないので、文言の言語は OS の地域と言語に従う。
 		// ここは日本語環境が前提 (e2e/README.md の前提を参照)
-		const warnings = await readTrayWarnings();
-		assert.equal(warnings.length, 1, 'トレイに警告が1つ出るはず');
-		assert.match(
-			warnings[0],
-			/^設定ファイルを読めません: /,
-			'読めない設定ファイルの警告が出るはず'
+		assert.deepEqual(
+			await readTrayWarnings(),
+			[`設定を読めなかったため、元のファイルを ${created} に写して、既定の設定で始めました`],
+			'写した先がトレイの警告に出るはず'
 		);
 	});
 
-	test('1項目だけ型を崩すとその項目だけ既定に戻り、設定を変えると元の内容が config.broken-….toml に写る', async () => {
-		// 警告の文言を決め打ちできるよう、壊していない language も書いておく
-		const original = toConfigText({
+	test('読めない値の項目だけが既定に戻り、ほかの項目はそのまま使う', async () => {
+		writeTestSettings({
+			// ログイン時の起動の登録に触れないよう、オフで起動する (beginTestConfig と同じ)
+			autostart: false,
 			hotkey: OTHER_HOTKEY,
 			language: 'ja',
 			theme: 1,
 			replacements: REPLACEMENTS
 		});
-		await writeConfigText(original);
-		const copiesBefore = await listBrokenConfigCopies();
 
 		const settings = await launch();
-		assert.equal(settings.theme, 'system', '型を崩したテーマは既定に戻るはず');
+		assert.equal(settings.theme, 'system', '読めない値のテーマは既定に戻るはず');
 		assert.equal(settings.hotkey, OTHER_HOTKEY, 'ほかの項目はそのままのはず');
 		assert.deepEqual(
 			withoutSyncFields(settings.replacements),
@@ -170,64 +172,30 @@ test.describe('再起動と設定ファイル', () => {
 			'ほかの項目はそのままのはず'
 		);
 		await sendKeySequence([[VK.CONTROL, VK.SHIFT, VK.J]]);
-		await waitDraftVisible('型を崩していないホットキーで下書きが出る');
-
-		assert.deepEqual(
-			await readTrayWarnings(),
-			['設定ファイルの読めない値と重なったキーを直しました: theme'],
-			'直した項目の名前が、トレイの警告に出るはず'
-		);
+		await waitDraftVisible('読めたホットキーで下書きが出る');
+		assert.deepEqual(await readTrayWarnings(), [], 'トレイには警告を出さないはず');
 
 		await invokeApp(client, 'set_theme', { theme: 'light' });
-		const copies = await waitFor(
-			listBrokenConfigCopies,
-			(names) => names.length === copiesBefore.length + 1,
-			{ label: 'config.broken-….toml ができる' }
-		);
-		const created = copies.find((name) => !copiesBefore.includes(name));
-		// 起動のときに、ID の無い行へ ID を足して書き直すので、写しには ID の行だけが増えている
-		const copied = await readBrokenConfigCopy(created);
-		assert.equal(
-			copied.replace(/^id = "[0-9a-f]{32}"\n/m, ''),
-			original,
-			'写しは、行の ID のほかは元の内容のはず'
-		);
-		const saved = await tryReadConfig();
-		assert.equal(saved?.theme, 'light');
-		assert.equal(saved?.hotkey, OTHER_HOTKEY);
-
-		assert.deepEqual(
-			await readTrayWarnings(),
-			[`元の設定ファイルを ${created} に写しました`],
-			'トレイの警告が、写した先のファイル名の知らせに変わるはず'
-		);
+		const saved = await waitFor(tryReadConfig, (config) => config?.theme === 'light', {
+			label: '置き場のテーマが変わる'
+		});
+		assert.equal(saved.hotkey, OTHER_HOTKEY);
 	});
 
-	test('メモ帳で書いたような CRLF とコメントのファイルでも、設定画面から変えた値だけが変わりコメントは残る', async () => {
-		const original = [
-			'# E2E のメモ',
-			`hotkey = "${DEFAULT_HOTKEY}"`,
-			'language = "ja"   # 日本語で使う',
-			'',
-			'# 辞書',
-			'[[replacements]]',
-			'from = "E2E前"',
-			'to = "E2E後"',
-			''
-		].join('\r\n');
-		await writeConfigText(original);
-
+	test('バックアップから戻すと、バックアップした時点の設定になる', async () => {
 		await launch();
 		await invokeApp(client, 'set_theme', { theme: 'dark' });
-		const saved = await waitFor(tryReadConfig, (config) => config?.theme === 'dark', {
-			label: '設定ファイルのテーマが変わる'
-		});
-		assert.equal(saved.language, 'ja');
-		assert.deepEqual(withoutSyncFields(saved.replacements), REPLACEMENTS);
-
-		const text = await readConfigText();
-		assert.match(text, /# E2E のメモ/, '先頭のコメントが残るはず');
-		assert.ok(text.includes('language = "ja"   # 日本語で使う'), '値の後ろのコメントが残るはず');
-		assert.match(text, /# 辞書/, '表の前のコメントが残るはず');
+		assert.equal(await invokeApp(client, 'back_up_settings'), true, 'バックアップを書くはず');
+		await invokeApp(client, 'set_theme', { theme: 'light' });
+		const backups = await invokeApp(client, 'settings_backups');
+		const darkBackup = backups.find((backup) =>
+			backup.changes.some(
+				(change) => change.restored.type === 'theme' && change.restored.value === 'dark'
+			)
+		);
+		assert.ok(darkBackup, 'dark のバックアップが並ぶはず');
+		await invokeApp(client, 'restore_settings_backup', { name: darkBackup.name });
+		const settings = await invokeApp(client, 'get_settings');
+		assert.equal(settings.theme, 'dark');
 	});
 });

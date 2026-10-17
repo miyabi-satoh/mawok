@@ -269,7 +269,7 @@ test.describe('下書きの履歴', () => {
 				`前・次のボタンは出ないはず: ${JSON.stringify(buttons)}`
 			);
 		} finally {
-			// 設定ファイルに書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
+			// 設定の置き場に書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
 			await invokeApp(client, 'set_draft_history_size', { size: DEFAULT_HISTORY_SIZE });
 		}
 	});

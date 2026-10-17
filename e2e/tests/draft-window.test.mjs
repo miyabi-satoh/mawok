@@ -46,7 +46,7 @@ import { waitFor } from '../lib/wait.mjs';
 // SetWindowPos が最小を通り抜けて小さくできてしまうので、右下の角を本物のドラッグで縮めて見る。
 // 最前面やタスクバーに出るかは、ウィンドウのスタイルと重なり順、タスクバーのボタン (UI Automation) で見る。
 // Alt+Tab に出るかは、ウィンドウのスタイルとオーナーで見る (window.mjs の appearsInAltTab)。
-// 位置と大きさの記録 (.window-state.json) は、config.toml と一緒に控えて戻す (config.mjs)
+// 位置と大きさの記録 (.window-state.json) は、設定の置き場と一緒に控えて戻す (config.mjs)
 
 const suite = createSuite();
 
@@ -247,7 +247,7 @@ test.describe('下書きのウィンドウ', () => {
 			});
 			assert.equal(await isWindowAbove(hwnd, pasteTarget.hwnd), true, '下書きが上に戻るはず');
 		} finally {
-			// 設定ファイルに書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
+			// 設定の置き場に書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
 			await invokeApp(client, 'set_draft_always_on_top', { enabled: true });
 		}
 	});

@@ -577,7 +577,7 @@ const RUN_KEY = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const STARTUP_APPROVED_KEY =
 	'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';
 
-// 控えたログイン時の起動の登録。config.toml の控え (config.mjs) と同じく、中断されても次の実行が書き戻せるよう、
+// 控えたログイン時の起動の登録。設定の置き場の控え (config.mjs) と同じく、中断されても次の実行が書き戻せるよう、
 // テストのプロセスの外 (e2e/ 直下) に置く
 const AUTOSTART_BACKUP_PATH = recordPath('.autostart-backup.json');
 

@@ -259,7 +259,7 @@ test.describe('@sh のコマンド', () => {
 			await waitFor(
 				tryReadConfig,
 				(config) => config?.snippets?.some((saved) => saved.body === '@sh echo 1\necho 2'),
-				{ label: 'config.toml に保存された2行の本文' }
+				{ label: '設定の置き場に保存された2行の本文' }
 			);
 		} finally {
 			await closeDraftSettings(client, draftHandle);

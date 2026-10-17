@@ -6,9 +6,9 @@ import { getDraftWindowHandle, getForegroundWindowHandle } from '../lib/os.mjs';
 import { beginMissingConfig, configExists } from '../lib/config.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
-// 初めての起動。config.toml がない状態で起動すると下書きが出てフォーカスが入り、
-// 起動したときに設定ファイルができるので、2回目の起動では出ない。
-// config.toml がない起動は既定の設定 (ログイン時の起動がオン) で作り直すので、ログイン時の起動の登録も
+// 初めての起動。設定の置き場がない状態で起動すると下書きが出てフォーカスが入り、
+// 起動したときに設定の置き場ができるので、2回目の起動では出ない。
+// 設定の置き場がない起動は既定の設定 (ログイン時の起動がオン) で作り直すので、ログイン時の起動の登録も
 // 書き換える (控えて書き戻すのは、`just e2e` では run.mjs が全体の前後で1度、直接回すときは setup.mjs の createSuite がファイルごとに行う)
 
 const suite = createSuite();
@@ -29,8 +29,8 @@ test.describe('初めての起動', () => {
 		}
 	});
 
-	test('設定ファイルがないと下書きが出てフォーカスが入り、もう一度起動すると出ない', async () => {
-		assert.equal(await configExists(), false, '設定ファイルがない状態から始める');
+	test('設定の置き場がないと下書きが出てフォーカスが入り、もう一度起動すると出ない', async () => {
+		assert.equal(await configExists(), false, '設定の置き場がない状態から始める');
 
 		// 画面の読み込みを待つ前から、出てくるのを見る
 		let client = await suite.newClient({ waitForPage: false });
@@ -47,7 +47,7 @@ test.describe('初めての起動', () => {
 			);
 			const placeholder = await client.$('textarea').getAttribute('placeholder');
 			assert.ok(placeholder, '入力欄の案内が出ているはず');
-			assert.equal(await configExists(), true, '起動したときに設定ファイルができるはず');
+			assert.equal(await configExists(), true, '起動したときに設定の置き場ができるはず');
 		} finally {
 			await suite.closeClient(client);
 		}

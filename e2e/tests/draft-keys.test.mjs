@@ -60,7 +60,7 @@ test.describe('下書きウィンドウのキーの変更', () => {
 		try {
 			await invokeApp(client, 'set_draft_key', { action: 'copy', key: OTHER_COPY_KEY });
 			await waitFor(tryReadConfig, (config) => config?.textWindowKeys?.copy === OTHER_COPY_KEY, {
-				label: 'config.toml のコピーのキーが変わる'
+				label: '設定の置き場のコピーのキーが変わる'
 			});
 
 			await setClipboard(SENTINEL);
@@ -81,7 +81,7 @@ test.describe('下書きウィンドウのキーの変更', () => {
 			await waitFor(
 				tryReadConfig,
 				(config) => config?.textWindowKeys?.copy === 'CommandOrControl+Enter',
-				{ label: 'config.toml のコピーのキーが既定に戻る' }
+				{ label: '設定の置き場のコピーのキーが既定に戻る' }
 			);
 			const again = `e2e draft key again ${Date.now()}`;
 			await showDraftAndWaitVisible('下書きウィンドウの表示 (既定に戻した後)');

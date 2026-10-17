@@ -43,7 +43,7 @@ import { expectStays, waitFor } from '../lib/wait.mjs';
 // クリップボードの履歴・管理アプリに残さない印 (nspasteboard.org の慣習。arboard の exclude_from_history が置く)
 const CONCEALED_TYPE = 'org.nspasteboard.ConcealedType';
 
-const REPLACEMENT_CONFIG = '[[replacements]]\nfrom = "濃度"\nto = "Node.js"\n';
+const REPLACEMENT_CONFIG = { replacements: [{ from: '濃度', to: 'Node.js' }] };
 
 test.describe('macOS: 出す・書く・コピーする', () => {
 	let target;
@@ -135,7 +135,7 @@ test.describe('macOS: 出す・書く・コピーする', () => {
 	});
 
 	test('1. の 10.: 「ほかのアプリに移ったら隠す」がオフなら、ほかのアプリをクリックしても出たまま', async () => {
-		await relaunchWithTestConfig('hide_text_window_on_blur = false\n');
+		await relaunchWithTestConfig({ hideTextWindowOnBlur: false });
 		await target.activate();
 		await showDraft();
 		await click(await pasteTargetPoint());
@@ -150,7 +150,7 @@ test.describe('macOS: 出す・書く・コピーする', () => {
 
 	test('「コピー」のボタンを押すと、隠れて前のアプリに戻って貼り付き、出し直すと履歴の前・次の列が出る', async () => {
 		// ボタンを日本語の名前で探すので、OS の言語によらず日本語にする
-		await relaunchWithTestConfig('language = "ja"\n', { clearHistory: true });
+		await relaunchWithTestConfig({ language: 'ja' }, { clearHistory: true });
 		await target.activate();
 		await showDraft();
 		assert.equal(
@@ -189,8 +189,8 @@ test.describe('macOS: 出す・書く・コピーする', () => {
 
 	test('コピーには、クリップボードの履歴に残さない印が付き、設定をオフにすると付かない', async () => {
 		for (const [extra, text, concealed] of [
-			['', 'concealed', true],
-			['exclude_from_clipboard_history = false\n', 'plain', false]
+			[{}, 'concealed', true],
+			[{ excludeFromClipboardHistory: false }, 'plain', false]
 		]) {
 			await relaunchWithTestConfig(extra);
 			await showDraftWith(text);
@@ -203,13 +203,13 @@ test.describe('macOS: 出す・書く・コピーする', () => {
 		}
 	});
 
-	test('1. の 13.: 設定ファイルが無い初めての起動で出てフォーカスが入り、2回目は出ない', async () => {
+	test('1. の 13.: 設定の置き場が無い初めての起動で出てフォーカスが入り、2回目は出ない', async () => {
 		await relaunchWithConfig(null);
 		const shown = await waitDraftFocused(
 			'初めての起動で、下書きウィンドウが出て入力欄にフォーカスが入る'
 		);
 		assert.ok(shown.placeholder, '入力欄の案内がある');
-		// 起動した設定ファイルのまま、もう一度起動する
+		// 起動した設定の置き場のまま、もう一度起動する
 		await relaunchWithConfig();
 		await expectStays(isDraftVisible, false, { label: '2回目の起動', duration: 3000 });
 	});

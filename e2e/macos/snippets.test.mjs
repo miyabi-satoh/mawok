@@ -4,7 +4,7 @@ import { SETTINGS_TITLE } from '../lib/app-conf.mjs';
 import {
 	KEY,
 	click,
-	configText,
+	readConfig,
 	draftState,
 	draftTexts,
 	drag,
@@ -34,7 +34,7 @@ import { expectStays, waitFor } from '../lib/wait.mjs';
 // 定型文のうち、Windows の E2E (WebDriver) で見られないものを macOS で見る。
 // - 設定の行のつまみのドラッグ (本物のマウスで動かす)
 // - 下書きの Cmd+K の一覧の、WKWebView でのキーと日本語入力、ほかのアプリに移ったとき
-// 定型文は config.toml で登録する。名前は英数にし、日本語入力は変換中のキーを見るときだけ使う
+// 定型文は設定の置き場に書いて登録する。名前は英数にし、日本語入力は変換中のキーを見るときだけ使う
 // (ライブ変換の結果しだいで、絞り込みに当たらなくなるため)。項目の名前で押すので、日本語で起動する
 
 const BODY = 'one\ntwo';
@@ -44,37 +44,9 @@ const SNIPPETS = [
 	{ name: 'third', body: 'c' }
 ];
 
-const snippetsToml = (snippets) =>
-	snippets
-		.map(
-			({ name, body }) =>
-				`\n[[snippets]]\nname = ${JSON.stringify(name)}\nbody = ${JSON.stringify(body)}\n`
-		)
-		.join('');
-
-// TOML の文字列 (複数行の """…""" と '''…'''、1行の "…" と '…')
-const TOML_STRING = /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:[^"\\]|\\.)*"|'[^']*'/;
-
-function tomlString(text) {
-	if (/^("""|''')/.test(text)) return text.slice(3, -3).replace(/^\n/, '');
-	return text.startsWith('"') ? JSON.parse(text) : text.slice(1, -1);
-}
-
-/**
- * 設定ファイルに書かれた定型文 (名前を省いた行は名前を空にそろえる)。macOS の確認は e2e の依存を入れずに動かすので、
- * TOML の読み手を使わず、ここで書く形 (名前と本文の文字列だけ) を読む
- */
+/** 置き場に書かれた定型文 (名前を省いた行は名前を空にそろえる) */
 async function savedSnippets() {
-	const blocks = ((await configText()) ?? '').split(/^\[\[snippets\]\]$/m).slice(1);
-	return blocks.map((block) => {
-		// 次の表の見出しから後は、この定型文のものではない
-		const own = block.split(/^\[/m)[0];
-		const field = (key) => {
-			const match = own.match(new RegExp(`^${key} = (${TOML_STRING.source})`, 'm'));
-			return match === null ? '' : tomlString(match[1]);
-		};
-		return { name: field('name'), body: field('body') };
-	});
+	return ((await readConfig())?.snippets ?? []).map(({ name = '', body = '' }) => ({ name, body }));
 }
 
 /**
@@ -128,9 +100,12 @@ test.describe('macOS: 定型文', () => {
 	test.before(async () => {
 		target = await launchPasteTarget();
 		await holdUserState();
-		await relaunchWithTestConfig(`language = "ja"\n${snippetsToml(SNIPPETS)}`, {
-			clearHistory: true
-		});
+		await relaunchWithTestConfig(
+			{ language: 'ja', snippets: SNIPPETS },
+			{
+				clearHistory: true
+			}
+		);
 	});
 
 	test.after(async () => {
@@ -233,7 +208,7 @@ test.describe('macOS: 定型文', () => {
 			savedSnippets,
 			(current) => current.length === SNIPPETS.length + 1,
 			{
-				label: '設定ファイルに足された定型文'
+				label: '設定の置き場に足された定型文'
 			}
 		);
 		assert.deepEqual(saved, [...SNIPPETS, { name: '', body: 'abc' }]);
@@ -245,7 +220,7 @@ test.describe('macOS: 定型文', () => {
 	});
 
 	test('設定の「定型文」で、行のつまみをドラッグして並べ替えると保存され、下書きの一覧もその順で出る', async () => {
-		await relaunchWithTestConfig(`language = "ja"\n${snippetsToml(SNIPPETS)}`);
+		await relaunchWithTestConfig({ language: 'ja', snippets: SNIPPETS });
 		await openSettings('定型文', '追加');
 		const grips = await waitFor(
 			() => elementFrames(SETTINGS_TITLE, 'AXButton', 'ドラッグして並べ替え'),

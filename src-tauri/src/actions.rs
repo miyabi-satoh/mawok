@@ -43,25 +43,7 @@ pub fn sh_command(line: &str) -> Option<&str> {
     addressed(line, SH_PREFIX)
 }
 
-/// アクションが別の並びだったころのコマンドの行を、宛先で始まる定型文の本文にする。`@ai` の行はそのまま、ほかはシェルの行だったので `@sh` を付ける。
-/// 複数行の指示文は、改行の所だけを空白にして1行につなぐ。選ぶと出す定型文は本文が1行のものだけなので、つながないと、挿入するだけの定型文に変わる
-pub fn legacy_action_body(command: &str) -> String {
-    // コマンドを書いていなかった行は、一覧に出ない空の定型文のままにする
-    if command.trim().is_empty() {
-        command.to_string()
-    } else if ai_instruction(command).is_some() {
-        command
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
-    } else {
-        format!("{SH_PREFIX} {command}")
-    }
-}
-
-/// 既定の定型文。設定ファイルに定型文の項目がないときに、今の表示言語で使う。
+/// 既定の定型文。定型文を変えていないときに、今の表示言語で使う。
 /// AI の見本（英訳）と、どの OS にも入っているコマンドの見本（`sort`。標準入力を並べ替えて返す）を1つずつ。
 /// Windows の `sort` はシステムの文字コードで読み書きするので、Shift_JIS にする。
 /// 文字コードの既定が OS で違うコマンドの見本は、同期しない行にしておく（docs/sync.md「同期する単位」）
@@ -297,16 +279,5 @@ mod tests {
         assert_eq!(sh_command("@Sh ls"), Some("ls"));
         assert_eq!(sh_command("@shell ls"), None);
         assert_eq!(sh_command("sort"), None);
-    }
-
-    #[test]
-    fn turns_a_command_line_from_the_separate_action_list_into_an_addressed_body() {
-        assert_eq!(legacy_action_body("sort"), "@sh sort");
-        assert_eq!(legacy_action_body("@ai 訳して"), "@ai 訳して");
-        assert_eq!(
-            legacy_action_body("@ai 丁寧に直して。\n  例: \"a  b\"\n\n直した文だけを返して。"),
-            "@ai 丁寧に直して。 例: \"a  b\" 直した文だけを返して。"
-        );
-        assert_eq!(legacy_action_body(""), "");
     }
 }

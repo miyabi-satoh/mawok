@@ -77,9 +77,9 @@ test.describe('下書きの文字色', () => {
 		const draftHandle = await openDraftAppearanceSettings();
 		await client.$('#draft-text-color-light').setValue('#abc');
 
-		// 欄に打つたびに保存される実装なので、閉じなくても config.toml に揃った形で書かれる
+		// 欄に打つたびに保存される実装なので、閉じなくても 設定の置き場に揃った形で書かれる
 		const config = await waitFor(tryReadConfig, (cfg) => cfg?.textColorLight === '#aabbcc', {
-			label: 'config.toml の textColorLight'
+			label: '設定の置き場の textColorLight'
 		});
 		assert.equal(config.textColorLight, '#aabbcc', '#abc は #aabbcc に揃うはず');
 
@@ -143,7 +143,7 @@ test.describe('下書きの文字色', () => {
 				{ label: '色選びで選んだ色が入る欄' }
 			);
 			await waitFor(tryReadConfig, (cfg) => cfg?.textColorLight === '#123456', {
-				label: 'config.toml の textColorLight (色選びの後)'
+				label: '設定の置き場の textColorLight (色選びの後)'
 			});
 
 			await closeSettings(draftHandle);
@@ -190,7 +190,7 @@ test.describe('下書きの文字色', () => {
 		await invokeApp(client, 'set_draft_text_color', { light: '#123456', dark: '' });
 		try {
 			await waitFor(tryReadConfig, (cfg) => cfg?.textColorLight === '#123456', {
-				label: 'config.toml の textColorLight (読めない値を打つ前)'
+				label: '設定の置き場の textColorLight (読めない値を打つ前)'
 			});
 			const draftHandle = await openDraftAppearanceSettings();
 			await client.$('#draft-text-color-light').setValue('red');
@@ -247,7 +247,7 @@ test.describe('下書きの文字色', () => {
 			await client.keys(['Backspace']);
 
 			await waitFor(tryReadConfig, (cfg) => cfg?.textColorLight === '', {
-				label: 'config.toml の textColorLight (空にした後)'
+				label: '設定の置き場の textColorLight (空にした後)'
 			});
 			assert.equal(await client.$('#draft-text-color-light').getValue(), '', '欄は空になるはず');
 
@@ -268,7 +268,7 @@ test.describe('下書きの文字色', () => {
 	test('選んだ文字色は、起動し直しても残る', async () => {
 		await invokeApp(client, 'set_draft_text_color', { light: '#123456', dark: '#abcdef' });
 		await waitFor(tryReadConfig, (cfg) => cfg?.textColorLight === '#123456', {
-			label: 'config.toml の textColorLight (起動し直す前)'
+			label: '設定の置き場の textColorLight (起動し直す前)'
 		});
 		// 出したままだと、次の起動でホットキーを送ったときに閉じる側に働くので隠しておく
 		await showDraftAndWaitVisible();

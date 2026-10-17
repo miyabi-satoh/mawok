@@ -56,7 +56,7 @@ showTextWindowButtons: boolean,
  */
 textHistorySize: number, trimTrailingWhitespace: boolean, replacements: Array<Replacement>, 
 /**
- * 定型文。登録した順。設定ファイルに書いていなければ、今の表示言語の既定の定型文
+ * 定型文。登録した順。変えていなければ、今の表示言語の既定の定型文
  */
 snippets: Array<Snippet>, 
 /**
@@ -76,13 +76,9 @@ mawokAccountSignedIn: boolean,
  */
 syncKinds: Kinds, 
 /**
- * 種類「設定」から外した設定ファイルの項目名
+ * 種類「設定」から外した設定の項目名
  */
-syncExcludedSettings: Array<string>, 
-/**
- * ほかのデバイスと別々に変えていて、どちらを使うか選ぶのを待っている設定の数
- */
-syncConflicts: number, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
+syncExcludedSettings: Array<string>, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
 /**
  * コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
  */

@@ -45,9 +45,8 @@ const CANCEL_SLEEP = 'sleep 31.7';
 const QUIT_SLEEP = 'sleep 61.7';
 const INSERTED = '<D>';
 
-/** 設定ファイルの [[snippets]] の、コマンドを実行する1件。値は TOML の文字列に書く */
-const action = (name, command, output = 'replace') =>
-	`[[snippets]]\nname = ${JSON.stringify(name)}\nbody = ${JSON.stringify(`@sh ${command}`)}\noutput = "${output}"\n`;
+/** 定型文の、コマンドを実行する1件 */
+const action = (name, command, output = 'replace') => ({ name, body: `@sh ${command}`, output });
 
 const ACTIONS = [
 	action('upper', 'tr a-z A-Z'),
@@ -59,9 +58,9 @@ const ACTIONS = [
 	action('insert', `printf '${INSERTED}'`, 'insert'),
 	action('record', `cat >> '${APPEND_FILE}'`, 'none'),
 	action('quitwait', `${QUIT_SLEEP}; cat`)
-].join('');
+];
 
-const CONFIG = `language = "ja"\nai_service = "none"\n${ACTIONS}`;
+const CONFIG = { language: 'ja', aiService: 'none', snippets: ACTIONS };
 
 // 下書きは、日本語や改行を打てないので、どれも貼り付けて書く (showDraftWith の paste)
 
@@ -268,7 +267,7 @@ test.describe('macOS: コマンドの定型文', () => {
 
 	test('既定の「行を並べ替え」で、日本語を含む行が並べ替わる', async () => {
 		// 定型文を書かない設定で起動すると、既定の定型文になる
-		await relaunchWithTestConfig('language = "ja"\nai_service = "none"\n');
+		await relaunchWithTestConfig({ language: 'ja', aiService: 'none' });
 		await showDraftWith('うめ\nあんず\nいちご', { paste: true });
 		await runAction('sort', '行を並べ替え ');
 		await waitDraftValue('あんず\nいちご\nうめ');

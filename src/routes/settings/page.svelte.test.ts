@@ -211,7 +211,7 @@ describe('設定画面の置き換え辞書', () => {
 		).toHaveLength(0);
 	});
 
-	it('設定ファイルにある辞書を表に出す', async () => {
+	it('保存されている辞書を表に出す', async () => {
 		settings.current = view([replacement('replacement-0', '濃度', 'Node.js')]);
 		const screen = await renderAt(m.settings_category_copy);
 
@@ -400,7 +400,7 @@ describe('設定画面の定型文', () => {
 		});
 	});
 
-	it('設定ファイルにある定型文を、名前と本文の欄に出す', async () => {
+	it('保存されている定型文を、名前と本文の欄に出す', async () => {
 		settings.current = { ...view(), snippets: snippetRows([confirm]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
@@ -678,7 +678,7 @@ describe('設定画面の定型文', () => {
 });
 
 describe('設定画面の下書きのフォント', () => {
-	it('設定ファイルにある値を出す', async () => {
+	it('保存されている値を出す', async () => {
 		settings.current = view([], 'keep', { family: 'HackGen Console NF', size: 22 });
 		const screen = await renderAt(m.settings_category_draft);
 
@@ -734,7 +734,7 @@ describe('設定画面の下書きのフォント', () => {
 });
 
 describe('設定画面の履歴の件数', () => {
-	it('設定ファイルにある値を出す', async () => {
+	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), textHistorySize: 20 };
 		const screen = await render(Page);
 
@@ -996,7 +996,7 @@ describe('設定画面の入力欄の案内', () => {
 });
 
 describe('設定画面の句読点を揃える', () => {
-	it('設定ファイルにある選択を選んだ状態で出す', async () => {
+	it('保存されている選択を選んだ状態で出す', async () => {
 		settings.current = view([], 'comma');
 		const screen = await renderAt(m.settings_category_copy);
 
@@ -1467,7 +1467,7 @@ describe('設定画面のサイドバー', () => {
 });
 
 describe('設定画面のクリップボードの履歴に残さない', () => {
-	it('設定ファイルにある値を出す', async () => {
+	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), excludeFromClipboardHistory: false };
 		const screen = await renderAt(m.settings_category_copy);
 
@@ -1486,7 +1486,7 @@ describe('設定画面のクリップボードの履歴に残さない', () => {
 });
 
 describe('設定画面の下書きを常に最前面に表示', () => {
-	it('設定ファイルにある値を出す', async () => {
+	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), textWindowAlwaysOnTop: false };
 		const screen = await render(Page);
 
@@ -1505,7 +1505,7 @@ describe('設定画面の下書きを常に最前面に表示', () => {
 });
 
 describe('設定画面の下書きにボタンを表示', () => {
-	it('設定ファイルにある値を出す', async () => {
+	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), showTextWindowButtons: false };
 		const screen = await render(Page);
 
@@ -1524,7 +1524,7 @@ describe('設定画面の下書きにボタンを表示', () => {
 });
 
 describe('設定画面のほかのアプリに移ったら下書きを隠す', () => {
-	it('設定ファイルにある値を出す', async () => {
+	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), hideTextWindowOnBlur: false };
 		const screen = await render(Page);
 

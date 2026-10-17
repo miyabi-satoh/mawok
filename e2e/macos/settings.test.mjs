@@ -48,7 +48,7 @@ test.describe('macOS: 設定ウィンドウ', () => {
 	test.before(async () => {
 		other = await launchOtherApp();
 		await holdUserState();
-		await relaunchWithTestConfig('language = "ja"\n');
+		await relaunchWithTestConfig({ language: 'ja' });
 	});
 
 	test.after(async () => {
