@@ -94,6 +94,17 @@ export function keyHint(label: string, key: string, platform: Platform): string 
 	return key ? m.key_hint({ label, keys: formatKeys(key, platform) }) : label;
 }
 
+/** キーを割り当てられなかった理由の符号か（draft_keys::Rejection::code） */
+export function isKeyRejection(error: unknown): boolean {
+	const code = errorCode(error);
+	return (
+		code === ERROR_CODES.KEYS_INVALID ||
+		code === ERROR_CODES.KEYS_EDITING ||
+		code === ERROR_CODES.KEYS_HOTKEY ||
+		code.startsWith(ERROR_CODES.KEYS_ACTION_PREFIX)
+	);
+}
+
 /**
  * キーを割り当てられなかった理由を、画面に出す文にする。Rust 側は理由を符号（draft_keys::Rejection::code）で返す。
  * 符号でなければ、受け取ったものをそのまま出す

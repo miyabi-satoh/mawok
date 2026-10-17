@@ -57,6 +57,7 @@
 		hasNoModifiers,
 		isCloseWindowKey,
 		isImeKey,
+		isKeyRejection,
 		keyRejectionMessage,
 		toAccelerator,
 		toDraftKey,
@@ -230,7 +231,7 @@
 			await invoke('set_hotkey', { accelerator });
 		} catch (e) {
 			// 下書きの操作と重なって断られたときは符号が返る。それ以外は OS に登録できなかった
-			hotkeyError = errorCode(e).startsWith('keys.')
+			hotkeyError = isKeyRejection(e)
 				? keyRejectionMessage(e, accelerator, view.platform)
 				: m.settings_hotkey_unavailable({
 						keys: formatKeys(accelerator, view.platform),

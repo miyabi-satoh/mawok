@@ -17,8 +17,8 @@ fn writes_constants() {
         .map(|service| service.name().to_string())
         .collect();
     let action_failures: Vec<&str> = actions::Failure::ALL
-        .into_iter()
-        .map(actions::Failure::code)
+        .iter()
+        .map(|failure| failure.code())
         .collect();
     let new_snippet =
         serde_json::to_string(&config::Snippet::default()).expect("could not serialize Snippet");

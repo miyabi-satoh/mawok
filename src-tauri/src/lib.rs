@@ -2956,14 +2956,14 @@ async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(
     }
 }
 
-/// 窓口の包んだ鍵と、その鍵の見分けを読む。包んだ鍵が無い（ほかのデバイスでリセットされて写しが消えた）ときは、
+/// 窓口の包んだ鍵と、その鍵の見分けを読む。どちらかが無い（ほかのデバイスでリセットされて写しが消えた）ときは、
 /// 状態を読み直して画面の欄を移す。読み直しは鍵の排他を取るので、失敗したときは受け取った排他を放してから行う
 async fn read_wrapped_key<'a>(
     app: &AppHandle,
     client: &reqwest::Client,
     token: &str,
     refresh: tokio::sync::MutexGuard<'a, ()>,
-) -> Result<(tokio::sync::MutexGuard<'a, ()>, Option<String>, String), String> {
+) -> Result<(tokio::sync::MutexGuard<'a, ()>, String, String), String> {
     let server = match account::sync_key(client, token).await {
         Ok(server) => server,
         Err(error) => {
@@ -2971,11 +2971,11 @@ async fn read_wrapped_key<'a>(
             return Err(account_failure(app, "couldn't read the sync key", error).await);
         }
     };
-    let Some(wrapped) = server.wrapped_key else {
+    let (Some(key_id), Some(wrapped)) = (server.key_id, server.wrapped_key) else {
         drop(refresh);
         return Err(recheck_sync_key(app).await);
     };
-    Ok((refresh, server.key_id, wrapped))
+    Ok((refresh, key_id, wrapped))
 }
 
 /// ほかのデバイスで始めた同期に加わる。窓口の包んだ鍵を同期のパスワードで開き、このデバイスに置く
@@ -2986,11 +2986,8 @@ async fn unlock_sync(app: AppHandle, password: String) -> Result<(), String> {
     let refresh = state.sync_key_refresh.lock().await;
     let (token, generation) = token_in_generation(&app).await?;
     let client = http_client(&app)?;
-    let (refresh, key_id, wrapped) = read_wrapped_key(&app, &client, &token, refresh).await?;
-    let Some(key_id) = key_id else {
-        drop(refresh);
-        return Err(recheck_sync_key(&app).await);
-    };
+    // 鍵を置き終えるまで排他を持つ（読み直しと重ならないように）
+    let (_refresh, key_id, wrapped) = read_wrapped_key(&app, &client, &token, refresh).await?;
     let key = unwrap_sync_key(wrapped, password).await?;
     if sync_key::key_id(&key) != key_id {
         warn!("the wrapped sync key doesn't match its key ID");
@@ -3024,7 +3021,7 @@ async fn change_sync_password(
     // 先に窓口の鍵と手元の鍵を照らす。ほかのデバイスがリセットして手元の鍵が古いと、前のパスワードは開けず、
     // 「パスワードが正しくありません」が出続けるため。違えば状態を読み直して「入力」の欄へ移す
     let local = *app.state::<AppState>().sync_key.lock().unwrap();
-    if local.as_ref().map(sync_key::key_id) != key_id {
+    if local.as_ref().map(sync_key::key_id) != Some(key_id) {
         drop(refresh);
         return Err(recheck_sync_key(&app).await);
     }
