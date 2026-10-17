@@ -635,7 +635,12 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
         let Value::Object(mut tagged) = json(value) else {
             unreachable!("SyncValue serializes to an object");
         };
-        items.insert(key, tagged.remove("value").unwrap_or(Value::Null));
+        items.insert(
+            key,
+            tagged
+                .remove("value")
+                .expect("SyncValue carries its content as value"),
+        );
     }
     items.insert(hotkey_item(), json(config.hotkey.clone()));
     items.insert(text_window_keys_item(), draft_keys_value(config));
