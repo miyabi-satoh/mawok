@@ -1383,7 +1383,7 @@ describe('宛先へ出す', () => {
 	it('@sh の行で Tab を押すとパスを補い、2つ以上なら候補を並べて Tab で順に入れ、Esc で選ぶ前に戻す', async () => {
 		const fallback = invoked.getMockImplementation();
 		invoked.mockImplementation((command, args) => {
-			if (command !== 'complete_path') return fallback?.(command, args);
+			if (command !== 'complete_path') return fallback!(command, args);
 			const { input } = args as { input: string };
 			if (input === 'My')
 				return Promise.resolve({

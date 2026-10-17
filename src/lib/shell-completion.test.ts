@@ -64,6 +64,8 @@ describe('pathWordAt', () => {
 		expect(wordAt('@sh type a^&b', 'windows')).toMatchObject({ path: 'a&b' });
 		expect(wordAt('@sh .\\scr', 'windows')).toMatchObject({ path: '.\\scr' });
 		expect(wordAt('@sh type %USERPROFILE%\\', 'windows')).toBeNull();
+		// cmd の / で始まる語はスイッチ
+		expect(wordAt('@sh dir /b', 'windows')).toBeNull();
 		// cmd は ~ をホームに広げない
 		expect(wordAt('@sh type ~\\', 'windows')).toBeNull();
 	});
@@ -79,6 +81,12 @@ describe('quotePath', () => {
 		expect(quotePath('My Folder/', word('My', { quote: '"' }), 'macos', false)).toBe('"My Folder/');
 		expect(quotePath('a"$.txt', word('a', { quote: '"' }), 'macos', true)).toBe('"a\\"\\$.txt"');
 		expect(quotePath("it's", word('it', { quote: "'" }), 'macos', true)).toBe("'it'\\''s'");
+	});
+
+	it('macOS は、語の頭の ~ と = も逃がす', () => {
+		expect(quotePath('~backup', word(''), 'macos', true)).toBe('\\~backup');
+		expect(quotePath('=foo', word(''), 'macos', true)).toBe('\\=foo');
+		expect(quotePath('a~=b', word('a'), 'macos', true)).toBe('a~=b');
 	});
 
 	it('macOS は、ホームの ~ を引用符の外に置く', () => {

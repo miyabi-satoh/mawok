@@ -30,7 +30,7 @@
 		historyDirection,
 		type HistoryDirection
 	} from '$lib/history.svelte';
-	import { caretLine } from '$lib/caret-line';
+	import { caretLine, firstLineHeight } from '$lib/caret-line';
 	import { clamp } from '$lib/clamp';
 	import {
 		draftActionFor,
@@ -765,9 +765,11 @@
 	/**
 	 * `@sh` の行で Tab を押して並べたパスの候補（docs/actions.md「パスの補完」）。
 	 * `start`〜`end` は1行目の中で補った語の範囲、`before` は選ぶ前に入れた語（Esc で戻す）。
-	 * `text` は並べた後のテキストで、打ち直したりカーソルを動かしたりしたら一覧を出さない
+	 * `text` は並べた後のテキストで、打ち直したりカーソルを動かしたりしたら一覧を閉じる。
+	 * `top` は一覧を出す位置で、1行目が折り返していればその下にする
 	 */
 	type PathList = {
+		top: number;
 		word: PathWord;
 		base: string;
 		candidates: string[];
@@ -780,8 +782,18 @@
 	};
 	let pathList = $state<PathList | null>(null);
 	const pathListShown = $derived(
-		pathList !== null && pathList.text === text && caret === pathList.end && !busy && !composing
+		pathList !== null &&
+			pathList.text === text &&
+			caret === pathList.end &&
+			!busy &&
+			!composing &&
+			!snippetsOpen &&
+			!folderOpen
 	);
+	$effect(() => {
+		// 一度閉じた一覧は、テキストやカーソルが元に戻っても出し直さない（Tab で補い直す）
+		if (pathList && !pathListShown) pathList = null;
+	});
 	const pathListId = `${addressListId}-path`;
 	// Tab のたびに進める。補いを待つ間に次の Tab を押していたら、古い補いで上書きしない
 	let pathRequests = 0;
@@ -809,14 +821,16 @@
 		);
 		if (!completion || requested !== pathRequests || text !== typed || caret !== at || busy) return;
 		if (completion.candidates.length === 0) {
-			if (completion.input !== word.path) {
-				replaceInLine(word.start, at, completedWord(completion.input, word, platform));
-			}
+			if (completion.input === word.path) return;
+			const completed = completedWord(completion.input, word, platform);
+			// 後ろがもう空白なら、ファイルの後ろに空白を重ねない
+			replaceInLine(word.start, at, /\s/.test(line[at] ?? '') ? completed.trimEnd() : completed);
 			return;
 		}
 		const common = quotePath(completion.input, word, platform, false);
 		if (line.slice(word.start, at) !== common) replaceInLine(word.start, at, common);
 		pathList = {
+			top: firstLineHeight(textarea) + 12,
 			word,
 			base: completion.base,
 			candidates: completion.candidates,
@@ -848,7 +862,8 @@
 		if (isImeKey(event) || event.altKey || event.ctrlKey || event.metaKey) return false;
 		if (pathListShown && pathList) {
 			const count = pathList.candidates.length;
-			if (event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+			const arrow = (event.key === 'ArrowDown' || event.key === 'ArrowUp') && !event.shiftKey;
+			if (event.key === 'Tab' || arrow) {
 				const step = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey) ? -1 : 1;
 				selectPath(stepSelection(pathList.selected, count, step));
 			} else if (event.key === 'Escape') {
@@ -862,12 +877,12 @@
 			event.preventDefault();
 			return true;
 		}
-		if (event.key !== 'Tab' || event.shiftKey || caret === null || composing || busy) return false;
+		if (event.key !== 'Tab' || event.shiftKey || composing || busy || !textarea) return false;
 		const { line } = splitFirstLine(text);
-		if (caret > line.length || shCommand(line) === null) return false;
-		// `@sh` の行では、補えなくても Tab で入力欄から抜けない（ターミナルと同じく、Tab は補うだけのキーにする）
+		if (textarea.selectionStart > line.length || shCommand(line) === null) return false;
+		// `@sh` の行では、補えなくても、範囲を選んでいても、Tab で入力欄から抜けない（ターミナルと同じく、Tab は補うだけのキーにする）
 		event.preventDefault();
-		void completePath();
+		if (caret !== null) void completePath();
 		return true;
 	}
 
@@ -1244,7 +1259,7 @@
 		{#if pathListShown && pathList}
 			<PathCandidates
 				id={pathListId}
-				top={fontSize * 1.5 + 12}
+				top={pathList.top}
 				candidates={pathList.candidates}
 				total={pathList.total}
 				selected={pathList.selected}

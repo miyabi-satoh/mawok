@@ -115,6 +115,8 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 	const separators = windows ? /[\\/]/ : /\//;
 	// 引用符の中の `~` はシェルが広げないので、ホームとして補うと違うパスになる
 	if (!tilde && /^~($|[\\/])/.test(path)) return null;
+	// cmd の `/` で始まる語はスイッチ（`dir /b`）で、パスではない
+	if (windows && path.startsWith('/')) return null;
 	if (wordIndex === 0 && !separators.test(path) && !path.startsWith('.') && !tilde) return null;
 	return { start, path, quote, tilde };
 }
@@ -144,7 +146,9 @@ export function quotePath(
 	const rest = path.slice(home.length);
 	if (word.quote === "'") return `${home}'${rest.replaceAll("'", "'\\''")}${close ? "'" : ''}`;
 	if (word.quote === '"') return `${home}"${rest.replace(/["\\$`]/g, '\\$&')}${close ? '"' : ''}`;
-	return home + rest.replace(UNIX_SPECIAL, '\\$&');
+	// 語の頭の `~`（ほかの人のホーム）と `=`（zsh のコマンドのパス）も、シェルが広げるので逃がす
+	const escaped = rest.replace(UNIX_SPECIAL, '\\$&');
+	return home + (home === '' && /^[~=]/.test(escaped) ? `\\${escaped}` : escaped);
 }
 
 /** 補ったパスがフォルダーか（Rust 側がフォルダーの名前にだけ区切りを付ける） */

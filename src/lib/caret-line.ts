@@ -36,17 +36,8 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 export type CaretLine = { first: boolean; last: boolean };
 
-/**
- * カーソルが見た目の1行目・最終行にあるか。範囲を選んでいるときは null。
- * カーソルが折り返しの位置にあると、上の行の末尾と下の行の先頭のどちらに出ているかは位置からは分からない
- * （上下キーや行頭のクリックで来たカーソルは下の行の先頭に、行末へ移ったカーソルは上の行の末尾に出る）。
- * 迷う位置では履歴に移らない側で数える。1行目かは下の行の先頭の側で、最終行かは上の行の末尾の側で見る。
- * 数え違えても、履歴を出すのにもう1回押すだけで済み、行を移るつもりが履歴に入れ替わることはない
- */
-export function caretLine(element: HTMLTextAreaElement): CaretLine | null {
-	const { value, selectionStart, selectionEnd } = element;
-	if (selectionStart !== selectionEnd) return null;
-
+/** 入力欄と同じ幅と書式で折り返す、見えない要素。中身を入れて body に足し、測ったら外す */
+function mirrorOf(element: HTMLTextAreaElement): HTMLDivElement {
 	const style = getComputedStyle(element);
 	const mirror = document.createElement('div');
 	for (const name of TEXT_STYLES) mirror.style[name] = style[name];
@@ -63,6 +54,35 @@ export function caretLine(element: HTMLTextAreaElement): CaretLine | null {
 		border: '0',
 		width: `${width}px`
 	});
+	return mirror;
+}
+
+/** 1行目（最初の改行まで）の見た目の高さ（px）。折り返していれば、折り返した行も含む */
+export function firstLineHeight(element: HTMLTextAreaElement): number {
+	const mirror = mirrorOf(element);
+	const end = element.value.indexOf('\n');
+	// 幅のない文字を足して、空の1行目も1行の高さにする
+	mirror.append((end < 0 ? element.value : element.value.slice(0, end)) + ZERO_WIDTH_SPACE);
+	document.body.append(mirror);
+	try {
+		return mirror.offsetHeight;
+	} finally {
+		mirror.remove();
+	}
+}
+
+/**
+ * カーソルが見た目の1行目・最終行にあるか。範囲を選んでいるときは null。
+ * カーソルが折り返しの位置にあると、上の行の末尾と下の行の先頭のどちらに出ているかは位置からは分からない
+ * （上下キーや行頭のクリックで来たカーソルは下の行の先頭に、行末へ移ったカーソルは上の行の末尾に出る）。
+ * 迷う位置では履歴に移らない側で数える。1行目かは下の行の先頭の側で、最終行かは上の行の末尾の側で見る。
+ * 数え違えても、履歴を出すのにもう1回押すだけで済み、行を移るつもりが履歴に入れ替わることはない
+ */
+export function caretLine(element: HTMLTextAreaElement): CaretLine | null {
+	const { value, selectionStart, selectionEnd } = element;
+	if (selectionStart !== selectionEnd) return null;
+
+	const mirror = mirrorOf(element);
 
 	// 印は中身の文字を増やさない。文字を足すと、単語の途中に折り返せる位置ができて、入力欄と折り返し方が変わる
 	const start = document.createElement('span');
