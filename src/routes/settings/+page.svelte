@@ -973,8 +973,7 @@
 							'trim-trailing',
 							m.settings_trim_trailing(),
 							view.trimTrailingWhitespace,
-							'set_trim_trailing_whitespace',
-							m.settings_trim_trailing_description()
+							'set_trim_trailing_whitespace'
 						)}
 						{@render switchRow(
 							'exclude_from_clipboard_history',
@@ -986,9 +985,6 @@
 						)}
 						<SettingsRow modified={modifiedName(view, 'char_width')}>
 							<Field.Title>{m.settings_char_width()}</Field.Title>
-							<Field.Description class="leading-snug">
-								{m.settings_char_width_description()}
-							</Field.Description>
 							<!-- 句読点は幅でなく形を選ぶ。「、。」と「，．」はどちらも全角で、「、。」にはふつうに使う半角が無いため -->
 							<Field.Field orientation="horizontal" class="flex-wrap justify-between">
 								<div class="flex items-center gap-1">
@@ -1247,14 +1243,7 @@
 		--muted-foreground: oklch(0.66 0 0);
 	}
 
-	:global(.settings-page [data-slot='field-description']),
-	:global(.settings-page .settings-lead) {
+	:global(.settings-page [data-slot='field-description']) {
 		font-size: 13px;
-	}
-
-	:global(.settings-page .settings-lead) {
-		padding-inline: 0.25rem;
-		line-height: 1.375;
-		color: var(--muted-foreground);
 	}
 </style>

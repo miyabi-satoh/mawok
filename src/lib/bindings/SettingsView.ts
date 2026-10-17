@@ -104,9 +104,9 @@ textColorLight: string,
  */
 textColorDark: string, aiService: AiService, 
 /**
- * 送る内容と扱いを了解した AI サービス
+ * 今の AI サービスと送り先（OpenAI ならベース URL も）に了解しているか
  */
-aiConsent: AiService | null, 
+aiConsented: boolean, 
 /**
  * AI サービスごとに設定したモデル。書いていないサービスは既定のモデル
  */
@@ -115,6 +115,10 @@ aiModels: { [key in AiService]?: string },
  * AI サービスごとの既定のモデル。既定は Rust 側だけで決める
  */
 defaultAiModels: { [key in AiService]?: string }, 
+/**
+ * AI サービスが OpenAI のときに送る API の URL。空なら OpenAI（`CONSTANTS.OPENAI_BASE_URL`）
+ */
+aiBaseUrl: string, 
 /**
  * アプリのバージョン。ログの先頭に出しているものと同じ
  */

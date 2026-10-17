@@ -150,8 +150,9 @@ describe('既定の値から変えた設定の印', () => {
 	it('すべての印の名前に対応する行を出す', async () => {
 		settings.current = settingsView({
 			modifiedSettings: [...CONSTANTS.MODIFIED_SETTINGS],
-			aiService: 'gemini',
-			aiModels: { gemini: 'gemini-3.8-flash' },
+			// ベース URL の行は OpenAI のときだけ出る
+			aiService: 'openai',
+			aiModels: { openai: 'gpt-custom' },
 			mawokAccountSignedIn: true,
 			proAvailable: true
 		});
@@ -1568,13 +1569,15 @@ describe('設定画面の AI サービス', () => {
 		expect(invoked).toHaveBeenCalledWith('has_ai_key', undefined);
 	});
 
-	it('AI サービスの選択肢を「使わない」から表示し、選んだサービスの説明を出す', async () => {
+	it('AI サービスの選択肢を「使わない」から表示し、選んだサービスの送り先の説明を出す', async () => {
 		const screen = await renderAt(m.settings_category_ai);
 
 		const service = screen.getByRole('combobox', { name: m.settings_ai_service() });
 		await expect.element(service).toHaveValue('none');
 		await expect.element(service).toHaveDisplayValue(m.settings_ai_service_none());
-		await expect.element(screen.getByText(m.settings_ai_service_description_none())).toBeVisible();
+		expect(
+			service.element().closest('[data-slot=field]')?.nextElementSibling?.getAttribute('data-slot')
+		).not.toBe('field-description');
 
 		settings.current = { ...view(), aiService: 'anthropic' };
 		await expect.element(service).toHaveDisplayValue('Anthropic');
@@ -1606,11 +1609,11 @@ describe('設定画面の AI サービス', () => {
 		invoked.mockImplementation((command, args) => {
 			if (command === 'set_ai_key') {
 				responses.has_ai_key = true;
-				settings.current = { ...settings.current!, aiConsent: null };
+				settings.current = { ...settings.current!, aiConsented: false };
 				return Promise.resolve(undefined);
 			}
 			if (command === 'consent_ai') {
-				settings.current = { ...settings.current!, aiConsent: 'gemini' };
+				settings.current = { ...settings.current!, aiConsented: true };
 				return Promise.resolve(undefined);
 			}
 			return command in responses
@@ -1639,13 +1642,13 @@ describe('設定画面の AI サービス', () => {
 		await dialog.getByRole('button', { name: m.settings_ai_consent_accept() }).click();
 
 		await vi.waitFor(() =>
-			expect(invoked).toHaveBeenCalledWith('consent_ai', { service: 'gemini' })
+			expect(invoked).toHaveBeenCalledWith('consent_ai', { service: 'gemini', baseUrl: '' })
 		);
 		await expect.element(screen.getByRole('alertdialog')).not.toBeInTheDocument();
 	});
 
 	it('キーがあり了解の記録が無ければ、分類を開いたときに了解を求める', async () => {
-		settings.current = { ...view(), aiService: 'gemini', aiConsent: null };
+		settings.current = { ...view(), aiService: 'gemini', aiConsented: false };
 		responses.has_ai_key = true;
 		const screen = await renderAt(m.settings_category_ai);
 
@@ -1661,13 +1664,13 @@ describe('設定画面の AI サービス', () => {
 		settings.current = {
 			...view(),
 			aiService: 'gemini',
-			aiConsent: 'gemini',
+			aiConsented: true,
 			aiModels: { gemini: 'custom-model' }
 		};
 		responses.has_ai_key = true;
 		invoked.mockImplementation((command, args) => {
 			if (command === 'set_ai_key') {
-				settings.current = { ...settings.current!, aiConsent: null };
+				settings.current = { ...settings.current!, aiConsented: false };
 				return Promise.resolve(undefined);
 			}
 			return command in responses
@@ -1767,29 +1770,6 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		// 最初の保存で Rust（のモック）が振った ID を、続きの保存でも渡す
 		expect(saved.at(-1)).toEqual([{ ...ai('要約', '要約してください。'), id: 'snippets-0' }]);
 		expect(saved.every((snippets) => snippets.length === 1)).toBe(true);
-	});
-
-	it('説明は、一覧を出すキーを入れて並びの上に一度だけ出す', async () => {
-		const snippets = [newSnippet('', '@sh sort'), newSnippet('', '@sh date')];
-		const description = m.settings_snippets_description({ key: 'Ctrl+K' });
-
-		settings.current = { ...view(), platform: 'windows', snippets };
-		const screen = await renderAt(m.settings_category_snippets);
-		await openRows(screen);
-		await expect.element(screen.getByText(description)).toBeVisible();
-		expect(screen.getByText(description).all()).toHaveLength(1);
-		const fields = screen.getByLabelText(m.settings_snippets_body()).all();
-		expect(fields).toHaveLength(2);
-		await expect.element(fields[0]).toHaveAccessibleDescription(description);
-		await expect.element(fields[1]).toHaveAccessibleDescription(description);
-		screen.unmount();
-
-		settings.current = { ...view(), platform: 'macos', snippets };
-		const mac = await renderAt(m.settings_category_snippets);
-		await openRows(mac);
-		await expect
-			.element(mac.getByText(m.settings_snippets_description({ key: '⌘K' })))
-			.toBeVisible();
 	});
 
 	it('@sh の行でだけ文字コードを、@ai・@sh の行でだけ結果の出し方を出し、選んだ出し方と文字コードを保存する', async () => {

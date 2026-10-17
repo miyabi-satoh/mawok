@@ -343,12 +343,14 @@ struct SettingsView {
     /// 下書きの入力欄の文字色（ダーク）。小文字の #rrggbb。空なら標準の色
     text_color_dark: String,
     ai_service: AiService,
-    /// 送る内容と扱いを了解した AI サービス
-    ai_consent: Option<AiService>,
+    /// 今の AI サービスと送り先（OpenAI ならベース URL も）に了解しているか
+    ai_consented: bool,
     /// AI サービスごとに設定したモデル。書いていないサービスは既定のモデル
     ai_models: BTreeMap<AiService, String>,
     /// AI サービスごとの既定のモデル。既定は Rust 側だけで決める
     default_ai_models: BTreeMap<AiService, String>,
+    /// AI サービスが OpenAI のときに送る API の URL。空なら OpenAI（`CONSTANTS.OPENAI_BASE_URL`）
+    ai_base_url: String,
     /// アプリのバージョン。ログの先頭に出しているものと同じ
     version: String,
     /// 表示言語の設定と OS の言語から決めた Paraglide のロケール
@@ -375,8 +377,9 @@ fn settings_view(state: &AppState) -> SettingsView {
         sync_excluded_settings: config.sync_excluded_settings.clone(),
         locale: lang.code(),
         ai_service: config.ai_service,
-        ai_consent: config.ai_consent,
+        ai_consented: config.ai_consented(),
         ai_models: config.ai_models,
+        ai_base_url: config.ai_base_url,
         default_ai_models: AiService::ALL
             .into_iter()
             .filter(|service| *service != AiService::None)
@@ -982,7 +985,8 @@ fn save_synced_config(
             warn!("couldn't clear draft history after sync: {error}");
         }
     }
-    if next.ai_service != current.ai_service {
+    // キーはサービスごと、OpenAI はベース URL ごとに置くので、替わったら確かめ直す
+    if next.ai_service != current.ai_service || next.ai_base_url != current.ai_base_url {
         state.forget_ai_key();
     }
     Ok(Some(rejected))
@@ -1430,29 +1434,45 @@ async fn run_blocking<T: Send + 'static>(
 }
 
 /// AI サービスのキーがあるかを、キーチェーンを待つ間メインスレッドを止めずに確かめる
-async fn ai_key_exists(service: AiService) -> Result<bool, String> {
+/// `user` は資格情報管理に置くときの名前（`Config::ai_credential_user`）
+async fn ai_key_exists(service: AiService, user: String) -> Result<bool, String> {
     run_blocking(move || match service {
         AiService::Mawok => account_credentials::has_token(),
-        _ => secrets::exists(service.credential_user()),
+        _ => secrets::exists(&user),
     })
     .await?
     .inspect_err(|error| warn!("couldn't check the AI key: {error}"))
 }
 
-/// 送る内容と扱いを了解する。画面が出した AI サービスが、今の AI サービスと違えば断る。
+/// 送る内容と扱いを了解する。画面が出した AI サービスと送り先（OpenAI ならベース URL）が、今のものと違えば断る。
 #[tauri::command]
-async fn consent_ai(app: AppHandle, service: AiService) -> Result<(), String> {
+async fn consent_ai(app: AppHandle, service: AiService, base_url: String) -> Result<(), String> {
     info!("acknowledge AI with {}", service.name());
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    let current = app.state::<AppState>().config.lock().unwrap().ai_service;
+    let (current, current_url) = {
+        let state = app.state::<AppState>();
+        let config = state.config.lock().unwrap();
+        (config.ai_service, config.ai_base_url.clone())
+    };
     if current != service || service == AiService::None {
         return Err(format!(
             "the AI service changed to {} before consenting",
             current.name(),
         ));
     }
-    update_config(&app, |config| config.ai_consent = Some(service))?;
+    if service == AiService::OpenAi && current_url != base_url {
+        return Err("the base URL changed before consenting".to_string());
+    }
+    update_config(&app, |config| {
+        config.ai_consent = Some(service);
+        // 記録するのは、検査済みの今のベース URL。OpenAI でなければ送り先の URL は無い
+        config.ai_consent_base_url = if service == AiService::OpenAi {
+            current_url
+        } else {
+            String::new()
+        };
+    })?;
     Ok(())
 }
 
@@ -1484,11 +1504,40 @@ fn set_ai_model(app: AppHandle, service: AiService, model: String) -> Result<(),
     })
 }
 
+/// AI サービスが OpenAI のときに送る API の URL。空か OpenAI の URL で既定に戻す。
+/// 送り先が変わるので、OpenAI への了解を取り直す（docs/actions.md「AI（`@ai`）」）
+#[tauri::command]
+async fn set_ai_base_url(app: AppHandle, url: String) -> Result<(), String> {
+    let url = ai::normalize_base_url(&url).ok_or_else(|| "invalid base URL".to_string())?;
+    let action_state = app.state::<ActionState>();
+    let _settings = action_state.settings.lock().await;
+    if app.state::<AppState>().config.lock().unwrap().ai_base_url == url {
+        return Ok(());
+    }
+    // ログにはホストだけを出す。パスに秘密を入れるサービスがありうるため
+    let host = reqwest::Url::parse(&url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string));
+    info!("set AI base URL: {}", host.as_deref().unwrap_or("default"));
+    // 了解は送り先の URL と組で記録しているので、替えた先には了解していないことになる（Config::ai_consented）
+    update_config(&app, |config| config.ai_base_url = url)?;
+    // キーは送り先ごとに置くので、替えた先のキーを確かめ直す
+    app.state::<AppState>().forget_ai_key();
+    Ok(())
+}
+
 /// 今の表示言語の既定の定型文。設定画面は、打っている途中の定型文を消さないよう、並びを自分で持ち、
 /// これを後ろに足してから set_snippets で保存する
 #[tauri::command]
 fn default_snippets(app: AppHandle) -> Vec<Snippet> {
     actions::default_snippets(app.state::<AppState>().lang())
+}
+
+/// 今の AI サービスと、そのキーを資格情報管理に置くときの名前
+fn ai_service_and_user(app: &AppHandle) -> (AiService, String) {
+    let state = app.state::<AppState>();
+    let config = state.config.lock().unwrap();
+    (config.ai_service, config.ai_credential_user())
 }
 
 /// 今の AI サービスのキーがあるか。中身は読まない
@@ -1497,12 +1546,12 @@ async fn has_ai_key(app: AppHandle) -> Result<bool, String> {
     // 確かめている間に、キーの保存・削除やサービスの切り替えがキャッシュを書き換えて、古い結果で上書きしないようにする
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    let service = app.state::<AppState>().config.lock().unwrap().ai_service;
+    let (service, user) = ai_service_and_user(&app);
     if service == AiService::None {
         app.state::<AppState>().forget_ai_key();
         return Ok(false);
     }
-    let available = match ai_key_exists(service).await {
+    let available = match ai_key_exists(service, user).await {
         Ok(available) => available,
         Err(error) => {
             app.state::<AppState>().forget_ai_key();
@@ -1520,7 +1569,7 @@ async fn has_ai_key(app: AppHandle) -> Result<bool, String> {
 async fn set_ai_key(app: AppHandle, key: String) -> Result<(), String> {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    let service = app.state::<AppState>().config.lock().unwrap().ai_service;
+    let (service, user) = ai_service_and_user(&app);
     // Mawok はキーを入れず、アカウントと結んで受け取る（start_mawok_sign_in）
     if service == AiService::None || service == AiService::Mawok {
         return Err(actions::Failure::Disabled.code().to_string());
@@ -1533,7 +1582,7 @@ async fn set_ai_key(app: AppHandle, key: String) -> Result<(), String> {
     // 了解の記録を消す保存を先にする。キーの保存の後で終了しても、入れ直したキーが了解なしで使われないようにするため。
     // キーの保存が失敗しても、記録は消えたまま（了解のダイアログをもう一度出すだけ）なので、画面には知らせる
     save_config(&app, |config| config.ai_consent = None)?;
-    let written = run_blocking(move || secrets::write(service.credential_user(), &key))
+    let written = run_blocking(move || secrets::write(&user, &key))
         .await
         .and_then(|result| result.inspect_err(|error| error!("couldn't save the AI key: {error}")));
     if written.is_ok() {
@@ -1548,13 +1597,13 @@ async fn set_ai_key(app: AppHandle, key: String) -> Result<(), String> {
 async fn delete_ai_key(app: AppHandle) -> Result<(), String> {
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    let service = app.state::<AppState>().config.lock().unwrap().ai_service;
+    let (service, user) = ai_service_and_user(&app);
     // Mawok はキーを持たない。トークンはサインアウトで消す（sign_out_mawok）
     if service == AiService::None || service == AiService::Mawok {
         return Err(actions::Failure::Disabled.code().to_string());
     }
     info!("delete the AI key for {}", service.name());
-    run_blocking(move || secrets::delete(service.credential_user()))
+    run_blocking(move || secrets::delete(&user))
         .await?
         .inspect_err(|error| error!("couldn't delete the AI key: {error}"))?;
     app.state::<AppState>().remember_ai_key(service, false);
@@ -1803,7 +1852,7 @@ async fn run_sync(app: &AppHandle) {
             let app_state = app.state::<AppState>();
             let _commit = lock_sync_commit(
                 app,
-                result.changed && result.config.ai_service != config.ai_service,
+                result.changed && ai_destination_changes(&config, &result.config),
             )
             .await;
             if app_state.sync_record_generation.load(Ordering::SeqCst) != record_generation {
@@ -1941,7 +1990,14 @@ async fn save_sync_record(
     saved
 }
 
-/// 同期の結果や、同期の外で作った設定と記録を置く間の排他。AI サービスが替わるなら、AI サービスを替えるコマンドと同じ排他も取る。
+/// AI の送り先（AI サービスか、OpenAI のベース URL）が替わるか。キーの置き場の名前が替わるので、
+/// キーを扱うコマンドと同じ排他（`ActionState.settings`）の中で替える
+fn ai_destination_changes(before: &Config, after: &Config) -> bool {
+    before.ai_service != after.ai_service || before.ai_base_url != after.ai_base_url
+}
+
+/// 同期の結果や、同期の外で作った設定と記録を置く間の排他。AI の送り先が替わるなら（`ai_destination_changes`）、
+/// AI サービスを替えるコマンドと同じ排他も取る。
 /// サインアウトは、その排他の中で同期の記録を消すので、記録の排他より先に取る
 async fn lock_sync_commit(app: &AppHandle, ai_service_changes: bool) -> SyncCommitGuard<'_> {
     let settings = if ai_service_changes {
@@ -2081,7 +2137,7 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
     for _ in 0..RESTORE_ATTEMPTS {
         let (current, _) = config_with_generation(&state);
         let ai_service_changes =
-            sync::restore_backup(&current, &backed_up).ai_service != current.ai_service;
+            ai_destination_changes(&current, &sync::restore_backup(&current, &backed_up));
         let _commit = lock_sync_commit(&app, ai_service_changes).await;
         // 同期の排他の中で、戻す直前の設定を残す。外で残すと、その後に入った同期の結果が戻す前の設定から漏れ、
         // 戻したことを戻せない
@@ -2091,8 +2147,8 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
         if next == current {
             return Ok(());
         }
-        // 排他を取った後に AI サービスの替わりが入った。AI サービスを替えるコマンドの排他も取り直す
-        if next.ai_service != current.ai_service && !ai_service_changes {
+        // 排他を取った後に AI の送り先の替わりが入った。AI サービスを替えるコマンドの排他も取り直す
+        if ai_destination_changes(&current, &next) && !ai_service_changes {
             continue;
         }
         if let Some(rejected) = save_synced_config(&app, generation, true, next)? {
@@ -3191,13 +3247,15 @@ fn start_ai_action(
     prompt: ai::Prompt,
     discard_output: bool,
 ) -> Result<ActionTask, ActionFailure> {
-    let (service, model, available, key_available) = {
+    let (service, model, base_url, user, available, key_available) = {
         let state = app.state::<AppState>();
         let config = state.config.lock().unwrap().clone();
         let key_available = state.ai_key_available(config.ai_service);
         (
             config.ai_service,
             config.ai_model(),
+            config.openai_base_url().to_string(),
+            config.ai_credential_user(),
             config.ai_available(key_available),
             key_available,
         )
@@ -3219,7 +3277,7 @@ fn start_ai_action(
         let reading = ReadingAiKey::start(&task_app);
         let read = run_blocking(move || match service {
             AiService::Mawok => account_credentials::read_token(),
-            _ => secrets::read(service.credential_user()),
+            _ => secrets::read(&user),
         })
         .await;
         drop(reading);
@@ -3248,7 +3306,7 @@ fn start_ai_action(
         };
         let client = http_client(&task_app)
             .map_err(|error| actions::ActionError::new(actions::Failure::Unexpected, error))?;
-        let output = ai::send(&client, service, &key, &model, &prompt).await?;
+        let output = ai::send(&client, service, &key, &model, &base_url, &prompt).await?;
         Ok(if discard_output {
             String::new()
         } else {
@@ -4497,6 +4555,7 @@ pub fn run() {
             consent_ai,
             set_ai_service,
             set_ai_model,
+            set_ai_base_url,
             default_snippets,
             has_ai_key,
             set_ai_key,

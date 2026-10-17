@@ -53,7 +53,8 @@ describe('needsAiSettings', () => {
 			'action.key_unreadable',
 			'action.invalid_key',
 			'action.rejected',
-			'action.model_not_found'
+			'action.model_not_found',
+			'action.endpoint_not_found'
 		]) {
 			expect(needsAiSettings({ code, detail: null }), code).toBe(true);
 		}

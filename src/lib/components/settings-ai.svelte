@@ -15,7 +15,8 @@
 	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
 	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
-	import { AI_SERVICES, aiServiceInfo } from '$lib/ai-services';
+	import { AI_SERVICES, aiServiceInfo, normalizeBaseUrl } from '$lib/ai-services';
+	import { CONSTANTS } from '$lib/bindings/constants';
 	import type { AccountStatus } from '$lib/bindings/AccountStatus';
 	import type { AiService, SettingsView } from '$lib/settings.svelte';
 
@@ -40,9 +41,19 @@
 	 * キーがあるかを確かめた結果と、どの AI サービスのものか。hasKey は確かめられなかったとき null。
 	 * 替える前のサービスの結果を、今のサービスのものとして出さないよう、サービスと組にして持つ
 	 */
-	let keyState = $state<{ service: AiService; hasKey: boolean | null } | null>(null);
-	/** 今の AI サービスのキーがあるか。まだ確かめていなければ undefined、確かめられなかったときは null */
-	const hasKey = $derived(keyState?.service === view.aiService ? keyState.hasKey : undefined);
+	let keyState = $state<{ service: AiService; baseUrl: string; hasKey: boolean | null } | null>(
+		null
+	);
+	/**
+	 * 今の AI サービスのキーがあるか。まだ確かめていなければ undefined、確かめられなかったときは null。
+	 * OpenAI のキーはベース URL ごとに置くので、ベース URL も合わせて見る
+	 */
+	const hasKey = $derived(
+		keyState?.service === view.aiService &&
+			(view.aiService !== 'openai' || keyState.baseUrl === view.aiBaseUrl)
+			? keyState.hasKey
+			: undefined
+	);
 
 	/**
 	 * キーを確かめるたびに振る番号。後から確かめ始めていれば、先の確かめの返事は古いので捨てる
@@ -56,9 +67,11 @@
 			return;
 		}
 		const request = ++keyRequest;
+		const baseUrl = view.aiBaseUrl;
 		const result = await editor.call<boolean>('has_ai_key', undefined, options);
 		if (request !== keyRequest || service !== view.aiService) return;
-		keyState = { service, hasKey: result.ok ? result.value : null };
+		if (service === 'openai' && baseUrl !== view.aiBaseUrl) return;
+		keyState = { service, baseUrl, hasKey: result.ok ? result.value : null };
 	}
 
 	/**
@@ -77,11 +90,32 @@
 		if (editor.modelService !== service) editor.switchService(view.aiModels, service);
 		checkKey(service);
 	});
+	/**
+	 * ベース URL が替わったら（この画面からでも、同期やバックアップから戻したことでも）、キーは URL ごとに置くので確かめ直す。
+	 * 前の URL への了解を求めているダイアログはやめる
+	 */
+	let shownBaseUrl: string | null = null;
+	$effect(() => {
+		const url = view.aiBaseUrl;
+		if (url === shownBaseUrl) return;
+		const first = shownBaseUrl === null;
+		shownBaseUrl = url;
+		if (first) return;
+		untrack(() => {
+			// ベース URL を使うのは OpenAI だけ
+			if (view.aiService !== 'openai') return;
+			if (consentService !== null && consentBaseUrl !== url) consentService = null;
+			// 打ちかけのキーは前の送り先のものなので、欄を閉じる
+			if (editingKeyFor !== null) cancelEditingKey();
+			checkKey(view.aiService);
+		});
+	});
 	$effect(() => {
 		const service = view.aiService;
 		const consent = untrack(() => consentService);
-		if (service !== 'none' && hasKey === true && view.aiConsent !== service && consent === null) {
+		if (service !== 'none' && hasKey === true && !view.aiConsented && consent === null) {
 			consentService = service;
+			consentBaseUrl = view.aiBaseUrl;
 		}
 	});
 
@@ -95,6 +129,8 @@
 	 * 出している間に設定が替わっても、読んでもらったのと同じサービスへの了解として送る（替わっていれば Rust 側が断る）
 	 */
 	let consentService = $state<AiService | null>(null);
+	/** 了解を求めている送り先のベース URL。出している間に替わっても、読んでもらった送り先への了解として送る */
+	let consentBaseUrl = $state('');
 	const editingKey = $derived(editingKeyFor === view.aiService);
 	let keyInput = $state('');
 
@@ -132,7 +168,7 @@
 		const service = consentService;
 		consentService = null;
 		if (!service || service === 'none' || service !== view.aiService) return;
-		await editor.call('consent_ai', { service });
+		await editor.call('consent_ai', { service, baseUrl: consentBaseUrl });
 	}
 
 	/** 今の AI サービスの既定のモデル */
@@ -142,6 +178,47 @@
 	 * 打って消している途中にまで既定を出すと、消した端から戻って打ち直せない。離れたら既定を出す
 	 */
 	let modelCleared = $state(false);
+
+	/**
+	 * ベース URL の欄。打っている間は保存せず、離れたときか Enter で保存する。送り先が変わると了解を取り直すので、
+	 * 打つたびに保存すると、打ち終える前に了解を求めてしまう。欄は既定のときも OpenAI の URL を値として見せる（モデルの欄と同じ）
+	 */
+	let baseUrlInput = $state(untrack(() => view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL));
+	let baseUrlError = $state('');
+	let editingBaseUrl = false;
+	/** 欄に入ったときの中身。打たずに離れたら保存しない（入っている間に同期で届いた URL を、古い中身で上書きしない） */
+	let baseUrlAtFocus = '';
+	$effect(() => {
+		const url = view.aiBaseUrl;
+		if (untrack(() => editingBaseUrl)) return;
+		baseUrlInput = url || CONSTANTS.OPENAI_BASE_URL;
+		baseUrlError = '';
+	});
+
+	async function saveBaseUrl() {
+		if (baseUrlInput === baseUrlAtFocus) {
+			baseUrlInput = view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL;
+			baseUrlError = '';
+			return;
+		}
+		const url = normalizeBaseUrl(baseUrlInput);
+		if (url === null) {
+			baseUrlError = m.settings_ai_base_url_invalid();
+			return;
+		}
+		baseUrlError = '';
+		baseUrlInput = url || CONSTANTS.OPENAI_BASE_URL;
+		if (url === view.aiBaseUrl) {
+			baseUrlAtFocus = baseUrlInput;
+			return;
+		}
+		// 保存できなければ、欄を今の送り先に戻す。打った URL のままだと、送り先が替わったように見える
+		if (!(await editor.call('set_ai_base_url', { url })).ok) {
+			baseUrlInput = view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL;
+		}
+		// Enter で保存して欄に残ったときは、保存した中身から先を打った分とみなす
+		baseUrlAtFocus = baseUrlInput;
+	}
 
 	async function setService(service: AiService) {
 		consentService = null;
@@ -176,9 +253,10 @@
 				{/each}
 			</NativeSelect.Root>
 		</Field.Field>
-		<Field.Description class="leading-snug">
-			{aiServiceInfo(view.aiService).description()}
-		</Field.Description>
+		{@const description = aiServiceInfo(view.aiService, view.aiBaseUrl).description()}
+		{#if description}
+			<Field.Description class="leading-snug">{description}</Field.Description>
+		{/if}
 		<!-- キーとモデルは選んだ AI サービスのものなので、サービスの下に字下げして置く。区切りの線は引かない -->
 		{#if view.aiService === 'mawok'}
 			<div class="mt-2 flex flex-col gap-5 pl-4">
@@ -202,6 +280,52 @@
 		{:else if view.aiService !== 'none'}
 			{@const modified = modifiedName(view, 'ai_models')}
 			<div class="mt-2 flex flex-col gap-5 pl-4">
+				<!-- 互換のサービスは、送り先を先に決める。キーは送り先ごとに置くので、先にキーを入れると OpenAI の分に入る -->
+				{#if view.aiService === 'openai'}
+					{@const baseUrlModified = modifiedName(view, 'ai_base_url')}
+					<Field.Content class="relative" data-modified={baseUrlModified}>
+						{#if baseUrlModified}
+							<SettingsModifiedMark class="inset-y-0 -left-4" />
+						{/if}
+						<Field.Field
+							orientation="horizontal"
+							class="min-h-8 *:data-[slot=field-label]:flex-none!"
+						>
+							<Field.Label for="ai-base-url">{m.settings_ai_base_url()}</Field.Label>
+							<SettingSyncToggle
+								{view}
+								name="ai_base_url"
+								label={m.settings_ai_base_url()}
+								call={editor.call}
+							/>
+							<Input
+								id="ai-base-url"
+								class="w-72 min-w-0 font-mono text-sm"
+								autocomplete="off"
+								spellcheck={false}
+								aria-invalid={baseUrlError !== ''}
+								bind:value={baseUrlInput}
+								onfocus={() => {
+									editingBaseUrl = true;
+									baseUrlAtFocus = baseUrlInput;
+								}}
+								onblur={() => {
+									editingBaseUrl = false;
+									saveBaseUrl();
+								}}
+								onkeydown={(event) => {
+									if (event.key === 'Enter' && !isImeKey(event)) saveBaseUrl();
+								}}
+							/>
+						</Field.Field>
+						{#if baseUrlError}
+							<Field.Error>{baseUrlError}</Field.Error>
+						{/if}
+						<Field.Description class="leading-snug">
+							{m.settings_ai_base_url_description()}
+						</Field.Description>
+					</Field.Content>
+				{/if}
 				<Field.Content>
 					<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
 					<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
@@ -310,14 +434,14 @@
 		<AlertDialog.Header>
 			<AlertDialog.Title>
 				{m.settings_ai_consent_title({
-					service: aiServiceInfo(consentService ?? view.aiService).name()
+					service: aiServiceInfo(consentService ?? view.aiService, consentBaseUrl).name()
 				})}
 			</AlertDialog.Title>
 			<AlertDialog.Description>
 				<div class="flex flex-col gap-2 text-left">
 					<p>{m.settings_ai_consent_what()}</p>
-					<p>{aiServiceInfo(consentService ?? view.aiService).consentWhere()}</p>
-					<p>{aiServiceInfo(consentService ?? view.aiService).consentHandling()}</p>
+					<p>{aiServiceInfo(consentService ?? view.aiService, consentBaseUrl).consentWhere()}</p>
+					<p>{aiServiceInfo(consentService ?? view.aiService, consentBaseUrl).consentHandling()}</p>
 				</div>
 			</AlertDialog.Description>
 		</AlertDialog.Header>

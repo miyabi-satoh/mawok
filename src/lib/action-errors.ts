@@ -13,6 +13,7 @@ const MESSAGES: Record<string, () => string> = {
 	'action.invalid_key': m.action_error_invalid_key,
 	'action.rejected': m.action_error_rejected,
 	'action.model_not_found': m.action_error_model_not_found,
+	'action.endpoint_not_found': m.action_error_endpoint_not_found,
 	'action.rate_limited': m.action_error_rate_limited,
 	'action.billing': m.action_error_billing,
 	'action.sign_in_required': m.action_error_sign_in_required,
@@ -60,7 +61,8 @@ const AI_SETTINGS_CODES = new Set([
 	'action.key_unreadable',
 	'action.invalid_key',
 	'action.rejected',
-	'action.model_not_found'
+	'action.model_not_found',
+	'action.endpoint_not_found'
 ]);
 
 /** 設定の「AI」で直す失敗か */

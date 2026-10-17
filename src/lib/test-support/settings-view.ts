@@ -46,8 +46,9 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		textColorDark: '',
 		inputGuidance: null,
 		aiService: 'none',
-		aiConsent: null,
+		aiConsented: false,
 		aiModels: {},
+		aiBaseUrl: '',
 		defaultAiModels: {
 			gemini: 'gemini-3.5-flash-lite',
 			anthropic: 'claude-haiku-4-5',
