@@ -1469,7 +1469,12 @@ async fn consent_ai(app: AppHandle, service: AiService, base_url: String) -> Res
     }
     update_config(&app, |config| {
         config.ai_consent = Some(service);
-        config.ai_consent_base_url = base_url;
+        // 記録するのは、検査済みの今のベース URL。OpenAI でなければ送り先の URL は無い
+        config.ai_consent_base_url = if service == AiService::OpenAi {
+            current_url
+        } else {
+            String::new()
+        };
     })?;
     Ok(())
 }

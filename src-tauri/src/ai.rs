@@ -274,8 +274,8 @@ pub(crate) fn request_error(error: reqwest::Error) -> ActionError {
     } else {
         Failure::Network
     };
-    // reqwest のエラーの文には URL が入るが、キーは URL に載せていない
-    ActionError::new(failure, error.to_string())
+    // reqwest のエラーの文には送り先の URL が入るので外す。互換のサービスには、パスに秘密を入れるものがありうる
+    ActionError::new(failure, error.without_url().to_string())
 }
 
 /// 返事の本文を JSON として読む
