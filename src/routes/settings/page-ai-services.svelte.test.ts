@@ -105,7 +105,8 @@ describe('設定画面の AI サービス選択', () => {
 		});
 		settings.current = {
 			...view('gemini'),
-			aiConsent: 'gemini'
+			aiConsent: 'gemini',
+			aiConsented: true
 		};
 		const screen = await renderAt(m.settings_category_ai);
 		await waitPending('has_ai_key');
@@ -118,7 +119,8 @@ describe('設定画面の AI サービス選択', () => {
 		const deleting = take('delete_ai_key');
 		await changeSettings({
 			...view('anthropic'),
-			aiConsent: 'anthropic'
+			aiConsent: 'anthropic',
+			aiConsented: true
 		});
 		await waitPending('has_ai_key');
 		take('has_ai_key').resolve(true);
@@ -145,7 +147,7 @@ describe('設定画面の AI サービス選択', () => {
 			}
 			return command === 'has_ai_key' ? Promise.resolve(hasKey) : Promise.resolve(undefined);
 		});
-		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
+		settings.current = { ...view('gemini'), aiConsent: 'gemini', aiConsented: true };
 		const screen = await renderAt(m.settings_category_ai);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_delete() }).click();
@@ -166,7 +168,7 @@ describe('設定画面の AI サービス選択', () => {
 			}
 			return Promise.resolve(undefined);
 		});
-		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
+		settings.current = { ...view('gemini'), aiConsent: 'gemini', aiConsented: true };
 		const screen = await renderAt(m.settings_category_ai);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();
@@ -185,7 +187,7 @@ describe('設定画面の AI サービス選択', () => {
 			if (command === 'set_ai_key') return Promise.reject('action.no_key');
 			return command === 'has_ai_key' ? Promise.resolve(false) : Promise.resolve(undefined);
 		});
-		settings.current = { ...view('gemini'), aiConsent: 'gemini' };
+		settings.current = { ...view('gemini'), aiConsent: 'gemini', aiConsented: true };
 		const screen = await renderAt(m.settings_category_ai);
 
 		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();

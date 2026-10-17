@@ -181,19 +181,27 @@ pub struct Config {
     pub ai_service: AiService,
     /// 送る内容と扱いを了解した AI サービス。AI サービスを替えたら了解を取り直す
     pub ai_consent: Option<AiService>,
+    /// OpenAI に了解したときのベース URL（`ai_base_url` と同じ形）。替えたら送り先が変わるので、了解を取り直す。
+    /// 了解と同じく同期しない
+    pub ai_consent_base_url: String,
     /// AI サービスごとのモデル。書いていないサービスは既定のモデルを使う。空文字は持たない
     pub ai_models: BTreeMap<AiService, String>,
     /// AI サービスが OpenAI のときに送る API の URL（`ai::normalize_base_url` で揃えたもの）。空なら OpenAI。
-    /// OpenAI と互換のサービスに送るときに替える。キーと組で使う送り先で、キーも同期しないので、デバイスごとに持つ
+    /// OpenAI と互換のサービスに送るときに替える。モデルと組で使うので、モデルと同じく同期する
     pub ai_base_url: String,
 }
 
 impl Config {
     /// AI が使えるか。サービス・キー・了解の記録がそろっていること。キーが未確認なら使えるものとして扱う
     pub fn ai_available(&self, key_available: Option<bool>) -> bool {
-        self.ai_service != AiService::None
-            && key_available != Some(false)
-            && self.ai_consent == Some(self.ai_service)
+        self.ai_service != AiService::None && key_available != Some(false) && self.ai_consented()
+    }
+
+    /// 今の AI サービスと送り先に了解しているか
+    pub fn ai_consented(&self) -> bool {
+        self.ai_consent == Some(self.ai_service)
+            && (self.ai_service != AiService::OpenAi
+                || self.ai_consent_base_url == self.ai_base_url)
     }
 
     /// AI サービスが OpenAI のときに送る API の URL
@@ -287,6 +295,7 @@ impl Default for Config {
             input_guidance: None,
             ai_service: AiService::default(),
             ai_consent: None,
+            ai_consent_base_url: String::new(),
             ai_models: BTreeMap::new(),
             ai_base_url: String::new(),
         }
@@ -494,6 +503,7 @@ pub mod key {
     pub const INPUT_GUIDANCE: &str = "input_guidance";
     pub const AI_SERVICE: &str = "ai_service";
     pub const AI_CONSENT: &str = "ai_consent";
+    pub const AI_CONSENT_BASE_URL: &str = "ai_consent_base_url";
     pub const AI_MODELS: &str = "ai_models";
     pub const AI_BASE_URL: &str = "ai_base_url";
 }
@@ -546,6 +556,7 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     field!(key::INPUT_GUIDANCE, input_guidance);
     field!(key::AI_SERVICE, ai_service);
     field!(key::AI_CONSENT, ai_consent);
+    field!(key::AI_CONSENT_BASE_URL, ai_consent_base_url);
     field!(key::AI_BASE_URL, ai_base_url);
     // 既定のモデルと同じものは書かない。版を上げて既定のモデルを替えたときに、変えていない人へ届くようにする
     let models: BTreeMap<&AiService, &String> = config
@@ -697,6 +708,7 @@ const KNOWN_SETTINGS: &[&str] = &[
     key::INPUT_GUIDANCE,
     key::AI_SERVICE,
     key::AI_CONSENT,
+    key::AI_CONSENT_BASE_URL,
     key::AI_MODELS,
     key::AI_BASE_URL,
 ];
@@ -756,6 +768,9 @@ pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> bool {
         key::INPUT_GUIDANCE => set(&mut config.input_guidance, value),
         key::AI_SERVICE => set(&mut config.ai_service, value),
         key::AI_CONSENT => set(&mut config.ai_consent, value),
+        key::AI_CONSENT_BASE_URL => set_checked(&mut config.ai_consent_base_url, value, |url| {
+            crate::ai::normalize_base_url(url).as_deref() == Some(url.as_str())
+        }),
         // 空のモデルは持たない。画面でも「既定のモデル」として項目ごと外す
         key::AI_MODELS => set_checked(&mut config.ai_models, value, |models| {
             models
@@ -948,6 +963,31 @@ mod tests {
             json!({ "copy": "CommandOrControl+KeyJ" })
         );
         assert_eq!(entries["ai_models"], json!({ "anthropic": "custom" }));
+    }
+
+    #[test]
+    fn consent_to_openai_covers_only_the_base_url_consented_to() {
+        let consented = Config {
+            ai_service: AiService::OpenAi,
+            ai_consent: Some(AiService::OpenAi),
+            ai_base_url: "https://api.deepseek.com".to_string(),
+            ai_consent_base_url: "https://api.deepseek.com".to_string(),
+            ..Config::default()
+        };
+        assert!(consented.ai_consented());
+        // 同期などで送り先が替わったら、了解していないものとして取り直す
+        let moved = Config {
+            ai_base_url: "http://localhost:11434/v1".to_string(),
+            ..consented.clone()
+        };
+        assert!(!moved.ai_consented());
+        // ほかのサービスには、ベース URL は関わらない
+        let gemini = Config {
+            ai_service: AiService::Gemini,
+            ai_consent: Some(AiService::Gemini),
+            ..moved
+        };
+        assert!(gemini.ai_consented());
     }
 
     #[test]

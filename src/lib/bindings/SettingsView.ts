@@ -108,6 +108,10 @@ textColorDark: string, aiService: AiService,
  */
 aiConsent: AiService | null, 
 /**
+ * 今の AI サービスと送り先（OpenAI ならベース URL も）に了解しているか
+ */
+aiConsented: boolean, 
+/**
  * AI サービスごとに設定したモデル。書いていないサービスは既定のモデル
  */
 aiModels: { [key in AiService]?: string }, 

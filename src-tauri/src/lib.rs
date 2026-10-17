@@ -345,6 +345,8 @@ struct SettingsView {
     ai_service: AiService,
     /// 送る内容と扱いを了解した AI サービス
     ai_consent: Option<AiService>,
+    /// 今の AI サービスと送り先（OpenAI ならベース URL も）に了解しているか
+    ai_consented: bool,
     /// AI サービスごとに設定したモデル。書いていないサービスは既定のモデル
     ai_models: BTreeMap<AiService, String>,
     /// AI サービスごとの既定のモデル。既定は Rust 側だけで決める
@@ -378,6 +380,7 @@ fn settings_view(state: &AppState) -> SettingsView {
         locale: lang.code(),
         ai_service: config.ai_service,
         ai_consent: config.ai_consent,
+        ai_consented: config.ai_consented(),
         ai_models: config.ai_models,
         ai_base_url: config.ai_base_url,
         default_ai_models: AiService::ALL
@@ -985,7 +988,8 @@ fn save_synced_config(
             warn!("couldn't clear draft history after sync: {error}");
         }
     }
-    if next.ai_service != current.ai_service {
+    // キーはサービスごと、OpenAI はベース URL ごとに置くので、替わったら確かめ直す
+    if next.ai_service != current.ai_service || next.ai_base_url != current.ai_base_url {
         state.forget_ai_key();
     }
     Ok(Some(rejected))
@@ -1443,20 +1447,30 @@ async fn ai_key_exists(service: AiService, user: String) -> Result<bool, String>
     .inspect_err(|error| warn!("couldn't check the AI key: {error}"))
 }
 
-/// 送る内容と扱いを了解する。画面が出した AI サービスが、今の AI サービスと違えば断る。
+/// 送る内容と扱いを了解する。画面が出した AI サービスと送り先（OpenAI ならベース URL）が、今のものと違えば断る。
 #[tauri::command]
-async fn consent_ai(app: AppHandle, service: AiService) -> Result<(), String> {
+async fn consent_ai(app: AppHandle, service: AiService, base_url: String) -> Result<(), String> {
     info!("acknowledge AI with {}", service.name());
     let action_state = app.state::<ActionState>();
     let _settings = action_state.settings.lock().await;
-    let current = app.state::<AppState>().config.lock().unwrap().ai_service;
+    let (current, current_url) = {
+        let state = app.state::<AppState>();
+        let config = state.config.lock().unwrap();
+        (config.ai_service, config.ai_base_url.clone())
+    };
     if current != service || service == AiService::None {
         return Err(format!(
             "the AI service changed to {} before consenting",
             current.name(),
         ));
     }
-    update_config(&app, |config| config.ai_consent = Some(service))?;
+    if service == AiService::OpenAi && current_url != base_url {
+        return Err("the base URL changed before consenting".to_string());
+    }
+    update_config(&app, |config| {
+        config.ai_consent = Some(service);
+        config.ai_consent_base_url = base_url;
+    })?;
     Ok(())
 }
 
@@ -1498,19 +1512,15 @@ async fn set_ai_base_url(app: AppHandle, url: String) -> Result<(), String> {
     if app.state::<AppState>().config.lock().unwrap().ai_base_url == url {
         return Ok(());
     }
-    // 送り先のホストは利用者が選んだもので、送った文は載らないので、ログに残す
-    info!(
-        "set AI base URL: {}",
-        if url.is_empty() { "default" } else { &url }
-    );
+    // ログにはホストだけを出す。パスに秘密を入れるサービスがありうるため
+    let host = reqwest::Url::parse(&url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string));
+    info!("set AI base URL: {}", host.as_deref().unwrap_or("default"));
     // キーは送り先ごとに置くので、替えた先のキーを確かめ直す
     app.state::<AppState>().forget_ai_key();
-    update_config(&app, |config| {
-        config.ai_base_url = url;
-        if config.ai_consent == Some(AiService::OpenAi) {
-            config.ai_consent = None;
-        }
-    })
+    // 了解は送り先の URL と組で記録しているので、替えた先には了解していないことになる（Config::ai_consented）
+    update_config(&app, |config| config.ai_base_url = url)
 }
 
 /// 今の表示言語の既定の定型文。設定画面は、打っている途中の定型文を消さないよう、並びを自分で持ち、

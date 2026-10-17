@@ -34,6 +34,7 @@ function setSettings(options: { proAvailable?: boolean } = {}) {
 	settings.current = settingsView({
 		aiService: 'mawok',
 		aiConsent: 'mawok',
+		aiConsented: true,
 		mawokAccountSignedIn: signedIn,
 		...options
 	});

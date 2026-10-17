@@ -185,7 +185,7 @@
 	"settings_ai_service_description_openai": "Only when you run an AI action, the text and the instruction are sent to OpenAI's API.",
 	"settings_ai_service_description_openai_compatible": "Only when you run an AI action, the text and the instruction are sent to {host}.",
 	"settings_ai_base_url": "Base URL",
-	"settings_ai_base_url_description": "To send to a service compatible with OpenAI (such as DeepSeek, OpenRouter, or Ollama), change this to that service's API URL. Leave empty to go back to OpenAI.",
+	"settings_ai_base_url_description": "To send to a service compatible with OpenAI (such as DeepSeek, OpenRouter, or Ollama), change this to that service's API URL, and use that service's model and API key. Enter something as the API key even if the service needs none. Leave empty to go back to OpenAI.",
 	"settings_ai_base_url_invalid": "Enter a URL that starts with http:// or https://.",
 	"settings_ai_consent_where_openai_compatible": "Where: {url} (the account of the API key you entered).",
 	"settings_ai_consent_handling_openai_compatible": "Handling: depends on the terms of the service you send to. What you send can't be taken back.",

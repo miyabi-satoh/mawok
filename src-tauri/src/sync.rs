@@ -536,6 +536,7 @@ pub const SYNCABLE_SETTING_NAMES: &[&str] = &[
     "input_guidance",
     "ai_service",
     "ai_models",
+    "ai_base_url",
 ];
 
 pub fn known_syncable_setting(name: &str) -> bool {
@@ -657,6 +658,7 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
             "input_guidance" => json(config.input_guidance.clone()),
             "ai_service" => json(config.ai_service),
             "ai_models" => json(config.ai_models.clone()),
+            "ai_base_url" => json(config.ai_base_url.clone()),
             _ => unreachable!("all syncable setting names have a value"),
         };
         items.insert(setting_item(name), value);
@@ -1551,6 +1553,7 @@ pub enum SyncValue {
     InputGuidance(Option<String>),
     AiService(AiService),
     AiModels(BTreeMap<AiService, String>),
+    AiBaseUrl(String),
     Hotkey(String),
     TextWindowKeys(DraftKeys),
     TextFontFamily(String),
@@ -1589,7 +1592,7 @@ pub fn restore_backup(current: &Config, backup: &Config) -> Config {
     let mut restored = Config {
         autostart: current.autostart,
         ai_consent: current.ai_consent,
-        ai_base_url: current.ai_base_url.clone(),
+        ai_consent_base_url: current.ai_consent_base_url.clone(),
         sync_settings: current.sync_settings,
         sync_keys: current.sync_keys,
         sync_replacements: current.sync_replacements,
@@ -1701,6 +1704,7 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
             "input_guidance" => SyncValue::InputGuidance(config.input_guidance.clone()),
             "ai_service" => SyncValue::AiService(config.ai_service),
             "ai_models" => SyncValue::AiModels(config.ai_models.clone()),
+            "ai_base_url" => SyncValue::AiBaseUrl(config.ai_base_url.clone()),
             "text_font_family" => SyncValue::TextFontFamily(config.text_font_family.clone()),
             _ => return None,
         },
@@ -2891,14 +2895,14 @@ mod tests {
             sync_settings: false,
             sync_history: false,
             yielded_draft_keys: crate::draft_keys::DraftAction::ALL.to_vec(),
-            ai_base_url: "http://localhost:11434/v1".to_string(),
+            ai_consent_base_url: "http://localhost:11434/v1".to_string(),
             ..Config::default()
         };
         let items = config_items(&config);
         for name in [
             "autostart",
             "ai_consent",
-            "ai_base_url",
+            "ai_consent_base_url",
             "sync_settings",
             "sync_history",
             "yielded_draft_keys",

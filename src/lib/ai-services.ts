@@ -79,24 +79,24 @@ export function aiServiceInfo(service: AiService, baseUrl = '') {
  * OpenAI の URL と同じなら空（既定）にする
  */
 export function normalizeBaseUrl(input: string): string | null {
-	const trimmed = input.trim().replace(/\/+$/, '');
+	const trimmed = input.trim();
 	if (trimmed === '') return '';
+	if (trimmed.includes('?') || trimmed.includes('#')) return null;
 	let url: URL;
 	try {
 		url = new URL(trimmed);
 	} catch {
 		return null;
 	}
-	// ホストの大文字などの書き方の違いでは、OpenAI を互換のサービスと取り違えない
-	if (url.href.replace(/\/+$/, '') === CONSTANTS.OPENAI_BASE_URL) return '';
 	const valid =
 		(url.protocol === 'http:' || url.protocol === 'https:') &&
 		url.hostname !== '' &&
 		url.username === '' &&
-		url.password === '' &&
-		!trimmed.includes('?') &&
-		!trimmed.includes('#');
-	return valid ? trimmed : null;
+		url.password === '';
+	if (!valid) return null;
+	// 置くのは解釈した後の形（ホストを小文字にするなど）
+	const normalized = url.href.replace(/\/+$/, '');
+	return normalized === CONSTANTS.OPENAI_BASE_URL ? '' : normalized;
 }
 
 /** AI サービスごとに設定したモデルのうち、そのサービスのもの。書いていなければ空（既定のモデル） */

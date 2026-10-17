@@ -1607,11 +1607,11 @@ describe('設定画面の AI サービス', () => {
 		invoked.mockImplementation((command, args) => {
 			if (command === 'set_ai_key') {
 				responses.has_ai_key = true;
-				settings.current = { ...settings.current!, aiConsent: null };
+				settings.current = { ...settings.current!, aiConsent: null, aiConsented: false };
 				return Promise.resolve(undefined);
 			}
 			if (command === 'consent_ai') {
-				settings.current = { ...settings.current!, aiConsent: 'gemini' };
+				settings.current = { ...settings.current!, aiConsent: 'gemini', aiConsented: true };
 				return Promise.resolve(undefined);
 			}
 			return command in responses
@@ -1640,13 +1640,13 @@ describe('設定画面の AI サービス', () => {
 		await dialog.getByRole('button', { name: m.settings_ai_consent_accept() }).click();
 
 		await vi.waitFor(() =>
-			expect(invoked).toHaveBeenCalledWith('consent_ai', { service: 'gemini' })
+			expect(invoked).toHaveBeenCalledWith('consent_ai', { service: 'gemini', baseUrl: '' })
 		);
 		await expect.element(screen.getByRole('alertdialog')).not.toBeInTheDocument();
 	});
 
 	it('キーがあり了解の記録が無ければ、分類を開いたときに了解を求める', async () => {
-		settings.current = { ...view(), aiService: 'gemini', aiConsent: null };
+		settings.current = { ...view(), aiService: 'gemini', aiConsent: null, aiConsented: false };
 		responses.has_ai_key = true;
 		const screen = await renderAt(m.settings_category_ai);
 
@@ -1663,12 +1663,13 @@ describe('設定画面の AI サービス', () => {
 			...view(),
 			aiService: 'gemini',
 			aiConsent: 'gemini',
+			aiConsented: true,
 			aiModels: { gemini: 'custom-model' }
 		};
 		responses.has_ai_key = true;
 		invoked.mockImplementation((command, args) => {
 			if (command === 'set_ai_key') {
-				settings.current = { ...settings.current!, aiConsent: null };
+				settings.current = { ...settings.current!, aiConsent: null, aiConsented: false };
 				return Promise.resolve(undefined);
 			}
 			return command in responses

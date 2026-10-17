@@ -81,8 +81,9 @@
 	$effect(() => {
 		const service = view.aiService;
 		const consent = untrack(() => consentService);
-		if (service !== 'none' && hasKey === true && view.aiConsent !== service && consent === null) {
+		if (service !== 'none' && hasKey === true && !view.aiConsented && consent === null) {
 			consentService = service;
+			consentBaseUrl = view.aiBaseUrl;
 		}
 	});
 
@@ -96,6 +97,8 @@
 	 * 出している間に設定が替わっても、読んでもらったのと同じサービスへの了解として送る（替わっていれば Rust 側が断る）
 	 */
 	let consentService = $state<AiService | null>(null);
+	/** 了解を求めている送り先のベース URL。出している間に替わっても、読んでもらった送り先への了解として送る */
+	let consentBaseUrl = '';
 	const editingKey = $derived(editingKeyFor === view.aiService);
 	let keyInput = $state('');
 
@@ -133,7 +136,7 @@
 		const service = consentService;
 		consentService = null;
 		if (!service || service === 'none' || service !== view.aiService) return;
-		await editor.call('consent_ai', { service });
+		await editor.call('consent_ai', { service, baseUrl: consentBaseUrl });
 	}
 
 	/** 今の AI サービスの既定のモデル */
@@ -167,7 +170,11 @@
 		baseUrlError = '';
 		baseUrlInput = url || CONSTANTS.OPENAI_BASE_URL;
 		if (url === view.aiBaseUrl) return;
-		await editor.call('set_ai_base_url', { url });
+		// 保存できなければ、欄を今の送り先に戻す。打った URL のままだと、送り先が替わったように見える
+		if (!(await editor.call('set_ai_base_url', { url })).ok) {
+			baseUrlInput = view.aiBaseUrl || CONSTANTS.OPENAI_BASE_URL;
+			return;
+		}
 		// キーは送り先ごとに置くので、替えた先のキーを確かめ直す
 		await checkKey(view.aiService);
 	}
@@ -329,6 +336,12 @@
 							class="min-h-8 *:data-[slot=field-label]:flex-none!"
 						>
 							<Field.Label for="ai-base-url">{m.settings_ai_base_url()}</Field.Label>
+							<SettingSyncToggle
+								{view}
+								name="ai_base_url"
+								label={m.settings_ai_base_url()}
+								call={editor.call}
+							/>
 							<Input
 								id="ai-base-url"
 								class="w-72 min-w-0 font-mono text-sm"

@@ -108,22 +108,29 @@ pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 /// http・https で、ホストがあり、利用者名・パスワード・問い合わせ・断片の無いものだけを受ける（後ろに `/chat/completions` を足して送るため）。
 /// http も受ける。手元や LAN で動かす Ollama は https で待たないため
 pub fn normalize_base_url(input: &str) -> Option<String> {
-    let trimmed = input.trim().trim_end_matches('/');
+    let trimmed = input.trim();
     if trimmed.is_empty() {
         return Some(String::new());
     }
-    let url = reqwest::Url::parse(trimmed).ok()?;
-    // ホストの大文字などの書き方の違いでは、OpenAI を互換のサービスと取り違えない
-    if url.as_str().trim_end_matches('/') == OPENAI_BASE_URL {
-        return Some(String::new());
+    // 問い合わせと断片は、空のもの（末尾の `?` だけ）も断る。画面の検査（src/lib/ai-services.ts）と揃えるため
+    if trimmed.contains(['?', '#']) {
+        return None;
     }
+    let url = reqwest::Url::parse(trimmed).ok()?;
     let valid = matches!(url.scheme(), "http" | "https")
         && url.host_str().is_some_and(|host| !host.is_empty())
         && url.username().is_empty()
-        && url.password().is_none()
-        && url.query().is_none()
-        && url.fragment().is_none();
-    valid.then(|| trimmed.to_string())
+        && url.password().is_none();
+    // 置くのは、解釈した後の形（ホストを小文字にするなど）。送る URL と資格情報管理の名前を、書き方の違いで分けないため
+    let normalized = url.as_str().trim_end_matches('/');
+    if !valid {
+        return None;
+    }
+    Some(if normalized == OPENAI_BASE_URL {
+        String::new()
+    } else {
+        normalized.to_string()
+    })
 }
 
 /// Chat Completions（developers.openai.com の api/reference の chat/create）に送る本文。
@@ -842,6 +849,12 @@ mod tests {
             ("https://user:secret@example.com/v1", None),
             ("https://example.com/v1?key=1", None),
             ("https://example.com/v1#x", None),
+            ("https://example.com/v1?", None),
+            // 解釈した後の形で置く
+            (
+                "https://API.DeepSeek.com/v1/",
+                Some("https://api.deepseek.com/v1"),
+            ),
         ] {
             assert_eq!(normalize_base_url(input).as_deref(), expected, "{input}");
         }

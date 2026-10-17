@@ -47,6 +47,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		inputGuidance: null,
 		aiService: 'none',
 		aiConsent: null,
+		aiConsented: false,
 		aiModels: {},
 		aiBaseUrl: '',
 		defaultAiModels: {
