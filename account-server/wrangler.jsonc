@@ -45,7 +45,6 @@
 			// 値付けの値 (→ src/pricing.ts)。原価の割合が分かるので vars に書かない。
 			"PURCHASE_GRANT_MILLI_YEN",
 			"FREE_GRANT_MILLI_YEN",
-			"FREE_MONTHLY_CAP_YEN",
 			"PRO_MONTHLY_GRANT_MILLI_YEN",
 			"PRO_YEARLY_GRANT_MILLI_YEN",
 			"USD_JPY",
@@ -84,7 +83,6 @@
 					"GEMINI_API_KEY",
 					"PURCHASE_GRANT_MILLI_YEN",
 					"FREE_GRANT_MILLI_YEN",
-					"FREE_MONTHLY_CAP_YEN",
 					"PRO_MONTHLY_GRANT_MILLI_YEN",
 					"PRO_YEARLY_GRANT_MILLI_YEN",
 					"USD_JPY",
