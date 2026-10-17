@@ -2589,14 +2589,16 @@ pub async fn sync_once(
 /// 手元で変えた同期の項目（oplog に積む名前）。保存の前と後の設定を、窓口に置く粒度で比べる。
 /// 同期を止めている種類の項目も積む。後でオンにしたときに、止めていた間に変えたものとして送る
 pub fn changed_items(before: &Config, after: &Config) -> Vec<String> {
-    // 既定の定型文のまま（None）の側は、既定の行を持つものとして比べる。初めて定型文を変えたときに、
-    // 触っていない既定の行まで今の時刻で積むと、ほかのデバイスで先に直した既定の行を後勝ちで巻き戻す
+    // 片方だけが既定の定型文のまま（None）なら、その側は既定の行を持つものとして比べる。初めて定型文を変えたときに、
+    // 触っていない既定の行まで今の時刻で積むと、ほかのデバイスで先に直した既定の行を後勝ちで巻き戻す。
+    // 既定の行は、変える前の言語のものにする（両方 None で言語だけ替えたときは、行を積まない）
+    let both_default = before.snippets.is_none() && after.snippets.is_none();
     let items = |config: &Config| {
-        if config.snippets.is_some() {
+        if both_default || config.snippets.is_some() {
             return config_items(config);
         }
         config_items(&Config {
-            snippets: Some(default_snippets_for(config.language)),
+            snippets: Some(default_snippets_for(before.language)),
             ..config.clone()
         })
     };
@@ -3732,6 +3734,15 @@ mod tests {
             ..before.clone()
         };
         assert_eq!(changed_items(&before, &after), [key.name()]);
+        // 既定の定型文のまま言語だけを替えても、既定の行は積まない
+        let switched = Config {
+            language: Language::Ja,
+            ..before.clone()
+        };
+        assert_eq!(
+            changed_items(&before, &switched),
+            [setting_item("language").name()]
+        );
     }
 
     #[test]

@@ -1743,17 +1743,16 @@ fn load_sync_record(app: &AppHandle, key_id: &str) -> Option<sync::State> {
     read_sync_record(&app.state::<AppState>()).filter(|state| state.key_id == key_id)
 }
 
-/// まだ窓口へ送っていない手元の変更（oplog）。読めなければ空にして、記録の無い項目だけを書く
-fn load_outbox(app: &AppHandle) -> BTreeMap<String, u64> {
+/// まだ窓口へ送っていない手元の変更（oplog）。読めなければ None。空として同期すると、送っていない手元の変更を
+/// 窓口の値で上書きする
+fn load_outbox(app: &AppHandle) -> Option<BTreeMap<String, u64>> {
     app.state::<AppState>()
         .store
         .lock()
         .unwrap()
         .outbox()
-        .unwrap_or_else(|error| {
-            warn!("couldn't read the sync outbox: {error}");
-            BTreeMap::new()
-        })
+        .inspect_err(|error| warn!("couldn't read the sync outbox: {error}"))
+        .ok()
 }
 
 async fn run_sync(app: &AppHandle) {
@@ -1768,9 +1767,9 @@ async fn run_sync(app: &AppHandle) {
         (config.clone(), generation, record_generation, outbox)
     };
     let kinds = sync::kinds(&config);
-    if !kinds.any() {
+    let Some(outbox) = outbox.filter(|_| kinds.any()) else {
         return;
-    }
+    };
     let Some(access) = sync_access(app).await else {
         return;
     };
@@ -4028,25 +4027,37 @@ fn autostart_at_launch(
     }
 }
 
-/// 設定の置き場を開く。読めなければ、元のファイルを写して退けてから作り直す（docs/config.md「読めないとき」）。
-/// 作り直せもしなければ、保存しない置き場で動かす
+/// 設定の置き場を開く。壊れていれば、元のファイルを写して退けてから作り直す（docs/config.md「読めないとき」）。
+/// 作り直せもしないときと、壊れてはいないが開けないとき（ロック・権限など）は、ファイルに手を付けず、保存しない置き場で動かす
 fn open_store(path: &std::path::Path) -> (store::Store, Option<ConfigProblem>) {
     let opened = path
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)
-        .map_err(|error| error.to_string())
-        .and_then(|()| store::Store::open(path))
-        .and_then(|store| store.entries().map(|_| store));
+        .map_err(|error| store::OpenError {
+            broken: false,
+            message: error.to_string(),
+        })
+        .and_then(|()| store::Store::open(path));
     let error = match opened {
         Ok(store) => return (store, None),
         Err(error) => error,
     };
-    warn!("couldn't open the settings store: {error}");
+    warn!("couldn't open the settings store: {}", error.message);
+    if !error.broken {
+        return (
+            store::Store::in_memory(),
+            Some(ConfigProblem::Unsaved(error.message)),
+        );
+    }
     let reset = atomic_file::back_up(path, SystemTime::now())
         .and_then(|copy| std::fs::remove_file(path).map(|()| copy))
         .and_then(|copy| store::remove_side_files(path).map(|()| copy))
         .map_err(|error| error.to_string())
-        .and_then(|copy| store::Store::open(path).map(|store| (store, copy)));
+        .and_then(|copy| {
+            store::Store::open(path)
+                .map(|store| (store, copy))
+                .map_err(|error| error.message)
+        });
     match reset {
         Ok((store, copy)) => {
             let name = copy
@@ -4887,6 +4898,17 @@ mod tests {
         // 作り直した置き場は、次の起動でそのまま開ける
         drop(store);
         assert!(open_store(&path).1.is_none());
+    }
+
+    #[test]
+    fn a_store_that_only_fails_to_open_is_left_as_it_is() {
+        let dir = test_support::TempDir::new("lib-unopenable-store");
+        // 置き場の名前のフォルダーは、SQLite が開けない（壊れたファイルではない）
+        let path = dir.join(store::FILE_NAME);
+        std::fs::create_dir(&path).unwrap();
+        let (_, problem) = open_store(&path);
+        assert!(matches!(problem, Some(ConfigProblem::Unsaved(_))));
+        assert!(path.is_dir());
     }
 
     #[test]

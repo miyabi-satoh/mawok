@@ -14,6 +14,27 @@ pub struct Store {
     connection: Connection,
 }
 
+/// 置き場を開けなかった理由
+#[derive(Debug)]
+pub struct OpenError {
+    /// ファイルが SQLite のものでないか、壊れている。作り直すしかない。ほかの失敗（ロック・権限・入出力）は、
+    /// 時間をおけば開けることがあるので、ファイルに手を付けない
+    pub broken: bool,
+    pub message: String,
+}
+
+impl From<rusqlite::Error> for OpenError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self {
+            broken: matches!(
+                error.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+            ),
+            message: error.to_string(),
+        }
+    }
+}
+
 /// 1回のトランザクションで書くもの。書かないものは既定のまま（None・空）にする
 #[derive(Default)]
 pub struct Commit<'a> {
@@ -28,9 +49,17 @@ pub struct Commit<'a> {
 }
 
 impl Store {
-    /// 開く。無ければ作る。SQLite のファイルとして読めなければ Err（呼ぶ側で退けて作り直す）
-    pub fn open(path: &Path) -> Result<Self, String> {
-        Self::init(Connection::open(path).map_err(|error| error.to_string())?)
+    /// 開く。無ければ作る。設定の項目を読み通せるかまで確かめる
+    pub fn open(path: &Path) -> Result<Self, OpenError> {
+        let store = Self::init(Connection::open(path)?)?;
+        store
+            .connection
+            .prepare("SELECT name, value FROM settings")?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .try_for_each(|row| row.map(|_| ()))?;
+        Ok(store)
     }
 
     /// 置き場を作れないときと、テストで使う。中身はアプリを終えると消える
@@ -39,10 +68,8 @@ impl Store {
             .expect("an in-memory database initializes")
     }
 
-    fn init(connection: Connection) -> Result<Self, String> {
-        let version: i64 = connection
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|error| error.to_string())?;
+    fn init(connection: Connection) -> rusqlite::Result<Self> {
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if version == 0 {
             connection
                 .execute_batch(
@@ -52,8 +79,7 @@ impl Store {
                      CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
                      PRAGMA user_version = 1;
                      COMMIT;",
-                )
-                .map_err(|error| error.to_string())?;
+                )?;
         } else if version > SCHEMA_VERSION {
             // 新しい版が足した表や列は、この版では読まずに残す。項目の値の読み方は、知らない項目を読み飛ばすので変わらない
             log::info!("settings database version {version} is newer than {SCHEMA_VERSION}");
@@ -280,6 +306,6 @@ mod tests {
         let dir = crate::test_support::TempDir::new("store-broken");
         let path = dir.join(FILE_NAME);
         std::fs::write(&path, "not a database").unwrap();
-        assert!(Store::open(&path).is_err());
+        assert!(Store::open(&path).is_err_and(|error| error.broken));
     }
 }
