@@ -101,6 +101,8 @@
 		if (first) return;
 		untrack(() => {
 			if (consentService !== null && consentBaseUrl !== url) consentService = null;
+			// 打ちかけのキーは前の送り先のものなので、欄を閉じる
+			if (editingKeyFor !== null) cancelEditingKey();
 			checkKey(view.aiService);
 		});
 	});

@@ -121,8 +121,13 @@ pub fn normalize_base_url(input: &str) -> Option<String> {
         && url.host_str().is_some_and(|host| !host.is_empty())
         && url.username().is_empty()
         && url.password().is_none();
-    // 置くのは、解釈した後の形（ホストを小文字にするなど）。送る URL と資格情報管理の名前を、書き方の違いで分けないため
+    // 置くのは、解釈した後の形（ホストを小文字にするなど）。送る URL と資格情報管理の名前を、書き方の違いで分けないため。
+    // サービスの文書にある `/chat/completions` まで貼られたら、それを除く（送るときに足すので）
     let normalized = url.as_str().trim_end_matches('/');
+    let normalized = normalized
+        .strip_suffix("/chat/completions")
+        .unwrap_or(normalized)
+        .trim_end_matches('/');
     if !valid {
         return None;
     }
@@ -850,6 +855,10 @@ mod tests {
             ("https://example.com/v1?key=1", None),
             ("https://example.com/v1#x", None),
             ("https://example.com/v1?", None),
+            (
+                "https://openrouter.ai/api/v1/chat/completions",
+                Some("https://openrouter.ai/api/v1"),
+            ),
             // 解釈した後の形で置く
             (
                 "https://API.DeepSeek.com/v1/",

@@ -94,8 +94,11 @@ export function normalizeBaseUrl(input: string): string | null {
 		url.username === '' &&
 		url.password === '';
 	if (!valid) return null;
-	// 置くのは解釈した後の形（ホストを小文字にするなど）
-	const normalized = url.href.replace(/\/+$/, '');
+	// 置くのは解釈した後の形（ホストを小文字にするなど）。`/chat/completions` まで貼られたら除く（送るときに足すので）
+	const normalized = url.href
+		.replace(/\/+$/, '')
+		.replace(/\/chat\/completions$/, '')
+		.replace(/\/+$/, '');
 	return normalized === CONSTANTS.OPENAI_BASE_URL ? '' : normalized;
 }
 
