@@ -16,7 +16,7 @@ type ServiceText = {
 const SERVICE_TEXT: Record<AiService, ServiceText> = {
 	none: {
 		name: m.settings_ai_service_none,
-		description: m.settings_ai_service_description_none,
+		description: () => '',
 		consentWhere: () => '',
 		consentHandling: () => ''
 	},

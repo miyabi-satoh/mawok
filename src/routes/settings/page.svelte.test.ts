@@ -1569,13 +1569,12 @@ describe('設定画面の AI サービス', () => {
 		expect(invoked).toHaveBeenCalledWith('has_ai_key', undefined);
 	});
 
-	it('AI サービスの選択肢を「使わない」から表示し、選んだサービスの説明を出す', async () => {
+	it('AI サービスの選択肢を「使わない」から表示し、選んだサービスの送り先の説明を出す', async () => {
 		const screen = await renderAt(m.settings_category_ai);
 
 		const service = screen.getByRole('combobox', { name: m.settings_ai_service() });
 		await expect.element(service).toHaveValue('none');
 		await expect.element(service).toHaveDisplayValue(m.settings_ai_service_none());
-		await expect.element(screen.getByText(m.settings_ai_service_description_none())).toBeVisible();
 
 		settings.current = { ...view(), aiService: 'anthropic' };
 		await expect.element(service).toHaveDisplayValue('Anthropic');
@@ -1768,29 +1767,6 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		// 最初の保存で Rust（のモック）が振った ID を、続きの保存でも渡す
 		expect(saved.at(-1)).toEqual([{ ...ai('要約', '要約してください。'), id: 'snippets-0' }]);
 		expect(saved.every((snippets) => snippets.length === 1)).toBe(true);
-	});
-
-	it('説明は、一覧を出すキーを入れて並びの上に一度だけ出す', async () => {
-		const snippets = [newSnippet('', '@sh sort'), newSnippet('', '@sh date')];
-		const description = m.settings_snippets_description({ key: 'Ctrl+K' });
-
-		settings.current = { ...view(), platform: 'windows', snippets };
-		const screen = await renderAt(m.settings_category_snippets);
-		await openRows(screen);
-		await expect.element(screen.getByText(description)).toBeVisible();
-		expect(screen.getByText(description).all()).toHaveLength(1);
-		const fields = screen.getByLabelText(m.settings_snippets_body()).all();
-		expect(fields).toHaveLength(2);
-		await expect.element(fields[0]).toHaveAccessibleDescription(description);
-		await expect.element(fields[1]).toHaveAccessibleDescription(description);
-		screen.unmount();
-
-		settings.current = { ...view(), platform: 'macos', snippets };
-		const mac = await renderAt(m.settings_category_snippets);
-		await openRows(mac);
-		await expect
-			.element(mac.getByText(m.settings_snippets_description({ key: '⌘K' })))
-			.toBeVisible();
 	});
 
 	it('@sh の行でだけ文字コードを、@ai・@sh の行でだけ結果の出し方を出し、選んだ出し方と文字コードを保存する', async () => {

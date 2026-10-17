@@ -253,9 +253,10 @@
 				{/each}
 			</NativeSelect.Root>
 		</Field.Field>
-		<Field.Description class="leading-snug">
-			{aiServiceInfo(view.aiService, view.aiBaseUrl).description()}
-		</Field.Description>
+		{@const description = aiServiceInfo(view.aiService, view.aiBaseUrl).description()}
+		{#if description}
+			<Field.Description class="leading-snug">{description}</Field.Description>
+		{/if}
 		<!-- キーとモデルは選んだ AI サービスのものなので、サービスの下に字下げして置く。区切りの線は引かない -->
 		{#if view.aiService === 'mawok'}
 			<div class="mt-2 flex flex-col gap-5 pl-4">

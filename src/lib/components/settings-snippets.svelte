@@ -14,7 +14,6 @@
 	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
 	import { ENCODINGS, OUTPUTS } from '$lib/action-options';
 	import { rowAddressee } from '$lib/addressee';
-	import { formatKeys } from '$lib/keys';
 	import { firstLine } from '$lib/snippets';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { Switch } from '$lib/components/ui/switch';
@@ -29,16 +28,9 @@
 	let { view, editor }: { view: SettingsView; editor: SnippetsEditor } = $props();
 </script>
 
-<!-- 画面の題名と同じ見出しをカードに重ねず、説明は題名のすぐ下に一度だけ置く。よく触る定型文の並びを先に出す -->
+<!-- 画面の題名と同じ見出しをカードに重ねない。よく触る定型文の並びを先に出す -->
 <div class="flex flex-col gap-5">
 	<div class="flex flex-col gap-3">
-		<p id="snippets-description" class="settings-lead">
-			{view.textWindowKeys.snippets
-				? m.settings_snippets_description({
-						key: formatKeys(view.textWindowKeys.snippets, view.platform)
-					})
-				: m.settings_snippets_description_no_key()}
-		</p>
 		{#if view.proAvailable && !view.syncKinds.snippets}
 			<SettingsSyncNote text={m.settings_sync_snippets_off()} />
 		{/if}
@@ -93,7 +85,6 @@
 								autocapitalize="off"
 								spellcheck={false}
 								aria-labelledby="snippet-{row.key}-body"
-								aria-describedby="snippets-description"
 								bind:value={
 									() => row.body,
 									(body) => {
