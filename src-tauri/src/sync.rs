@@ -1254,6 +1254,8 @@ fn receive(
             if !is_known_value(target.config, &remote.key, value) {
                 target.state.ignored.insert(name, remote.seq);
             } else if local_change.is_some_and(|at| at > remote_at)
+                // 手元で消した行は、ほかのデバイスで変えられたら時刻によらず残す（docs/sync.md「食い違い」）
+                && current.is_some()
                 && current.as_ref() != Some(value)
             {
                 // 手元の方が後に変えた。記録を窓口の今の項目に進めて、次に手元の値で上書きする
@@ -1406,14 +1408,18 @@ fn reconcile_as(
     state
         .too_large
         .retain(|name, hash| hashes.get(name) == Some(hash));
-    // 手元にも記録にも無い項目（窓口に一度も書かないまま消した行など）は、書くものが無いので oplog から外す
+    // 手元にも記録にも無い項目（窓口に一度も書かないまま消した行など）と、記録と同じに揃った並び（並べ替えて
+    // 戻した など）は、書くものが無いので oplog から外す。並びは oplog でなく、揃えたときの値と比べて書くため
     let present = config_items(&config);
     let stale: Vec<String> = pending
         .keys()
-        .filter(|name| {
-            !state.items.contains_key(*name)
-                && key_of(name)
-                    .is_none_or(|key| kind(&key).is_none() || !present.contains_key(&key))
+        .filter(|name| match state.items.get(*name) {
+            Some(seen) => {
+                key_of(name).is_some_and(|key| is_order(&key))
+                    && hashes.get(*name) == Some(&seen.hash)
+            }
+            None => key_of(name)
+                .is_none_or(|key| kind(&key).is_none() || !present.contains_key(&key)),
         })
         .cloned()
         .collect();
@@ -3739,6 +3745,19 @@ mod tests {
     }
 
     #[test]
+    fn an_order_put_back_as_recorded_leaves_the_oplog() {
+        let config = Config {
+            replacements: vec![replacement('a', "a"), replacement('b', "b")],
+            ..Config::default()
+        };
+        let order = ItemKey::new(SETTINGS, order_id("replacements")).name();
+        let outbox = BTreeMap::from([(order.clone(), 3)]);
+        let result = super::reconcile(&config, Some(recorded(&config)), &outbox, &[], "key", 1);
+        assert_eq!(result.accepted, [(order, 3)]);
+        assert!(result.writes.is_empty());
+    }
+
+    #[test]
     fn a_value_changed_later_here_overwrites_the_server() {
         let base = Config::default();
         let local = Config {
@@ -3808,6 +3827,28 @@ mod tests {
         let write = result.writes.iter().find(|write| write.key == key).unwrap();
         assert_eq!(write.base_seq, Some(4));
         assert!(!write.deleted);
+    }
+
+    #[test]
+    fn a_row_deleted_here_and_changed_there_comes_back_even_if_deleted_later() {
+        let base = Config {
+            replacements: vec![replacement('a', "row")],
+            ..Config::default()
+        };
+        let key = row_key('r', 'a');
+        let changed = replacement('a', "changed");
+        let outbox = BTreeMap::from([(key.name(), 20)]);
+        let result = super::reconcile(
+            &Config::default(),
+            Some(recorded(&base)),
+            &outbox,
+            &[remote_at(&key.id, 4, row_value(&changed), 10)],
+            "key",
+            4,
+        );
+        assert_eq!(result.config.replacements, [changed]);
+        assert_eq!(result.accepted, [(key.name(), 20)]);
+        assert!(!result.writes.iter().any(|write| write.key == key));
     }
 
     #[test]

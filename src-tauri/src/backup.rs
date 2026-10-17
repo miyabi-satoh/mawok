@@ -44,10 +44,22 @@ pub fn write(
         settings: entries.clone(),
     };
     let bytes = serde_json::to_vec_pretty(&file).map_err(io::Error::other)?;
-    let name = name_at(now);
+    // 名前は秒までなので、同じ秒に書いたもの（戻す直前のバックアップと、すぐ続けて戻したときのもの など）を
+    // 上書きしないよう、空いている次の秒の名前にする
+    let mut stamp = now;
+    let name = loop {
+        let name = name_at(stamp);
+        if !dir.join(&name).exists() {
+            break name;
+        }
+        stamp += Duration::from_secs(1);
+    };
     // 設定にはキー操作や定型文の本文が入るので、unix では所有者だけが読めるようにする
     atomic_file::write_private(&dir.join(&name), &bytes)?;
-    clean(dir, now)?;
+    // 書けたバックアップを、片付けられなかったことで失敗に見せない
+    if let Err(error) = clean(dir, now) {
+        log::warn!("couldn't remove old settings backups: {error}");
+    }
     Ok(Some(name))
 }
 
@@ -191,6 +203,18 @@ mod tests {
             .unwrap()
             .is_some());
         assert_eq!(names(&backups).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn does_not_overwrite_a_backup_written_in_the_same_second() {
+        let dir = TempDir::new("backup-same-second");
+        let backups = dir.join(DIR_NAME);
+        let first = write(&backups, &entries("dark"), at(DAY)).unwrap().unwrap();
+        let second = write(&backups, &entries("light"), at(DAY)).unwrap().unwrap();
+        assert_ne!(first, second);
+        assert_eq!(read(&backups, &first).unwrap(), entries("dark"));
+        // 後に書いた方が、いちばん新しいものとして並ぶ
+        assert_eq!(names(&backups).unwrap().first(), Some(&second));
     }
 
     #[test]

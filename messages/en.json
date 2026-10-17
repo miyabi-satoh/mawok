@@ -105,7 +105,7 @@
 	"settings_backup_unchanged": "The current settings are already backed up.",
 	"backup_loading": "Loading...",
 	"backup_restore_title": "Restore from backup",
-	"backup_restore_description": "If you sync, the restored settings will also sync to your other devices.",
+	"backup_restore_description": "Your current settings are backed up before restoring. If you sync, the restored settings will also sync to your other devices.",
 	"backup_restore_empty": "There are no backups yet.",
 	"backup_restore_same": "Same as the current settings.",
 	"backup_restore_changes": "Changes: {names}",

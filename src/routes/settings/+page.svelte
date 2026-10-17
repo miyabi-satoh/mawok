@@ -139,7 +139,7 @@
 
 	/** バックアップから戻す窓を出しているか */
 	let backupOpen = $state(false);
-	/** 「今すぐバックアップ」の結果。次にバックアップするまで出しておく */
+	/** 「今すぐバックアップ」の結果。戻す窓を開くと、戻した後の設定と食い違うので消す */
 	let backupNotice = $state('');
 
 	async function backUp() {
@@ -1196,7 +1196,11 @@
 									<Button variant="outline" size="sm" onclick={backUp}>
 										{m.settings_backup_now()}
 									</Button>
-									<Button variant="outline" size="sm" onclick={() => (backupOpen = true)}>
+									<Button variant="outline" size="sm" onclick={() => {
+											backupNotice = '';
+											backupOpen = true;
+										}}
+									>
 										{m.settings_backup_restore_open()}
 									</Button>
 								</div>

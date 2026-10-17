@@ -171,6 +171,20 @@ impl Store {
     }
 }
 
+/// 置き場を作り直す前に、SQLite がファイルの横に置く書きかけの記録を消す。残すと、新しいファイルの書きかけとして
+/// 当て直され、作り直したファイルを壊す
+pub fn remove_side_files(path: &Path) -> std::io::Result<()> {
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let mut side = path.as_os_str().to_owned();
+        side.push(suffix);
+        match std::fs::remove_file(side) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn to_sql(at: u64) -> i64 {
     i64::try_from(at).unwrap_or(i64::MAX)
 }

@@ -127,6 +127,7 @@ Settings are backed up automatically every day. To go back to earlier settings, 
 ::: windows
 - **“Couldn't read the API key” appears**: Enter the key again under “AI” in Settings.
 :::
+- **“Couldn't read the settings, so started with the defaults” appears**: Select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
 - **“Couldn't connect...”, “Couldn't reach...”, or a similar message appears and trying again doesn't help**: Check that you are connected to the network. If you are, the Mawok server or the AI service may be having problems. Try again after a while.
 - **“Your Mawok account has no credit left” appears**: Select “Buy credits” under “AI” in Settings to add more.
 - **“The AI service's spending or credit limit was reached” appears**: Trying again won't help. Check the balance and limits in your AI service account.

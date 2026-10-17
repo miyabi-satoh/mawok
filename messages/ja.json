@@ -105,7 +105,7 @@
 	"settings_backup_unchanged": "今の設定は、もうバックアップしてあります。",
 	"backup_loading": "読み込んでいます...",
 	"backup_restore_title": "バックアップから戻す",
-	"backup_restore_description": "同期しているときは、戻した設定がほかのデバイスにも同期されます。",
+	"backup_restore_description": "戻す前に、今の設定もバックアップします。同期しているときは、戻した設定がほかのデバイスにも同期されます。",
 	"backup_restore_empty": "バックアップはまだありません。",
 	"backup_restore_same": "今の設定と同じです。",
 	"backup_restore_changes": "変わるもの: {names}",

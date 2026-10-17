@@ -1757,11 +1757,15 @@ fn load_outbox(app: &AppHandle) -> BTreeMap<String, u64> {
 }
 
 async fn run_sync(app: &AppHandle) {
-    let (config, generation, record_generation) = {
+    let (config, generation, record_generation, outbox) = {
         let state = app.state::<AppState>();
-        let (config, generation) = config_with_generation(&state);
+        // oplog も設定と同じ排他の中で読む。後で読むと、間に入った保存の時刻を古い値に付けて書き、
+        // 書けた時刻で oplog から外すので、新しい値を送らないまま落とす
+        let config = state.config.lock().unwrap();
+        let outbox = load_outbox(app);
+        let generation = state.sync_generation.load(Ordering::SeqCst);
         let record_generation = state.sync_record_generation.load(Ordering::SeqCst);
-        (config, generation, record_generation)
+        (config.clone(), generation, record_generation, outbox)
     };
     let kinds = sync::kinds(&config);
     if !kinds.any() {
@@ -1784,7 +1788,6 @@ async fn run_sync(app: &AppHandle) {
         _ => None,
     };
     let before = load_sync_record(app, key_id);
-    let outbox = load_outbox(app);
     let synced = sync::sync_once(
         access.transport(),
         &config,
@@ -4039,6 +4042,7 @@ fn open_store(path: &std::path::Path) -> (store::Store, Option<ConfigProblem>) {
     warn!("couldn't open the settings store: {error}");
     let reset = atomic_file::back_up(path, SystemTime::now())
         .and_then(|copy| std::fs::remove_file(path).map(|()| copy))
+        .and_then(|copy| store::remove_side_files(path).map(|()| copy))
         .map_err(|error| error.to_string())
         .and_then(|copy| store::Store::open(path).map(|store| (store, copy)));
     match reset {
@@ -4866,11 +4870,14 @@ mod tests {
         let dir = test_support::TempDir::new("lib-broken-store");
         let path = dir.join(store::FILE_NAME);
         std::fs::write(&path, "not a database").unwrap();
+        let journal = dir.join(format!("{}-journal", store::FILE_NAME));
+        std::fs::write(&journal, "a journal of the broken file").unwrap();
         let (mut store, problem) = open_store(&path);
         let Some(ConfigProblem::Reset(copy)) = problem else {
             panic!("the store should be recreated");
         };
         assert!(copy.starts_with("settings.broken-") && copy.ends_with(".db"));
+        assert!(!journal.exists());
         assert_eq!(std::fs::read(dir.join(&copy)).unwrap(), b"not a database");
         assert_eq!(load_config(&mut store), Config::default());
         // 作り直した置き場は、次の起動でそのまま開ける
