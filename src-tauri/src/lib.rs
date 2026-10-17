@@ -2050,9 +2050,14 @@ async fn back_up_now(app: &AppHandle) -> Result<Option<String>, String> {
     let state = app.state::<AppState>();
     let entries = config::stored_entries(&state.config.lock().unwrap());
     let dir = state.backups_dir.clone();
-    let written = run_blocking(move || backup::write(&dir, &entries, SystemTime::now()))
-        .await?
-        .map_err(|error| error.to_string())?;
+    let written = run_blocking(move || {
+        // 毎日のものと「今すぐ」が重なっても、同じ名前を空きと見て互いに上書きしない
+        static BACKUP_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = BACKUP_LOCK.lock().unwrap();
+        backup::write(&dir, &entries, SystemTime::now())
+    })
+    .await?
+    .map_err(|error| error.to_string())?;
     if let Some(name) = &written {
         info!("backed up settings to {name}");
     }

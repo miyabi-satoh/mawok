@@ -1223,8 +1223,16 @@ fn receive(
     } else {
         config_items(target.config).get(&remote.key).cloned()
     };
-    // 手元で変えて、まだ送っていない時刻。並びは食い違いにせず混ぜるので見ない
-    let local_change = target.pending.get(&name).copied().filter(|_| !order);
+    // 手元で変えて、まだ送っていない時刻。並びは食い違いにせず混ぜるので見ない。
+    // 変えてから記録の値に戻した項目は、手元では何も変えていないので、窓口の値を入れる
+    let reverted = previous
+        .as_ref()
+        .is_some_and(|seen| current.as_ref().map(hash_plain) == Some(seen.hash));
+    let local_change = target
+        .pending
+        .get(&name)
+        .copied()
+        .filter(|_| !order && !reverted);
     match remote.incoming() {
         Incoming::Deleted => {
             if current.is_none() {
@@ -1408,16 +1416,14 @@ fn reconcile_as(
     state
         .too_large
         .retain(|name, hash| hashes.get(name) == Some(hash));
-    // 手元にも記録にも無い項目（窓口に一度も書かないまま消した行など）と、記録と同じに揃った並び（並べ替えて
-    // 戻した など）は、書くものが無いので oplog から外す。並びは oplog でなく、揃えたときの値と比べて書くため
+    // 手元にも記録にも無い項目（窓口に一度も書かないまま消した行など）と、変えてから記録の値に戻した項目
+    // （並べ替えて戻した並びも）は、書くものが無いので oplog から外す。書くと、新しい時刻で、ほかのデバイスが
+    // 後から変えた値を上書きする
     let present = config_items(&config);
     let stale: Vec<String> = pending
         .keys()
         .filter(|name| match state.items.get(*name) {
-            Some(seen) => {
-                key_of(name).is_some_and(|key| is_order(&key))
-                    && hashes.get(*name) == Some(&seen.hash)
-            }
+            Some(seen) => hashes.get(*name) == Some(&seen.hash),
             None => {
                 key_of(name).is_none_or(|key| kind(&key).is_none() || !present.contains_key(&key))
             }
@@ -3771,11 +3777,21 @@ mod tests {
 
     #[test]
     fn a_change_with_nothing_to_write_leaves_the_oplog() {
-        let config = Config::default();
+        let config = Config {
+            theme: Theme::Dark,
+            ..Config::default()
+        };
         let gone = row_key('r', 'a').name();
         let kept = setting_item("theme").name();
         let outbox = BTreeMap::from([(gone.clone(), 3), (kept.clone(), 4)]);
-        let result = super::reconcile(&config, Some(recorded(&config)), &outbox, &[], "key", 1);
+        let result = super::reconcile(
+            &config,
+            Some(recorded(&Config::default())),
+            &outbox,
+            &[],
+            "key",
+            1,
+        );
         // 足して消した行は窓口に一度も書いていないので、送るものが無い。設定の項目は書く
         assert_eq!(result.accepted, [(gone, 3)]);
         assert_eq!(result.pending, BTreeMap::from([(kept, 4)]));
@@ -3791,6 +3807,28 @@ mod tests {
         let outbox = BTreeMap::from([(order.clone(), 3)]);
         let result = super::reconcile(&config, Some(recorded(&config)), &outbox, &[], "key", 1);
         assert_eq!(result.accepted, [(order, 3)]);
+        assert!(result.writes.is_empty());
+    }
+
+    #[test]
+    fn a_value_changed_and_put_back_here_takes_the_server_value() {
+        let base = Config::default();
+        let theme = setting_item("theme").name();
+        let outbox = BTreeMap::from([(theme.clone(), 20)]);
+        let result = super::reconcile(
+            &base,
+            Some(recorded(&base)),
+            &outbox,
+            &[remote_at("s_theme", 2, json!("dark"), 10)],
+            "key",
+            2,
+        );
+        assert_eq!(result.config.theme, Theme::Dark);
+        assert_eq!(result.accepted, [(theme.clone(), 20)]);
+        assert!(written_ids(&result).is_empty());
+        // 届いた項目が無くても、戻した項目は書かずに oplog から外す
+        let result = super::reconcile(&base, Some(recorded(&base)), &outbox, &[], "key", 2);
+        assert_eq!(result.accepted, [(theme, 20)]);
         assert!(result.writes.is_empty());
     }
 
