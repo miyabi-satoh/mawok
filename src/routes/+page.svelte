@@ -1246,7 +1246,6 @@
 				: m.snippets_empty_no_key()}
 			noMatchMessage={m.snippets_no_match()}
 			action={registerSnippetAction}
-			actionAt="end"
 			onpick={pickSnippet}
 			onclose={closeSnippets}
 		/>

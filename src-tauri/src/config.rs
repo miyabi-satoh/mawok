@@ -110,15 +110,9 @@ pub enum ActionEncoding {
 }
 
 impl ActionEncoding {
-    /// ログとエラーに出す名前（serde の名前と揃える）
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Utf8 => "utf-8",
-            Self::ShiftJis => "shift_jis",
-            Self::EucJp => "euc-jp",
-            Self::Iso2022Jp => "iso-2022-jp",
-            Self::Utf16Le => "utf-16le",
-        }
+    /// ログとエラーに出す名前（serde の名前）
+    pub fn name(self) -> String {
+        choice_name(&self)
     }
 }
 
@@ -580,7 +574,7 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     entries
 }
 
-fn json<T: Serialize>(value: T) -> Value {
+pub(crate) fn json<T: Serialize>(value: T) -> Value {
     serde_json::to_value(value).expect("settings serialize")
 }
 
@@ -802,12 +796,6 @@ pub(crate) fn valid_item_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn new_item_id() -> Result<String, String> {
-    let mut bytes = [0; 16];
-    getrandom::fill(&mut bytes).map_err(|error| format!("random item id: {error}"))?;
-    Ok(crate::hex::to_hex(&bytes))
-}
-
 /// 空・不正・重複の ID を、新しいランダムな値へ替える。
 ///
 /// 画面から足した行もこの入口を通るので、ID は Rust 側だけで作る。
@@ -818,7 +806,7 @@ pub(crate) fn repair_item_ids<T: SyncRow>(items: &mut [T]) -> Result<bool, Strin
         let item_id = item.id();
         if !valid_item_id(item_id) || !seen.insert(item_id.to_string()) {
             let next = loop {
-                let next = new_item_id()?;
+                let next = crate::hex::random_hex::<16>()?;
                 if seen.insert(next.clone()) {
                     break next;
                 }

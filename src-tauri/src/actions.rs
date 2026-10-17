@@ -11,12 +11,12 @@ use crate::{
 pub const AI_PREFIX: &str = "@ai";
 /// 行頭にあれば、残りをコマンドとしてその機のシェルで実行する宛先
 pub const SH_PREFIX: &str = "@sh";
-/// 言語を替えても同じ既定の翻訳アクションを見分けるための ID。
-const DEFAULT_TRANSLATE_ACTION_ID: &str = "6b6a77e6d4f846f2a8bbf953fbd0e0d3";
-/// 言語を替えても同じ既定の並べ替えアクションを見分けるための ID。
-const DEFAULT_SORT_ACTION_ID: &str = "9c4d11698d17426c8e930b8118ffb2f2";
+/// 言語を替えても同じ既定の翻訳の定型文を見分けるための ID。
+const DEFAULT_TRANSLATE_SNIPPET_ID: &str = "6b6a77e6d4f846f2a8bbf953fbd0e0d3";
+/// 言語を替えても同じ既定の並べ替えの定型文を見分けるための ID。
+const DEFAULT_SORT_SNIPPET_ID: &str = "9c4d11698d17426c8e930b8118ffb2f2";
 
-/// 指示文から AI のアクションの行を作る
+/// 指示文から、AI に頼む定型文の本文を作る
 fn ai_line(instruction: &str) -> String {
     format!("{AI_PREFIX} {}", instruction.trim())
 }
@@ -67,14 +67,14 @@ pub fn default_snippets(lang: Lang) -> Vec<Snippet> {
     };
     [
         (
-            DEFAULT_TRANSLATE_ACTION_ID,
+            DEFAULT_TRANSLATE_SNIPPET_ID,
             translate,
             ai_line(translate_instruction),
             ActionEncoding::Utf8,
             true,
         ),
         (
-            DEFAULT_SORT_ACTION_ID,
+            DEFAULT_SORT_SNIPPET_ID,
             sort,
             format!("{SH_PREFIX} sort"),
             sort_encoding,
@@ -147,9 +147,9 @@ pub enum Failure {
     EmptyOutput,
     /// コマンドの標準出力が上限（command::MAX_OUTPUT）を超えた
     OutputTooLarge,
-    /// 実行する文に、アクションの文字コードで表せない文字がある（Shift_JIS に絵文字など）
+    /// 実行する文に、定型文の文字コードで表せない文字がある（Shift_JIS に絵文字など）
     TextNotEncodable,
-    /// コマンドの標準出力が、アクションの文字コードとして読めない
+    /// コマンドの標準出力が、定型文の文字コードとして読めない
     OutputUndecodable,
 }
 

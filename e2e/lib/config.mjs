@@ -9,14 +9,14 @@ import {
 	recoverStaleAutostartBackupIfAny
 } from './os.mjs';
 import { PROFILE_IDENTIFIER } from './app-conf.mjs';
-import { readBackupRecord, readTextIfExists, recordPath, writeJsonAtomic } from './files.mjs';
 import {
-	BROKEN_PREFIX,
-	readSettings,
-	SETTINGS_FILE,
-	settingsExist,
-	writeSettings
-} from './settings-db.mjs';
+	fileExists,
+	readBackupRecord,
+	readTextIfExists,
+	recordPath,
+	writeJsonAtomic
+} from './files.mjs';
+import { BROKEN_PREFIX, readSettings, SETTINGS_FILE, writeSettings } from './settings-db.mjs';
 
 // 自動の確認は、プロファイル `e2e` で起動する (tauri-driver.mjs の startTauriDriver が MAWOK_PROFILE を渡す。src-tauri/src/profile.rs)。
 // 設定・履歴・ログのフォルダーは識別子の後ろに `.e2e` が付き、常用の Mawok のものとは別になる。
@@ -112,7 +112,7 @@ async function readConfig() {
 }
 
 /**
- * 置き換え辞書・定型文・アクションの行から、アプリが付ける `id` と `sync` を外す。
+ * 置き換え辞書・定型文の行から、アプリが付ける `id` と `sync` を外す。
  * テストが渡した中身と比べるときに使う (`id` は行ごとに乱数で付き、`sync` は読む口によって出たり出なかったりする)
  */
 export function withoutSyncFields(rows) {
@@ -466,7 +466,7 @@ export async function beginMissingConfig() {
 
 /** 設定の置き場があるか */
 export async function configExists() {
-	return settingsExist(CONFIG_PATH);
+	return fileExists(CONFIG_PATH);
 }
 
 /**

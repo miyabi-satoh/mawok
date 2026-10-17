@@ -30,11 +30,11 @@ pub struct LinkRequest {
 
 impl LinkRequest {
     pub fn new() -> Result<Self, String> {
-        let verifier = random_hex::<32>()?;
+        let verifier = crate::hex::random_hex::<32>()?;
         Ok(Self {
             challenge: crate::hex::to_hex(&Sha256::digest(verifier.as_bytes())),
             verifier,
-            state: random_hex::<16>()?,
+            state: crate::hex::random_hex::<16>()?,
         })
     }
 
@@ -73,12 +73,6 @@ pub fn code_from(state: &str, request_line: &str) -> Option<String> {
         .then(|| param("code"))
         .flatten()
         .filter(|code| !code.is_empty())
-}
-
-fn random_hex<const N: usize>() -> Result<String, String> {
-    let mut bytes = [0u8; N];
-    getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
-    Ok(crate::hex::to_hex(&bytes))
 }
 
 /// 窓口に問い合わせて分かった、アカウントの様子

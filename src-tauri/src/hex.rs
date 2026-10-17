@@ -4,6 +4,13 @@ pub fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// N バイトの乱数を 16 進の文字列にする
+pub fn random_hex<const N: usize>() -> Result<String, String> {
+    let mut bytes = [0u8; N];
+    getrandom::fill(&mut bytes).map_err(|error| format!("random: {error}"))?;
+    Ok(to_hex(&bytes))
+}
+
 pub fn from_hex(text: &str) -> Option<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
         return None;

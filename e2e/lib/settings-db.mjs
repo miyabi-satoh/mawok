@@ -1,8 +1,8 @@
 // 設定の置き場 (settings.db。docs/config.md) を、E2E から読み書きする。
 // テストは画面とのやり取りと同じ camelCase の名前で読み書きするので、ここで置き場の snake_case の名前と付け替える
 
-import fs from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
+import { fileExists } from './files.mjs';
 
 export const SETTINGS_FILE = 'settings.db';
 /** 読めない置き場を作り直す前に写す先の名前の頭 (`settings.broken-….db`) */
@@ -44,22 +44,12 @@ function renameEntry(name, value, rename) {
 	return [renamed, value];
 }
 
-/** 置き場があるか */
-export async function settingsExist(file) {
-	try {
-		await fs.access(file);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
 /**
  * 置き場の項目を camelCase の名前で読む (既定と違う値だけ)。置き場が無ければ null。
  * アプリが書いている最中などで読めなければ投げる
  */
 export async function readSettings(file) {
-	if (!(await settingsExist(file))) return null;
+	if (!(await fileExists(file))) return null;
 	const db = new DatabaseSync(file, { readOnly: true, timeout: BUSY_TIMEOUT_MS });
 	try {
 		const rows = db.prepare('SELECT name, value FROM settings').all();

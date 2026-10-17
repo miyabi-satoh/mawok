@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     account, actions,
     ai::AiService,
-    config::{self, valid_item_id, Config, Language, Snippet, SyncRow, Theme},
+    config::{self, json, valid_item_id, Config, Language, Snippet, SyncRow, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     history_store::{self, History},
     i18n::Lang,
@@ -394,15 +394,8 @@ fn encrypted_len(plain: &Plain) -> usize {
     24 + 16 + encode_plain(plain).map_or(usize::MAX, |bytes| bytes.len())
 }
 
-fn platform_suffix() -> &'static str {
-    match Platform::current() {
-        Platform::MacOs => "macos",
-        Platform::Windows => "windows",
-    }
-}
-
-fn json<T: Serialize>(value: T) -> Value {
-    serde_json::to_value(value).expect("sync value serializes")
+fn platform_suffix() -> String {
+    config::choice_name(&Platform::current())
 }
 
 fn set(map: &mut BTreeMap<ItemKey, Value>, id: impl Into<String>, value: Value) {
@@ -3619,7 +3612,7 @@ mod tests {
     }
 
     #[test]
-    fn text_window_keys_use_the_config_file_names_and_omit_yielded_keys() {
+    fn text_window_keys_use_the_store_names_and_omit_yielded_keys() {
         let mut config = Config::default();
         *config.text_window_keys.get_mut(DraftAction::HistoryOlder) = "Alt+KeyP".into();
         config

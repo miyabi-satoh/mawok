@@ -1423,7 +1423,7 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     Ok(true)
 }
 
-/// 待つことのある処理（キーチェーン、相手のデバイスとのやり取り）を、メインスレッドを止めずに別のスレッドで走らせる。
+/// 待つことのある処理（資格情報管理、同期のパスワードからの鍵の導出、バックアップのファイルの読み書き）を、メインスレッドを止めずに別のスレッドで走らせる。
 /// 走らせたスレッドが落ちたら、その理由を返す
 async fn run_blocking<T: Send + 'static>(
     task: impl FnOnce() -> T + Send + 'static,
@@ -4099,7 +4099,7 @@ fn autostart_at_launch(
     }
 }
 
-/// 設定の置き場を開く。壊れていれば、元のファイルを写して退けてから作り直す（docs/config.md「読めないとき」）。
+/// 設定の置き場を開く。壊れていれば、元のファイルを写して退けてから作り直す（docs/config.md「読むとき」）。
 /// 作り直せもしないときと、壊れてはいないが開けないとき（ロック・権限など）は、ファイルに手を付けず、保存しない置き場で動かす
 fn open_store(path: &std::path::Path) -> (store::Store, Option<ConfigProblem>) {
     let opened = path
