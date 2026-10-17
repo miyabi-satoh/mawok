@@ -43,27 +43,15 @@ export async function balance(env: Env, accountId: string): Promise<Balance> {
 	return { remaining, percent: Math.min(100, Math.ceil((remaining * 100) / size)) };
 }
 
-/** その月の初め (UTC)。無料の分の月の上限を数える区切り。 */
-function monthStart(t: number): number {
-	const d = new Date(t * 1000);
-	return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
-}
-
 /**
  * 無料の分をまだ付けていないアカウントに付ける文。サインイン・残りの問い合わせ・中継のたびに流し、付けるのは一度だけ。
- * その月に付けた無料の分の合計に、この付与を足しても上限 (`FREE_MONTHLY_CAP_YEN`) を超えないときだけ付ける。
- * その月に付けた無料の分が全部使われても、原価は上限までに収まる。
- * 超えるときは付けず、翌月以降の次の問い合わせで付け直す。
  */
 export function grantFreeStatement(env: Env, accountId: string, t = now()) {
-	const { freeGrant, freeMonthlyCap } = pricing(env);
 	return env.DB.prepare(
 		`INSERT INTO grants (id, account_id, purchase_id, kind, granted, remaining, created_at)
 		 SELECT ?1, ?2, NULL, 'free', ?3, ?3, ?4
-		 WHERE NOT EXISTS (SELECT 1 FROM grants WHERE account_id = ?2 AND kind = 'free')
-		   AND (SELECT coalesce(sum(granted), 0) FROM grants
-		        WHERE kind = 'free' AND created_at >= ?5) + ?3 <= ?6`
-	).bind(randomHex(16), accountId, freeGrant, t, monthStart(t), freeMonthlyCap);
+		 WHERE NOT EXISTS (SELECT 1 FROM grants WHERE account_id = ?2 AND kind = 'free')`
+	).bind(randomHex(16), accountId, pricing(env).freeGrant, t);
 }
 
 /** Pro の状態。払い終えた期間が今より後なら Pro のまま使える。 */
@@ -159,8 +147,8 @@ export async function charge(env: Env, accountId: string, cost: number, t = now(
 		// 記録してから引く。どちらも、その時点の残りを超えない量にする。
 		statements.push(
 			env.DB.prepare(
-				`INSERT INTO consumptions (id, purchase_id, grant_id, grant_kind, milli_yen, created_at)
-					 SELECT ?1, purchase_id, id, kind, min(?2, remaining), ?3 FROM grants WHERE id = ?4 AND remaining > 0`
+				`INSERT INTO consumptions (id, purchase_id, grant_id, grant_kind, grant_size, milli_yen, created_at)
+					 SELECT ?1, purchase_id, id, kind, granted, min(?2, remaining), ?3 FROM grants WHERE id = ?4 AND remaining > 0`
 			).bind(randomHex(16), amount, t, grant.id),
 			env.DB.prepare(
 				'UPDATE grants SET remaining = remaining - min(?, remaining) WHERE id = ?'
