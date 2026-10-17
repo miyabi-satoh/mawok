@@ -1,4 +1,4 @@
-import { CONSTANTS } from '$lib/bindings/constants';
+import { CONSTANTS, ERROR_CODES } from '$lib/bindings/constants';
 import type { SyncKeyStatus } from '$lib/bindings/SyncKeyStatus';
 import { errorCode } from '$lib/errors';
 import { m } from '$lib/paraglide/messages';
@@ -7,7 +7,7 @@ import { m } from '$lib/paraglide/messages';
 export const MIN_SYNC_PASSWORD_CHARS = CONSTANTS.MIN_SYNC_PASSWORD_CHARS;
 
 /** 同期のパスワードの欄。エラーを、どの欄の下に出すかに使う */
-export type SyncPasswordField = 'current' | 'password' | 'confirm';
+type SyncPasswordField = 'current' | 'password' | 'confirm';
 export type SyncPasswordErrors = Partial<Record<SyncPasswordField, string>>;
 
 function tooShort(): string {
@@ -33,18 +33,19 @@ export function syncPasswordFailure(
 	checked: 'current' | 'password'
 ): SyncPasswordErrors | undefined {
 	const code = errorCode(error);
-	if (code === 'sync.wrong_password') return { [checked]: m.sync_password_error_incorrect() };
-	if (code === 'sync.password_too_short') return { password: tooShort() };
+	if (code === ERROR_CODES.SYNC_WRONG_PASSWORD)
+		return { [checked]: m.sync_password_error_incorrect() };
+	if (code === ERROR_CODES.SYNC_PASSWORD_TOO_SHORT) return { password: tooShort() };
 	return undefined;
 }
 
 /**
  * 窓口の同期の状態が、欄を出したときから変わっていた（ほかのデバイスが始めた・リセットした・Pro が終わった）か
- * （src-tauri/src/lib.rs の SYNC_STATE_CHANGED）。Rust 側が鍵の状態を読み直してあるので、エラーは出さず、
+ * （src-tauri/src/error_codes.rs の SYNC_STATE_CHANGED）。Rust 側が鍵の状態を読み直してあるので、エラーは出さず、
  * 出している欄を閉じて、今の状態の欄に任せる
  */
 export function syncStateChanged(error: unknown): boolean {
-	return errorCode(error) === 'sync.state_changed';
+	return errorCode(error) === ERROR_CODES.SYNC_STATE_CHANGED;
 }
 
 /**

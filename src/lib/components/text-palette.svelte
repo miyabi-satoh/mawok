@@ -34,12 +34,9 @@
 		/** 絞り込んで1件も残らないときの案内 */
 		noMatchMessage: string;
 		/**
-		 * 一覧の端に添える操作の項目。絞り込みの文字を受け取り、出さないときは null を返す
-		 * （アクションの「この内容で実行」、定型文の「テキストを定型文に登録」）
+		 * 一覧の末尾に添える操作の項目（「テキストを定型文に登録」）。絞り込みの文字を受け取り、出さないときは null を返す
 		 */
 		action?: (query: string) => PaletteAction | null;
-		/** 操作の項目を先頭と末尾のどちらに添えるか */
-		actionAt?: 'start' | 'end';
 		/** 選んだ1件を受け取る */
 		onpick: (item: T) => void;
 		/** 選ばずに閉じる */
@@ -55,7 +52,6 @@
 		emptyMessage,
 		noMatchMessage,
 		action,
-		actionAt = 'start',
 		onpick,
 		onclose
 	}: Props = $props();
@@ -77,7 +73,7 @@
 		const extra = action?.(query);
 		if (!extra) return entries;
 		const entry: Entry = { ...extra, pick: extra.run };
-		return actionAt === 'start' ? [entry, ...entries] : [...entries, entry];
+		return [...entries, entry];
 	});
 	// アイコンのある行があれば、ない行にもその幅を空ける
 	const hasIcons = $derived(items.some((item) => item.icon));
@@ -118,10 +114,6 @@
 	}
 </script>
 
-{#snippet statusLine(message: string)}
-	<p role="status" class="px-3 py-6 text-center text-sm text-muted-foreground">{message}</p>
-{/snippet}
-
 <!-- 下は、下書きの下の列に重ならないよう 2.75rem 空ける -->
 <PaletteFrame label={listLabel} maxHeightClass="max-h-[calc(100%-4.5rem)]" {onclose}>
 	<div class="flex h-9 shrink-0 items-center gap-2 border-b px-3">
@@ -142,8 +134,8 @@
 			{@attach (element) => element.focus()}
 		/>
 	</div>
-	{#if status && actionAt === 'end'}
-		{@render statusLine(status)}
+	{#if status}
+		<p role="status" class="px-3 py-6 text-center text-sm text-muted-foreground">{status}</p>
 	{/if}
 	{#if items.length > 0}
 		<ul
@@ -182,8 +174,5 @@
 				</li>
 			{/each}
 		</ul>
-	{/if}
-	{#if status && actionAt === 'start'}
-		{@render statusLine(status)}
 	{/if}
 </PaletteFrame>

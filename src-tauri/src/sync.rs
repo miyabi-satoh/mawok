@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     account, actions,
     ai::AiService,
-    config::{self, valid_item_id, Config, Language, Snippet, SyncRow, Theme},
+    config::{self, json, valid_item_id, Config, Language, Snippet, SyncRow, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     history_store::{self, History},
     i18n::Lang,
@@ -394,15 +394,8 @@ fn encrypted_len(plain: &Plain) -> usize {
     24 + 16 + encode_plain(plain).map_or(usize::MAX, |bytes| bytes.len())
 }
 
-fn platform_suffix() -> &'static str {
-    match Platform::current() {
-        Platform::MacOs => "macos",
-        Platform::Windows => "windows",
-    }
-}
-
-fn json<T: Serialize>(value: T) -> Value {
-    serde_json::to_value(value).expect("sync value serializes")
+fn platform_suffix() -> String {
+    config::choice_name(&Platform::current())
 }
 
 fn set(map: &mut BTreeMap<ItemKey, Value>, id: impl Into<String>, value: Value) {
@@ -515,28 +508,28 @@ fn is_order(key: &ItemKey) -> bool {
 
 /// この項目名の設定を、種類「設定」から外せる。画面に渡す一覧と窓口の id の検査を同じ定義から作る。
 pub const SYNCABLE_SETTING_NAMES: &[&str] = &[
-    "language",
-    "theme",
-    "text_window_always_on_top",
-    "hide_text_window_on_blur",
-    "show_text_window_buttons",
-    "text_history_size",
-    "trim_trailing_whitespace",
-    "punctuation_style",
-    "alphabet_width",
-    "digit_width",
-    "space_width",
-    "symbol_width",
-    "katakana_width",
-    "exclude_from_clipboard_history",
-    "text_font_family",
-    "text_font_size",
-    "text_color_light",
-    "text_color_dark",
-    "input_guidance",
-    "ai_service",
-    "ai_models",
-    "ai_base_url",
+    config::key::LANGUAGE,
+    config::key::THEME,
+    config::key::TEXT_WINDOW_ALWAYS_ON_TOP,
+    config::key::HIDE_TEXT_WINDOW_ON_BLUR,
+    config::key::SHOW_TEXT_WINDOW_BUTTONS,
+    config::key::TEXT_HISTORY_SIZE,
+    config::key::TRIM_TRAILING_WHITESPACE,
+    config::key::PUNCTUATION_STYLE,
+    config::key::ALPHABET_WIDTH,
+    config::key::DIGIT_WIDTH,
+    config::key::SPACE_WIDTH,
+    config::key::SYMBOL_WIDTH,
+    config::key::KATAKANA_WIDTH,
+    config::key::EXCLUDE_FROM_CLIPBOARD_HISTORY,
+    config::key::TEXT_FONT_FAMILY,
+    config::key::TEXT_FONT_SIZE,
+    config::key::TEXT_COLOR_LIGHT,
+    config::key::TEXT_COLOR_DARK,
+    config::key::INPUT_GUIDANCE,
+    config::key::AI_SERVICE,
+    config::key::AI_MODELS,
+    config::key::AI_BASE_URL,
 ];
 
 pub fn known_syncable_setting(name: &str) -> bool {
@@ -636,32 +629,18 @@ fn known_setting(name: &str) -> bool {
 pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
     let mut items = BTreeMap::new();
     for name in SYNCABLE_SETTING_NAMES {
-        let value = match *name {
-            "language" => json(config.language),
-            "theme" => json(config.theme),
-            "text_window_always_on_top" => json(config.text_window_always_on_top),
-            "hide_text_window_on_blur" => json(config.hide_text_window_on_blur),
-            "show_text_window_buttons" => json(config.show_text_window_buttons),
-            "text_history_size" => json(config.text_history_size),
-            "trim_trailing_whitespace" => json(config.trim_trailing_whitespace),
-            "punctuation_style" => json(config.punctuation_style),
-            "alphabet_width" => json(config.char_widths.alphabet),
-            "digit_width" => json(config.char_widths.digit),
-            "space_width" => json(config.char_widths.space),
-            "symbol_width" => json(config.char_widths.symbol),
-            "katakana_width" => json(config.char_widths.katakana),
-            "exclude_from_clipboard_history" => json(config.exclude_from_clipboard_history),
-            "text_font_family" => json(config.text_font_family.clone()),
-            "text_font_size" => json(config.text_font_size),
-            "text_color_light" => json(config.text_color_light.clone()),
-            "text_color_dark" => json(config.text_color_dark.clone()),
-            "input_guidance" => json(config.input_guidance.clone()),
-            "ai_service" => json(config.ai_service),
-            "ai_models" => json(config.ai_models.clone()),
-            "ai_base_url" => json(config.ai_base_url.clone()),
-            _ => unreachable!("all syncable setting names have a value"),
+        let key = setting_item(name);
+        // 値は、バックアップの画面に出す値（SyncValue）と同じ写しから取る。項目ごとの写しを1か所にするため
+        let value = sync_value(config, &key).expect("all syncable setting names have a value");
+        let Value::Object(mut tagged) = json(value) else {
+            unreachable!("SyncValue serializes to an object");
         };
-        items.insert(setting_item(name), value);
+        items.insert(
+            key,
+            tagged
+                .remove("value")
+                .expect("SyncValue carries its content as value"),
+        );
     }
     items.insert(hotkey_item(), json(config.hotkey.clone()));
     items.insert(text_window_keys_item(), draft_keys_value(config));
@@ -728,7 +707,7 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
         Some(Kind::Setting(name)) if name == text_window_keys_name() => {
             apply_draft_keys(config, value)
         }
-        Some(Kind::Setting(name)) => config::apply_setting(config, name, value),
+        Some(Kind::Setting(name)) => config::apply_setting(config, name, value).unwrap_or(false),
         Some(Kind::Replacement(id)) => apply_row(&mut config.replacements, id, value),
         Some(Kind::Snippet(id)) => apply_snippet_row(config, id, value),
         Some(Kind::Order("replacements")) => apply_order(&mut config.replacements, value),
@@ -1583,6 +1562,9 @@ pub struct BackupDifference {
 #[serde(rename_all = "camelCase")]
 pub struct Backup {
     pub name: String,
+    /// 作った時刻（UNIX 時刻のミリ秒）。名前から読めなければ null
+    #[cfg_attr(test, ts(type = "number | null"))]
+    pub created_at: Option<u64>,
     pub changes: Vec<BackupDifference>,
 }
 
@@ -1674,38 +1656,44 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
             SyncValue::TextWindowKeys(config.text_window_keys.clone())
         }
         Kind::Setting(name) => match name {
-            "language" => SyncValue::Language(config.language),
-            "theme" => SyncValue::Theme(config.theme),
-            "text_window_always_on_top" => {
+            config::key::LANGUAGE => SyncValue::Language(config.language),
+            config::key::THEME => SyncValue::Theme(config.theme),
+            config::key::TEXT_WINDOW_ALWAYS_ON_TOP => {
                 SyncValue::TextWindowAlwaysOnTop(config.text_window_always_on_top)
             }
-            "hide_text_window_on_blur" => {
+            config::key::HIDE_TEXT_WINDOW_ON_BLUR => {
                 SyncValue::HideTextWindowOnBlur(config.hide_text_window_on_blur)
             }
-            "show_text_window_buttons" => {
+            config::key::SHOW_TEXT_WINDOW_BUTTONS => {
                 SyncValue::ShowTextWindowButtons(config.show_text_window_buttons)
             }
-            "text_history_size" => SyncValue::TextHistorySize(config.text_history_size),
-            "trim_trailing_whitespace" => {
+            config::key::TEXT_HISTORY_SIZE => SyncValue::TextHistorySize(config.text_history_size),
+            config::key::TRIM_TRAILING_WHITESPACE => {
                 SyncValue::TrimTrailingWhitespace(config.trim_trailing_whitespace)
             }
-            "punctuation_style" => SyncValue::PunctuationStyle(config.punctuation_style),
-            "alphabet_width" => SyncValue::AlphabetWidth(config.char_widths.alphabet),
-            "digit_width" => SyncValue::DigitWidth(config.char_widths.digit),
-            "space_width" => SyncValue::SpaceWidth(config.char_widths.space),
-            "symbol_width" => SyncValue::SymbolWidth(config.char_widths.symbol),
-            "katakana_width" => SyncValue::KatakanaWidth(config.char_widths.katakana),
-            "exclude_from_clipboard_history" => {
+            config::key::PUNCTUATION_STYLE => SyncValue::PunctuationStyle(config.punctuation_style),
+            config::key::ALPHABET_WIDTH => SyncValue::AlphabetWidth(config.char_widths.alphabet),
+            config::key::DIGIT_WIDTH => SyncValue::DigitWidth(config.char_widths.digit),
+            config::key::SPACE_WIDTH => SyncValue::SpaceWidth(config.char_widths.space),
+            config::key::SYMBOL_WIDTH => SyncValue::SymbolWidth(config.char_widths.symbol),
+            config::key::KATAKANA_WIDTH => SyncValue::KatakanaWidth(config.char_widths.katakana),
+            config::key::EXCLUDE_FROM_CLIPBOARD_HISTORY => {
                 SyncValue::ExcludeFromClipboardHistory(config.exclude_from_clipboard_history)
             }
-            "text_font_size" => SyncValue::TextFontSize(config.text_font_size),
-            "text_color_light" => SyncValue::TextColorLight(config.text_color_light.clone()),
-            "text_color_dark" => SyncValue::TextColorDark(config.text_color_dark.clone()),
-            "input_guidance" => SyncValue::InputGuidance(config.input_guidance.clone()),
-            "ai_service" => SyncValue::AiService(config.ai_service),
-            "ai_models" => SyncValue::AiModels(config.ai_models.clone()),
-            "ai_base_url" => SyncValue::AiBaseUrl(config.ai_base_url.clone()),
-            "text_font_family" => SyncValue::TextFontFamily(config.text_font_family.clone()),
+            config::key::TEXT_FONT_SIZE => SyncValue::TextFontSize(config.text_font_size),
+            config::key::TEXT_COLOR_LIGHT => {
+                SyncValue::TextColorLight(config.text_color_light.clone())
+            }
+            config::key::TEXT_COLOR_DARK => {
+                SyncValue::TextColorDark(config.text_color_dark.clone())
+            }
+            config::key::INPUT_GUIDANCE => SyncValue::InputGuidance(config.input_guidance.clone()),
+            config::key::AI_SERVICE => SyncValue::AiService(config.ai_service),
+            config::key::AI_MODELS => SyncValue::AiModels(config.ai_models.clone()),
+            config::key::AI_BASE_URL => SyncValue::AiBaseUrl(config.ai_base_url.clone()),
+            config::key::TEXT_FONT_FAMILY => {
+                SyncValue::TextFontFamily(config.text_font_family.clone())
+            }
             _ => return None,
         },
     })
@@ -3619,7 +3607,7 @@ mod tests {
     }
 
     #[test]
-    fn text_window_keys_use_the_config_file_names_and_omit_yielded_keys() {
+    fn text_window_keys_use_the_store_names_and_omit_yielded_keys() {
         let mut config = Config::default();
         *config.text_window_keys.get_mut(DraftAction::HistoryOlder) = "Alt+KeyP".into();
         config

@@ -6,6 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
 	import { Switch } from '$lib/components/ui/switch';
+	import type { SyncKind } from '$lib/bindings/SyncKind';
 	import type { Call } from '$lib/call';
 	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
@@ -48,7 +49,7 @@
 		{ kind: 'replacements', label: m.settings_sync_replacements },
 		{ kind: 'snippets', label: m.settings_sync_snippets },
 		{ kind: 'history', label: m.settings_sync_history }
-	] as const;
+	] as const satisfies readonly { kind: SyncKind; label: () => string }[];
 
 	function confirmReset() {
 		resetOpen = false;

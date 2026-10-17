@@ -123,6 +123,12 @@ fn name_at(time: SystemTime) -> String {
     format!("{date}T{}Z.json", &time[1..])
 }
 
+/// 名前から、作った時刻（UNIX 時刻のミリ秒）を読む。画面は名前でなくこれを書式にして出す
+pub fn created_ms(name: &str) -> Option<u64> {
+    let elapsed = time_of(name)?.duration_since(UNIX_EPOCH).ok()?;
+    u64::try_from(elapsed.as_millis()).ok()
+}
+
 fn time_of(name: &str) -> Option<SystemTime> {
     let digits = |range: std::ops::Range<usize>| name.get(range)?.parse::<u64>().ok();
     let (year, month, day) = (digits(0..4)?, digits(4..6)?, digits(6..8)?);
@@ -184,6 +190,10 @@ mod tests {
             .unwrap();
         assert_eq!(name, "20261017T123456Z.json");
         assert_eq!(time_of(&name), Some(now));
+        assert_eq!(
+            created_ms(&name),
+            Some(now.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64)
+        );
         assert_eq!(read(&dir.join(DIR_NAME), &name).unwrap(), entries("dark"));
     }
 

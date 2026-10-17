@@ -14,7 +14,7 @@
 	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
 	import { ENCODINGS, OUTPUTS } from '$lib/action-options';
 	import { rowAddressee } from '$lib/addressee';
-	import { firstLine } from '$lib/snippets';
+	import { firstLine, snippetLabel } from '$lib/snippets';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { Switch } from '$lib/components/ui/switch';
 	import { focusFirstField } from '$lib/focus-field';
@@ -49,10 +49,11 @@
 					searchText={(row) => [row.name, row.body]}
 				>
 					{#snippet trailing(row)}
+						{@const label = snippetLabel(row)}
 						{#if view.proAvailable && view.syncKinds.snippets}
 							<SyncToggle
 								pressed={row.sync}
-								name={row.name || firstLine(row.body)}
+								name={label}
 								onchange={(sync) => {
 									row.sync = sync;
 									editor.snippets.save();
@@ -61,8 +62,8 @@
 						{/if}
 						<!-- 一覧から外すスイッチ。消さずに取っておくのは、挿入する文でも実行する行でも同じなので、どの行にも出す -->
 						<Switch
-							aria-label={row.name || firstLine(row.body)
-								? m.settings_snippets_enabled({ name: row.name || firstLine(row.body) })
+							aria-label={label
+								? m.settings_snippets_enabled({ name: label })
 								: m.settings_snippets_enabled_unnamed()}
 							bind:checked={
 								() => row.enabled,

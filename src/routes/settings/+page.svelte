@@ -40,6 +40,7 @@
 	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '$lib/history.svelte';
 	import { modifiedName } from '$lib/modified-settings';
 	import { onEvent } from '$lib/on-event';
+	import { AiModelEditor } from '$lib/ai-model-editor.svelte';
 	import { SnippetsEditor } from '$lib/snippets-editor.svelte';
 	import KeyCaps from '$lib/components/key-caps.svelte';
 	import ListFilter from '$lib/components/list-filter.svelte';
@@ -56,6 +57,7 @@
 		hasNoModifiers,
 		isCloseWindowKey,
 		isImeKey,
+		isKeyRejection,
 		keyRejectionMessage,
 		toAccelerator,
 		toDraftKey,
@@ -229,7 +231,7 @@
 			await invoke('set_hotkey', { accelerator });
 		} catch (e) {
 			// 下書きの操作と重なって断られたときは符号が返る。それ以外は OS に登録できなかった
-			hotkeyError = errorCode(e).startsWith('keys.')
+			hotkeyError = isKeyRejection(e)
 				? keyRejectionMessage(e, accelerator, view.platform)
 				: m.settings_hotkey_unavailable({
 						keys: formatKeys(accelerator, view.platform),
@@ -270,8 +272,9 @@
 		isBlankReplacement
 	);
 
-	/** 定型文とモデル。定型文の分類は開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
+	/** 定型文と AI のモデル。どちらの分類も開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
 	const snippetsEditor = new SnippetsEditor(settings.current, callActions);
+	const aiModel = new AiModelEditor(settings.current, callActions);
 	$effect(() => {
 		if (settings.current) snippetsEditor.followLocale(settings.current);
 	});
@@ -423,13 +426,14 @@
 		if (textColorInputs[theme].trim() === '') textColorInputs[theme] = DEFAULT_TEXT_COLORS[theme];
 	}
 
-	// 同期が設定を変えたら、画面側で持っている一覧と欄を、届いた設定から写し直す。
+	// 同期やバックアップから戻すことで設定が替わったら、画面側で持っている一覧と欄を、新しい設定から写し直す。
 	// 写し直さないと、次に画面で直したときに、届く前の並びや値で保存して、届いた分を消してしまう。
 	// Rust 側は、通信の間に画面からの保存が無かったときだけ知らせるので、打った内容は届いた設定に入っている
 	$effect(() =>
-		onEvent<SettingsView>(EVENTS.SYNC_APPLIED, (view) => {
+		onEvent<SettingsView>(EVENTS.CONFIG_REPLACED, (view) => {
 			replacements.recopy(view.replacements, true);
 			snippetsEditor.recopy(view);
+			aiModel.switchService(view.aiModels, view.aiService);
 			fontFamily = view.textFontFamily;
 			fontSize = view.textFontSize;
 			// 保存の前の、打っている途中の値（離れるまで保存しない件数、読めない色）は消さない
@@ -1128,7 +1132,8 @@
 					{#if category === 'ai'}
 						<SettingsAi
 							{view}
-							editor={snippetsEditor}
+							call={callActions}
+							model={aiModel}
 							{mawokAccountStatus}
 							onopenaccount={openAccount}
 						/>

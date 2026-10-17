@@ -22,11 +22,25 @@ export const EVENTS = {
 	DRAFT_HISTORY_CLEARED: "draft-history-cleared",
 	DRAFT_HISTORY_SYNCED: "draft-history-synced",
 	SNIPPET_ADDED: "snippet-added",
-	SYNC_APPLIED: "sync-applied",
+	CONFIG_REPLACED: "config-replaced",
 	AI_SETTINGS_REQUESTED: "ai-settings-requested",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested",
 	DRAFT_HIDDEN: "draft-hidden",
 	MAWOK_SIGN_IN_ENDED: "mawok-sign-in-ended",
 	UPDATE_CHANGED: "update-changed"
+} as const;
+
+export const ERROR_CODES = {
+	ACCOUNT_UNREACHABLE: "account.unreachable",
+	ACTION_CANCELLED: "action.cancelled",
+	BACKUP_RESTORE_PARTIAL: "backup.restore_partial",
+	SYNC_WRONG_PASSWORD: "sync.wrong_password",
+	SYNC_PASSWORD_TOO_SHORT: "sync.password_too_short",
+	SYNC_STATE_CHANGED: "sync.state_changed",
+	KEYS_INVALID: "keys.invalid",
+	KEYS_EDITING: "keys.editing",
+	KEYS_HOTKEY: "keys.hotkey",
+	KEYS_ACTION_PREFIX: "keys.action.",
+	ACTION_FAILURES: ["action.disabled", "action.no_key", "action.key_unreadable", "action.invalid_key", "action.rejected", "action.model_not_found", "action.endpoint_not_found", "action.rate_limited", "action.billing", "action.sign_in_required", "action.no_credit", "action.text_too_long", "action.previous_running", "action.service_error", "action.network", "action.timeout", "action.unexpected", "action.command_not_started", "action.folder_missing", "action.command_not_found", "action.command_failed", "action.multiline_command", "action.empty_output", "action.output_too_large", "action.text_not_encodable", "action.output_undecodable"]
 } as const;

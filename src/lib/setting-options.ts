@@ -50,8 +50,3 @@ export const CHAR_WIDTH_KINDS: {
 		styles: WIDTH_STYLES.filter(({ value }) => value !== 'half')
 	}
 ];
-
-/** 選択肢の表から、値の名前を引く */
-export function optionName<V extends string>(options: Option<V>[], value: V): string {
-	return options.find((option) => option.value === value)?.name() ?? value;
-}

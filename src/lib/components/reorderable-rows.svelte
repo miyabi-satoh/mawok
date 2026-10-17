@@ -6,10 +6,7 @@
 	overrideItemIdKeyNameBeforeInitialisingDndZones('key');
 </script>
 
-<script
-	lang="ts"
-	generics="T extends { id: string; name: string } & Record<K, string>, K extends string = never"
->
+<script lang="ts" generics="T extends { id: string; name: string }">
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
 	import { dragHandle, dragHandleZone, type DndEvent } from 'svelte-dnd-action';
@@ -21,13 +18,12 @@
 	import RowMenu from '$lib/components/row-menu.svelte';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Textarea } from '$lib/components/ui/textarea';
 	import { matchedKeys, shownRows } from '$lib/list-filter';
 	import { REORDER_FLIP_DURATION } from '$lib/reorder';
 	import type { Row, RowList } from '$lib/row-list.svelte';
 
 	/**
-	 * 名前と本文の組を並べて編集する一覧（定型文・アクション）。ふだんは1件1行（grip・名前と本文の頭・「…」メニュー）で見せ、
+	 * 名前と本文の組を並べて編集する一覧（定型文）。ふだんは1件1行（grip・名前と本文の頭・「…」メニュー）で見せ、
 	 * 行を押すと開いて、名前と本文を編集する。grip でドラッグ、「…」メニューの移動でも並べ替えられる。
 	 * 絞り込んでいる間は、並びの一部しか見えないので、並べ替えの操作を出さない
 	 */
@@ -38,42 +34,28 @@
 		nameLabel: string;
 		/** 閉じた行に、名前の横に出す本文の頭 */
 		preview: (row: Row<T>) => string;
-		/** 本文の頭を等幅の字で出すか（コマンド） */
-		monoPreview?: boolean;
 		/** 絞り込みの語。空なら絞り込まない */
 		query?: string;
 		/** 絞り込みで語を探す文字列（名前と本文） */
 		searchText: (row: Row<T>) => string[];
-		/** 閉じた行の、「…」メニューの前に置くもの（アクションの有効のスイッチ） */
+		/** 閉じた行の、「…」メニューの前に置くもの（定型文の有効のスイッチ） */
 		trailing?: Snippet<[Row<T>]>;
-		/** 閉じた行の名前と本文の頭を薄く出すか（切ったアクション） */
+		/** 閉じた行の名前と本文の頭を薄く出すか（切った定型文） */
 		dimmed?: (row: Row<T>) => boolean;
-	} & (
-		| {
-				/** 本文を持つ項目の名前（定型文は body） */
-				bodyKey: K;
-				bodyLabel: string;
-				body?: never;
-		  }
-		| {
-				/** 本文の欄の代わりに描くもの（アクション）。書き換えたら list.save() を呼ぶ */
-				body: Snippet<[Row<T>]>;
-				bodyKey?: never;
-				bodyLabel?: never;
-		  }
-	);
+		/** 開いた行の、名前の欄の下に描く本文の欄。書き換えたら list.save() を呼ぶ */
+		body: Snippet<[Row<T>]>;
+	};
 
 	let {
 		list,
 		expanded,
 		nameLabel,
 		preview,
-		monoPreview = false,
 		query = '',
 		searchText,
 		trailing,
 		dimmed,
-		...bodyProps
+		body
 	}: Props = $props();
 
 	/** ドラッグの並べ替えのアニメーションの長さ。動きを減らす設定なら 0 にする */
@@ -174,9 +156,7 @@
 								<!-- 足した直後の空の行にも、見える名前と読み上げの名前を持たせる -->
 								<span class="text-muted-foreground">{m.settings_row_empty()}</span>
 							{/if}
-							<span class="truncate text-muted-foreground {monoPreview ? 'font-mono text-xs' : ''}"
-								>{head}</span
-							>
+							<span class="truncate text-muted-foreground">{head}</span>
 						</span>
 					</button>
 					{@render trailing?.(row)}
@@ -202,22 +182,7 @@
 								}
 							}
 						/>
-						{#if bodyProps.body}
-							{@render bodyProps.body(row)}
-						{:else}
-							{@const bodyKey = bodyProps.bodyKey}
-							<Textarea
-								class="min-h-20 text-sm"
-								aria-label={bodyProps.bodyLabel}
-								bind:value={
-									() => row[bodyKey],
-									(body) => {
-										row[bodyKey] = (body ?? '') as Row<T>[K];
-										list.save();
-									}
-								}
-							/>
-						{/if}
+						{@render body(row)}
 					</div>
 				{/if}
 			</div>

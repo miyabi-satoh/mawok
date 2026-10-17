@@ -110,15 +110,9 @@ pub enum ActionEncoding {
 }
 
 impl ActionEncoding {
-    /// ログとエラーに出す名前（serde の名前と揃える）
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Utf8 => "utf-8",
-            Self::ShiftJis => "shift_jis",
-            Self::EucJp => "euc-jp",
-            Self::Iso2022Jp => "iso-2022-jp",
-            Self::Utf16Le => "utf-16le",
-        }
+    /// ログとエラーに出す名前（serde の名前）
+    pub fn name(self) -> String {
+        choice_name(&self)
     }
 }
 
@@ -580,7 +574,7 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     entries
 }
 
-fn json<T: Serialize>(value: T) -> Value {
+pub(crate) fn json<T: Serialize>(value: T) -> Value {
     serde_json::to_value(value).expect("settings serialize")
 }
 
@@ -626,12 +620,11 @@ pub fn from_entries(entries: &BTreeMap<String, Value>) -> Result<Loaded, String>
             key::HOTKEY | key::TEXT_WINDOW_KEYS => {}
             key::REPLACEMENTS => config.replacements = read_rows(name, value, &mut skipped),
             key::SNIPPETS => config.snippets = Some(read_rows(name, value, &mut skipped)),
-            _ if KNOWN_SETTINGS.contains(&name.as_str()) => {
-                if !apply_setting(&mut config, name, value) {
-                    skipped.push(name.clone());
-                }
-            }
-            _ => log::info!("ignored an unknown setting: {name}"),
+            _ => match apply_setting(&mut config, name, value) {
+                Some(true) => {}
+                Some(false) => skipped.push(name.clone()),
+                None => log::info!("ignored an unknown setting: {name}"),
+            },
         }
     }
     match entries.get(key::HOTKEY).map(Value::as_str) {
@@ -678,45 +671,10 @@ fn read_rows<T: DeserializeOwned>(name: &str, value: &Value, skipped: &mut Vec<S
         .collect()
 }
 
-/// `apply_setting` で読む項目
-const KNOWN_SETTINGS: &[&str] = &[
-    key::AUTOSTART,
-    key::SYNC_SETTINGS,
-    key::SYNC_KEYS,
-    key::SYNC_REPLACEMENTS,
-    key::SYNC_SNIPPETS,
-    key::SYNC_HISTORY,
-    key::SYNC_EXCLUDED_SETTINGS,
-    key::LANGUAGE,
-    key::THEME,
-    key::TEXT_WINDOW_ALWAYS_ON_TOP,
-    key::HIDE_TEXT_WINDOW_ON_BLUR,
-    key::SHOW_TEXT_WINDOW_BUTTONS,
-    key::TEXT_HISTORY_SIZE,
-    key::TRIM_TRAILING_WHITESPACE,
-    key::PUNCTUATION_STYLE,
-    key::ALPHABET_WIDTH,
-    key::DIGIT_WIDTH,
-    key::SPACE_WIDTH,
-    key::SYMBOL_WIDTH,
-    key::KATAKANA_WIDTH,
-    key::EXCLUDE_FROM_CLIPBOARD_HISTORY,
-    key::TEXT_FONT_FAMILY,
-    key::TEXT_FONT_SIZE,
-    key::TEXT_COLOR_LIGHT,
-    key::TEXT_COLOR_DARK,
-    key::INPUT_GUIDANCE,
-    key::AI_SERVICE,
-    key::AI_CONSENT,
-    key::AI_CONSENT_BASE_URL,
-    key::AI_MODELS,
-    key::AI_BASE_URL,
-];
-
-/// 1つの設定を、画面から変えるときと同じ検査を通して入れる。入れられない値なら何も変えずに false。
+/// 1つの設定を、画面から変えるときと同じ検査を通して入れる。入れられない値なら何も変えずに false、知らない項目名なら None。
 /// 置き場から読むときと、同期で届いたときに使う。範囲の外の値は収めずに断る（収めて入れると、届いた値と違う値を書き戻すため）。
 /// ホットキー・キー操作・行は扱わない
-pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> bool {
+pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> Option<bool> {
     fn set<T: DeserializeOwned>(target: &mut T, value: &Value) -> bool {
         set_checked(target, value, |_| true)
     }
@@ -733,7 +691,7 @@ pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> bool {
             _ => false,
         }
     }
-    match name {
+    Some(match name {
         key::AUTOSTART => set(&mut config.autostart, value),
         key::SYNC_SETTINGS => set(&mut config.sync_settings, value),
         key::SYNC_KEYS => set(&mut config.sync_keys, value),
@@ -780,8 +738,8 @@ pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> bool {
         key::AI_BASE_URL => set_checked(&mut config.ai_base_url, value, |url| {
             crate::ai::normalize_base_url(url).as_deref() == Some(url.as_str())
         }),
-        _ => false,
-    }
+        _ => return None,
+    })
 }
 
 /// 文字色。画面と同じ決まりで揃えてから入れる
@@ -802,12 +760,6 @@ pub(crate) fn valid_item_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn new_item_id() -> Result<String, String> {
-    let mut bytes = [0; 16];
-    getrandom::fill(&mut bytes).map_err(|error| format!("random item id: {error}"))?;
-    Ok(crate::hex::to_hex(&bytes))
-}
-
 /// 空・不正・重複の ID を、新しいランダムな値へ替える。
 ///
 /// 画面から足した行もこの入口を通るので、ID は Rust 側だけで作る。
@@ -818,7 +770,7 @@ pub(crate) fn repair_item_ids<T: SyncRow>(items: &mut [T]) -> Result<bool, Strin
         let item_id = item.id();
         if !valid_item_id(item_id) || !seen.insert(item_id.to_string()) {
             let next = loop {
-                let next = new_item_id()?;
+                let next = crate::hex::random_hex::<16>()?;
                 if seen.insert(next.clone()) {
                     break next;
                 }

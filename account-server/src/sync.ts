@@ -362,7 +362,7 @@ export async function putSync(env: Env, accountId: string, body: unknown): Promi
 }
 
 /** 包んだ鍵の上限。中身はアプリが決める (salt・パラメーター・暗号文を JSON にして 300 字ほど)。読まずに置くので、際限なく置かせない。 */
-export const WRAPPED_KEY_LENGTH = 1024;
+const WRAPPED_KEY_LENGTH = 1024;
 
 function validWrappedKey(value: unknown): value is string {
 	return typeof value === 'string' && value.length > 0 && value.length <= WRAPPED_KEY_LENGTH;

@@ -4,4 +4,8 @@ import type { BackupDifference } from "./BackupDifference";
 /**
  * 戻す画面に並べるバックアップ。名前は UTC の作成日時で、画面は今との違いを選ぶ手がかりとして出す。
  */
-export type Backup = { name: string, changes: Array<BackupDifference>, };
+export type Backup = { name: string, 
+/**
+ * 作った時刻（UNIX 時刻のミリ秒）。名前から読めなければ null
+ */
+createdAt: number | null, changes: Array<BackupDifference>, };

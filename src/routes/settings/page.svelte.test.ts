@@ -472,7 +472,7 @@ describe('設定画面の定型文', () => {
 
 		const received = { name: '同期した行', body: '同期した本文' };
 		const synced = { ...view(), snippets: snippetRows([received, confirm]) };
-		emit(listened, EVENTS.SYNC_APPLIED, synced);
+		emit(listened, EVENTS.CONFIG_REPLACED, synced);
 		await openRows(screen);
 		await expect
 			.element(screen.getByLabelText(m.settings_snippets_name()).nth(0))
@@ -715,7 +715,7 @@ describe('設定画面の下書きのフォント', () => {
 		const screen = await renderAt(m.settings_category_draft);
 
 		const synced = view([], 'keep', { family: 'HackGen', size: 16 });
-		emit(listened, EVENTS.SYNC_APPLIED, synced);
+		emit(listened, EVENTS.CONFIG_REPLACED, synced);
 		await expect.element(screen.getByLabelText(m.settings_draft_font())).toHaveValue('HackGen');
 		await screen.getByLabelText(m.settings_draft_font_size()).fill('22');
 

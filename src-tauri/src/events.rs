@@ -6,7 +6,7 @@ pub const DRAFT_HISTORY_CLEARED: &str = "draft-history-cleared";
 pub const DRAFT_HISTORY_SYNCED: &str = "draft-history-synced";
 pub const SNIPPET_ADDED: &str = "snippet-added";
 /// 同期かバックアップから戻したことで設定の行一覧が替わった。設定画面は行を新しい設定から写し直す。
-pub const SYNC_APPLIED: &str = "sync-applied";
+pub const CONFIG_REPLACED: &str = "config-replaced";
 /// テキストウィンドウのエラーの帯から、AI の設定を頼まれた。設定画面は「AI」に移る。
 pub const AI_SETTINGS_REQUESTED: &str = "ai-settings-requested";
 pub const SHOWN: &str = "shown";

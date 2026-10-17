@@ -199,13 +199,18 @@ app.delete('/v1/token', async (c) => {
 	return c.body(null, 204);
 });
 
-/** デバイスの一覧の入口の共通の認可と、アカウントごとの上限 (同期と同じ数で、別に数える)。 */
-async function devicesAccount(c: Context<App>): Promise<string | Response> {
+/** アプリのトークンの認可と、アカウントごとの上限。`prefix` で、同じ上限の数を入口ごとに分けて数える。 */
+async function limitedAppAccount(c: Context<App>, prefix: string): Promise<string | Response> {
 	const accountId = await appAccount(c);
 	if (!accountId) return c.json({ error: 'unauthorized' }, 401);
-	if (await limited(c, c.env.SYNC_LIMITER, `devices:${accountId}`))
+	if (await limited(c, c.env.SYNC_LIMITER, `${prefix}${accountId}`))
 		return c.json({ error: 'rate_limited' }, 429);
 	return accountId;
+}
+
+/** デバイスの一覧の入口の共通の認可と、アカウントごとの上限 (同期と同じ数で、別に数える)。 */
+function devicesAccount(c: Context<App>): Promise<string | Response> {
+	return limitedAppAccount(c, 'devices:');
 }
 
 /**
@@ -249,10 +254,8 @@ app.delete('/v1/devices/:id', async (c) => {
 
 /** 同期の入口の共通の認可と、アカウントごとの書き込み上限。 */
 async function syncAccount(c: Context<App>): Promise<string | Response> {
-	const accountId = await appAccount(c);
-	if (!accountId) return c.json({ error: 'unauthorized' }, 401);
-	if (await limited(c, c.env.SYNC_LIMITER, accountId))
-		return c.json({ error: 'rate_limited' }, 429);
+	const accountId = await limitedAppAccount(c, '');
+	if (accountId instanceof Response) return accountId;
 	if (!(await hasSyncPro(c.env, accountId))) return c.json({ error: 'pro_required' }, 403);
 	return accountId;
 }

@@ -9,6 +9,7 @@ import {
 	isDismissKey,
 	keyHint,
 	keyLabels,
+	isKeyRejection,
 	keyRejectionMessage,
 	platformFromUrl,
 	toAccelerator
@@ -203,6 +204,15 @@ describe('keyHint', () => {
 			m.key_hint({ label: '設定を開く', keys: '⌘,' })
 		);
 		expect(keyHint('設定を開く', '', 'macos')).toBe('設定を開く');
+	});
+});
+
+describe('isKeyRejection', () => {
+	it('キーを割り当てられない理由の符号だけを見分ける', () => {
+		expect(isKeyRejection('keys.hotkey')).toBe(true);
+		expect(isKeyRejection('keys.action.snippets')).toBe(true);
+		expect(isKeyRejection('keys.unknown')).toBe(false);
+		expect(isKeyRejection('the shortcut is already registered')).toBe(false);
 	});
 });
 

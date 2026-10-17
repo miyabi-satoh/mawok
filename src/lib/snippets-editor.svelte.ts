@@ -1,14 +1,12 @@
 import { SvelteSet } from 'svelte/reactivity';
 import { okValue, type Call } from '$lib/call';
-import { modelFor } from '$lib/ai-services';
 import { isBlankSnippet } from '$lib/blank-rows';
 import { RowList } from '$lib/row-list.svelte';
-import { coalescedSaver } from '$lib/saver';
-import type { AiService, SettingsView, Snippet } from '$lib/settings.svelte';
+import type { SettingsView, Snippet } from '$lib/settings.svelte';
 import { newSnippet } from '$lib/snippets';
 
 /**
- * 設定画面の「定型文」で編集している定型文とモデル。
+ * 設定画面の「定型文」で編集している定型文。
  * 定型文の分類は開いている間だけ描くので、置き換え辞書と同じく設定画面の本体がこれを持ち、
  * 分類を移って戻っても打った内容と保存のしくみを保つ（戻ったときに古い写しで作り直すと、直前の入力を保存で消しかねない）。
  * 打っている途中に Rust 側からの反映で打ち消されないよう、最初の1回だけ写して以降は画面側が持ち主になる
@@ -18,9 +16,6 @@ export class SnippetsEditor {
 	/** 開いている行の画面用 key と、絞り込みの語。分類を移っても保つ */
 	readonly expanded = new SvelteSet<string>();
 	filter = $state('');
-	model = $state('');
-	/** 欄のモデルがどの AI サービスのものか。替えた直後に、前のサービスのモデルとして保存しないため */
-	modelService = $state<AiService>('none');
 
 	readonly call: Call;
 	/** 定型文を写したときの表示言語 */
@@ -34,10 +29,6 @@ export class SnippetsEditor {
 			async (snippets) => okValue(await this.call<Snippet[]>('set_snippets', { snippets })),
 			isBlankSnippet
 		);
-		if (view) {
-			this.model = modelFor(view.aiModels, view.aiService);
-			this.modelService = view.aiService;
-		}
 	}
 
 	/**
@@ -50,26 +41,10 @@ export class SnippetsEditor {
 		this.snippets.recopy(view.snippets);
 	}
 
-	/** 同期が設定を変えたら、定型文とモデルを写し直す。画面で変えていても写す（RowList.recopy の force） */
+	/** 同期やバックアップから戻すことで設定が替わったら、定型文を写し直す。画面で変えていても写す（RowList.recopy の force） */
 	recopy(view: SettingsView) {
 		this.#snippetsLocale = view.locale;
 		this.snippets.recopy(view.snippets, true);
-		this.switchService(view.aiModels, view.aiService);
-	}
-
-	saveModel = coalescedSaver(() =>
-		this.call('set_ai_model', { service: this.modelService, model: this.model })
-	);
-
-	setModel(model: string) {
-		this.model = model;
-		this.saveModel();
-	}
-
-	/** AI サービスを替えたら、モデルの欄を替えた先で設定したものにする */
-	switchService(models: Partial<Record<AiService, string>>, service: AiService) {
-		this.model = modelFor(models, service);
-		this.modelService = service;
 	}
 
 	/**
