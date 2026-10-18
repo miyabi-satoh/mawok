@@ -118,6 +118,8 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 
 	if (!inWord) start = caret;
 	if (unresolvable) return null;
+	// ホームに広がるのは `~` と `~/` だけ。`~bob` はほかの人のホームで、補う先が分からないので、ただの名前として補う
+	tilde = tilde && /^~(\/|$)/.test(path);
 	const separators = windows ? /[\\/]/ : /\//;
 	// 引用符の中の `~` はシェルが広げないので、ホームとして補うと違うパスになる
 	if (!tilde && /^~($|[\\/])/.test(path)) return null;
