@@ -66,6 +66,8 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 		}
 		if (quote === '"') {
 			if (char === '"') quote = null;
+			// カーソルの直前が逃がしの印だけなら、次に打つ文字が決まっていないので補わない
+			else if (!windows && char === '\\' && index + 1 >= caret) return null;
 			else if (
 				!windows &&
 				char === '\\' &&
@@ -108,7 +110,8 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 			path += line[index];
 		} else {
 			if (!inWord && !windows && char === '~') tilde = true;
-			if (expands(char)) unresolvable = true;
+			// 引用符の外のワイルドカードも、シェルが当てはまる名前に広げる
+			if (expands(char) || (!windows && '*?['.includes(char))) unresolvable = true;
 			addChar(index, char);
 		}
 	}

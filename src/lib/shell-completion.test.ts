@@ -29,6 +29,7 @@ describe('pathWordAt', () => {
 
 	it('カーソルの直前が逃がしの印だけなら補わない', () => {
 		expect(wordAt('@sh cat My\\')).toBeNull();
+		expect(wordAt('@sh cat "My\\')).toBeNull();
 	});
 
 	it('リダイレクトの後ろはファイルとして補う', () => {
@@ -43,10 +44,12 @@ describe('pathWordAt', () => {
 		expect(wordAt('@sh ls | ~/bin/')).toMatchObject({ path: '~/bin/', tilde: true });
 	});
 
-	it('シェルが広げる語と、引用符の中の ~ は補わない', () => {
+	it('シェルが広げる語（変数・ワイルドカード）と、引用符の中の ~ は補わない', () => {
 		expect(wordAt('@sh cat $HOME/')).toBeNull();
 		expect(wordAt('@sh cat "$HOME/')).toBeNull();
 		expect(wordAt('@sh cat "~/')).toBeNull();
+		expect(wordAt('@sh rm ./a*')).toBeNull();
+		expect(wordAt('@sh cat "a*')).toMatchObject({ path: 'a*' });
 		expect(wordAt("@sh cat '$x")).toMatchObject({ path: '$x' });
 	});
 
