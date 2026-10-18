@@ -115,7 +115,7 @@ try {
 		if (!(await reportBuild())) code = 2;
 	} else {
 		// ADR: インストーラー抜きで、LTO を切って組み直す。配る版と同じコードで最適化だけが違い、
-		// cargo の組み直しが約5分半から約1分に縮む。配る形は msix-check が見る。
+		// ビルドの時間の大半を占める LTO を省ける。LTO ありの配る形 (MSIX) は msix-check が見る。
 		// Node は .cmd を直には起動できないので、cmd.exe 経由で pnpm を呼ぶ
 		code = await run('cmd.exe', ['/c', 'pnpm', 'tauri', 'build', '--no-bundle'], repoRoot, {
 			CARGO_PROFILE_RELEASE_LTO: 'false',
