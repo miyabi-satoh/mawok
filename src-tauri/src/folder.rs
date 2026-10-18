@@ -221,8 +221,13 @@ impl Found {
 fn composed(name: &str) -> std::borrow::Cow<'_, str> {
     #[cfg(target_os = "macos")]
     {
-        use unicode_normalization::UnicodeNormalization;
-        std::borrow::Cow::Owned(name.nfc().collect())
+        use unicode_normalization::{is_nfc, UnicodeNormalization};
+        // 大半の名前はもう NFC なので、作り直さずにそのまま使う
+        if is_nfc(name) {
+            std::borrow::Cow::Borrowed(name)
+        } else {
+            std::borrow::Cow::Owned(name.nfc().collect())
+        }
     }
     #[cfg(not(target_os = "macos"))]
     std::borrow::Cow::Borrowed(name)
