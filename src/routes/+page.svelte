@@ -881,7 +881,11 @@
 		if (isImeKey(event) || event.altKey || event.ctrlKey || event.metaKey) return false;
 		if (pathListShown && pathList) {
 			const count = pathList.candidates.length;
-			const arrow = (event.key === 'ArrowDown' || event.key === 'ArrowUp') && !event.shiftKey;
+			// ↑↓ は、Tab で選び始めてから一覧に取る。選ぶ前は、行の移動と履歴のキーのまま
+			const arrow =
+				(event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
+				!event.shiftKey &&
+				pathList.selected >= 0;
 			if (event.key === 'Tab' || arrow) {
 				const step = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey) ? -1 : 1;
 				selectPath(stepSelection(pathList.selected, count, step));

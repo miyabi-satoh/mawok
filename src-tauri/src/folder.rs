@@ -151,8 +151,8 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        let name = composed(&name).into_owned();
-        if !name.to_lowercase().starts_with(&lowered) {
+        let key = composed(&name).into_owned();
+        if !key.to_lowercase().starts_with(&lowered) {
             continue;
         }
         // 名前の一覧と一緒に返る種類で見て、フォルダーの数だけ stat しない。
@@ -164,38 +164,30 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
         if !(is_dir || files) {
             continue;
         }
-        let entry_name = (name, is_dir);
-        match visibility(&entry_name.0, &entry) {
+        let found = Found { name, key, is_dir };
+        match visibility(&found.name, &entry) {
             Visibility::Protected => {}
-            Visibility::Hidden if !prefix.starts_with('.') => hidden.push(entry_name),
-            _ => visible.push(entry_name),
+            Visibility::Hidden if !prefix.starts_with('.') => hidden.push(found),
+            _ => visible.push(found),
         }
     }
-    let mut entries = if visible.is_empty() { hidden } else { visible };
-    entries.sort_by_cached_key(|(name, _)| name.to_lowercase());
-    // 区切りは、共通する所を求めた後に付ける。付けてから求めると、大文字と小文字だけが違うフォルダー（`Foo` と `foo`）で区切りまで共通になる
-    let with_separator = |(name, is_dir): &(String, bool)| {
-        if *is_dir {
-            format!("{name}{SEPARATOR}")
-        } else {
-            name.clone()
-        }
-    };
-    match entries.as_slice() {
+    let mut found = if visible.is_empty() { hidden } else { visible };
+    found.sort_by_cached_key(|found| found.key.to_lowercase());
+    match found.as_slice() {
         [] => unchanged(),
-        [entry] => FolderCompletion {
-            input: format!("{folder_part}{}", with_separator(entry)),
+        [one] => FolderCompletion {
+            input: format!("{folder_part}{}", one.completed()),
             ..unchanged()
         },
         _ => {
-            let names: Vec<String> = entries.iter().map(|(name, _)| name.clone()).collect();
+            let keys: Vec<String> = found.iter().map(|found| found.key.clone()).collect();
             FolderCompletion {
-                input: format!("{folder_part}{}", completed_part(&names, &prefix)),
-                total: entries.len() as u32,
-                candidates: entries
+                input: format!("{folder_part}{}", completed_part(&keys, &prefix)),
+                total: found.len() as u32,
+                candidates: found
                     .iter()
                     .take(CANDIDATE_LIMIT)
-                    .map(with_separator)
+                    .map(Found::completed)
                     .collect(),
                 ..unchanged()
             }
@@ -203,9 +195,29 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
     }
 }
 
-/// 名前を合成済みの形（NFC）にする（macOS）。Finder などが付けた名前は濁点を分けた形（NFD）のことがあり、
-/// 打った文字（NFC）と比べられないため。macOS のファイルシステムはどちらの形でも同じ名前として開けるので、補った名前も NFC で返す。
-/// Windows の名前は NFC で、ファイルシステムは形を区別するので、そのままにする
+/// 打ちかけに当てはまった名前
+struct Found {
+    /// 実際の名前。補うときはこれを入れる（形を区別するファイルシステムでも開けるように）
+    name: String,
+    /// 比べるための名前（composed）。2つ以上のときに共通する所を求めるのも、これで行う
+    key: String,
+    is_dir: bool,
+}
+
+impl Found {
+    /// 補って入れる名前。フォルダーは区切りまで。区切りは共通する所を求めた後に付ける。
+    /// 付けてから求めると、大文字と小文字だけが違うフォルダー（`Foo` と `foo`）で区切りまで共通になる
+    fn completed(&self) -> String {
+        if self.is_dir {
+            format!("{}{SEPARATOR}", self.name)
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
+/// 打ちかけと名前を比べる形（macOS は合成済みの形 NFC）。Finder などが付けた名前は濁点を分けた形（NFD）のことがあり、
+/// 打った文字（NFC）と比べられないため。Windows の名前は NFC なので、そのままにする
 fn composed(name: &str) -> std::borrow::Cow<'_, str> {
     #[cfg(target_os = "macos")]
     {
@@ -644,9 +656,10 @@ mod tests {
         let d = completion_dirs("complete-nfd");
         // 「ガイド」を、濁点を分けた形（カ + U+3099）で作る
         fs::write(d.home.join("\u{30AB}\u{3099}イド.txt"), "").unwrap();
+        // 入れるのは実際の名前（形を区別するボリュームでも開けるように）
         assert_eq!(
             complete_path(&d.home, &d.home, "\u{30AC}").input,
-            "\u{30AC}イド.txt"
+            "\u{30AB}\u{3099}イド.txt"
         );
     }
 

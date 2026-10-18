@@ -49,7 +49,9 @@ describe('pathWordAt', () => {
 		expect(wordAt('@sh cat "$HOME/')).toBeNull();
 		expect(wordAt('@sh cat "~/')).toBeNull();
 		expect(wordAt('@sh rm ./a*')).toBeNull();
-		expect(wordAt('@sh cat ~bo')).toMatchObject({ path: '~bo', tilde: false });
+		expect(wordAt('@sh cat ~bo')).toBeNull();
+		expect(wordAt('@sh cp x.{txt,b')).toBeNull();
+		expect(wordAt('@sh ls # Do')).toBeNull();
 		expect(wordAt('@sh cat "a*')).toMatchObject({ path: 'a*' });
 		expect(wordAt("@sh cat '$x")).toMatchObject({ path: '$x' });
 	});

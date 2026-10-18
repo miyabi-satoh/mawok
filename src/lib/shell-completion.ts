@@ -112,16 +112,18 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 			path += line[index];
 		} else {
 			if (!inWord && !windows && char === '~') tilde = true;
-			// 引用符の外のワイルドカードも、シェルが当てはまる名前に広げる
-			if (expands(char) || (!windows && '*?['.includes(char))) unresolvable = true;
+			// 語の頭の `#` から後ろは、シェルが読まない注釈
+			if (!windows && !inWord && char === '#') return null;
+			// 引用符の外のワイルドカードと `{a,b}` も、シェルが名前に広げる
+			if (expands(char) || (!windows && '*?[{'.includes(char))) unresolvable = true;
 			addChar(index, char);
 		}
 	}
 
 	if (!inWord) start = caret;
 	if (unresolvable) return null;
-	// ホームに広がるのは `~` と `~/` だけ。`~bob` はほかの人のホームで、補う先が分からないので、ただの名前として補う
-	tilde = tilde && /^~(\/|$)/.test(path);
+	// ホームに広がるのは `~` と `~/` のほか、`~bob` のようなほかの人のホームもある。その先は分からないので補わない
+	if (tilde && !/^~(\/|$)/.test(path)) return null;
 	const separators = windows ? /[\\/]/ : /\//;
 	// 引用符の中の `~` はシェルが広げないので、ホームとして補うと違うパスになる
 	if (!tilde && /^~($|[\\/])/.test(path)) return null;
