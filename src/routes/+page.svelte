@@ -798,6 +798,12 @@
 	// Tab のたびに進める。補いを待つ間に次の Tab を押していたら、古い補いで上書きしない
 	let pathRequests = 0;
 
+	/** 待っている補いを捨て、一覧を閉じる。隠した後に、前の補いが入力欄に入らないようにする */
+	function cancelPathCompletion() {
+		pathRequests += 1;
+		pathList = null;
+	}
+
 	/** 1行目の start〜end を、打ったのと同じ扱い（取り消しで戻せる）で置き換える */
 	function replaceInLine(start: number, end: number, replacement: string) {
 		if (!textarea) return;
@@ -936,6 +942,7 @@
 	async function dismiss() {
 		if (hiding) return;
 		hiding = true;
+		cancelPathCompletion();
 		try {
 			await invoke('dismiss');
 		} catch {
@@ -1092,6 +1099,7 @@
 			// 隠れても、実行は取り消さずに続ける
 			listen(EVENTS.DRAFT_HIDDEN, () => {
 				draftVisible = false;
+				cancelPathCompletion();
 			}),
 			listen(EVENTS.DRAFT_HISTORY_CLEARED, () => {
 				historyClearedCount += 1;
