@@ -151,10 +151,15 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        let key = composed(&name).into_owned();
+        let key = composed(&name);
         if !key.to_lowercase().starts_with(&lowered) {
             continue;
         }
+        // 実際の名前と同じなら持たない（大半の名前で、写しを作らない）
+        let key = match key {
+            std::borrow::Cow::Borrowed(_) => None,
+            std::borrow::Cow::Owned(key) => Some(key),
+        };
         // 名前の一覧と一緒に返る種類で見て、フォルダーの数だけ stat しない。
         // シンボリックリンクだけは先を見て、フォルダーなら候補にする（移るときもリンクのまま移れる）
         let Ok(file_type) = entry.file_type() else {
@@ -172,7 +177,7 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
         }
     }
     let mut found = if visible.is_empty() { hidden } else { visible };
-    found.sort_by_cached_key(|found| found.key.to_lowercase());
+    found.sort_by_cached_key(|found| found.key().to_lowercase());
     match found.as_slice() {
         [] => unchanged(),
         [one] => FolderCompletion {
@@ -180,7 +185,7 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
             ..unchanged()
         },
         _ => {
-            let keys: Vec<String> = found.iter().map(|found| found.key.clone()).collect();
+            let keys: Vec<String> = found.iter().map(|found| found.key().to_string()).collect();
             FolderCompletion {
                 input: format!("{folder_part}{}", completed_part(&keys, &prefix)),
                 total: found.len() as u32,
@@ -199,12 +204,16 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
 struct Found {
     /// 実際の名前。補うときはこれを入れる（形を区別するファイルシステムでも開けるように）
     name: String,
-    /// 比べるための名前（composed）。2つ以上のときに共通する所を求めるのも、これで行う
-    key: String,
+    /// 比べるための名前（composed）が実際の名前と違うときの、その名前。2つ以上のときに共通する所を求めるのも、これで行う
+    key: Option<String>,
     is_dir: bool,
 }
 
 impl Found {
+    fn key(&self) -> &str {
+        self.key.as_deref().unwrap_or(&self.name)
+    }
+
     /// 補って入れる名前。フォルダーは区切りまで。区切りは共通する所を求めた後に付ける。
     /// 付けてから求めると、大文字と小文字だけが違うフォルダー（`Foo` と `foo`）で区切りまで共通になる
     fn completed(&self) -> String {
