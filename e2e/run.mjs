@@ -1,5 +1,5 @@
 // `just e2e` の入口。画面がロック中でないことを確かめ (消えていれば起こし)、終わるまで画面を点けたまま、
-// リリース版をビルドし直してからテストを回す。
+// リリース版 (インストーラー抜き・LTO なし) をビルドし直してからテストを回す。
 //
 // 引数でテストファイルを選べる。`draft-clipboard` のように名前だけなら `tests/<名前>.test.mjs`、
 // パスやグロブならそのまま使う。省略すると全部回す。ファイルは1つずつ `node` で直接回す (runner.mjs の runTests)。
@@ -60,7 +60,7 @@ async function reportBuild() {
 		builtAt = (await stat(APP_PATH)).mtime;
 	} catch {
 		console.error(`[e2e] --no-build を付けましたが、実行ファイルがありません: ${APP_PATH}`);
-		console.error('[e2e] 先に --no-build なしで1度回すか、just bundle でビルドしてください');
+		console.error('[e2e] 先に --no-build なしで1度回してください');
 		return false;
 	}
 	console.log('[e2e] ビルドを飛ばします (--no-build)');
@@ -114,7 +114,13 @@ try {
 	if (options.flags.has('--no-build')) {
 		if (!(await reportBuild())) code = 2;
 	} else {
-		code = await run('just', ['bundle'], repoRoot);
+		// ADR: インストーラー抜きで、LTO を切って組み直す。配る版と同じコードで最適化だけが違い、
+		// cargo の組み直しが約5分半から約1分に縮む。配る形は msix-check が見る。
+		// Node は .cmd を直には起動できないので、cmd.exe 経由で pnpm を呼ぶ
+		code = await run('cmd.exe', ['/c', 'pnpm', 'tauri', 'build', '--no-bundle'], repoRoot, {
+			CARGO_PROFILE_RELEASE_LTO: 'false',
+			CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+		});
 	}
 	if (code === 0) {
 		// ログイン時の起動の登録は、全体の前後で1度だけ控えて戻し、回している間は外しておく。
