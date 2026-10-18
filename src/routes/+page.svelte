@@ -14,6 +14,7 @@
 	import AddressSuggestions from '$lib/components/address-suggestions.svelte';
 	import FolderButton from '$lib/components/folder-button.svelte';
 	import FolderPalette from '$lib/components/folder-palette.svelte';
+	import PathCandidates from '$lib/components/path-candidates.svelte';
 	import KeyCaps from '$lib/components/key-caps.svelte';
 	import TextPalette, { type PaletteAction } from '$lib/components/text-palette.svelte';
 	import * as Alert from '$lib/components/ui/alert';
@@ -29,7 +30,7 @@
 		historyDirection,
 		type HistoryDirection
 	} from '$lib/history.svelte';
-	import { caretLine } from '$lib/caret-line';
+	import { caretLine, firstLineHeight } from '$lib/caret-line';
 	import { clamp } from '$lib/clamp';
 	import {
 		draftActionFor,
@@ -45,6 +46,8 @@
 	import type { FolderMenu } from '$lib/bindings/FolderMenu';
 	import { coalescedSaver } from '$lib/saver';
 	import { folderErrorMessage } from '$lib/folder-errors';
+	import { stepSelection } from '$lib/folder-completion';
+	import { completedWord, pathWordAt, quotePath, type PathWord } from '$lib/shell-completion';
 	import {
 		previewSegments,
 		ReplacementPreview,
@@ -58,6 +61,7 @@
 		isRunnable,
 		matchingAddresses,
 		rowAddressee,
+		shCommand,
 		splitFirstLine,
 		textAddressee,
 		typedAddress,
@@ -758,6 +762,153 @@
 		return true;
 	}
 
+	/**
+	 * `@sh` の行で Tab を押して並べたパスの候補（docs/actions.md「パスの補完」）。
+	 * `start`〜`end` は1行目の中で補った語の範囲、`before` は選ぶ前に入れた語（Esc で戻す）。
+	 * `text` は並べた後のテキストで、打ち直したりカーソルを動かしたりしたら一覧を閉じる。
+	 * `top` は一覧を出す位置で、1行目が折り返していればその下にする
+	 */
+	type PathList = {
+		top: number;
+		word: PathWord;
+		base: string;
+		candidates: string[];
+		total: number;
+		start: number;
+		end: number;
+		selected: number;
+		before: string;
+		text: string;
+	};
+	let pathList = $state<PathList | null>(null);
+	const pathListShown = $derived(
+		pathList !== null &&
+			pathList.text === text &&
+			caret === pathList.end &&
+			!busy &&
+			!composing &&
+			!snippetsOpen &&
+			!folderOpen
+	);
+	$effect(() => {
+		// 一度閉じた一覧は、テキストやカーソルが元に戻っても出し直さない（Tab で補い直す）
+		if (pathList && !pathListShown) pathList = null;
+	});
+	const pathListId = `${addressListId}-path`;
+	// Tab のたびに進める。補いを待つ間に次の Tab を押していたら、古い補いで上書きしない
+	let pathRequests = 0;
+
+	/** 待っている補いを捨て、一覧を閉じる。隠した後に、前の補いが入力欄に入らないようにする */
+	function cancelPathCompletion() {
+		pathRequests += 1;
+		pathList = null;
+	}
+
+	/** 1行目の start〜end を、打ったのと同じ扱い（取り消しで戻せる）で置き換える */
+	function replaceInLine(start: number, end: number, replacement: string) {
+		if (!textarea) return;
+		textarea.focus();
+		textarea.setSelectionRange(start, end);
+		insertAsTyped(textarea, replacement, start, end);
+		trackCaret();
+	}
+
+	/** カーソルの前のパスを、今の作業フォルダーから見て補う。2つ以上当てはまれば、共通する所まで補って候補を並べる */
+	async function completePath() {
+		if (!textarea || !platform || caret === null) return;
+		const { line } = splitFirstLine(text);
+		const at = caret;
+		const word = pathWordAt(line, at, platform);
+		if (!word) return;
+		const requested = ++pathRequests;
+		const typed = text;
+		const completion = await invoke<FolderCompletion>('complete_path', { input: word.path }).catch(
+			() => null
+		);
+		if (!completion || requested !== pathRequests || text !== typed || caret !== at) return;
+		// 待つ間に実行を始めた・変換を始めた・一覧や欄を開いたなら、入れない（入れるとフォーカスを入力欄に取り戻してしまう）
+		if (busy || composing || snippetsOpen || folderOpen) return;
+		if (completion.candidates.length === 0) {
+			if (completion.input === word.path) return;
+			const followed = /[ \t]/.test(line[at] ?? '');
+			replaceInLine(word.start, at, completedWord(completion.input, word, platform, followed));
+			return;
+		}
+		const common = quotePath(completion.input, word, platform, false);
+		if (line.slice(word.start, at) !== common) replaceInLine(word.start, at, common);
+		pathList = {
+			// 宛先の候補と同じく1行目の下端から 12px 下げ、入力欄をスクロールした分を引く
+			top: firstLineHeight(textarea) + 12 - textarea.scrollTop,
+			word,
+			base: completion.base,
+			candidates: completion.candidates,
+			total: completion.total,
+			start: word.start,
+			end: word.start + common.length,
+			selected: -1,
+			before: common,
+			text: textarea.value
+		};
+	}
+
+	/** 並べた候補を選んで、1行目の語を置き換える。-1 は選ぶ前の語に戻す */
+	function selectPath(selected: number) {
+		if (!pathList || !platform || !textarea) return;
+		// 1行目の終わりの改行は、後ろの空白に数えない
+		const followed = /[ \t]/.test(textarea.value[pathList.end] ?? '');
+		const word =
+			selected < 0
+				? pathList.before
+				: completedWord(
+						pathList.base + pathList.candidates[selected],
+						pathList.word,
+						platform,
+						followed
+					);
+		replaceInLine(pathList.start, pathList.end, word);
+		pathList = { ...pathList, selected, end: pathList.start + word.length, text: textarea.value };
+		// 候補が多くて一覧がスクロールするとき、選んだ候補を見える所へ出す
+		void tick().then(() =>
+			document.getElementById(`${pathListId}-${selected}`)?.scrollIntoView({ block: 'nearest' })
+		);
+	}
+
+	/**
+	 * パスの補完のキー。受けたら true。候補が並んでいる間は、フォルダーの欄と同じく Tab・Shift+Tab・↑・↓ で順に選び、
+	 * Enter で決め、Esc で選ぶ前に戻す（選んでいなければ一覧を閉じる）
+	 */
+	function onPathKeydown(event: KeyboardEvent): boolean {
+		if (isImeKey(event) || event.altKey || event.ctrlKey || event.metaKey) return false;
+		if (pathListShown && pathList) {
+			const count = pathList.candidates.length;
+			// ↑↓ は、Tab で選び始めてから一覧に取る。選ぶ前は、行の移動と履歴のキーのまま
+			const arrow =
+				(event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
+				!event.shiftKey &&
+				pathList.selected >= 0;
+			if (event.key === 'Tab' || arrow) {
+				const step = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey) ? -1 : 1;
+				selectPath(stepSelection(pathList.selected, count, step));
+			} else if (event.key === 'Escape') {
+				if (pathList.selected >= 0) selectPath(-1);
+				else pathList = null;
+			} else if (event.key === 'Enter' && !event.shiftKey && pathList.selected >= 0) {
+				pathList = null;
+			} else {
+				return false;
+			}
+			event.preventDefault();
+			return true;
+		}
+		if (event.key !== 'Tab' || event.shiftKey || composing || busy || !textarea) return false;
+		const { line } = splitFirstLine(text);
+		if (textarea.selectionStart > line.length || shCommand(line) === null) return false;
+		// `@sh` の行では、補えなくても、範囲を選んでいても、Tab で入力欄から抜けない（ターミナルと同じく、Tab は補うだけのキーにする）
+		event.preventDefault();
+		if (caret !== null) void completePath();
+		return true;
+	}
+
 	// 1行目の宛先が指す先。宛先でなければ null。宛先があれば、コピーのキーとボタンは、コピーせずに宛先へ出す
 	const addressee = $derived(textAddressee(text));
 
@@ -799,6 +950,7 @@
 	async function dismiss() {
 		if (hiding) return;
 		hiding = true;
+		cancelPathCompletion();
 		try {
 			await invoke('dismiss');
 		} catch {
@@ -810,7 +962,7 @@
 
 	function onKeydown(event: KeyboardEvent) {
 		// 宛先の候補が出ている間は、選ぶ・入れる・閉じるキーを先に受ける。Esc は候補を閉じるだけで、ウィンドウは隠さない
-		if (event.target === textarea && onAddressKeydown(event)) return;
+		if (event.target === textarea && (onAddressKeydown(event) || onPathKeydown(event))) return;
 		const view = settings.current;
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
 		// アクションを実行している間、Esc は取り消しだけで隠さない。ほかの下書きのキーと履歴のキーは効かない
@@ -955,6 +1107,7 @@
 			// 隠れても、実行は取り消さずに続ける
 			listen(EVENTS.DRAFT_HIDDEN, () => {
 				draftVisible = false;
+				cancelPathCompletion();
 			}),
 			listen(EVENTS.DRAFT_HISTORY_CLEARED, () => {
 				historyClearedCount += 1;
@@ -1087,13 +1240,19 @@
 			readonly={busy}
 			placeholder={guidance || undefined}
 			aria-label={m.draft_label()}
-			role={addressMatches.length > 0 ? 'combobox' : undefined}
+			role={addressMatches.length > 0 || pathListShown ? 'combobox' : undefined}
 			aria-autocomplete="list"
-			aria-expanded={addressMatches.length > 0 ? true : undefined}
-			aria-controls={addressMatches.length > 0 ? addressListId : undefined}
+			aria-expanded={addressMatches.length > 0 || pathListShown ? true : undefined}
+			aria-controls={addressMatches.length > 0
+				? addressListId
+				: pathListShown
+					? pathListId
+					: undefined}
 			aria-activedescendant={addressMatches.length > 0
 				? `${addressListId}-${activeAddress}`
-				: undefined}
+				: pathListShown && pathList && pathList.selected >= 0
+					? `${pathListId}-${pathList.selected}`
+					: undefined}
 			onkeydown={onKeydown}
 			oninput={() => {
 				draftHistory.stopBrowsing();
@@ -1122,6 +1281,26 @@
 				onpick={pickAddress}
 			/>
 		{/if}
+		{#if pathListShown && pathList}
+			<PathCandidates
+				id={pathListId}
+				top={pathList.top}
+				candidates={pathList.candidates}
+				total={pathList.total}
+				selected={pathList.selected}
+				onpick={(index) => {
+					selectPath(index);
+					pathList = null;
+				}}
+			/>
+		{/if}
+		<!--
+			Tab を押してもフォーカスは入力欄から動かないので、候補が出たことを読み上げで知らせる。一覧ごと読むと長いので、件数だけを読む。
+			読み上げは、前からある領域の中身が変わったときに働くので、領域はいつも置く
+		-->
+		<p aria-live="polite" class="sr-only">
+			{pathListShown && pathList ? m.draft_path_candidates_count({ count: pathList.total }) : ''}
+		</p>
 		{#if hoveredMatch}
 			<!-- ハイライトの上（余地がなければ下）に置き換え後の文字列を出す。マウスの動きを邪魔しないよう、こちらも pointer-events-none -->
 			<div

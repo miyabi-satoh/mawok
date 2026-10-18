@@ -111,7 +111,16 @@ pub struct FolderCompletion {
 /// Windows の隠しとシステムの両方の属性のフォルダーは候補にしない
 pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
     // 末尾の空白は、`Program Files` の `Program ` のように打ちかけの名前の一部なので残す
-    let input = unquote(input.trim_start());
+    complete_entries(current, home, unquote(input.trim_start()), false)
+}
+
+/// `@sh` の行で、打ちかけのパスの最後の名前を、ファイルとフォルダーの名前で補う（docs/actions.md「パスの補完」）。
+/// `input` は、シェルの引用符と `\` を外した後のパス。拾い方は complete と同じで、フォルダーの名前には区切りを付け、ファイルには付けない
+pub fn complete_path(current: &Path, home: &Path, input: &str) -> FolderCompletion {
+    complete_entries(current, home, input, true)
+}
+
+fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> FolderCompletion {
     let split = input
         .rfind(|c| c == '/' || (cfg!(windows) && c == '\\'))
         .map_or(0, |index| index + 1);
@@ -134,6 +143,7 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
     let Ok(entries) = std::fs::read_dir(&folder) else {
         return unchanged();
     };
+    let prefix = composed(prefix);
     let lowered = prefix.to_lowercase();
     let mut visible = Vec::new();
     let mut hidden = Vec::new();
@@ -141,42 +151,95 @@ pub fn complete(current: &Path, home: &Path, input: &str) -> FolderCompletion {
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        if !name.to_lowercase().starts_with(&lowered) {
+        let key = composed(&name);
+        if !key.to_lowercase().starts_with(&lowered) {
             continue;
         }
+        // 実際の名前と同じなら持たない（大半の名前で、写しを作らない）
+        let key = match key {
+            std::borrow::Cow::Borrowed(_) => None,
+            std::borrow::Cow::Owned(key) => Some(key),
+        };
         // 名前の一覧と一緒に返る種類で見て、フォルダーの数だけ stat しない。
         // シンボリックリンクだけは先を見て、フォルダーなら候補にする（移るときもリンクのまま移れる）
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
-        if !(file_type.is_dir() || file_type.is_symlink() && entry.path().is_dir()) {
+        let is_dir = file_type.is_dir() || file_type.is_symlink() && entry.path().is_dir();
+        if !(is_dir || files) {
             continue;
         }
-        match visibility(&name, &entry) {
+        let found = Found { name, key, is_dir };
+        match visibility(&found.name, &entry) {
             Visibility::Protected => {}
-            Visibility::Hidden if !prefix.starts_with('.') => hidden.push(name),
-            _ => visible.push(name),
+            Visibility::Hidden if !prefix.starts_with('.') => hidden.push(found),
+            _ => visible.push(found),
         }
     }
-    let mut names = if visible.is_empty() { hidden } else { visible };
-    names.sort_by_cached_key(|name| name.to_lowercase());
-    match names.as_slice() {
+    let mut found = if visible.is_empty() { hidden } else { visible };
+    found.sort_by_cached_key(|found| found.key().to_lowercase());
+    match found.as_slice() {
         [] => unchanged(),
-        [name] => FolderCompletion {
-            input: format!("{folder_part}{name}{SEPARATOR}"),
+        [one] => FolderCompletion {
+            input: format!("{folder_part}{}", one.completed()),
             ..unchanged()
         },
-        _ => FolderCompletion {
-            input: format!("{folder_part}{}", completed_part(&names, prefix)),
-            total: names.len() as u32,
-            candidates: names
-                .into_iter()
-                .take(CANDIDATE_LIMIT)
-                .map(|name| format!("{name}{SEPARATOR}"))
-                .collect(),
-            ..unchanged()
-        },
+        _ => {
+            let keys: Vec<String> = found.iter().map(|found| found.key().to_string()).collect();
+            FolderCompletion {
+                input: format!("{folder_part}{}", completed_part(&keys, &prefix)),
+                total: found.len() as u32,
+                candidates: found
+                    .iter()
+                    .take(CANDIDATE_LIMIT)
+                    .map(Found::completed)
+                    .collect(),
+                ..unchanged()
+            }
+        }
     }
+}
+
+/// 打ちかけに当てはまった名前
+struct Found {
+    /// 実際の名前。補うときはこれを入れる（形を区別するファイルシステムでも開けるように）
+    name: String,
+    /// 比べるための名前（composed）が実際の名前と違うときの、その名前。2つ以上のときに共通する所を求めるのも、これで行う
+    key: Option<String>,
+    is_dir: bool,
+}
+
+impl Found {
+    fn key(&self) -> &str {
+        self.key.as_deref().unwrap_or(&self.name)
+    }
+
+    /// 補って入れる名前。フォルダーは区切りまで。区切りは共通する所を求めた後に付ける。
+    /// 付けてから求めると、大文字と小文字だけが違うフォルダー（`Foo` と `foo`）で区切りまで共通になる
+    fn completed(&self) -> String {
+        if self.is_dir {
+            format!("{}{SEPARATOR}", self.name)
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
+/// 打ちかけと名前を比べる形（macOS は合成済みの形 NFC）。Finder などが付けた名前は濁点を分けた形（NFD）のことがあり、
+/// 打った文字（NFC）と比べられないため。Windows の名前は NFC なので、そのままにする
+fn composed(name: &str) -> std::borrow::Cow<'_, str> {
+    #[cfg(target_os = "macos")]
+    {
+        use unicode_normalization::{is_nfc, UnicodeNormalization};
+        // 大半の名前はもう NFC なので、作り直さずにそのまま使う
+        if is_nfc(name) {
+            std::borrow::Cow::Borrowed(name)
+        } else {
+            std::borrow::Cow::Owned(name.nfc().collect())
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    std::borrow::Cow::Borrowed(name)
 }
 
 /// 2つ以上の名前で補った後の、最後の名前の部分。打った所は、候補どうしで書き方が揃っていればそれに合わせ、
@@ -599,6 +662,36 @@ mod tests {
         assert_eq!(completion.input, "nowhere/x");
         assert!(completion.candidates.is_empty());
         assert_eq!(completion.total, 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn completes_a_decomposed_name_from_composed_input() {
+        let d = completion_dirs("complete-nfd");
+        // 「ガイド」を、濁点を分けた形（カ + U+3099）で作る
+        fs::write(d.home.join("\u{30AB}\u{3099}イド.txt"), "").unwrap();
+        // 入れるのは実際の名前（形を区別するボリュームでも開けるように）
+        assert_eq!(
+            complete_path(&d.home, &d.home, "\u{30AC}").input,
+            "\u{30AB}\u{3099}イド.txt"
+        );
+    }
+
+    #[test]
+    fn completes_files_too_for_a_command_line() {
+        let d = completion_dirs("complete-path");
+        // ファイルには区切りを付けない
+        assert_eq!(complete_path(&d.home, &d.home, "docs.").input, "Docs.txt");
+        let completion = complete_path(&d.home, &d.home, "Doc");
+        assert_eq!(completion.input, "Doc");
+        assert_eq!(
+            completion.candidates,
+            ["Docs.txt".into(), sep("Documents/"), sep("Documents-old/")]
+        );
+        // 引用符はシェルの側で外してあるので、そのまま名前の一部として見る
+        assert_eq!(complete_path(&d.home, &d.home, "\"My").input, "\"My");
+        // フォルダーの欄は、ファイルを候補にしない
+        assert_eq!(complete(&d.home, &d.home, "docs.").input, "docs.");
     }
 
     #[test]

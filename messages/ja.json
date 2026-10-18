@@ -327,5 +327,7 @@
 	"draft_address_ai": "AI に頼む",
 	"draft_address_sh": "コマンドを実行する",
 	"draft_run": "実行",
-	"draft_address_empty": "宛先の後ろに、指示かコマンドを書いてください。"
+	"draft_address_empty": "宛先の後ろに、指示かコマンドを書いてください。",
+	"draft_path_candidates": "パスの候補",
+	"draft_path_candidates_count": "当てはまるファイルとフォルダーが {count} 件あります。"
 }
