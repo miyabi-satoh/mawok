@@ -105,8 +105,8 @@ site-check:
     cd site && pnpm run check
     cd site && pnpm run build
 
-# tauri-driver + WebdriverIO。配る物そのものを試すため、
-# 既定では just bundle でビルドし直してから回す (e2e/run.mjs が、画面を点けたままビルドとテストを続けて行う)。
+# tauri-driver + WebdriverIO。既定では、インストーラー抜き・LTO なしでビルドし直してから回す
+# (e2e/run.mjs が、画面を点けたままビルドとテストを続けて行う)。
 # --no-build を付けるとビルドだけを飛ばし、前に作った実行ファイルで回す (例: just e2e --no-build tray)。
 # 引数でテストファイルを選べる (例: just e2e draft-clipboard)。省略すると全部回す。
 # tauri-driver と msedgedriver が要るため just ci には含めない。機能がまとまったときに手動で回す運用。

@@ -37,10 +37,14 @@ export function testFiles(dir, tests, cwd) {
 	return [...new Set(files)].sort();
 }
 
-/** 標準入出力をそのまま流して子プロセスを動かし、終了コードを返す (シグナルで終わったら 1) */
-export function run(command, args, cwd) {
+/** 標準入出力をそのまま流して子プロセスを動かし、終了コードを返す (シグナルで終わったら 1)。`env` は今の環境変数に足す分 */
+export function run(command, args, cwd, env = {}) {
 	return new Promise((resolve, reject) => {
-		const child = spawn(command, args, { cwd, stdio: 'inherit' });
+		const child = spawn(command, args, {
+			cwd,
+			stdio: 'inherit',
+			env: { ...process.env, ...env }
+		});
 		child.once('error', reject);
 		child.once('exit', (code) => resolve(code ?? 1));
 	});
