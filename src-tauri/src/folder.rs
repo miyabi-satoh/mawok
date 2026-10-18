@@ -143,6 +143,7 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
     let Ok(entries) = std::fs::read_dir(&folder) else {
         return unchanged();
     };
+    let prefix = composed(prefix);
     let lowered = prefix.to_lowercase();
     let mut visible = Vec::new();
     let mut hidden = Vec::new();
@@ -150,6 +151,7 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
+        let name = composed(&name).into_owned();
         if !name.to_lowercase().starts_with(&lowered) {
             continue;
         }
@@ -188,7 +190,7 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
         _ => {
             let names: Vec<String> = entries.iter().map(|(name, _)| name.clone()).collect();
             FolderCompletion {
-                input: format!("{folder_part}{}", completed_part(&names, prefix)),
+                input: format!("{folder_part}{}", completed_part(&names, &prefix)),
                 total: entries.len() as u32,
                 candidates: entries
                     .iter()
@@ -199,6 +201,19 @@ fn complete_entries(current: &Path, home: &Path, input: &str, files: bool) -> Fo
             }
         }
     }
+}
+
+/// 名前を合成済みの形（NFC）にする（macOS）。Finder などが付けた名前は濁点を分けた形（NFD）のことがあり、
+/// 打った文字（NFC）と比べられないため。macOS のファイルシステムはどちらの形でも同じ名前として開けるので、補った名前も NFC で返す。
+/// Windows の名前は NFC で、ファイルシステムは形を区別するので、そのままにする
+fn composed(name: &str) -> std::borrow::Cow<'_, str> {
+    #[cfg(target_os = "macos")]
+    {
+        use unicode_normalization::UnicodeNormalization;
+        std::borrow::Cow::Owned(name.nfc().collect())
+    }
+    #[cfg(not(target_os = "macos"))]
+    std::borrow::Cow::Borrowed(name)
 }
 
 /// 2つ以上の名前で補った後の、最後の名前の部分。打った所は、候補どうしで書き方が揃っていればそれに合わせ、
@@ -621,6 +636,18 @@ mod tests {
         assert_eq!(completion.input, "nowhere/x");
         assert!(completion.candidates.is_empty());
         assert_eq!(completion.total, 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn completes_a_decomposed_name_from_composed_input() {
+        let d = completion_dirs("complete-nfd");
+        // 「ガイド」を、濁点を分けた形（カ + U+3099）で作る
+        fs::write(d.home.join("\u{30AB}\u{3099}イド.txt"), "").unwrap();
+        assert_eq!(
+            complete_path(&d.home, &d.home, "\u{30AC}").input,
+            "\u{30AC}イド.txt"
+        );
     }
 
     #[test]

@@ -103,6 +103,8 @@ objc2-service-management = { version = "0.3.2", default-features = false, featur
 tauri-plugin-updater = "~2.12.0"
 # テキストウィンドウを、アプリを前面にしないパネルにする（focus.rs）
 tauri-nspanel = "2.1.1"
+# ファイルの名前を、打った文字と同じ合成済みの形（NFC）に揃えて補う（folder.rs）。Finder などが付けた名前は分解した形（NFD）のことがある
+unicode-normalization = "0.1.26"
 
 # ログイン時の起動（autostart.rs）。macOS はログイン項目（SMAppService）を直接使う
 [target.'cfg(not(target_os = "macos"))'.dependencies]

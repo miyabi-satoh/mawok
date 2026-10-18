@@ -867,6 +867,10 @@
 					);
 		replaceInLine(pathList.start, pathList.end, word);
 		pathList = { ...pathList, selected, end: pathList.start + word.length, text: textarea.value };
+		// 候補が多くて一覧がスクロールするとき、選んだ候補を見える所へ出す
+		void tick().then(() =>
+			document.getElementById(`${pathListId}-${selected}`)?.scrollIntoView({ block: 'nearest' })
+		);
 	}
 
 	/**

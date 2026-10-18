@@ -107,6 +107,8 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 			// カーソルの直前が逃がしの印だけなら、次に打つ文字が決まっていないので補わない
 			if (index + 1 >= caret) return null;
 			index += 1;
+			// cmd は `^` を読む前に `%` を広げるので、逃がした `%` も広がる
+			if (windows && expands(line[index])) unresolvable = true;
 			path += line[index];
 		} else {
 			if (!inWord && !windows && char === '~') tilde = true;
