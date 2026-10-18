@@ -824,7 +824,7 @@
 		if (busy || composing || snippetsOpen || folderOpen) return;
 		if (completion.candidates.length === 0) {
 			if (completion.input === word.path) return;
-			const followed = /\s/.test(line[at] ?? '');
+			const followed = /[ \t]/.test(line[at] ?? '');
 			replaceInLine(word.start, at, completedWord(completion.input, word, platform, followed));
 			return;
 		}
@@ -848,7 +848,8 @@
 	/** 並べた候補を選んで、1行目の語を置き換える。-1 は選ぶ前の語に戻す */
 	function selectPath(selected: number) {
 		if (!pathList || !platform || !textarea) return;
-		const followed = /\s/.test(textarea.value[pathList.end] ?? '');
+		// 1行目の終わりの改行は、後ろの空白に数えない
+		const followed = /[ \t]/.test(textarea.value[pathList.end] ?? '');
 		const word =
 			selected < 0
 				? pathList.before

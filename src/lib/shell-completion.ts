@@ -82,6 +82,9 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 		}
 		if (/\s/.test(char)) {
 			endWord();
+		} else if (windows && char === ';') {
+			// cmd の `;` は引数の区切りで、次のコマンドにはならない
+			endWord();
 		} else if (COMMAND_SEPARATORS.has(char)) {
 			endWord();
 			wordIndex = 0;
@@ -99,10 +102,10 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 				inWord = true;
 				start = index;
 			}
-			if (index + 1 < caret) {
-				index += 1;
-				path += line[index];
-			}
+			// カーソルの直前が逃がしの印だけなら、次に打つ文字が決まっていないので補わない
+			if (index + 1 >= caret) return null;
+			index += 1;
+			path += line[index];
 		} else {
 			if (!inWord && !windows && char === '~') tilde = true;
 			if (expands(char)) unresolvable = true;

@@ -27,6 +27,10 @@ describe('pathWordAt', () => {
 		expect(wordAt('@sh cat ')).toEqual({ start: 8, path: '', quote: null, tilde: false });
 	});
 
+	it('カーソルの直前が逃がしの印だけなら補わない', () => {
+		expect(wordAt('@sh cat My\\')).toBeNull();
+	});
+
 	it('リダイレクトの後ろはファイルとして補う', () => {
 		expect(wordAt('@sh sort >ou')).toMatchObject({ start: 10, path: 'ou' });
 	});
@@ -64,6 +68,7 @@ describe('pathWordAt', () => {
 		expect(wordAt('@sh type a^&b', 'windows')).toMatchObject({ path: 'a&b' });
 		expect(wordAt('@sh .\\scr', 'windows')).toMatchObject({ path: '.\\scr' });
 		expect(wordAt('@sh type %USERPROFILE%\\', 'windows')).toBeNull();
+		expect(wordAt('@sh type a;b\\', 'windows')).toMatchObject({ path: 'b\\' });
 		// cmd の / で始まる語はスイッチ
 		expect(wordAt('@sh dir /b', 'windows')).toBeNull();
 		// cmd は ~ をホームに広げない
