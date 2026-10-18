@@ -17,6 +17,7 @@ describe('pathWordAt', () => {
 	it('引数の位置の語を、引用符と \\ を外したパスにする', () => {
 		expect(wordAt('@sh cat Doc')).toEqual({ start: 8, path: 'Doc', quote: null, tilde: false });
 		expect(wordAt('@sh cat My\\ Fo')).toMatchObject({ start: 8, path: 'My Fo' });
+		expect(wordAt('@sh cat 資料\u3000一')).toMatchObject({ start: 8, path: '資料\u3000一' });
 		expect(wordAt('@sh cat "My Fo')).toMatchObject({ path: 'My Fo', quote: '"' });
 		expect(wordAt("@sh cat 'it'\\'s")).toMatchObject({ path: "it's", quote: null });
 		expect(wordAt('@sh cat ~/Wo')).toMatchObject({ path: '~/Wo', tilde: true });

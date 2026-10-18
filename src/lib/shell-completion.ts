@@ -82,7 +82,8 @@ export function pathWordAt(line: string, caret: number, platform: Platform): Pat
 			}
 			continue;
 		}
-		if (/\s/.test(char)) {
+		// シェルが語を分けるのは半角の空白とタブだけ。全角の空白は名前の一部
+		if (char === ' ' || char === '\t') {
 			endWord();
 		} else if (windows && char === ';') {
 			// cmd の `;` は引数の区切りで、次のコマンドにはならない
