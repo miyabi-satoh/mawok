@@ -356,7 +356,7 @@ pub fn encrypt(
     let cipher = XChaCha20Poly1305::new((&derived_key(key)).into());
     let ciphertext = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: &encode_plain(plain)?,
                 aad: &associated_data(key_id, item),
@@ -374,7 +374,7 @@ pub fn decrypt(key: &[u8; 32], key_id: &str, item: &ItemKey, data: &str) -> Opti
     let cipher = XChaCha20Poly1305::new((&derived_key(key)).into());
     let plaintext = cipher
         .decrypt(
-            XNonce::from_slice(nonce),
+            &XNonce::try_from(nonce).ok()?,
             Payload {
                 msg: ciphertext,
                 aad: &associated_data(key_id, item),
@@ -2783,6 +2783,15 @@ mod tests {
         assert_eq!(state.paused.get(SyncKind::Settings.group()), Some(&7));
         state.paused.insert(SyncKind::Keys.group().to_string(), 3);
         assert_eq!(state.read_since(&Config::default()), 3);
+    }
+
+    #[test]
+    fn decrypts_data_from_earlier_versions() {
+        // chacha20poly1305 0.10 で暗号化した値。版を上げても、窓口に置いた暗号文を読めること
+        let data =
+            "MJO3M6wDkVWFX9ZmCukyShY/7kIZHtSgwtzbD4zpedHRxRH6/QyIwxXhSrZh6NnPtUUSKKr8YvL2r2X5c0Q=";
+        let plain = decrypt(&[7; 32], "key", &ItemKey::new(SETTINGS, "s_theme"), data).unwrap();
+        assert_eq!(plain.value, Some(json!("dark")));
     }
 
     #[test]

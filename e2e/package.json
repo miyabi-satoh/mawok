@@ -6,6 +6,6 @@
 	"type": "module",
 	"packageManager": "pnpm@12.10.1",
 	"devDependencies": {
-		"webdriverio": "^10.0.0"
+		"webdriverio": "^10.0.2"
 	}
 }

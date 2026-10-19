@@ -441,7 +441,7 @@
 		{
 			"name": "aead",
 			"versions": [
-				"0.5.2"
+				"0.6.1"
 			],
 			"license": "MIT OR Apache-2.0",
 			"repository": "https://github.com/RustCrypto/traits",
@@ -686,9 +686,9 @@
 		{
 			"name": "chacha20",
 			"versions": [
-				"0.9.1"
+				"0.10.2"
 			],
-			"license": "Apache-2.0 OR MIT",
+			"license": "MIT OR Apache-2.0",
 			"repository": "https://github.com/RustCrypto/stream-ciphers",
 			"texts": [
 				6
@@ -697,10 +697,10 @@
 		{
 			"name": "chacha20poly1305",
 			"versions": [
-				"0.10.1"
+				"0.11.0"
 			],
 			"license": "Apache-2.0 OR MIT",
-			"repository": "https://github.com/RustCrypto/AEADs/tree/master/chacha20poly1305",
+			"repository": "https://github.com/RustCrypto/AEADs",
 			"texts": [
 				6
 			]
@@ -708,7 +708,7 @@
 		{
 			"name": "cipher",
 			"versions": [
-				"0.4.4"
+				"0.5.2"
 			],
 			"license": "MIT OR Apache-2.0",
 			"repository": "https://github.com/RustCrypto/traits",
@@ -1531,7 +1531,7 @@
 		{
 			"name": "inout",
 			"versions": [
-				"0.1.4"
+				"0.2.4"
 			],
 			"license": "MIT OR Apache-2.0",
 			"repository": "https://github.com/RustCrypto/utils",
@@ -1597,7 +1597,7 @@
 		{
 			"name": "keyring-core",
 			"versions": [
-				"1.0.0"
+				"1.0.1"
 			],
 			"license": "MIT OR Apache-2.0",
 			"repository": "https://github.com/open-source-cooperative/keyring-core",
@@ -1959,17 +1959,6 @@
 			]
 		},
 		{
-			"name": "opaque-debug",
-			"versions": [
-				"0.3.1"
-			],
-			"license": "MIT OR Apache-2.0",
-			"repository": "https://github.com/RustCrypto/utils",
-			"texts": [
-				6
-			]
-		},
-		{
 			"name": "open",
 			"versions": [
 				"5.4.4"
@@ -2093,7 +2082,7 @@
 		{
 			"name": "poly1305",
 			"versions": [
-				"0.8.0"
+				"0.9.1"
 			],
 			"license": "Apache-2.0 OR MIT",
 			"repository": "https://github.com/RustCrypto/universal-hashes",
@@ -2170,8 +2159,8 @@
 		{
 			"name": "rand_core",
 			"versions": [
-				"0.6.4",
-				"0.9.5"
+				"0.9.5",
+				"0.10.1"
 			],
 			"license": "MIT OR Apache-2.0",
 			"repository": "https://github.com/rust-random/rand",
@@ -2284,7 +2273,7 @@
 		{
 			"name": "rustls",
 			"versions": [
-				"0.23.45"
+				"0.23.46"
 			],
 			"license": "Apache-2.0 OR ISC OR MIT",
 			"repository": "https://github.com/rustls/rustls",
@@ -2416,7 +2405,7 @@
 		{
 			"name": "serde_json",
 			"versions": [
-				"1.0.151"
+				"1.0.154"
 			],
 			"license": "MIT OR Apache-2.0",
 			"repository": "https://github.com/serde-rs/json",
@@ -2890,7 +2879,7 @@
 		{
 			"name": "tokio",
 			"versions": [
-				"1.53.2"
+				"1.53.3"
 			],
 			"license": "MIT",
 			"repository": "https://github.com/tokio-rs/tokio",
@@ -3156,7 +3145,7 @@
 		{
 			"name": "universal-hash",
 			"versions": [
-				"0.5.1"
+				"0.6.1"
 			],
 			"license": "MIT OR Apache-2.0",
 			"repository": "https://github.com/RustCrypto/traits",
