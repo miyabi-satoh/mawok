@@ -356,7 +356,7 @@ pub fn encrypt(
     let cipher = XChaCha20Poly1305::new((&derived_key(key)).into());
     let ciphertext = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: &encode_plain(plain)?,
                 aad: &associated_data(key_id, item),
@@ -374,7 +374,7 @@ pub fn decrypt(key: &[u8; 32], key_id: &str, item: &ItemKey, data: &str) -> Opti
     let cipher = XChaCha20Poly1305::new((&derived_key(key)).into());
     let plaintext = cipher
         .decrypt(
-            XNonce::from_slice(nonce),
+            &XNonce::try_from(nonce).ok()?,
             Payload {
                 msg: ciphertext,
                 aad: &associated_data(key_id, item),

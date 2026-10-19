@@ -160,7 +160,7 @@ fn wrap_with(key: &[u8; 32], password: &str, kdf: &Kdf) -> Result<String, String
     let cipher = XChaCha20Poly1305::new((&password_key(password, &salt, kdf)?).into());
     let sealed = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: key,
                 aad: WRAP_AAD,
@@ -214,7 +214,8 @@ pub fn unwrap(wrapped: &str, password: &str) -> Result<[u8; 32], UnwrapError> {
     );
     let key = cipher
         .decrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::try_from(nonce.as_slice())
+                .map_err(|_| unreadable("the nonce has the wrong length"))?,
             Payload {
                 msg: &sealed,
                 aad: WRAP_AAD,
