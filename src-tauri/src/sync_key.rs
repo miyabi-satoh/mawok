@@ -199,7 +199,8 @@ pub fn unwrap(wrapped: &str, password: &str) -> Result<[u8; 32], UnwrapError> {
     }
     let decode = |value: &str| STANDARD.decode(value).map_err(|_| unreadable("not base64"));
     let salt = decode(&wrapped.salt)?;
-    let nonce = decode(&wrapped.nonce)?;
+    let nonce = XNonce::try_from(decode(&wrapped.nonce)?.as_slice())
+        .map_err(|_| unreadable("the nonce has the wrong length"))?;
     let sealed = decode(&wrapped.key)?;
     if salt.len() != SALT_LEN {
         return Err(unreadable("the salt has the wrong length"));
@@ -214,8 +215,7 @@ pub fn unwrap(wrapped: &str, password: &str) -> Result<[u8; 32], UnwrapError> {
     );
     let key = cipher
         .decrypt(
-            &XNonce::try_from(nonce.as_slice())
-                .map_err(|_| unreadable("the nonce has the wrong length"))?,
+            &nonce,
             Payload {
                 msg: &sealed,
                 aad: WRAP_AAD,
