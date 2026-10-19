@@ -2786,6 +2786,15 @@ mod tests {
     }
 
     #[test]
+    fn decrypts_data_from_earlier_versions() {
+        // chacha20poly1305 0.10 で暗号化した値。版を上げても、窓口に置いた暗号文を読めること
+        let data =
+            "MJO3M6wDkVWFX9ZmCukyShY/7kIZHtSgwtzbD4zpedHRxRH6/QyIwxXhSrZh6NnPtUUSKKr8YvL2r2X5c0Q=";
+        let plain = decrypt(&[7; 32], "key", &ItemKey::new(SETTINGS, "s_theme"), data).unwrap();
+        assert_eq!(plain.value, Some(json!("dark")));
+    }
+
+    #[test]
     fn encryption_rejects_a_changed_key_id() {
         let key = [1; 32];
         let item = ItemKey::new(SETTINGS, "s_theme");

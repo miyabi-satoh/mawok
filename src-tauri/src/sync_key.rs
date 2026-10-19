@@ -201,8 +201,8 @@ pub fn unwrap(wrapped: &str, password: &str) -> Result<[u8; 32], UnwrapError> {
     let salt = decode(&wrapped.salt)?;
     let nonce = decode(&wrapped.nonce)?;
     let sealed = decode(&wrapped.key)?;
-    if salt.len() != SALT_LEN || nonce.len() != 24 {
-        return Err(unreadable("the salt or nonce has the wrong length"));
+    if salt.len() != SALT_LEN {
+        return Err(unreadable("the salt has the wrong length"));
     }
     let kdf = Kdf {
         m: wrapped.m,
@@ -290,6 +290,13 @@ mod tests {
         // 日本語は1文字を1つと数える（UTF-8 のバイト数ではない）
         assert!(!password_long_enough("あいうえおかき"));
         assert!(password_long_enough("あいうえおかきく"));
+    }
+
+    #[test]
+    fn unwraps_keys_wrapped_by_earlier_versions() {
+        // chacha20poly1305 0.10 で包んだ鍵。版を上げても、窓口に置いた鍵を開けること
+        let wrapped = r#"{"v":1,"kdf":"argon2id","m":65536,"t":3,"p":4,"salt":"7RhWLLJE/Rg3iUhaa4/BNg==","nonce":"fqSSF+g/DZTkm152u9L3RUe22jabtoq1","key":"JIvCjIqpETPob7SeteSiRkAKtYQPFVWWw70OhR7znep1CjEatlmftCiPHG7RAMDX"}"#;
+        assert_eq!(unwrap(wrapped, "correct horse"), Ok([7; 32]));
     }
 
     #[test]
