@@ -47,7 +47,7 @@ Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}
 | First line | What it does |
 | --- | --- |
 | `@ai instruction` | Asks AI (an AI action) and replaces the text with the result. For example: `@ai Rewrite this politely` |
-| `@sh command` | Runs the command and replaces the text with the result. For example: `@sh sort` |
+| `@sh command` | Runs the command and replaces the text with the result. For example: {macos:`@sh sort`}{windows:`@sh dir`} |
 
 - Type `@` at the start of the first line to see addressee suggestions. Press `Tab` or `Enter` to choose one.
 - On an `@sh` line, type the start of a file or folder name and press `Tab` to complete it. If several match, they appear below the first line. Press `Tab` again to go through them.
@@ -55,6 +55,9 @@ Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}
 - The command receives the lines below the first, and its output becomes the result.{macos:}{windows: Commands run in cmd.}
 ::: macos
 - If a command is not found, write its full path.
+:::
+::: windows
+- Commands that come with Windows (such as `sort` and `findstr`) garble Japanese text when you run them from the first line. Save the command as a snippet, and set that snippet's “Text encoding” to “Shift_JIS” under “Snippets” in Settings. The built-in “Sort lines” snippet is already set up this way.
 :::
 
 Commands run in your home folder. The folder button at the bottom left shows the current folder. To run commands in another folder, select the button and choose a folder. Folders you have used appear in the button menu so you can choose them again. To go back to your home folder, choose “Back to home folder” in the menu.
