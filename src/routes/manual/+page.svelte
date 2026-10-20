@@ -228,6 +228,11 @@
 	.manual :global(td code) {
 		white-space: nowrap;
 	}
+	/* 狭い窓では、折り返さないキーの列に幅を取られて、説明の列が数文字ごとに折れる。
+	 * 説明の列に幅を残し、足りない分は表の中で横に送る */
+	.manual :global(:is(th, td):first-child) {
+		min-width: 9rem;
+	}
 	.manual :global(th) {
 		background: var(--muted);
 		font-weight: 600;
