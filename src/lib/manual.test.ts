@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { collapseCjkLineBreaks, renderManual, selectPlatform } from './manual';
+import { collapseCjkLineBreaks, githubSlug, renderManual, selectPlatform } from './manual';
 
 const read = (locale: string) =>
 	readFileSync(new URL(`../../docs/manual/${locale}.md`, import.meta.url), 'utf8');
@@ -37,6 +37,29 @@ describe('renderManual', () => {
 		);
 		expect(html).toContain('<code>@ai</code>');
 		expect(html).toContain('<code>@sh sort</code>');
+	});
+
+	it('GitHub と同じ見出しの # で書いた節へのリンクを、後ろの節でもその節の id へ向け直す', () => {
+		const { html } = renderManual(
+			'# 題\n\n## 一つ目\n\n「[AI を使う](#ai-を使う)」を参照\n\n## AI を使う\n',
+			'表',
+			'macos'
+		);
+		expect(html).toContain('<a href="#section-2">AI を使う</a>');
+	});
+
+	it('節へのリンクの先の見出しが無ければ、描かずに知らせる', () => {
+		expect(() => renderManual('## 一つ目\n\n[無い節](#無い節)\n', '表', 'macos')).toThrow(
+			'#無い節'
+		);
+	});
+
+	it.each([
+		['AI を使う', 'ai-を使う'],
+		['What is sent and privacy', 'what-is-sent-and-privacy'],
+		['Write an addressee, and run', 'write-an-addressee-and-run']
+	])('GitHub と同じ見出しの # にする: %s', (text, slug) => {
+		expect(githubSlug(text)).toBe(slug);
 	});
 
 	it('表を、名前の付いた横に送れる領域で包む', () => {

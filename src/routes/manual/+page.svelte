@@ -47,6 +47,12 @@
 		heading.focus({ preventScroll: true });
 	}
 
+	/** 本文の中の、ほかの節へのリンクも、目次と同じく見出しまで送る */
+	function onArticleClick(event: MouseEvent) {
+		const link = (event.target as Element).closest('.manual a[href^="#section-"]');
+		if (link) jump(event, link.getAttribute('href')!.slice(1));
+	}
+
 	function onScroll(event: Event) {
 		if (jumped) return;
 		const body = event.currentTarget as HTMLElement;
@@ -71,6 +77,7 @@
 <!-- 利用者が自分でスクロールしたら、塗る節をスクロールの位置から決め直す -->
 <svelte:window
 	onkeydown={onKeydown}
+	onclick={onArticleClick}
 	onwheel={() => (jumped = null)}
 	onpointerdown={() => (jumped = null)}
 />
@@ -188,6 +195,14 @@
 		font-weight: 500;
 		line-height: 1.6;
 		text-align: center;
+	}
+	/* 文字の色は本文と同じなので、下線でリンクと分かるようにする (設定の窓のリンクと同じ) */
+	.manual :global(a) {
+		text-decoration: underline;
+		text-underline-offset: 0.2em;
+	}
+	.manual :global(a:hover) {
+		text-decoration-thickness: 2px;
 	}
 	.manual :global(strong) {
 		font-weight: 600;

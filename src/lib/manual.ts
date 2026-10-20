@@ -19,15 +19,28 @@ export interface Manual {
  * 英語と日本語で id が揃わず、記号の扱いも決めることになるため。
  * 表は、横に送れる領域で包む。表そのものを `overflow` にすると、表の中に押せる要素が無いので
  * キーボードでは見切れた列に届かない。
+ * 本文から節へのリンクは、原典に GitHub と同じ見出しの # で書き (`[AI を使う](#ai-を使う)`)、その節の id へ向け直す。
+ * 原典を GitHub で読んだときもリンクが効くようにするため。
  */
 class ManualRenderer extends Renderer {
 	title = '';
 	readonly sections: ManualSection[] = [];
 	readonly tableLabel: string;
+	/** 見出し2の GitHub と同じ # から、節の id へ */
+	readonly sectionIds: Map<string, string>;
 
-	constructor(tableLabel: string) {
+	constructor(tableLabel: string, sectionIds: Map<string, string>) {
 		super();
 		this.tableLabel = tableLabel;
+		this.sectionIds = sectionIds;
+	}
+
+	override link(token: Tokens.Link): string {
+		if (!token.href.startsWith('#')) return super.link(token);
+		const id = this.sectionIds.get(token.href.slice(1));
+		// 見出しを書き換えてリンクを直し忘れると、押しても移らないリンクが残るので、描かずに知らせる
+		if (!id) throw new Error(`節へのリンク ${token.href} の先の見出しがありません`);
+		return `<a href="#${id}">${this.parser.parseInline(token.tokens)}</a>`;
 	}
 
 	override heading(token: Tokens.Heading): string {
@@ -65,6 +78,14 @@ const KEYS = new RegExp(`^${COMBO}(?: / ${COMBO})*$`);
 function keyCombo(combo: string): string {
 	const keys = combo.split('+').map((key) => `<kbd>${key}</kbd>`);
 	return `<kbd class="keys">${keys.join('<span class="sr-only">+</span>')}</kbd>`;
+}
+
+/** GitHub が見出しに振る # と同じ形にする。小文字にし、記号を除き、空白をハイフンにする */
+export function githubSlug(text: string): string {
+	return text
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}\s_-]/gu, '')
+		.replace(/\s/g, '-');
 }
 
 function escapeAttribute(text: string): string {
@@ -151,7 +172,15 @@ export function selectPlatform(markdown: string, platform: Platform): string {
  * @param platform 開いた OS。原典の OS ごとの書き分けから、この OS の分だけを出す
  */
 export function renderManual(markdown: string, tableLabel: string, platform: Platform): Manual {
-	const renderer = new ManualRenderer(tableLabel);
-	const html = marked.parse(selectPlatform(markdown, platform), { async: false, renderer });
+	const source = selectPlatform(markdown, platform);
+	// リンクは後ろの節を指すこともあるので、描く前に見出し2を集めておく
+	const headings = marked
+		.lexer(source)
+		.filter((token): token is Tokens.Heading => token.type === 'heading' && token.depth === 2);
+	const sectionIds = new Map(
+		headings.map((heading, index) => [githubSlug(heading.text), `section-${index + 1}`])
+	);
+	const renderer = new ManualRenderer(tableLabel, sectionIds);
+	const html = marked.parse(source, { async: false, renderer });
 	return { title: renderer.title, html: collapseCjkLineBreaks(html), sections: renderer.sections };
 }

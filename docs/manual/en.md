@@ -5,7 +5,7 @@
 From any app, you can bring up the text window, write, then copy the text and paste it into the app you came from.
 
 1. Press {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} to bring up the text window.
-2. Type. Enter adds a line break.
+2. Type. `Enter` adds a line break.
 3. Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}. The text is copied, the text window closes, and you return to the app you came from. Paste it there.
 
 You can also insert snippets and rewrite the text with AI or commands.
@@ -24,19 +24,19 @@ Copied text is kept in history.
 
 - Press `↑` at the start of the text box to show text you copied earlier. Each press goes further back; press `↓` at the end of the text box to go forward again. The “Previous” and “Next” buttons at the top do the same.
 - Change how many are kept under “General” in Settings. Set it to 0 to keep no history.
-- While history is synced, selecting “Clear history” in Settings or setting the number to 0 also clears the history on your other devices (see “Sync settings and history”).
+- While history is synced, selecting “Clear history” in Settings or setting the number to 0 also clears the history on your other devices (see “[Sync settings and history](#sync-settings-and-history)”).
 
 ## Use snippets
 
 Save text you use often, and instructions that rewrite the text with AI or a command, then pick them from a list.
 
 1. Press {macos:`Cmd+K`}{windows:`Ctrl+K`} to open the snippet list.
-2. Type to filter, then press Enter to pick one.
+2. Type to filter, then press `Enter` to pick one.
 
 - An ordinary snippet is inserted at the cursor.
-- A one-line snippet that starts with `@ai` or `@sh` runs the text with that addressee (see the next section, “Write an addressee and run”). A selection is used if you have one; otherwise, all of the text is used. The result replaces the text. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`} to undo it. You can choose how each snippet shows its result (replace, insert at the cursor, or don't show) under “Snippets” in Settings.
+- A one-line snippet that starts with `@ai` or `@sh` runs the text with that addressee (see the next section, “[Write an addressee and run](#write-an-addressee-and-run)”). A selection is used if you have one; otherwise, all of the text is used. The result replaces the text. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`} to undo it. You can choose how each snippet shows its result (replace, insert at the cursor, or don't show) under “Snippets” in Settings.
 
-At first, “Translate to English” (`@ai`) and “Sort lines” (`@sh sort`) are included. Translating requires AI service setup (see “Use AI”).
+At first, “Translate to English” (`@ai`) and “Sort lines” (`@sh sort`) are included. Translating requires AI service setup (see “[Use AI](#use-ai)”).
 
 Add snippets under “Snippets” in Settings. You can also save the text you are writing right away by choosing “Save the text as a snippet” at the end of the list. If you have a selection, the selection is saved. If you typed in the filter, what you typed becomes the name.
 
@@ -98,7 +98,7 @@ To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{win
 - Kept per device: launch at login and API keys for AI services. The hotkey and keyboard shortcuts sync only between {macos:Macs}{windows:Windows devices}.
 - For settings, replacements, and snippets, turn off the cloud mark to stop syncing just that item or row.
 
-If you change the same setting on different devices, the one changed last is used. To go back to earlier settings, restore them from a backup (see “Settings”).
+If you change the same setting on different devices, the one changed last is used. To go back to earlier settings, restore them from a backup (see “[Settings](#settings)”).
 
 ## Keyboard shortcuts
 
