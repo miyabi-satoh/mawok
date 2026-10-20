@@ -17,16 +17,18 @@
 	/** 目次で塗る、読んでいる節 */
 	let current = $state('section-1');
 	/**
-	 * 目次から移った節。最後の方の短い節は見出しが上端まで来ないので、スクロールの位置から決めると
-	 * 押した節と違う節が塗られる。利用者が自分でスクロールするまでは、押した節を塗る
+	 * 目次から節へ移った後のスクロールの位置。最後の方の短い節は見出しが上端まで来ないので、
+	 * スクロールの位置から決めると押した節と違う節が塗られる。位置が動くまでは、押した節を塗る。
+	 * 利用者の操作 (ホイール・キー・スクロールバー) を拾う代わりに位置で見るのは、スクロールバーを
+	 * つかんだときに pointerdown が届かない WebView があるため
 	 */
-	let jumped: string | null = null;
+	let jumpedTop: number | null = null;
+	let body: HTMLElement;
 	/** 見出しが本文の区画の上端からこの距離に入ったら、その節を読んでいるとみなす (見出しの scroll-margin と揃える) */
 	const READING_OFFSET = 24;
 
 	/** 設定ウィンドウと同じく、Esc と Cmd+W（Windows は Ctrl+W）で閉じる */
 	function onKeydown(event: KeyboardEvent) {
-		jumped = null;
 		if (isCloseWindowKey(event, data.platform)) {
 			event.preventDefault();
 			invoke('close_manual_window');
@@ -41,10 +43,10 @@
 		event.preventDefault();
 		const heading = document.getElementById(id);
 		if (!heading) return;
-		jumped = id;
 		current = id;
 		heading.scrollIntoView({ block: 'start' });
 		heading.focus({ preventScroll: true });
+		jumpedTop = body.scrollTop;
 	}
 
 	/** 本文の中の、ほかの節へのリンクも、目次と同じく見出しまで送る */
@@ -53,9 +55,9 @@
 		if (link) jump(event, link.getAttribute('href')!.slice(1));
 	}
 
-	function onScroll(event: Event) {
-		if (jumped) return;
-		const body = event.currentTarget as HTMLElement;
+	function onScroll() {
+		if (jumpedTop !== null && Math.abs(body.scrollTop - jumpedTop) < 1) return;
+		jumpedTop = null;
 		const top = body.getBoundingClientRect().top + READING_OFFSET;
 		let reading: string | undefined = manual.sections[0]?.id;
 		for (const { id } of manual.sections) {
@@ -74,13 +76,7 @@
 	}
 </script>
 
-<!-- 利用者が自分でスクロールしたら、塗る節をスクロールの位置から決め直す -->
-<svelte:window
-	onkeydown={onKeydown}
-	onclick={onArticleClick}
-	onwheel={() => (jumped = null)}
-	onpointerdown={() => (jumped = null)}
-/>
+<svelte:window onkeydown={onKeydown} onclick={onArticleClick} />
 
 <main class="flex h-dvh" {@attach showWindow} lang={locale}>
 	<!-- 目次は設定の窓のサイドバーと同じ幅と色にする -->
@@ -99,7 +95,7 @@
 		{/each}
 	</nav>
 	<!-- 本文だけをスクロールし、目次は残す -->
-	<div class="min-w-0 flex-1 overflow-y-auto px-8 pt-2 pb-12" onscroll={onScroll}>
+	<div class="min-w-0 flex-1 overflow-y-auto px-8 pt-2 pb-12" bind:this={body} onscroll={onScroll}>
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- ソースは同梱の docs/manual/*.md だけで、外から入る文字を含まない -->
 		<article class="manual">{@html manual.html}</article>
 	</div>
@@ -138,7 +134,8 @@
 	.manual :global(li::marker) {
 		color: var(--muted-foreground);
 	}
-	/* 手順の番号は、丸の中の数字にして本文から離す */
+	/* 手順の番号は、丸の中の数字にして本文から離す。list-style: none で WebKit が並びとして読み上げなく
+	 * なるのは、描くときに role="list" を付けて防ぐ (src/lib/manual.ts) */
 	.manual :global(ol) {
 		counter-reset: step;
 		list-style: none;

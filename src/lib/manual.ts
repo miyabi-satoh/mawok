@@ -60,6 +60,12 @@ class ManualRenderer extends Renderer {
 		return token.text.split(' / ').map(keyCombo).join(' / ');
 	}
 
+	override list(token: Tokens.List): string {
+		const html = super.list(token);
+		// 番号を CSS で描くので list-style を外している。WebKit はそれで並びとして読み上げなくなるため、役割を明示する
+		return token.ordered ? html.replace(/^<ol/, '<ol role="list"') : html;
+	}
+
 	override table(token: Tokens.Table): string {
 		const label = escapeAttribute(this.tableLabel);
 		return `<div class="table-scroll" tabindex="0" role="region" aria-label="${label}">${super.table(token)}</div>`;

@@ -34,7 +34,7 @@ Save text you use often, and instructions that rewrite the text with AI or a com
 2. Type to filter, then press `Enter` to pick one.
 
 - An ordinary snippet is inserted at the cursor.
-- A one-line snippet that starts with `@ai` or `@sh` runs the text with that addressee (see the next section, “[Write an addressee and run](#write-an-addressee-and-run)”). A selection is used if you have one; otherwise, all of the text is used. The result replaces the text. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`} to undo it. You can choose how each snippet shows its result (replace, insert at the cursor, or don't show) under “Snippets” in Settings.
+- A one-line snippet that starts with `@ai` or `@sh` runs the text with that addressee (see the next section, “[Write an addressee and run](#write-an-addressee-and-run)”). A selection is used if you have one; otherwise, all of the text is used. The result replaces the text. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`} to undo it. Under “Snippets” in Settings, set each snippet's “Output” to “Replace”, “Insert”, or “Don't show”.
 
 At first, “Translate to English” (`@ai`) and “Sort lines” (`@sh sort`) are included. Translating requires AI service setup (see “[Use AI](#use-ai)”).
 

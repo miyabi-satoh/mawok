@@ -62,6 +62,12 @@ describe('renderManual', () => {
 		expect(githubSlug(text)).toBe(slug);
 	});
 
+	it('番号付きの並びにだけ role="list" を付ける', () => {
+		const { html } = renderManual('1. a\n2. b\n\n- c\n', '表', 'macos');
+		expect(html).toContain('<ol role="list">');
+		expect(html).toContain('<ul>');
+	});
+
 	it('表を、名前の付いた横に送れる領域で包む', () => {
 		const { html } = renderManual('| a | b |\n| - | - |\n| 1 | 2 |\n', 'Table "x"', 'macos');
 		expect(html).toMatch(
