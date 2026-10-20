@@ -2,8 +2,7 @@
 
 ## Getting started
 
-Mawok is a place to write text before you send it to a terminal or another app.
-When voice input cannot type directly into an app, or when it is easy to forget whether the IME is on, write it in Mawok first and then paste it.
+From any app, you can bring up the text window, write, then copy the text and paste it into the app you came from.
 
 1. Press {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`} to bring up the text window.
 2. Type. Enter adds a line break.
