@@ -110,13 +110,16 @@
 	}
 	.manual :global(h3) {
 		margin-top: 1.5rem;
-		font-size: 1rem;
+		font-size: 1.125rem;
 		font-weight: 600;
 	}
+	/* 本文はデジタル庁デザインシステムの読み物の本文 (16px・行高 1.75・字間 2%) に合わせる。
+	 * 操作の画面 (設定の窓など) の 14px は、読み物の本文には小さい */
 	.manual :global(:is(p, ul, ol, .table-scroll)) {
 		margin-top: 0.75rem;
-		font-size: 0.875rem;
-		line-height: 1.85;
+		font-size: 1rem;
+		line-height: 1.75;
+		letter-spacing: 0.02em;
 	}
 	.manual :global(ul) {
 		list-style: disc;
@@ -197,7 +200,8 @@
 	.manual :global(table) {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.8125rem;
+		/* 表は本文より詰めるが、同じ指針の下限の 14px は割らない */
+		font-size: 0.875rem;
 		line-height: 1.6;
 	}
 	.manual :global(:is(th, td)) {
