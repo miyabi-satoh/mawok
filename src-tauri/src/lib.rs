@@ -95,7 +95,8 @@ const SETTINGS_SIZE: (f64, f64) = (720.0, 520.0);
 const SETTINGS_MIN_SIZE: (f64, f64) = (560.0, 400.0);
 const LICENSES_SIZE: (f64, f64) = (640.0, 560.0);
 const LICENSES_MIN_SIZE: (f64, f64) = (480.0, 320.0);
-const MANUAL_SIZE: (f64, f64) = (720.0, 640.0);
+/// 幅は、本文 (16px) の1行が日本語でおよそ33字 (一般に言う35〜40字の手前) になるように、目次のサイドバーの分を足して決めた
+const MANUAL_SIZE: (f64, f64) = (800.0, 640.0);
 const MANUAL_MIN_SIZE: (f64, f64) = (480.0, 320.0);
 const TRAY_ID: &str = "main";
 

@@ -37,6 +37,14 @@ describe('使い方のウィンドウ', () => {
 		expect(invoked).toHaveBeenCalledWith('close_manual_window');
 	});
 
+	it('本文の中の節へのリンクでも、その節の見出しへ移ってフォーカスを置く', async () => {
+		const screen = await render(Page, { props: { data: { platform: 'macos' } } as never });
+		const link = screen.getByRole('article').getByRole('link', { name: '設定と履歴を同期する' });
+		await link.click();
+		await expect.poll(() => document.activeElement?.textContent).toBe('設定と履歴を同期する');
+		expect(document.activeElement?.tagName).toBe('H2');
+	});
+
 	it('開いたまま表示言語を変えると、本文と目次がその言語に替わる', async () => {
 		const screen = await render(Page, { props: { data: { platform: 'macos' } } as never });
 		await expect
