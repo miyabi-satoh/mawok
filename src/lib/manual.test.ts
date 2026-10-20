@@ -23,6 +23,22 @@ describe('renderManual', () => {
 		expect(html).toContain('<h3>小見出し</h3>');
 	});
 
+	it('キーだけを書いたコードをキーキャップにし、+ は読み上げにだけ残す。それ以外のコードはそのまま', () => {
+		const { html } = renderManual(
+			'`Cmd+,` と `Esc`、`Ctrl+Alt+↑ / Ctrl+Alt+↓`。`@ai` と `@sh sort`\n',
+			'表',
+			'windows'
+		);
+		const sep = '<span class="sr-only">+</span>';
+		expect(html).toContain(`<kbd class="keys"><kbd>Cmd</kbd>${sep}<kbd>,</kbd></kbd>`);
+		expect(html).toContain('<kbd class="keys"><kbd>Esc</kbd></kbd>');
+		expect(html).toContain(
+			`<kbd class="keys"><kbd>Ctrl</kbd>${sep}<kbd>Alt</kbd>${sep}<kbd>↑</kbd></kbd> / <kbd class="keys">`
+		);
+		expect(html).toContain('<code>@ai</code>');
+		expect(html).toContain('<code>@sh sort</code>');
+	});
+
 	it('表を、名前の付いた横に送れる領域で包む', () => {
 		const { html } = renderManual('| a | b |\n| - | - |\n| 1 | 2 |\n', 'Table "x"', 'macos');
 		expect(html).toMatch(

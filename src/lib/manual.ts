@@ -42,10 +42,29 @@ class ManualRenderer extends Renderer {
 		return `<h2 id="${id}" tabindex="-1">${this.parser.parseInline(token.tokens)}</h2>\n`;
 	}
 
+	override codespan(token: Tokens.Codespan): string {
+		if (!KEYS.test(token.text)) return super.codespan(token);
+		return token.text.split(' / ').map(keyCombo).join(' / ');
+	}
+
 	override table(token: Tokens.Table): string {
 		const label = escapeAttribute(this.tableLabel);
 		return `<div class="table-scroll" tabindex="0" role="region" aria-label="${label}">${super.table(token)}</div>`;
 	}
+}
+
+const KEY = '(?:Cmd|Ctrl|Shift|Option|Alt|Space|Enter|Esc|Tab|[↑↓←→A-Z0-9,])';
+const COMBO = `${KEY}(?:\\+${KEY})*`;
+/** 原典で `Cmd+Enter`・`Cmd+Option+↑ / Cmd+Option+↓` のようにキーだけを書いたコード。`@ai` やパスはコードのまま */
+const KEYS = new RegExp(`^${COMBO}(?: / ${COMBO})*$`);
+
+/**
+ * キーの組み合わせを、キーごとのキーキャップにする。組み合わせ全体を外側の kbd で包むのは HTML の書き方
+ * (押すキーの組を kbd の入れ子で表す)。+ は見た目では並べて示すので隠し、読み上げには残す
+ */
+function keyCombo(combo: string): string {
+	const keys = combo.split('+').map((key) => `<kbd>${key}</kbd>`);
+	return `<kbd class="keys">${keys.join('<span class="sr-only">+</span>')}</kbd>`;
 }
 
 function escapeAttribute(text: string): string {
