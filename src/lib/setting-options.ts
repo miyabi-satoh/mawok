@@ -28,7 +28,7 @@ export const PUNCTUATION_STYLES: Option<PunctuationStyle>[] = [
 ];
 
 /** 全角・半角の揃え方の選択肢 */
-export const WIDTH_STYLES: Option<WidthStyle>[] = [
+const WIDTH_STYLES: Option<WidthStyle>[] = [
 	{ value: 'keep', name: m.settings_char_width_keep },
 	{ value: 'full', name: m.settings_char_width_full },
 	{ value: 'half', name: m.settings_char_width_half }

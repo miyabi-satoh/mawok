@@ -1,6 +1,6 @@
 # 設定の置き場
 
-- 設定は SQLite のファイル `settings.db` に置く。置き場所は OS 標準のアプリ設定フォルダ（macOS は `~/Library/Application Support/<identifier>/`、Windows は `%APPDATA%\<identifier>\`）。中身を変えるのはアプリだけで、手で書く使い方はしない。
+- 設定は SQLite のファイル `settings.db` に置く。置き場所は OS 標準のアプリ設定フォルダ（macOS は `~/Library/Application Support/<identifier>/`、Windows は `%APPDATA%\<identifier>\`、Linux は `~/.config/<identifier>/`）。中身を変えるのはアプリだけで、手で書く使い方はしない。
 - 表は3つで、設定を書くのと同じトランザクションで同期の oplog も書く（docs/sync.md「手元の記録」）。
   - `settings`: 項目名と、値（JSON）。
   - `sync_outbox`: 手元で変えて、まだ窓口へ送っていない同期の項目と、最後に変えた時刻（oplog）。

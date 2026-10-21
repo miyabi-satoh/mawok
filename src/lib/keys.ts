@@ -201,7 +201,7 @@ export function keyLabels(accelerator: string, platform: Platform): string[] {
 		.map((part) => LABELS[platform][part] ?? part.replace(/^(?:Key|Digit)(.)$/, '$1'));
 }
 
-/** キーの組み合わせを、文の中に書く形にする。macOS は記号を詰めて（⌘⇧Space）、Windows は + でつなぐ（Ctrl+Shift+Space） */
+/** キーの組み合わせを、文の中に書く形にする。macOS は記号を詰めて（⌘⇧Space）、Windows・Linux は + でつなぐ（Ctrl+Shift+Space） */
 export function formatKeys(accelerator: string, platform: Platform): string {
 	return keyLabels(accelerator, platform).join(platform === 'macos' ? '' : '+');
 }
