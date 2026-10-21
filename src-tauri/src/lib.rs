@@ -817,9 +817,14 @@ fn write_clipboard(text: &str, conceal: bool) -> Result<(), arboard::Error> {
     } else {
         set
     };
-    // 印を付ける手段が無い OS（Linux。開発のビルドだけ）では付けずに書く
-    #[cfg(not(any(windows, target_os = "macos")))]
-    let _ = conceal;
+    // Linux は配らないが、開発のビルドでも同じく履歴から外す（KDE の慣習の MIME 型。arboard の説明による）
+    #[cfg(target_os = "linux")]
+    let set = if conceal {
+        use arboard::SetExtLinux;
+        set.exclude_from_history()
+    } else {
+        set
+    };
     set.text(text)
 }
 
