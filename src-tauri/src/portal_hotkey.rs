@@ -168,6 +168,8 @@ pub async fn start(
     state
         .configurable
         .store(portal.version() >= 2, std::sync::atomic::Ordering::Relaxed);
+    // 知らせを読み直す処理がセッションを使えるよう、知らせを受け始める前に置く
+    *state.session.lock().unwrap() = Some(Arc::new((portal, session)));
 
     tokio::spawn(async move {
         while let Some(event) = activated.next().await {
@@ -188,7 +190,6 @@ pub async fn start(
             on_changed();
         }
     });
-    *state.session.lock().unwrap() = Some(Arc::new((portal, session)));
     Ok(())
 }
 
