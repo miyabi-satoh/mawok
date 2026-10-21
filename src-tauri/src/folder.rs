@@ -446,7 +446,7 @@ fn normalize(path: &Path) -> PathBuf {
     normalized
 }
 
-/// タイトルバーに出す形。macOS・Linux はホームの中を `~` で縮める（ターミナルと同じ）。Windows は `~` を使わないので、そのままにする
+/// タイトルバーに出す形。Windows 以外はホームの中を `~` で縮める（ターミナルと同じ）。Windows は `~` を使わないので、そのままにする
 pub fn display(path: &Path, home: &Path) -> String {
     #[cfg(not(windows))]
     if let Ok(rest) = path.strip_prefix(home) {
