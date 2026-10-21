@@ -18,6 +18,7 @@ const ABOUT_CONFIG = 'src-tauri/about.toml';
 // - 条文のファイルを同梱していないので、cargo-about が SPDX のひな形 (著作権者が空欄) で埋めるもの。
 //   - webview2-rs.txt: wravery/webview2-rs の LICENSE (b74dc5e・dffa41a で同じ)
 //   - rust-alloc-no-stdlib.txt: dropbox/rust-alloc-no-stdlib の LICENSE (ae42d22)
+//   - dlopen2.txt: OpenByteDev/dlopen2 の LICENSE (cc80e4a)
 //   - objc2.txt: madsmtm/objc2 の LICENSE.md (b4167b5・8852b42・8d214f5・7b1abfd で同じ) と MIT の条文。
 //     上流は MIT で提供すると書くだけで、著作権表示をどこにも掲げていないので、著作権者の行は置かない。
 // - ring: cargo-about がソースファイルを丸ごと本文として拾う (ライセンスの注釈を頭に持つため)。
@@ -32,6 +33,7 @@ const OVERRIDES = {
 	'webview2-com-macros@0.8.1': { texts: [{ id: 'MIT', file: 'webview2-rs.txt' }] },
 	'webview2-com-sys@0.38.2': { texts: [{ id: 'MIT', file: 'webview2-rs.txt' }] },
 	'alloc-stdlib@0.2.4': { texts: [{ id: 'BSD-3-Clause', file: 'rust-alloc-no-stdlib.txt' }] },
+	'dlopen2@0.8.2': { texts: [{ id: 'MIT', file: 'dlopen2.txt' }] },
 	'block2@0.6.2': { texts: [{ id: 'MIT', file: 'objc2.txt' }] },
 	'objc2@0.6.4': { texts: [{ id: 'MIT', file: 'objc2.txt' }] },
 	'objc2-encode@4.1.0': { texts: [{ id: 'MIT', file: 'objc2.txt' }] },

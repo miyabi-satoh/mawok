@@ -116,7 +116,8 @@ impl DraftKeys {
     }
 }
 
-/// 画面が OS ごとにキーの表記や閉じるキーを変えるときも、この名前（`macos`・`windows`）で渡す
+/// 画面が OS ごとにキーの表記や閉じるキーを変えるときも、この名前（`macos`・`windows`・`linux`）で渡す。
+/// Linux のキーの扱いは Windows と同じ（Ctrl を軸にし、Super はデスクトップが使う）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -124,12 +125,15 @@ impl DraftKeys {
 pub enum Platform {
     MacOs,
     Windows,
+    Linux,
 }
 
 impl Platform {
     pub fn current() -> Self {
         if cfg!(target_os = "macos") {
             Platform::MacOs
+        } else if cfg!(target_os = "linux") {
+            Platform::Linux
         } else {
             Platform::Windows
         }
@@ -314,7 +318,7 @@ pub fn normalize(key: &str, platform: Platform) -> Option<String> {
     }
     let unavailable = match platform {
         Platform::MacOs => "Super",
-        Platform::Windows => "Control",
+        Platform::Windows | Platform::Linux => "Control",
     };
     let mut present = [false; MODIFIERS.len()];
     for part in parts {
@@ -375,7 +379,7 @@ fn is_editing_key(key: &str, platform: Platform) -> bool {
                     .map(|letter| format!("Control+Key{letter}")),
             );
         }
-        Platform::Windows => {
+        Platform::Windows | Platform::Linux => {
             keys.extend(
                 ["KeyY", "Insert", "Home", "End"].map(|code| format!("CommandOrControl+{code}")),
             );
@@ -425,7 +429,7 @@ fn hotkey_alias(hotkey: &str, platform: Platform) -> Option<String> {
     use tauri_plugin_global_shortcut::{Modifiers, Shortcut};
     let (command, other) = match platform {
         Platform::MacOs => (Modifiers::SUPER, (Modifiers::CONTROL, "Control")),
-        Platform::Windows => (Modifiers::CONTROL, (Modifiers::SUPER, "Super")),
+        Platform::Windows | Platform::Linux => (Modifiers::CONTROL, (Modifiers::SUPER, "Super")),
     };
     // global-hotkey は CommandOrControl の別名をビルドした OS で読み替えるので、platform で先に読み替えておく
     let command_name = if command == Modifiers::SUPER {

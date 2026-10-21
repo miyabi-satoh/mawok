@@ -26,6 +26,21 @@ function checkPortFree(port) {
 	});
 }
 
+/** ポートが接続を受けているか */
+function isListening(port) {
+	return new Promise((resolve) => {
+		const socket = net.createConnection({ port, host: '127.0.0.1' });
+		socket.once('connect', () => {
+			socket.destroy();
+			resolve(true);
+		});
+		socket.once('error', () => {
+			socket.destroy();
+			resolve(false);
+		});
+	});
+}
+
 /**
  * tauri-driver (と、その内部で使う msedgedriver) を起動する。
  * リポジトリ直下の msedgedriver.exe を使う想定 (msedgedriver-tool で用意し、WebView2 のバージョンに合わせる)。
@@ -50,7 +65,7 @@ export async function startTauriDriver({ port = 4444, nativePort = 9515, msedged
 			],
 			// アプリは tauri-driver → msedgedriver の順に環境変数を引き継ぐので、ここで渡せばアプリまで届く。
 			// プロファイルを分けて、常用のアカウントで同期しない・常用の設定と履歴に触れないようにする (src-tauri/src/profile.rs)
-			{ stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, [PROFILE_ENV]: PROFILE } }
+			{ stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, [PROFILE_ENV]: PROFILE } }
 		);
 
 		let settled = false;
@@ -64,21 +79,24 @@ export async function startTauriDriver({ port = 4444, nativePort = 9515, msedged
 			});
 		}, 15_000);
 
-		// 起動成功を示す行が、OS のパイプの都合で複数の data イベントに分割されて届くことが
-		// あるため、チャンクを単独で見ずに蓄積したバッファに対して判定する
-		let buffered = '';
-		child.stdout.on('data', (chunk) => {
-			if (settled) return;
-			buffered += chunk.toString();
-			if (buffered.includes('msedgedriver was started successfully')) {
-				settled = true;
-				clearTimeout(timeout);
-				resolve({
-					port,
-					stop: () => stopProcessTree(child)
-				});
+		// tauri-driver 2.0.5 以降は msedgedriver の標準出力を捨て、起動を知らせる行が届かない。
+		// tauri-driver が受けるポートと、msedgedriver が受けるポートの両方がつながるまで待つ
+		const poll = async () => {
+			while (!settled) {
+				if ((await isListening(port)) && (await isListening(nativePort))) {
+					if (settled) return;
+					settled = true;
+					clearTimeout(timeout);
+					resolve({
+						port,
+						stop: () => stopProcessTree(child)
+					});
+					return;
+				}
+				await new Promise((wake) => setTimeout(wake, 200));
 			}
-		});
+		};
+		void poll();
 
 		child.on('error', (error) => {
 			if (!settled) {

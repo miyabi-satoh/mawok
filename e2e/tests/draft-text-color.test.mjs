@@ -40,8 +40,8 @@ test.describe('下書きの文字色', () => {
 	test.before(async () => {
 		await suite.before();
 		// 文字色と表示言語・テーマは、このテストが決め打ちするので固定する。
-		// 案内も既定に戻す (ユーザーが空にしていると placeholder 属性が付かず、
-		// `::placeholder` の色を読むところが落ちる。`src/routes/+page.svelte` の placeholder)
+		// 案内も既定に戻す (ユーザーが空にしていると案内が描かれず、
+		// 案内の色を読むところが落ちる。`src/routes/+page.svelte` の .draft-guidance)
 		testConfig = await beginTestConfig({
 			language: 'ja',
 			theme: 'light',

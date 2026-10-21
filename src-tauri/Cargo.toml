@@ -108,13 +108,13 @@ unicode-normalization = "0.1.26"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"
 
-# ログイン時の起動（autostart.rs）。macOS はログイン項目（SMAppService）を直接使う
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-tauri-plugin-autostart = "2.5.1"
 # 多重起動を防ぐ。macOS は開き直しを OS が既存のインスタンスへ知らせるので、lib.rs の lock_single_instance で2つ目を止めるだけにする
 tauri-plugin-single-instance = "2.4.4"
 
 [target."cfg(windows)".dependencies]
+# ログイン時の起動（autostart.rs）。macOS はログイン項目（SMAppService）、Linux は XDG autostart を直接使う
+tauri-plugin-autostart = "2.5.1"
 # Win32_System_JobObjects・Win32_Security・Win32_System_Threading・Win32_Globalization は、コマンドのアクション（command.rs）で子プロセスごと止め、標準エラーを読むため
 # ApplicationModel・Win32_Storage_Packaging_Appx は、MSIX 版かを見分けて（package.rs）、ログイン時の起動を StartupTask で行うため（autostart.rs）
 windows = { version = "0.62.2", features = ["ApplicationModel", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Storage_Packaging_Appx", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
@@ -125,6 +125,22 @@ windows-core = "0.61.2"
 tauri-winrt-notification = "0.7.3"
 # AI サービスのキーを、資格情報マネージャーに置く（secrets.rs）。検索は使わないので、正規表現の依存を持ち込まない
 windows-native-keyring-store = { version = "1.1.0", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# AI サービスのキーを、Secret Service（GNOME Keyring・KWallet など）に置く（secrets.rs）。zbus は Tauri の依存でもともと入っているので、
+# libdbus の C ライブラリを足さない zbus 版にする。spawn_blocking の中から呼ぶので同期の API で足り、暗号は C ライブラリの要らない Rust の実装にする
+zbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rust"] }
+# WebView の描画プロセスが落ちたのを知る（diagnostics.rs）。Tauri（wry）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
+webkit2gtk = { version = "2.0.2", features = ["v2_20"] }
+# `mawok --toggle` で呼んだデスクトップの印を窓に渡す（lib.rs の on_toggle）。Tauri（tao）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
+gtk = "0.18.2"
+# `mawok --toggle` を、動いている Mawok に単一起動のプラグインと同じ D-Bus の呼び出しで渡す（toggle.rs）。プラグインが使うのと同じ版
+zbus = "5.19.0"
+# Wayland のホットキーを、デスクトップの GlobalShortcuts portal に登録する（portal_hotkey.rs）。zbus は Tauri の側と同じく async-io で動かす
+ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "global_shortcuts"] }
+futures-util = "0.3.34"
+# Wayland では、クリップボードを XWayland 越しでなく Wayland の仕組み（data-control）で書く。持たないデスクトップ（GNOME）は X11 の道に落ちる
+arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
 
 [dev-dependencies]
 # 画面 (TS) に渡す型を Rust から書き出す。cargo test で src/lib/bindings/ に出力する

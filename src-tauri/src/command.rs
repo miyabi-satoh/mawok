@@ -97,13 +97,19 @@ fn strip_blank_lines(command: &str) -> &str {
     &command[..end]
 }
 
-/// コマンドを渡すシェル（macOS）。Dock などから起動した GUI のアプリはターミナルの PATH を引き継がないので、
+/// `$SHELL` が無いときのシェル。macOS は標準のログインシェルに合わせ、Linux は zsh が入っているとは限らないので、どこにでもある sh にする
+#[cfg(target_os = "macos")]
+const DEFAULT_SHELL: &str = "/bin/zsh";
+#[cfg(target_os = "linux")]
+const DEFAULT_SHELL: &str = "/bin/sh";
+
+/// コマンドを渡すシェル（macOS・Linux）。Dock などから起動した GUI のアプリはターミナルの PATH を引き継がないので、
 /// ログインシェルで読む設定の PATH で動かす
 #[cfg(unix)]
 fn shell_command(command: &str) -> tokio::process::Command {
     let shell = std::env::var_os("SHELL")
         .filter(|shell| !shell.is_empty())
-        .unwrap_or_else(|| "/bin/zsh".into());
+        .unwrap_or_else(|| DEFAULT_SHELL.into());
     let mut process = tokio::process::Command::new(shell);
     process.arg("-l").arg("-c").arg(command);
     // 止めるときに子プロセスごと止められるよう、新しいプロセスグループにする

@@ -65,7 +65,7 @@ function resolveColorInPage(value) {
 }
 
 /**
- * 下書きの入力欄の、文字の色と案内 (placeholder) の色・字体を読む。
+ * 下書きの入力欄の、文字の色と案内の色・字体を読む。
  * 比べる相手として、案内の色の変数 (`--draft-guidance`) と標準の文字色 (`--foreground`) を
  * 解決した後の値も一緒に返す
  */
@@ -86,11 +86,12 @@ function readDraftColorsInPage(resolve) {
 			'設定ウィンドウの「入力欄の案内」を読もうとしています (下書きのウィンドウに切り替えてから呼んでください)'
 		);
 	}
-	const placeholder = getComputedStyle(textarea, '::placeholder');
+	const guidance = document.querySelector('.draft-guidance');
+	if (!guidance) throw new Error('入力欄の案内が描かれていません (入力欄が空でないか、案内が空)');
 	return {
 		text: getComputedStyle(textarea).color,
-		guidance: placeholder.color,
-		guidanceFontStyle: placeholder.fontStyle,
+		guidance: getComputedStyle(guidance).color,
+		guidanceFontStyle: getComputedStyle(guidance).fontStyle,
 		guidanceVariable: resolve('var(--draft-guidance)'),
 		foreground: resolve('var(--foreground)')
 	};

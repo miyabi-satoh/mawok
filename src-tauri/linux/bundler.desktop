@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name={{name}}
+Exec={{exec}}
+Icon={{icon}}
+NoDisplay=true

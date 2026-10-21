@@ -13,8 +13,8 @@ accepted = [
     "Unlicense",
     "Zlib",
 ]
-# 配るのは macOS (Apple シリコン) と Windows の2つ。
-targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
+# 配るのは macOS (Apple シリコン)・Windows・Linux (amd64) の3つ。
+targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 # mawok 自身は表示しない。

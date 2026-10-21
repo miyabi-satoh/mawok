@@ -22,9 +22,11 @@ mod hotkey;
 mod i18n;
 #[cfg(target_os = "macos")]
 mod menu_tracking;
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 mod package;
 mod placement;
+#[cfg(target_os = "linux")]
+mod portal_hotkey;
 mod pro;
 mod profile;
 mod secrets;
@@ -34,6 +36,8 @@ mod sync_key;
 #[cfg(test)]
 mod test_support;
 mod text;
+#[cfg(target_os = "linux")]
+mod toggle;
 // 境目の型は、Windows でもテストで書き出す。Windows では書き出すだけで使わない
 #[cfg(any(target_os = "macos", test))]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -210,6 +214,8 @@ struct AppState {
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
+    #[cfg(target_os = "linux")]
+    portal_hotkey: portal_hotkey::PortalHotkey,
     /// 開いているメニューの深さ（macOS）。サブメニューなどで開く・閉じるの通知が入れ子になっても、
     /// いちばん外のメニューを開いたときに外し、閉じたときに戻す
     #[cfg(target_os = "macos")]
@@ -304,6 +310,14 @@ struct SettingsView {
     default_draft_keys: DraftKeys,
     /// ホットキーの「既定に戻す」で戻すキー
     default_hotkey: &'static str,
+    /// ホットキーをアプリでなくデスクトップで割り当てるか（Linux の Wayland。toggle.rs・portal_hotkey.rs）
+    hotkey_by_desktop: bool,
+    /// デスクトップが portal で付けたホットキーの表示。portal で付いていなければ None で、画面は `mawok --toggle` の割り当てを案内する
+    desktop_hotkey: Option<String>,
+    /// `desktop_hotkey` を設定のホットキーと同じ書き方に読めたもの。読めなければ None で、画面は `desktop_hotkey` をそのまま出す
+    desktop_hotkey_keys: Option<String>,
+    /// デスクトップの、ホットキーを割り当て直す画面を開けるか
+    desktop_hotkey_configurable: bool,
     /// ログイン時に起動するか
     autostart: bool,
     language: Language,
@@ -373,6 +387,10 @@ fn settings_view(state: &AppState) -> SettingsView {
     let lang = Lang::resolve(config.language, state.system_lang);
     let pro_available = state.pro_available();
     let modified_settings = config::modified_settings(&config);
+    #[cfg(target_os = "linux")]
+    let desktop_hotkey = state.portal_hotkey.trigger.lock().unwrap().clone();
+    #[cfg(not(target_os = "linux"))]
+    let desktop_hotkey: Option<String> = None;
     SettingsView {
         revision,
         sync_kinds: sync::kinds(&config),
@@ -393,6 +411,18 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_window_keys: config.text_window_keys,
         default_draft_keys: DraftKeys::default(),
         default_hotkey: config::DEFAULT_HOTKEY,
+        hotkey_by_desktop: hotkey_by_desktop(),
+        #[cfg(target_os = "linux")]
+        desktop_hotkey_keys: desktop_hotkey
+            .as_deref()
+            .and_then(portal_hotkey::accelerator_from_trigger),
+        #[cfg(not(target_os = "linux"))]
+        desktop_hotkey_keys: None,
+        desktop_hotkey,
+        #[cfg(target_os = "linux")]
+        desktop_hotkey_configurable: state.portal_hotkey.configurable.load(Ordering::Relaxed),
+        #[cfg(not(target_os = "linux"))]
+        desktop_hotkey_configurable: false,
         autostart: config.autostart,
         language: config.language,
         theme: config.theme,
@@ -557,6 +587,106 @@ fn on_hotkey(app: &AppHandle) {
     } else {
         show(app);
     }
+}
+
+/// 初めての起動で、portal の確かめの画面の返事を待って下書きを出すまでの上限
+#[cfg(target_os = "linux")]
+const PORTAL_CONFIRMATION_WAIT: Duration = Duration::from_secs(60);
+
+/// Wayland のホットキーを portal に登録する。portal が無いデスクトップでは、`mawok --toggle` の案内のまま
+#[cfg(target_os = "linux")]
+fn start_portal_hotkey(app: AppHandle, show_after: bool) {
+    // 初めての起動の下書きは、確かめの画面が閉じてから出す。返事が来ないまま（画面がほかの窓の裏にある・portal が固まった）でも、
+    // 何も出ない常駐にならないよう、待つのは利用者が確かめの画面を読んで答える程度の間までにする
+    let first_show = std::sync::Arc::new(AtomicBool::new(!show_after));
+    let show_first = {
+        let (app, first_show) = (app.clone(), first_show.clone());
+        move || {
+            if first_show.swap(true, Ordering::Relaxed) {
+                return;
+            }
+            info!("first launch: show the draft");
+            let shown = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                show(&shown);
+            });
+        }
+    };
+    if show_after {
+        let show_first = show_first.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(PORTAL_CONFIRMATION_WAIT).await;
+            show_first();
+        });
+    }
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let (description, hotkey) = (
+            state.lang().toggle_draft(),
+            state.config.lock().unwrap().hotkey.clone(),
+        );
+        let (activated, changed) = (app.clone(), app.clone());
+        let app_id = app.config().identifier.clone();
+        let started = portal_hotkey::start(
+            &state.portal_hotkey,
+            &app_id,
+            description,
+            &hotkey,
+            move |token| {
+                let app = activated.clone();
+                let _ = activated.run_on_main_thread(move || on_toggle(&app, token.as_deref()));
+            },
+            move || {
+                let app = changed.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) =
+                        portal_hotkey::refresh(&app.state::<AppState>().portal_hotkey).await
+                    {
+                        warn!("couldn't read the desktop hotkey: {error}");
+                    }
+                    emit_settings(&app);
+                });
+            },
+        )
+        .await;
+        match started {
+            Ok(()) => info!("hotkey registered with the desktop portal"),
+            // portal が無い・利用者が断った・失敗した。どれも mawok --toggle の案内に落ちる
+            Err(error) => info!("hotkey not registered with the desktop portal: {error}"),
+        }
+        emit_settings(&app);
+        show_first();
+    });
+}
+
+/// デスクトップの、ホットキーを割り当て直す画面を開く
+#[tauri::command]
+async fn configure_desktop_hotkey(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        portal_hotkey::configure(&app.state::<AppState>().portal_hotkey)
+            .await
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = portal_hotkey::refresh(&app.state::<AppState>().portal_hotkey).await {
+            warn!("couldn't read the desktop hotkey: {error}");
+        }
+        emit_settings(&app);
+    }
+    let _ = app;
+    Ok(())
+}
+
+/// `mawok --toggle` で呼ばれたとき。呼んだデスクトップの印があれば、窓を前に出すのに使う
+#[cfg(target_os = "linux")]
+fn on_toggle(app: &AppHandle, activation_token: Option<&str>) {
+    if let (Some(token), Some(window)) = (activation_token, main_window(app)) {
+        use gtk::prelude::GtkWindowExt;
+        match window.gtk_window() {
+            Ok(gtk_window) => gtk_window.set_startup_id(token),
+            Err(error) => warn!("couldn't pass the activation token: {error}"),
+        }
+    }
+    on_hotkey(app);
 }
 
 /// 出ていて、フォーカスがあるか。確かめられなければ、ないものとする
@@ -798,7 +928,14 @@ fn hide_draft_and_return(app: &AppHandle, state: &DraftState) -> Result<(), Stri
 /// クリップボードへ文字列を書く。`conceal` のときは、クリップボードの履歴・同期・管理アプリに残さないよう印を付ける。
 /// Tauri のクリップボードのプラグインは印を付けて書けないので、arboard を直接使う
 fn write_clipboard(text: &str, conceal: bool) -> Result<(), arboard::Error> {
-    let mut clipboard = arboard::Clipboard::new()?;
+    with_clipboard(|clipboard| write_text(clipboard, text, conceal))
+}
+
+fn write_text(
+    clipboard: &mut arboard::Clipboard,
+    text: &str,
+    conceal: bool,
+) -> Result<(), arboard::Error> {
     let set = clipboard.set();
     #[cfg(target_os = "macos")]
     let set = if conceal {
@@ -817,7 +954,7 @@ fn write_clipboard(text: &str, conceal: bool) -> Result<(), arboard::Error> {
     } else {
         set
     };
-    // Linux は配らないが、開発のビルドでも同じく履歴から外す（KDE の慣習の MIME 型。arboard の説明による）
+    // KDE の慣習の MIME 型（arboard の説明による）
     #[cfg(target_os = "linux")]
     let set = if conceal {
         use arboard::SetExtLinux;
@@ -826,6 +963,27 @@ fn write_clipboard(text: &str, conceal: bool) -> Result<(), arboard::Error> {
         set
     };
     set.text(text)
+}
+
+/// Linux のクリップボードは、書いたプロセスが求めに応じて中身を配る。arboard は最後の Clipboard を手放すと配るのをやめるので、
+/// クリップボードマネージャーの無い環境でもコピーした中身が残るよう、プロセスの間ずっと持っておく
+#[cfg(target_os = "linux")]
+fn with_clipboard<T>(
+    use_it: impl FnOnce(&mut arboard::Clipboard) -> Result<T, arboard::Error>,
+) -> Result<T, arboard::Error> {
+    static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
+    let mut clipboard = CLIPBOARD.lock().unwrap();
+    if clipboard.is_none() {
+        *clipboard = Some(arboard::Clipboard::new()?);
+    }
+    use_it(clipboard.as_mut().expect("just created"))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn with_clipboard<T>(
+    use_it: impl FnOnce(&mut arboard::Clipboard) -> Result<T, arboard::Error>,
+) -> Result<T, arboard::Error> {
+    use_it(&mut arboard::Clipboard::new()?)
 }
 
 /// 画面の読み込みが終わったときに呼ばれる。表示中なら WebView にキーボードのフォーカスを移して true を返し、画面側は表示時の処理をする。
@@ -3643,11 +3801,25 @@ fn show_notification(app: &AppHandle, message: String) {
     }
 }
 
-/// global-shortcut プラグインでホットキーを登録・解除する
+/// ホットキーをデスクトップのキー設定で割り当てるか。Wayland ではアプリがキーを奪えない。
+/// global-shortcut プラグインは XWayland 越しに登録できてしまうが、キーは XWayland の窓が前面のときしか届かない
+fn hotkey_by_desktop() -> bool {
+    static BY_DESKTOP: OnceLock<bool> = OnceLock::new();
+    *BY_DESKTOP.get_or_init(|| {
+        cfg!(target_os = "linux")
+            && std::env::var_os("WAYLAND_DISPLAY").is_some()
+            && std::env::var("GDK_BACKEND").map_or(true, |backend| !backend.starts_with("x11"))
+    })
+}
+
+/// global-shortcut プラグインでホットキーを登録・解除する。デスクトップのキー設定で割り当てるときは、何も登録せず、登録できている扱いにする
 struct PluginRegistrar<'a>(&'a AppHandle);
 
 impl hotkey::Registrar for PluginRegistrar<'_> {
     fn register(&mut self, hotkey: &str) -> Result<(), String> {
+        if hotkey_by_desktop() {
+            return Ok(());
+        }
         self.0
             .global_shortcut()
             .register(hotkey)
@@ -3656,7 +3828,7 @@ impl hotkey::Registrar for PluginRegistrar<'_> {
 
     // 起動時に登録できなかったキーや、記録のために止めているキーは、解除するものがないので成功として扱う
     fn unregister(&mut self, hotkey: &str) -> Result<(), String> {
-        if !self.is_registered(hotkey) {
+        if hotkey_by_desktop() || !self.is_registered(hotkey) {
             return Ok(());
         }
         self.0
@@ -3666,7 +3838,7 @@ impl hotkey::Registrar for PluginRegistrar<'_> {
     }
 
     fn is_registered(&self, hotkey: &str) -> bool {
-        self.0.global_shortcut().is_registered(hotkey)
+        hotkey_by_desktop() || self.0.global_shortcut().is_registered(hotkey)
     }
 }
 
@@ -4499,9 +4671,31 @@ pub fn run() {
         warn!("a TLS crypto provider was already installed");
     }
 
+    // 識別子が、設定・履歴・ログのフォルダーと単一起動の見分けを決める
+    let mut context = tauri::generate_context!();
+    let identifier = profile::scoped(&context.config().identifier);
+    #[cfg(target_os = "linux")]
+    if toggle::forward_to_running(&identifier) {
+        return;
+    }
+    context.config_mut().identifier = identifier;
+
     let builder = tauri::Builder::default();
     #[cfg(not(target_os = "macos"))]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        // D-Bus を受けるスレッドから呼ばれる。窓の印を渡すのは GTK なので、メインスレッドで行う
+        #[cfg(target_os = "linux")]
+        if toggle::requested(&args) {
+            let (app, token) = (
+                app.clone(),
+                toggle::activation_token(&args).map(str::to_string),
+            );
+            let _ = app
+                .clone()
+                .run_on_main_thread(move || on_toggle(&app, token.as_deref()));
+            return;
+        }
+        let _ = args;
         show(app)
     }));
     let builder = builder
@@ -4593,6 +4787,7 @@ pub fn run() {
             set_draft_key,
             reset_draft_key,
             pause_hotkey,
+            configure_desktop_hotkey,
             resume_hotkey,
             reveal_log_file,
             open_terms_page,
@@ -4773,10 +4968,21 @@ pub fn run() {
                 ai_settings_requested: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
+                #[cfg(target_os = "linux")]
+                portal_hotkey: portal_hotkey::PortalHotkey::default(),
                 #[cfg(target_os = "macos")]
                 menu_depth: std::sync::atomic::AtomicUsize::new(0),
             });
             build_tray(app.handle())?;
+            // 初めての起動で下書きを出すのは、portal の確かめの画面が閉じてから。先に出すと、確かめの画面にフォーカスを取られて隠れる
+            #[cfg(target_os = "linux")]
+            let show_after_portal = hotkey_by_desktop() && first_launch;
+            #[cfg(not(target_os = "linux"))]
+            let show_after_portal = false;
+            #[cfg(target_os = "linux")]
+            if hotkey_by_desktop() {
+                start_portal_hotkey(app.handle().clone(), show_after_portal);
+            }
             #[cfg(target_os = "macos")]
             {
                 let (begin, end) = (app.handle().clone(), app.handle().clone());
@@ -4793,15 +4999,20 @@ pub fn run() {
             // 初めての起動では下書きを一度出す。常駐するだけで何も出ないと、入ったのか分からず、
             // 使い方を伝える入力欄の案内も、一度出すまで目に入らないため。
             // 画面の読み込みが終わる前に出すので、入力欄へのフォーカスは page_ready で移す
-            if first_launch {
+            if first_launch && !show_after_portal {
                 info!("first launch: show the draft");
+                show(app.handle());
+            }
+            // 動いていないときに `--toggle` で呼ばれたら、起動してそのまま出す
+            #[cfg(target_os = "linux")]
+            if !first_launch && toggle::requested(&std::env::args().collect::<Vec<_>>()) {
                 show(app.handle());
             }
             Ok(())
         });
 
-    // macOS のログイン時の起動は、プラグインを通さずにログイン項目を使う（autostart.rs）
-    #[cfg(not(target_os = "macos"))]
+    // macOS のログイン時の起動はログイン項目、Linux は XDG autostart の .desktop を直接使う（autostart.rs）
+    #[cfg(windows)]
     let builder = builder.plugin(tauri_plugin_autostart::Builder::new().build());
 
     // 更新は Mac 版だけが自分で行う。Windows は Microsoft Store が受け持つ（docs/platform.md「Mac 版の更新」）
@@ -4813,11 +5024,6 @@ pub fn run() {
         .manage(updater::UpdateState::default())
         .on_web_content_process_terminate(diagnostics::web_content_process_terminated)
         .menu(macos_app_menu);
-
-    // 識別子が、設定・履歴・ログのフォルダーと単一起動の見分けを決める
-    let mut context = tauri::generate_context!();
-    let identifier = profile::scoped(&context.config().identifier);
-    context.config_mut().identifier = identifier;
 
     builder
         .build(context)

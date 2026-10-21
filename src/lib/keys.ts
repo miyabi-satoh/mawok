@@ -159,6 +159,11 @@ const LABELS: Record<Platform, Record<string, string>> = {
 		...COMMON_LABELS,
 		CommandOrControl: 'Ctrl',
 		Super: 'Win'
+	},
+	linux: {
+		...COMMON_LABELS,
+		CommandOrControl: 'Ctrl',
+		Super: 'Super'
 	}
 };
 
@@ -184,7 +189,8 @@ export function isCloseWindowKey(
  * 開くときに Rust 側が付ける。読めなければ Windows とみなす
  */
 export function platformFromUrl(url: URL): Platform {
-	return url.searchParams.get('platform') === 'macos' ? 'macos' : 'windows';
+	const platform = url.searchParams.get('platform');
+	return platform === 'macos' || platform === 'linux' ? platform : 'windows';
 }
 
 /** ホットキーの設定の文字列を、画面に並べるキーの表示に分ける */
@@ -225,7 +231,7 @@ export function toAccelerator(event: KeyCombo, platform: Platform): string | nul
 	// Mac の ⌘ と Windows の Ctrl は、どちらの OS でも同じ意味になる CommandOrControl として書く
 	if (platform === 'macos' ? event.metaKey : event.ctrlKey) parts.push('CommandOrControl');
 	if (platform === 'macos' && event.ctrlKey) parts.push('Control');
-	if (platform === 'windows' && event.metaKey) parts.push('Super');
+	if (platform !== 'macos' && event.metaKey) parts.push('Super');
 	if (event.altKey) parts.push('Alt');
 	// Shift だけ（や修飾キーなし）では普段の文字の入力を奪うので、ほかの修飾キーを必須にする
 	if (parts.length === 0) return null;

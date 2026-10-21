@@ -753,40 +753,82 @@
 				<Tabs.Content value="keys">
 					<SettingsSection>
 						<!-- 説明文は、題名と操作の行の下に全幅で置く -->
-						<SettingsRow modified={modifiedName(view, 'hotkey')}>
-							<Field.Field orientation="horizontal" class="flex-wrap">
-								<Field.Title class="shrink-0">{m.settings_hotkey()}</Field.Title>
-								{#if recording === 'hotkey'}
-									<div class="ml-auto">
-										{@render keyRecordingStatus(
-											view.hotkey,
-											view.defaultHotkey,
-											() => setHotkey(view.defaultHotkey),
-											() => setHotkey('')
-										)}
-									</div>
+						{#if view.hotkeyByDesktop}
+							<SettingsRow>
+								{#if view.desktopHotkey}
+									<!-- portal で付けたキーは、Mawok からは変えられない。デスクトップの割り当ての画面を開く -->
+									<Field.Field orientation="horizontal" class="flex-wrap">
+										<Field.Title class="shrink-0">{m.settings_hotkey()}</Field.Title>
+										{#if view.desktopHotkeyKeys}
+											<span class="ml-auto"
+												><KeyCaps key={view.desktopHotkeyKeys} platform={view.platform} /></span
+											>
+										{:else}
+											<span class="ml-auto text-sm">{view.desktopHotkey}</span>
+										{/if}
+										{#if view.desktopHotkeyConfigurable}
+											<Button
+												variant="outline"
+												size="sm"
+												onclick={() => invoke('configure_desktop_hotkey')}
+											>
+												{m.settings_hotkey_configure_desktop()}
+											</Button>
+										{/if}
+									</Field.Field>
+									{#if !view.desktopHotkeyConfigurable}
+										<Field.Description class="leading-snug">
+											{m.settings_hotkey_change_in_desktop()}
+										</Field.Description>
+									{/if}
 								{:else}
-									{@render keyButton(
-										'hotkey',
-										view.hotkey,
-										m.settings_hotkey_change_label({
-											key: view.hotkey
-												? formatKeys(view.hotkey, view.platform)
-												: m.settings_key_none()
-										}),
-										'px-1.5'
-									)}
+									<Field.Field>
+										<Field.Title>{m.settings_hotkey()}</Field.Title>
+										<Field.Description class="leading-snug">
+											{m.settings_hotkey_by_desktop()}
+										</Field.Description>
+										<code class="w-fit rounded bg-muted px-1.5 py-0.5 font-mono text-sm select-all"
+											>mawok --toggle</code
+										>
+									</Field.Field>
 								{/if}
-							</Field.Field>
-							{#if recording === 'hotkey'}
-								<Field.Description class="leading-snug">
-									{m.settings_hotkey_recording_description()}
-								</Field.Description>
-							{/if}
-							{#if hotkeyError}
-								<Field.Error>{hotkeyError}</Field.Error>
-							{/if}
-						</SettingsRow>
+							</SettingsRow>
+						{:else}
+							<SettingsRow modified={modifiedName(view, 'hotkey')}>
+								<Field.Field orientation="horizontal" class="flex-wrap">
+									<Field.Title class="shrink-0">{m.settings_hotkey()}</Field.Title>
+									{#if recording === 'hotkey'}
+										<div class="ml-auto">
+											{@render keyRecordingStatus(
+												view.hotkey,
+												view.defaultHotkey,
+												() => setHotkey(view.defaultHotkey),
+												() => setHotkey('')
+											)}
+										</div>
+									{:else}
+										{@render keyButton(
+											'hotkey',
+											view.hotkey,
+											m.settings_hotkey_change_label({
+												key: view.hotkey
+													? formatKeys(view.hotkey, view.platform)
+													: m.settings_key_none()
+											}),
+											'px-1.5'
+										)}
+									{/if}
+								</Field.Field>
+								{#if recording === 'hotkey'}
+									<Field.Description class="leading-snug">
+										{m.settings_hotkey_recording_description()}
+									</Field.Description>
+								{/if}
+								{#if hotkeyError}
+									<Field.Error>{hotkeyError}</Field.Error>
+								{/if}
+							</SettingsRow>
+						{/if}
 						<SettingsRow>
 							<!-- 1行が1つの操作。割り当てられなかった理由は、その行から離れないよう行と一緒に包む -->
 							<div class="flex flex-col gap-2">

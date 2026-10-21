@@ -1145,6 +1145,45 @@ describe('設定画面のホットキー', () => {
 		return screen;
 	}
 
+	it('デスクトップのキー設定で割り当てるときは、記録の代わりに割り当てるコマンドを出す', async () => {
+		settings.current = settingsView({ hotkeyByDesktop: true });
+		const screen = await renderAt(m.settings_category_keys);
+
+		await expect.element(screen.getByText(m.settings_hotkey_by_desktop())).toBeVisible();
+		await expect.element(screen.getByText('mawok --toggle')).toBeVisible();
+		await expect
+			.element(screen.getByRole('button', { name: hotkeyButtonName }))
+			.not.toBeInTheDocument();
+	});
+
+	it('デスクトップが付けたキーを読めたら、ほかのキーと同じくキーごとに出す', async () => {
+		settings.current = settingsView({
+			platform: 'linux',
+			hotkeyByDesktop: true,
+			desktopHotkey: '<Shift><Control>space を押す',
+			desktopHotkeyKeys: 'CommandOrControl+Shift+Space'
+		});
+		const screen = await renderAt(m.settings_category_keys);
+
+		await expect.element(screen.getByText('Space', { exact: true })).toBeVisible();
+		await expect.element(screen.getByText('<Shift><Control>space を押す')).not.toBeInTheDocument();
+	});
+
+	it('デスクトップが portal で付けたキーは、そのまま出し、変更でデスクトップの割り当ての画面を開く', async () => {
+		settings.current = settingsView({
+			hotkeyByDesktop: true,
+			desktopHotkey: 'Ctrl+Shift+Space',
+			desktopHotkeyConfigurable: true
+		});
+		const screen = await renderAt(m.settings_category_keys);
+
+		await expect.element(screen.getByText('Ctrl+Shift+Space')).toBeVisible();
+		await expect.element(screen.getByText('mawok --toggle')).not.toBeInTheDocument();
+		await screen.getByRole('button', { name: m.settings_hotkey_configure_desktop() }).click();
+
+		expect(commands()).toContain('configure_desktop_hotkey');
+	});
+
 	it('変更を押すと記録を始め、押したキーで下書きが出ないよう今のホットキーを止める', async () => {
 		await startRecording();
 

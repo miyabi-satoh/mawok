@@ -3,11 +3,26 @@ import { caretLine } from './caret-line';
 
 // 見た目の行は実際に描かないと分からないので、Chromium で描いて見る
 
-/** 1行に全角で10文字ほど入る入力欄を作り、カーソルを置く */
+/** 入力欄の書体で、全角の10文字の幅を測る。入る書体によっては「あ」が 1em にならず、10em では10文字で折り返さない（CI の Ubuntu） */
+function tenCharsWidth(element: HTMLTextAreaElement): number {
+	const span = document.createElement('span');
+	// 前に置いた入力欄の横で折り返すと幅が行をまたいで測れないので、流れから外して1行で測る
+	Object.assign(span.style, {
+		font: getComputedStyle(element).font,
+		position: 'absolute',
+		whiteSpace: 'nowrap'
+	});
+	span.textContent = 'あ'.repeat(10);
+	document.body.append(span);
+	const width = span.getBoundingClientRect().width;
+	span.remove();
+	return width;
+}
+
+/** 1行に全角でちょうど10文字入る入力欄を作り、カーソルを置く */
 function textarea(value: string, start: number, end = start): HTMLTextAreaElement {
 	const element = document.createElement('textarea');
 	Object.assign(element.style, {
-		width: '10em',
 		padding: '8px',
 		fontSize: '16px',
 		lineHeight: '1.5'
@@ -15,6 +30,7 @@ function textarea(value: string, start: number, end = start): HTMLTextAreaElemen
 	element.rows = 10;
 	element.value = value;
 	document.body.append(element);
+	element.style.width = `${Math.ceil(tenCharsWidth(element))}px`;
 	element.setSelectionRange(start, end);
 	return element;
 }

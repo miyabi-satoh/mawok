@@ -4,7 +4,7 @@
 
 ## 常駐
 
-- Windows はタスクトレイ、macOS はメニューバーに常駐する。
+- Windows と Linux はタスクトレイ、macOS はメニューバーに常駐する。
 - ログイン時に自動起動する（既定でオン）。設定画面でオフにできる。
   - 初めての起動では、設定のとおりに OS のログイン項目へ登録する。2回目からは、起動のたびに設定を OS へ書き込み直さず、設定か OS のどちらかがオフならオフにそろえる。
   - Windows のタスクマネージャーや macOS のシステム設定で切ったら、切ったままにし、設定もオフとして扱う。利用者が OS で選んだ状態を、アプリが断りなく有効に戻さないため。
@@ -35,7 +35,7 @@
 
 - 不具合の原因を後から追えるように、動作をログファイルに残す。記録するのは、起動、表示、非表示、ウィンドウの破棄、終了、WebView のプロセスの異常終了、画面側で起きた想定外のエラー、CSP に止められた読み込み（止めた指令と読み込み先だけ）、設定の読み込みやホットキーの登録などの失敗の詳細。
 - 入力内容はログに残さない。アクションで渡した内容と受け取った結果も、コマンドの行と標準エラーも残さない。アクションについては、始めた・終えた・取り消した・失敗した（失敗の種類、コマンドなら終了コード）ことだけを残す。
-- 置き場所は OS 標準のログフォルダ（macOS は `~/Library/Logs/<identifier>/`、Windows は `%LOCALAPPDATA%\<identifier>\logs\`）。時刻は UTC。
+- 置き場所は OS 標準のログフォルダ（macOS は `~/Library/Logs/<identifier>/`、Windows は `%LOCALAPPDATA%\<identifier>\logs\`、Linux は `~/.local/share/<identifier>/logs/`）。時刻は UTC。
 
 ## プロファイル
 
@@ -76,6 +76,23 @@
 - 変換中の Esc と Cmd+Enter（Ctrl+Enter）の判定は `KeyboardEvent.isComposing` か keyCode 229 で行う（`src/lib/keys.ts`）。
 - ウィンドウの大きさ（2026-09 に macOS 26 で検証）: `set_size` に渡した高さはタイトルバーを含む外側の高さとして効き、`inner_size` もタイトルバーを含んだ値を返す。ドキュメントの説明（どちらも中身の大きさ）とは食い違う、未修正の不具合（[tauri#15136](https://github.com/tauri-apps/tauri/issues/15136)・[#6333](https://github.com/tauri-apps/tauri/issues/6333)・[#12152](https://github.com/tauri-apps/tauri/issues/12152)）。wry が `contentView` を差し替えるため、tao が持つ古いビューの大きさが当てにならないことが原因。中身の大きさに合わせる公式の API はなく、差分を自分で求めるのが Tauri のメンテナの回答（[discussion#11816](https://github.com/orgs/tauri-apps/discussions/11816)）。今は、この差分を求めて使っているところはない。
 - ホットキーの重複（2026-09 に macOS 26 で検証）: `RegisterEventHotKey` は、別のプロセスが登録済みの組み合わせでも、システムのショートカット（⌘Space・⌘⇧3・⌃Space）でも成功を返す。別のプロセスと重なった場合、押すと登録したすべてのプロセスに届き、前面のアプリの keydown には届かない。システムのショートカットは `CopySymbolicHotKeys` で照合できるが、ほかのアプリのホットキーを調べる公開 API はない。Windows の `RegisterHotKey` は重複を `ERROR_HOTKEY_ALREADY_REGISTERED` で返す（PowerToys はこれで重複を見つけている）。ただし Windows でも、ほかのアプリが登録済みのキーは記録中の WebView2 に届かない（2026-09 に検証）。そのため、どちらの OS でも重複は登録の失敗としては現れない。
+
+## Linux のホットキー
+
+- X11 では、Windows・macOS と同じく global-shortcut プラグインで登録する。
+- Wayland では、アプリがキーを奪えない。global-shortcut プラグイン（global-hotkey）は X11 にしか対応しておらず、XWayland 越しに登録は成功するが、キーは XWayland の窓が前面のときしか届かない。失敗として現れないので、Wayland（`WAYLAND_DISPLAY` があり、`GDK_BACKEND` が x11 でない）ではプラグインに登録せず、次の2つで出す。
+  - デスクトップの GlobalShortcuts portal（`portal_hotkey.rs`）。設定のホットキーを希望として渡し、どのキーにするかはデスクトップが決めて利用者が確かめる。付いたキーは設定画面に出し、デスクトップの割り当ての画面（portal の version 2 の `ConfigureShortcuts`）を開ける。GNOME 48 以降と KDE が持つ。
+  - `mawok --toggle`（`toggle.rs`）。portal が無い・portal でキーが付かないデスクトップ（Ubuntu 24.04 の GNOME 46、Hyprland など）では、デスクトップのキー設定でこのコマンドにキーを割り当ててもらう。設定画面のホットキーの欄も、そう案内する。2つ目のプロセスは、単一起動のプラグインと同じ D-Bus の呼び出しで動いている Mawok に知らせてすぐ終わる。プラグインに任せると GTK と WebView の準備を待つので、出るまでが遅れる。
+- Wayland では、窓を前に出すのに、呼んだ側（デスクトップ）が渡す印（xdg-activation のトークン）が要る。無いと GNOME は窓を出さずに「準備ができました」と知らせるだけになる。`mawok --toggle` は `XDG_ACTIVATION_TOKEN`（X11 は `DESKTOP_STARTUP_ID`）を、portal は `Activated` の `activation_token` を受け取り、出す前に窓に渡す。
+- 隠したときにフォーカスがどこへ戻るかは、デスクトップが決める。Wayland には、ほかのアプリの窓を前に出す要求が無い。
+
+## Linux のそのほか
+
+- クリップボード: 書いたプロセスが、求めに応じて中身を配る。arboard は最後の `Clipboard` を手放すと配るのをやめるので、プロセスの間ずっと1つ持つ。Wayland では data-control で書き、持たないデスクトップ（GNOME）は XWayland 越しに書く。履歴に残さない印は、KDE の慣習の形式（`x-kde-passwordManagerHint`）。
+- 入力欄の案内は、placeholder でなく、入力欄の裏の置き換えのハイライトの層に描く。WebKitGTK は placeholder を入力欄より1文字ほど広い幅で折り返し、右端が見切れるため。
+- ログイン時の起動は、XDG autostart の `~/.config/autostart/Mawok.desktop` を自分で読み書きする。デスクトップの設定で切ると `Hidden=true` や `X-GNOME-Autostart-enabled=false` が書かれ、tauri-plugin-autostart はそれを読まずに有効に戻してしまうため（上の「常駐」の決まり）。
+- AI サービスのキーとアカウントのトークンは、Secret Service（GNOME キーリング・KWallet など）に置く。Secret Service が動いていない環境では読み書きできず、使えない旨を出す。
+- トレイは StatusNotifierItem で出し、`libayatana-appindicator3` を実行時に読み込む（無いと起動できない）。押すとメニューが出るだけで、押したことは受け取れない。GNOME は AppIndicator の拡張が要る（Ubuntu には最初から入っている）。
 
 ## macOS の手元のビルドの署名
 
