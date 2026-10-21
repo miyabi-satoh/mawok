@@ -21,6 +21,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		textWindowKeys: { ...DEFAULT_DRAFT_KEYS },
 		defaultDraftKeys: DEFAULT_DRAFT_KEYS,
 		defaultHotkey: 'CommandOrControl+Shift+Space',
+		hotkeyByDesktop: false,
 		autostart: true,
 		language: 'system',
 		theme: 'system',

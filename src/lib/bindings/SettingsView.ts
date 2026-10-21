@@ -36,6 +36,10 @@ defaultDraftKeys: DraftKeys,
  */
 defaultHotkey: string, 
 /**
+ * ホットキーをアプリでなくデスクトップのキー設定で割り当てるか（Linux の Wayland。toggle.rs）
+ */
+hotkeyByDesktop: boolean, 
+/**
  * ログイン時に起動するか
  */
 autostart: boolean, language: Language, theme: Theme, 
