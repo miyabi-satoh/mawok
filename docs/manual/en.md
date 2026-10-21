@@ -5,7 +5,7 @@
 From any app, you can bring up the text window, write, then copy the text and paste it into the app you came from.
 
 ::: linux
-On Ubuntu's GNOME and on Hyprland, first assign the hotkey in your desktop's settings (see “[Assign the hotkey](#assign-the-hotkey)”).
+If your desktop asks to add a shortcut the first time Mawok starts, add it. On desktops that don't ask (such as GNOME on Ubuntu 24.04, or Hyprland), first assign the hotkey in your desktop's settings (see “[Assign the hotkey](#assign-the-hotkey)”).
 :::
 
 1. Press {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`}{linux:`Ctrl+Shift+Space`} to bring up the text window.
@@ -18,7 +18,7 @@ Mawok stays in the {macos:menu bar}{windows:system tray}{linux:tray} and starts 
 ::: linux
 ## Assign the hotkey
 
-On Ubuntu's GNOME and on Hyprland, Mawok can't register a hotkey. Assign a key to the command `mawok --toggle` in your desktop's settings. If this command appears in the hotkey field under “Keyboard shortcuts” in Settings, you need to assign it.
+If `mawok --toggle` appears in the hotkey field under “Keyboard shortcuts” in Settings, Mawok couldn't register the hotkey. Assign a key to this command in your desktop's settings.
 
 On GNOME:
 
