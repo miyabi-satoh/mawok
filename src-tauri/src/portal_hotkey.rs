@@ -63,6 +63,64 @@ pub fn preferred_trigger(hotkey: &str) -> Option<String> {
     Some(trigger.join("+"))
 }
 
+/// デスクトップが返すキーの表示（GNOME は `<Shift><Control>space を押す`、KDE は `Ctrl+Shift+Space` の形）を、
+/// 設定のホットキーと同じ書き方（`CommandOrControl+Shift+Space`）にする。読めなければ None で、画面は表示をそのまま出す
+pub fn accelerator_from_trigger(trigger: &str) -> Option<String> {
+    // 「を押す」「Press」のような言葉は言語で変わるので、キーの組み合わせの部分だけを拾う
+    let first = trigger
+        .split_whitespace()
+        .find(|word| word.contains('<') || word.contains('+'))?;
+    let parts: Vec<&str> = if first.starts_with('<') {
+        first
+            .split(['<', '>'])
+            .filter(|part| !part.is_empty())
+            .collect()
+    } else {
+        first.split('+').collect()
+    };
+    let (key, modifiers) = parts.split_last()?;
+    let mut accelerator = Vec::new();
+    for modifier in ["CommandOrControl", "Super", "Alt", "Shift"] {
+        let present = modifiers
+            .iter()
+            .any(|part| match part.to_ascii_lowercase().as_str() {
+                "control" | "ctrl" | "primary" => modifier == "CommandOrControl",
+                "super" | "meta" | "logo" => modifier == "Super",
+                "alt" | "mod1" => modifier == "Alt",
+                "shift" => modifier == "Shift",
+                _ => false,
+            });
+        if present {
+            accelerator.push(modifier.to_string());
+        }
+    }
+    if accelerator.len() != modifiers.len() {
+        return None;
+    }
+    let lower = key.to_ascii_lowercase();
+    let code = match lower.as_str() {
+        "space" => "Space".to_string(),
+        "return" | "enter" => "Enter".to_string(),
+        "up" => "ArrowUp".to_string(),
+        "down" => "ArrowDown".to_string(),
+        "left" => "ArrowLeft".to_string(),
+        "right" => "ArrowRight".to_string(),
+        "comma" => "Comma".to_string(),
+        "period" => "Period".to_string(),
+        "slash" => "Slash".to_string(),
+        _ if lower.len() == 1 && lower.as_bytes()[0].is_ascii_lowercase() => {
+            format!("Key{}", lower.to_ascii_uppercase())
+        }
+        _ if lower.len() == 1 && lower.as_bytes()[0].is_ascii_digit() => format!("Digit{lower}"),
+        _ if lower.starts_with('f') && lower[1..].parse::<u8>().is_ok() => {
+            lower.to_ascii_uppercase()
+        }
+        _ => return None,
+    };
+    accelerator.push(code);
+    Some(accelerator.join("+"))
+}
+
 fn trigger_of(shortcuts: &[Shortcut]) -> Option<String> {
     shortcuts
         .iter()
@@ -169,6 +227,33 @@ mod tests {
             preferred_trigger("CommandOrControl+F12").as_deref(),
             Some("CTRL+F12")
         );
+    }
+
+    #[test]
+    fn a_desktop_trigger_becomes_a_hotkey() {
+        assert_eq!(
+            accelerator_from_trigger("<Shift><Control>space を押す").as_deref(),
+            Some("CommandOrControl+Shift+Space")
+        );
+        assert_eq!(
+            accelerator_from_trigger("Press <Super>m").as_deref(),
+            Some("Super+KeyM")
+        );
+        assert_eq!(
+            accelerator_from_trigger("Ctrl+Shift+Space").as_deref(),
+            Some("CommandOrControl+Shift+Space")
+        );
+        assert_eq!(
+            accelerator_from_trigger("Meta+F5").as_deref(),
+            Some("Super+F5")
+        );
+    }
+
+    #[test]
+    fn an_unknown_trigger_is_left_as_written() {
+        assert_eq!(accelerator_from_trigger("<Hyper>x"), None);
+        assert_eq!(accelerator_from_trigger("Ctrl+Backquote"), None);
+        assert_eq!(accelerator_from_trigger(""), None);
     }
 
     #[test]

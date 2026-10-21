@@ -23,6 +23,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		defaultHotkey: 'CommandOrControl+Shift+Space',
 		hotkeyByDesktop: false,
 		desktopHotkey: null,
+		desktopHotkeyKeys: null,
 		desktopHotkeyConfigurable: false,
 		autostart: true,
 		language: 'system',

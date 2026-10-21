@@ -759,7 +759,13 @@
 									<!-- portal で付けたキーは、Mawok からは変えられない。デスクトップの割り当ての画面を開く -->
 									<Field.Field orientation="horizontal" class="flex-wrap">
 										<Field.Title class="shrink-0">{m.settings_hotkey()}</Field.Title>
-										<span class="ml-auto text-sm">{view.desktopHotkey}</span>
+										{#if view.desktopHotkeyKeys}
+											<span class="ml-auto"
+												><KeyCaps key={view.desktopHotkeyKeys} platform={view.platform} /></span
+											>
+										{:else}
+											<span class="ml-auto text-sm">{view.desktopHotkey}</span>
+										{/if}
 										{#if view.desktopHotkeyConfigurable}
 											<Button
 												variant="outline"

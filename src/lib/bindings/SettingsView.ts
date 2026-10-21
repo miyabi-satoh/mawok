@@ -44,6 +44,10 @@ hotkeyByDesktop: boolean,
  */
 desktopHotkey: string | null, 
 /**
+ * `desktop_hotkey` を設定のホットキーと同じ書き方に読めたもの。読めなければ None で、画面は `desktop_hotkey` をそのまま出す
+ */
+desktopHotkeyKeys: string | null, 
+/**
  * デスクトップの、ホットキーを割り当て直す画面を開けるか
  */
 desktopHotkeyConfigurable: boolean, 

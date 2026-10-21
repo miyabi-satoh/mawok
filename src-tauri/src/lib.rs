@@ -314,6 +314,8 @@ struct SettingsView {
     hotkey_by_desktop: bool,
     /// デスクトップが portal で付けたホットキーの表示。portal で付いていなければ None で、画面は `mawok --toggle` の割り当てを案内する
     desktop_hotkey: Option<String>,
+    /// `desktop_hotkey` を設定のホットキーと同じ書き方に読めたもの。読めなければ None で、画面は `desktop_hotkey` をそのまま出す
+    desktop_hotkey_keys: Option<String>,
     /// デスクトップの、ホットキーを割り当て直す画面を開けるか
     desktop_hotkey_configurable: bool,
     /// ログイン時に起動するか
@@ -410,6 +412,16 @@ fn settings_view(state: &AppState) -> SettingsView {
         desktop_hotkey: state.portal_hotkey.trigger.lock().unwrap().clone(),
         #[cfg(not(target_os = "linux"))]
         desktop_hotkey: None,
+        #[cfg(target_os = "linux")]
+        desktop_hotkey_keys: state
+            .portal_hotkey
+            .trigger
+            .lock()
+            .unwrap()
+            .as_deref()
+            .and_then(portal_hotkey::accelerator_from_trigger),
+        #[cfg(not(target_os = "linux"))]
+        desktop_hotkey_keys: None,
         #[cfg(target_os = "linux")]
         desktop_hotkey_configurable: state.portal_hotkey.configurable.load(Ordering::Relaxed),
         #[cfg(not(target_os = "linux"))]
@@ -582,7 +594,7 @@ fn on_hotkey(app: &AppHandle) {
 
 /// Wayland のホットキーを portal に登録する。portal が無いデスクトップでは、`mawok --toggle` の案内のまま
 #[cfg(target_os = "linux")]
-fn start_portal_hotkey(app: AppHandle) {
+fn start_portal_hotkey(app: AppHandle, show_after: bool) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
         let (description, hotkey) = (
@@ -618,6 +630,13 @@ fn start_portal_hotkey(app: AppHandle) {
             Err(error) => info!("no desktop portal for the hotkey: {error}"),
         }
         emit_settings(&app);
+        if show_after {
+            info!("first launch: show the draft");
+            let shown = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                show(&shown);
+            });
+        }
     });
 }
 
@@ -4918,9 +4937,14 @@ pub fn run() {
                 menu_depth: std::sync::atomic::AtomicUsize::new(0),
             });
             build_tray(app.handle())?;
+            // 初めての起動で下書きを出すのは、portal の確かめの画面が閉じてから。先に出すと、確かめの画面にフォーカスを取られて隠れる
+            #[cfg(target_os = "linux")]
+            let show_after_portal = hotkey_by_desktop() && first_launch;
+            #[cfg(not(target_os = "linux"))]
+            let show_after_portal = false;
             #[cfg(target_os = "linux")]
             if hotkey_by_desktop() {
-                start_portal_hotkey(app.handle().clone());
+                start_portal_hotkey(app.handle().clone(), show_after_portal);
             }
             #[cfg(target_os = "macos")]
             {
@@ -4938,7 +4962,7 @@ pub fn run() {
             // 初めての起動では下書きを一度出す。常駐するだけで何も出ないと、入ったのか分からず、
             // 使い方を伝える入力欄の案内も、一度出すまで目に入らないため。
             // 画面の読み込みが終わる前に出すので、入力欄へのフォーカスは page_ready で移す
-            if first_launch {
+            if first_launch && !show_after_portal {
                 info!("first launch: show the draft");
                 show(app.handle());
             }

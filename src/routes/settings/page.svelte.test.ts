@@ -1156,6 +1156,19 @@ describe('設定画面のホットキー', () => {
 			.not.toBeInTheDocument();
 	});
 
+	it('デスクトップが付けたキーを読めたら、ほかのキーと同じくキーごとに出す', async () => {
+		settings.current = settingsView({
+			platform: 'linux',
+			hotkeyByDesktop: true,
+			desktopHotkey: '<Shift><Control>space を押す',
+			desktopHotkeyKeys: 'CommandOrControl+Shift+Space'
+		});
+		const screen = await renderAt(m.settings_category_keys);
+
+		await expect.element(screen.getByText('Space', { exact: true })).toBeVisible();
+		await expect.element(screen.getByText('<Shift><Control>space を押す')).not.toBeInTheDocument();
+	});
+
 	it('デスクトップが portal で付けたキーは、そのまま出し、変更でデスクトップの割り当ての画面を開く', async () => {
 		settings.current = settingsView({
 			hotkeyByDesktop: true,

@@ -83,8 +83,10 @@
 		settings.current
 			? draftGuidance(
 					settings.current.inputGuidance,
-					// デスクトップのキー設定で割り当てるときは、どのキーかを Mawok は知らないので書かない
-					settings.current.hotkeyByDesktop ? '' : settings.current.hotkey,
+					// デスクトップで割り当てるときは、portal で付いて読めたキーだけを書く。キー設定から呼ぶ形では、どのキーかを Mawok は知らない
+					settings.current.hotkeyByDesktop
+						? (settings.current.desktopHotkeyKeys ?? '')
+						: settings.current.hotkey,
 					settings.current.textWindowKeys,
 					settings.current.platform
 				)
