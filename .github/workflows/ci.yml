@@ -1,6 +1,6 @@
 name: CI
 
-# PR ごとに `just ci` (Windows では、OS によらない検査を除いた `just ci-app`) を流し、通ることを main へのマージの条件にする (ブランチの保護の必須のチェック)。
+# PR ごとに `just ci` (Windows と Linux では、OS によらない検査を除いた `just ci-app`) を流し、通ることを main へのマージの条件にする (ブランチの保護の必須のチェック)。
 # スカッシュマージ後の main への push では流さない。pull_request は main の先端とのマージ結果に対して走り、
 # マージの前に main へ追いつくことも保護で求めるので、同じ内容をもう一度確かめても情報が増えない。
 on:
@@ -20,11 +20,12 @@ concurrency:
 
 jobs:
   ci:
-    # OS ごとに作りを分けたコード (#[cfg(windows)]・#[cfg(target_os = "macos")]) は、その OS の clippy でしか見られない
+    # OS ごとに作りを分けたコード (#[cfg(windows)]・#[cfg(target_os = "macos")]・#[cfg(target_os = "linux")]) は、その OS の clippy でしか見られない。
+    # Linux は配る .deb を作るのと同じ、支える中でいちばん古い Ubuntu で見る
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -48,6 +49,13 @@ jobs:
         id: scope
         shell: bash
         run: echo "run=${{ github.event_name != 'pull_request' || steps.changes.outputs.code == 'true' || steps.changes.outputs.read_md == 'true' }}" >> "$GITHUB_OUTPUT"
+
+      # WebKitGTK とトレイの部品の開発用の包み (Tauri の前提環境)
+      - name: Install Linux build dependencies
+        if: steps.scope.outputs.run == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.scope.outputs.run == 'true'
@@ -97,7 +105,7 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: pnpm exec playwright install chromium
 
-      # 窓口と紹介のサイトは OS によらない中身 (Cloudflare の Worker と Astro) なので、片方の OS でだけ見る
+      # 窓口と紹介のサイトは OS によらない中身 (Cloudflare の Worker と Astro) なので、macOS でだけ見る
       - name: Run CI checks
         if: steps.scope.outputs.run == 'true'
-        run: just ${{ runner.os == 'Windows' && 'ci-app' || 'ci' }}
+        run: just ${{ runner.os == 'macOS' && 'ci' || 'ci-app' }}
