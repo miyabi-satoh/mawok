@@ -6,6 +6,8 @@ pub const TOGGLE_ARG: &str = "--toggle";
 /// 呼んだデスクトップから受け取った、窓を前に出すための印を渡す引数。
 /// Wayland では、印の無い窓は前に出られず、フォーカスも入らない（GNOME は「準備ができました」の知らせを出すだけ）
 const ACTIVATION_TOKEN_ARG: &str = "--activation-token=";
+/// 動いている Mawok は、受け取ったらすぐ返す（出す処理はメインスレッドへ回す）ので、返事が無ければ固まっている
+const METHOD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 引数に `--toggle` があるか
 pub fn requested(args: &[String]) -> bool {
@@ -41,19 +43,38 @@ pub fn forward_to_running(identifier: &str) -> bool {
         args.push(format!("{ACTIVATION_TOKEN_ARG}{token}"));
     }
     let (name, path) = single_instance_address(identifier);
-    let Ok(connection) = zbus::blocking::Connection::session() else {
+    // 動いている Mawok が固まっていても、キーを押すたびに呼ばれたプロセスが長く残らないよう、すぐに諦める
+    let Ok(connection) = zbus::blocking::connection::Builder::session()
+        .map(|builder| builder.method_timeout(METHOD_TIMEOUT))
+        .and_then(|builder| builder.build())
+    else {
         return false;
     };
     let cwd = std::env::current_dir().unwrap_or_default();
-    connection
-        .call_method(
-            Some(name.as_str()),
-            path.as_str(),
-            Some("org.SingleInstance.DBus"),
-            "ExecuteCallback",
-            &(args, cwd.to_string_lossy().as_ref()),
-        )
-        .is_ok()
+    match connection.call_method(
+        Some(name.as_str()),
+        path.as_str(),
+        Some("org.SingleInstance.DBus"),
+        "ExecuteCallback",
+        &(args, cwd.to_string_lossy().as_ref()),
+    ) {
+        Ok(_) => true,
+        // 名前を持つプロセスが無い。動いていないので、起動して出す
+        Err(zbus::Error::MethodError(error, _, _))
+            if matches!(
+                error.as_str(),
+                "org.freedesktop.DBus.Error.ServiceUnknown"
+                    | "org.freedesktop.DBus.Error.NameHasNoOwner"
+            ) =>
+        {
+            false
+        }
+        // 動いているのに返事が無い・失敗した。ここで起動を続けると、単一起動のプラグインがもう一度知らせて、2回切り替わる
+        Err(error) => {
+            eprintln!("couldn't reach the running Mawok: {error}");
+            true
+        }
+    }
 }
 
 #[cfg(test)]

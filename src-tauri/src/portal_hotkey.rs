@@ -2,7 +2,7 @@
 //! どのキーにするかはデスクトップが決め、利用者が確かめる。portal が無い・キーが付かないデスクトップ（Hyprland など）は、
 //! デスクトップのキー設定から `mawok --toggle` を呼んでもらう（toggle.rs）
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use ashpd::desktop::{
     global_shortcuts::{GlobalShortcuts, NewShortcut, Shortcut},
@@ -13,6 +13,8 @@ use futures_util::StreamExt;
 /// portal に渡すショートカットの id。デスクトップの設定画面では description のほうが出る
 const SHORTCUT_ID: &str = "toggle";
 
+type Registered = (GlobalShortcuts, Session<GlobalShortcuts>);
+
 /// portal で割り当てたホットキーの今の状態
 #[derive(Default)]
 pub struct PortalHotkey {
@@ -20,7 +22,8 @@ pub struct PortalHotkey {
     pub trigger: Mutex<Option<String>>,
     /// デスクトップの割り当ての画面を開けるか（portal の version 2 以降）
     pub configurable: std::sync::atomic::AtomicBool,
-    session: tokio::sync::Mutex<Option<(GlobalShortcuts, Session<GlobalShortcuts>)>>,
+    /// 登録できた portal とセッション。割り当ての画面は開いている間ずっと返らないので、ロックの外で使えるよう Arc で持つ
+    session: Mutex<Option<Arc<Registered>>>,
 }
 
 /// 設定のホットキー（`CommandOrControl+Shift+Space`）を、portal に希望として渡す書き方（XDG の shortcuts の書き方、
@@ -143,17 +146,25 @@ pub async fn start(
     let app_id: ashpd::AppID = app_id.parse()?;
     ashpd::register_host_app(app_id).await?;
     let portal = GlobalShortcuts::new().await?;
-    state
-        .configurable
-        .store(portal.version() >= 2, std::sync::atomic::Ordering::Relaxed);
     let session = portal.create_session(Default::default()).await?;
     let shortcut = NewShortcut::new(SHORTCUT_ID, description)
         .preferred_trigger(preferred_trigger(hotkey).as_deref());
-    let bound = portal
+    let bound = match portal
         .bind_shortcuts(&session, &[shortcut], None, Default::default())
-        .await?
-        .response()?;
+        .await
+        .and_then(|request| request.response())
+    {
+        Ok(bound) => bound,
+        Err(error) => {
+            // 利用者が確かめの画面で断ったときなど。セッションを残すと、デスクトップの側に登録の申し込みが残る
+            let _ = session.close().await;
+            return Err(error);
+        }
+    };
     *state.trigger.lock().unwrap() = trigger_of(bound.shortcuts());
+    state
+        .configurable
+        .store(portal.version() >= 2, std::sync::atomic::Ordering::Relaxed);
 
     let mut activated = portal.receive_activated().await?;
     tokio::spawn(async move {
@@ -176,16 +187,20 @@ pub async fn start(
             on_changed();
         }
     });
-    *state.session.lock().await = Some((portal, session));
+    *state.session.lock().unwrap() = Some(Arc::new((portal, session)));
     Ok(())
+}
+
+fn registered(state: &PortalHotkey) -> Option<Arc<Registered>> {
+    state.session.lock().unwrap().clone()
 }
 
 /// デスクトップが付けているキーを読み直す
 pub async fn refresh(state: &PortalHotkey) -> Result<(), ashpd::Error> {
-    let session = state.session.lock().await;
-    let Some((portal, session)) = session.as_ref() else {
+    let Some(registered) = registered(state) else {
         return Ok(());
     };
+    let (portal, session) = registered.as_ref();
     let listed = portal
         .list_shortcuts(session, Default::default())
         .await?
@@ -196,10 +211,10 @@ pub async fn refresh(state: &PortalHotkey) -> Result<(), ashpd::Error> {
 
 /// デスクトップの、ホットキーを割り当て直す画面を開く
 pub async fn configure(state: &PortalHotkey) -> Result<(), ashpd::Error> {
-    let session = state.session.lock().await;
-    let Some((portal, session)) = session.as_ref() else {
+    let Some(registered) = registered(state) else {
         return Ok(());
     };
+    let (portal, session) = registered.as_ref();
     portal
         .configure_shortcuts(session, None, Default::default())
         .await

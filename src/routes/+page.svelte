@@ -1216,7 +1216,8 @@
 			コピー時に置き換え辞書で書き換わる範囲を、裏に重ねた透明な div でハイライトする。
 			文字色を透明にし、一致箇所だけ背景色を付ける。padding・border・フォント・折り返しを textarea と揃え、
 			スクロール位置も同期させることで、実際の文字の裏にちょうど重なる。ここ自体は入力を受けない（pointer-events-none）。
-			入力欄の案内もここに出す。placeholder は、WebKitGTK が入力欄より広い幅で折り返し、右端が見切れるため
+			入力欄の案内もここに出す。placeholder は、WebKitGTK が入力欄より広い幅で折り返し、右端が見切れるため。
+			placeholder の属性は読み上げのために残し、文字だけを透明にする
 		-->
 		<div
 			class="pointer-events-none absolute inset-y-0 left-0 z-0 overflow-hidden rounded-lg border border-transparent px-2.5 py-2 text-base md:text-sm [&_*]:[word-break:inherit]"
@@ -1243,7 +1244,7 @@
 			style="font-family: {fontFamily}; font-size: {fontSize}px; line-height: 1.5"
 			spellcheck="false"
 			readonly={busy}
-			aria-placeholder={guidance || undefined}
+			placeholder={guidance || undefined}
 			aria-label={m.draft_label()}
 			role={addressMatches.length > 0 || pathListShown ? 'combobox' : undefined}
 			aria-autocomplete="list"
@@ -1456,6 +1457,13 @@
 	}
 	:global(.dark) main :global(textarea) {
 		color: var(--draft-text-dark, var(--foreground));
+	}
+	/* 透明にした placeholder も、WebKitGTK では入力欄の幅をはみ出して横のスクロールバーを出す。入力した文字は折り返すので、横にはスクロールさせない */
+	main :global(textarea) {
+		overflow-x: hidden;
+	}
+	main :global(textarea::placeholder) {
+		color: transparent;
 	}
 	/* 案内は、入力した文字と見間違えないよう、緑みの薄い色の斜体にする */
 	.draft-guidance {

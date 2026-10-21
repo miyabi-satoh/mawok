@@ -776,6 +776,11 @@
 											</Button>
 										{/if}
 									</Field.Field>
+									{#if !view.desktopHotkeyConfigurable}
+										<Field.Description class="leading-snug">
+											{m.settings_hotkey_change_in_desktop()}
+										</Field.Description>
+									{/if}
 								{:else}
 									<Field.Field>
 										<Field.Title>{m.settings_hotkey()}</Field.Title>

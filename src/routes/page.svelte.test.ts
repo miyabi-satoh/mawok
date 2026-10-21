@@ -282,7 +282,7 @@ describe('下書きウィンドウ', () => {
 	});
 
 	function placeholderOf(screen: Screen) {
-		return draftField(screen).element().getAttribute('aria-placeholder');
+		return draftField(screen).element().getAttribute('placeholder');
 	}
 
 	it('案内の設定がなければ、既定の案内を今のホットキーで出す', async () => {

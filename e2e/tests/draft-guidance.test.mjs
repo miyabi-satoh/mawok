@@ -62,10 +62,10 @@ test.describe('下書きの入力欄の案内', () => {
 
 	/** 入力欄に置かれている案内 (置かれていなければ null)。見えているかどうかとは別 */
 	const readGuidance = () =>
-		client.$('textarea').then((textarea) => textarea.getAttribute('aria-placeholder'));
+		client.$('textarea').then((textarea) => textarea.getAttribute('placeholder'));
 
 	/**
-	 * 案内が実際に見えているか。aria-placeholder は入力欄の中身に左右されないので、
+	 * 案内が実際に見えているか。placeholder 属性は入力欄の中身に左右されないので、
 	 * 見えているかどうかは、入力欄の裏に描く案内 (.draft-guidance) があるかで見る
 	 */
 	const isGuidanceShown = () =>

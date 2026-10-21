@@ -45,6 +45,7 @@
 	"settings_hotkey_unavailable": "Couldn't register {keys}. Another app may be using it. The hotkey is still {current}.",
 	"settings_hotkey_by_desktop": "On this desktop, Mawok can't register a hotkey. Assign a key to the following command in your desktop's keyboard settings.",
 	"settings_hotkey_configure_desktop": "Change...",
+	"settings_hotkey_change_in_desktop": "You can change it in your desktop's settings.",
 	"settings_trim_trailing": "Trim trailing whitespace",
 	"settings_exclude_history": "Keep out of clipboard history",
 	"settings_exclude_history_description": "Text copied from Mawok can't be pasted again from clipboard history.",
