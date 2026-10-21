@@ -4,6 +4,8 @@
 //! - Windows（MSIX 版）: マニフェストの `StartupTask`（`src-tauri/msix/AppxManifest.xml`）。MSIX の中から HKCU に書いても、
 //!   パッケージごとの場所に回されて効かないため。
 //! - Windows（EXE 版）: tauri-plugin-autostart（HKCU の Run と `Explorer\StartupApproved\Run`）
+//! - Linux: XDG の自動起動（`~/.config/autostart/Mawok.desktop`）。tauri-plugin-autostart はファイルがあるかしか見ず、
+//!   デスクトップの設定で切ったとき（`Hidden=true` など）も有効と読むので、自前で読み書きする。
 
 pub use imp::*;
 
@@ -83,7 +85,7 @@ mod imp {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 mod imp {
     use tauri::AppHandle;
     use tauri_plugin_autostart::ManagerExt as _;
@@ -93,7 +95,6 @@ mod imp {
 
     /// OS のログイン項目に登録されていて、有効か。タスクマネージャーや Windows の設定で切られていれば有効ではない
     pub fn is_enabled(app: &AppHandle) -> Result<bool, String> {
-        #[cfg(windows)]
         if packaged() {
             return startup_task::is_enabled();
         }
@@ -104,7 +105,6 @@ mod imp {
 
     /// OS のログイン項目に登録する・外す
     pub fn set(app: &AppHandle, enabled: bool) -> Result<(), SetError> {
-        #[cfg(windows)]
         if packaged() {
             return startup_task::set(app, enabled);
         }
@@ -124,7 +124,6 @@ mod imp {
         packaged()
     }
 
-    #[cfg(windows)]
     mod startup_task {
         use tauri::AppHandle;
         use tauri_plugin_opener::OpenerExt as _;
@@ -180,5 +179,179 @@ mod imp {
             }
             Err(SetError::SetByPolicy)
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::path::{Path, PathBuf};
+
+    use tauri::{AppHandle, Manager as _};
+
+    use super::{desktop_entry, enabled_in, exec_in, exec_value, SetError};
+
+    /// 自動起動の .desktop が有り、デスクトップの設定で切られていないか
+    pub fn is_enabled(app: &AppHandle) -> Result<bool, String> {
+        Ok(read(&file(app)?)?.is_some_and(|content| enabled_in(&content)))
+    }
+
+    /// 自動起動の .desktop を書く・消す。切られた（`Hidden=true` などの）ファイルも、書き直して有効に戻す
+    pub fn set(app: &AppHandle, enabled: bool) -> Result<(), SetError> {
+        let file = file(app).map_err(SetError::Os)?;
+        let result = if enabled {
+            let content = desktop_entry(&app.package_info().name, &exec().map_err(SetError::Os)?);
+            file.parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&file, content))
+        } else {
+            match std::fs::remove_file(&file) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                result => result,
+            }
+        };
+        result.map_err(|error| SetError::Os(error.to_string()))
+    }
+
+    /// 登録先が今の実行ファイルか。.desktop の Exec を比べる。読めなければ書き直すほうに倒す
+    pub fn registration_is_current(app: &AppHandle) -> bool {
+        let (Ok(file), Ok(exec)) = (file(app), exec()) else {
+            return false;
+        };
+        matches!(read(&file), Ok(Some(content)) if exec_in(&content) == Some(exec.as_str()))
+    }
+
+    /// `$XDG_CONFIG_HOME/autostart/<アプリ名>.desktop`。名前は tauri-plugin-autostart と同じにする
+    fn file(app: &AppHandle) -> Result<PathBuf, String> {
+        app.path()
+            .config_dir()
+            .map(|dir| {
+                dir.join("autostart")
+                    .join(format!("{}.desktop", app.package_info().name))
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    fn read(file: &Path) -> Result<Option<String>, String> {
+        match std::fs::read_to_string(file) {
+            Ok(content) => Ok(Some(content)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn exec() -> Result<String, String> {
+        let path = std::env::current_exe().map_err(|error| error.to_string())?;
+        let path = path.to_str().ok_or("the executable path is not UTF-8")?;
+        // 動いている間に apt で入れ替えると、元のファイルは消えて /proc/self/exe の先に印が付く。入れ替えた後も同じ場所にあるので、印を外す
+        let path = path.strip_suffix(" (deleted)").unwrap_or(path);
+        Ok(exec_value(path))
+    }
+}
+
+/// XDG の自動起動の .desktop の中身。名前はデスクトップの自動起動の一覧に出る
+#[cfg(any(target_os = "linux", test))]
+fn desktop_entry(name: &str, exec: &str) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+    )
+}
+
+/// .desktop の `[Desktop Entry]` の項目の値
+#[cfg(any(target_os = "linux", test))]
+fn desktop_entry_value<'a>(content: &'a str, key: &str) -> Option<&'a str> {
+    let mut in_entry = false;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_entry = line == "[Desktop Entry]";
+            continue;
+        }
+        if !in_entry {
+            continue;
+        }
+        if let Some((name, value)) = line.split_once('=') {
+            if name.trim_end() == key {
+                return Some(value.trim_start());
+            }
+        }
+    }
+    None
+}
+
+/// 自動起動が有効か。デスクトップの設定で切ると、ファイルを消さずに `Hidden=true`（XDG の決まり）や
+/// `X-GNOME-Autostart-enabled=false`（GNOME）を書くものがあり、それを切ってあると読む（docs/platform.md「常駐」）
+#[cfg(any(target_os = "linux", test))]
+fn enabled_in(content: &str) -> bool {
+    desktop_entry_value(content, "Hidden") != Some("true")
+        && desktop_entry_value(content, "X-GNOME-Autostart-enabled") != Some("false")
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn exec_in(content: &str) -> Option<&str> {
+    desktop_entry_value(content, "Exec")
+}
+
+/// 実行ファイルのパスを Exec の値にする。空白や記号を含むパスは、Desktop Entry の決まりに従って引用符で囲み、
+/// 引用符の中で特別な文字を `\` で逃がす。`\` は値の文字列としてもう一度逃がす。`%` はフィールドコードと読まれないよう `%%` にする
+#[cfg(any(target_os = "linux", test))]
+fn exec_value(path: &str) -> String {
+    let path = path.replace('%', "%%");
+    let plain = path
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-+%".contains(c));
+    if plain {
+        return path;
+    }
+    let mut quoted = String::from("\"");
+    for c in path.chars() {
+        match c {
+            '"' | '`' | '$' => {
+                quoted.push_str("\\\\");
+                quoted.push(c);
+            }
+            '\\' => quoted.push_str("\\\\\\\\"),
+            _ => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn written_entry_is_enabled_and_points_to_the_executable() {
+        let content = desktop_entry("Mawok", "/usr/bin/mawok");
+        assert!(enabled_in(&content));
+        assert_eq!(exec_in(&content), Some("/usr/bin/mawok"));
+    }
+
+    #[test]
+    fn turned_off_in_the_desktop_settings() {
+        let base = desktop_entry("Mawok", "/usr/bin/mawok");
+        assert!(!enabled_in(&format!("{base}Hidden=true\n")));
+        assert!(!enabled_in(&base.replace(
+            "X-GNOME-Autostart-enabled=true",
+            "X-GNOME-Autostart-enabled=false"
+        )));
+        assert!(enabled_in(&format!("{base}Hidden=false\n")));
+    }
+
+    #[test]
+    fn reads_only_the_desktop_entry_group() {
+        let content = "[Desktop Entry]\nExec = /usr/bin/mawok\n[Desktop Action new]\nHidden=true\nExec=/usr/bin/other\n";
+        assert!(enabled_in(content));
+        assert_eq!(exec_in(content), Some("/usr/bin/mawok"));
+        assert_eq!(exec_in("Exec=/usr/bin/mawok\n"), None);
+    }
+
+    #[test]
+    fn quotes_paths_with_reserved_characters() {
+        assert_eq!(exec_value("/usr/bin/mawok"), "/usr/bin/mawok");
+        assert_eq!(exec_value("/opt/My Apps/mawok"), "\"/opt/My Apps/mawok\"");
+        assert_eq!(exec_value("/opt/a$b/mawok"), "\"/opt/a\\\\$b/mawok\"");
+        assert_eq!(exec_value("/opt/100%/mawok"), "/opt/100%%/mawok");
     }
 }

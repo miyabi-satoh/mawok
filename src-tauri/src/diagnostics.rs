@@ -1,6 +1,6 @@
 //! 不具合の原因を後から追えるように、アプリの動きをログファイルへ残す。
 //! 出力先は OS のログフォルダ（macOS: ~/Library/Logs/com.amiiby.mawok、
-//! Windows: %LOCALAPPDATA%\com.amiiby.mawok\logs）。時刻は UTC。
+//! Windows: %LOCALAPPDATA%\com.amiiby.mawok\logs、Linux: ~/.local/share/com.amiiby.mawok/logs）。時刻は UTC。
 //! WebView のプロセスが落ちたときは、記録に加えて、立て直せるものは立て直す。
 
 use log::LevelFilter;
@@ -29,7 +29,27 @@ pub fn watch_webview_process<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     }
 }
 
-#[cfg(not(windows))]
+/// WebKitGTK の描画プロセスが終了したら記録し、再読み込みする。落ちると画面が空になり、自動では戻らないため（macOS と同じ扱い）
+#[cfg(target_os = "linux")]
+pub fn watch_webview_process<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    use webkit2gtk::WebViewExt as _;
+
+    let label = window.label().to_owned();
+    let registered = window.with_webview(move |webview| {
+        webview
+            .inner()
+            .connect_web_process_terminated(move |webview, reason| {
+                log::error!("web process terminated in window {label}: {reason:?}");
+                webview.reload();
+                log::info!("reloaded the webview in window {label}");
+            });
+    });
+    if let Err(error) = registered {
+        log::error!("couldn't watch the WebKitGTK web process: {error}");
+    }
+}
+
+#[cfg(target_os = "macos")]
 pub fn watch_webview_process<R: Runtime>(_window: &tauri::WebviewWindow<R>) {}
 
 /// 描画プロセスが落ちると画面が空になり、自動では戻らないので、再読み込みする

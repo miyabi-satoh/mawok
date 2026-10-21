@@ -6,11 +6,6 @@ pub fn packaged() -> bool {
     app_user_model_id().is_some()
 }
 
-#[cfg(not(windows))]
-pub fn packaged() -> bool {
-    false
-}
-
 /// パッケージの中で動いているときの、このアプリの AUMID（`<パッケージ ファミリー名>!Mawok`）。EXE 版では None。
 /// MSIX 版の通知は、差出人をこれにしないと出ない
 #[cfg(windows)]

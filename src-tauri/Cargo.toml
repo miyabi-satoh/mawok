@@ -126,6 +126,13 @@ tauri-winrt-notification = "0.7.3"
 # AI サービスのキーを、資格情報マネージャーに置く（secrets.rs）。検索は使わないので、正規表現の依存を持ち込まない
 windows-native-keyring-store = { version = "1.1.0", default-features = false }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# AI サービスのキーを、Secret Service（GNOME Keyring・KWallet など）に置く（secrets.rs）。zbus は Tauri の依存でもともと入っているので、
+# libdbus の C ライブラリを足さない zbus 版にする。spawn_blocking の中から呼ぶので同期の API で足り、暗号は C ライブラリの要らない Rust の実装にする
+zbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rust"] }
+# WebView の描画プロセスが落ちたのを知る（diagnostics.rs）。Tauri（wry）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
+webkit2gtk = { version = "2.0.2", features = ["v2_20"] }
+
 [dev-dependencies]
 # 画面 (TS) に渡す型を Rust から書き出す。cargo test で src/lib/bindings/ に出力する
 ts-rs = "12"

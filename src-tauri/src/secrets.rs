@@ -1,7 +1,9 @@
 //! AI のアクションで使う AI サービスのキーを、OS の資格情報管理に置く。
-//! macOS はログインのキーチェーン、Windows は資格情報マネージャー。設定の置き場とバックアップは人に見せることがあるので、キーは書かない。
+//! macOS はログインのキーチェーン、Windows は資格情報マネージャー、Linux は Secret Service（GNOME Keyring・KWallet など）。
+//! 設定の置き場とバックアップは人に見せることがあるので、キーは書かない。
 //!
 //! キーチェーンは、読むときに OS が許可を求めることがあり（ad-hoc 署名の版を入れ直した後など）、答えるまで呼んだスレッドが止まる。
+//! Secret Service も、キーリングが閉じていれば開くためのパスワードを求め、答えるまで止まる。
 //! ここの関数はどれも、メインスレッドから呼ばずに spawn_blocking などで呼ぶ
 
 use std::sync::Arc;
@@ -37,12 +39,11 @@ fn store() -> keyring_core::Result<Arc<CredentialStore>> {
     Ok(store)
 }
 
-/// 対応していない OS（開発で Linux の型チェックをするときなど）
-#[cfg(not(any(target_os = "macos", windows)))]
+/// Secret Service を持つもの（gnome-keyring-daemon など）が動いていなければ、つなぐところで失敗し、読めない（Unreadable）として扱われる
+#[cfg(target_os = "linux")]
 fn store() -> keyring_core::Result<Arc<CredentialStore>> {
-    Err(Error::NotSupportedByStore(
-        "no credential store on this OS".to_string(),
-    ))
+    let store: Arc<CredentialStore> = zbus_secret_service_keyring_store::Store::new()?;
+    Ok(store)
 }
 
 fn entry(user: &str) -> keyring_core::Result<Entry> {
@@ -85,7 +86,8 @@ pub fn exists(user: &str) -> Result<bool, String> {
         .map_err(|error| error.to_string())
 }
 
-/// キーが置いてあるか。Windows の資格情報マネージャーは読むときに許可を求めないので、属性を読んで確かめる
+/// キーが置いてあるか。Windows の資格情報マネージャーは読むときに許可を求めないので、属性を読んで確かめる。
+/// Secret Service も属性だけを読む（キーリングが閉じていれば、開くためのパスワードは求められる）
 #[cfg(not(target_os = "macos"))]
 pub fn exists(user: &str) -> Result<bool, String> {
     match entry(user).and_then(|entry| entry.get_attributes()) {

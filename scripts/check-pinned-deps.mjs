@@ -1,5 +1,5 @@
 // Tauri の側と型をやり取りするため、同じ版に揃えている依存が、揃っているかを見る (`just ci` から呼ぶ)。
-// 版がずれても cfg(windows) のコードは Mac でコンパイルされないので、Mac の検査だけでは気づけない。
+// 版がずれても cfg(windows)・cfg(target_os = "linux") のコードはほかの OS でコンパイルされないので、1つの OS の検査だけでは気づけない。
 // 揃え方は src-tauri/Cargo.toml のコメント、Dependabot が個別に上げないことは .github/dependabot.yml。
 
 import { execFileSync } from 'node:child_process';
@@ -8,7 +8,8 @@ import { execFileSync } from 'node:child_process';
 const PINNED = [
 	{ name: 'webview2-com', partner: 'wry' },
 	{ name: 'windows-core', partner: 'wry' },
-	{ name: 'tauri-winrt-notification', partner: 'notify-rust' }
+	{ name: 'tauri-winrt-notification', partner: 'notify-rust' },
+	{ name: 'webkit2gtk', partner: 'wry' }
 ];
 
 const metadata = JSON.parse(
@@ -22,7 +23,7 @@ const packages = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
 const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
 const rootId = metadata.resolve.root;
 
-/** `from` の名前の crate が依存する `name` の版 (Windows 向けの依存も含む)。 */
+/** `from` の名前の crate が依存する `name` の版 (ほかの OS 向けの依存も含む)。 */
 function versionsUsedBy(from, name) {
 	const versions = new Set();
 	for (const node of nodes.values()) {

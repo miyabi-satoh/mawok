@@ -365,11 +365,27 @@ pub fn device_name() -> String {
         .ok()
         .filter(|output| output.status.success())
         .and_then(|output| String::from_utf8(output.stdout).ok());
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
     let name = std::env::var("COMPUTERNAME").ok();
+    #[cfg(target_os = "linux")]
+    let name = host_name();
     name.map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| crate::APP_NAME.to_string())
+}
+
+/// ホスト名。/etc/hostname は置かない環境もあるので、カーネルが持つ名前を読む
+#[cfg(target_os = "linux")]
+fn host_name() -> Option<String> {
+    // ホスト名の上限（HOST_NAME_MAX）は 64 バイト。終わりの NUL の分を足す
+    let mut buffer = [0u8; 65];
+    // SAFETY: 渡した長さのバッファーにだけ書く
+    let result = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
+    if result != 0 {
+        return None;
+    }
+    let end = buffer.iter().position(|&byte| byte == 0)?;
+    String::from_utf8(buffer[..end].to_vec()).ok()
 }
 
 /// トークンを外す（Mawok でのサインアウト）。外せなくても、手元のトークンは消す（窓口の画面からも外せる）
