@@ -1145,6 +1145,17 @@ describe('設定画面のホットキー', () => {
 		return screen;
 	}
 
+	it('デスクトップのキー設定で割り当てるときは、記録の代わりに割り当てるコマンドを出す', async () => {
+		settings.current = settingsView({ hotkeyByDesktop: true });
+		const screen = await renderAt(m.settings_category_keys);
+
+		await expect.element(screen.getByText(m.settings_hotkey_by_desktop())).toBeVisible();
+		await expect.element(screen.getByText('mawok --toggle')).toBeVisible();
+		await expect
+			.element(screen.getByRole('button', { name: hotkeyButtonName }))
+			.not.toBeInTheDocument();
+	});
+
 	it('変更を押すと記録を始め、押したキーで下書きが出ないよう今のホットキーを止める', async () => {
 		await startRecording();
 

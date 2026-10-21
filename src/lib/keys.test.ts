@@ -303,6 +303,10 @@ describe('platformFromUrl', () => {
 	it('windows・無い・知らない値は Windows', () => {
 		expect(platformFromUrl(new URL('http://localhost/manual?platform=windows'))).toBe('windows');
 		expect(platformFromUrl(new URL('http://localhost/manual'))).toBe('windows');
-		expect(platformFromUrl(new URL('http://localhost/manual?platform=linux'))).toBe('windows');
+		expect(platformFromUrl(new URL('http://localhost/manual?platform=freebsd'))).toBe('windows');
+	});
+
+	it('linux は Linux', () => {
+		expect(platformFromUrl(new URL('http://localhost/manual?platform=linux'))).toBe('linux');
 	});
 });
