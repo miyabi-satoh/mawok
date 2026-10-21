@@ -36,9 +36,17 @@ defaultDraftKeys: DraftKeys,
  */
 defaultHotkey: string, 
 /**
- * ホットキーをアプリでなくデスクトップのキー設定で割り当てるか（Linux の Wayland。toggle.rs）
+ * ホットキーをアプリでなくデスクトップで割り当てるか（Linux の Wayland。toggle.rs・portal_hotkey.rs）
  */
 hotkeyByDesktop: boolean, 
+/**
+ * デスクトップが portal で付けたホットキーの表示。portal で付いていなければ None で、画面は `mawok --toggle` の割り当てを案内する
+ */
+desktopHotkey: string | null, 
+/**
+ * デスクトップの、ホットキーを割り当て直す画面を開けるか
+ */
+desktopHotkeyConfigurable: boolean, 
 /**
  * ログイン時に起動するか
  */

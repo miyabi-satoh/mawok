@@ -755,15 +755,32 @@
 						<!-- 説明文は、題名と操作の行の下に全幅で置く -->
 						{#if view.hotkeyByDesktop}
 							<SettingsRow>
-								<Field.Field>
-									<Field.Title>{m.settings_hotkey()}</Field.Title>
-									<Field.Description class="leading-snug">
-										{m.settings_hotkey_by_desktop()}
-									</Field.Description>
-									<code class="w-fit rounded bg-muted px-1.5 py-0.5 font-mono text-sm select-all"
-										>mawok --toggle</code
-									>
-								</Field.Field>
+								{#if view.desktopHotkey}
+									<!-- portal で付けたキーは、Mawok からは変えられない。デスクトップの割り当ての画面を開く -->
+									<Field.Field orientation="horizontal" class="flex-wrap">
+										<Field.Title class="shrink-0">{m.settings_hotkey()}</Field.Title>
+										<span class="ml-auto text-sm">{view.desktopHotkey}</span>
+										{#if view.desktopHotkeyConfigurable}
+											<Button
+												variant="outline"
+												size="sm"
+												onclick={() => invoke('configure_desktop_hotkey')}
+											>
+												{m.settings_hotkey_configure_desktop()}
+											</Button>
+										{/if}
+									</Field.Field>
+								{:else}
+									<Field.Field>
+										<Field.Title>{m.settings_hotkey()}</Field.Title>
+										<Field.Description class="leading-snug">
+											{m.settings_hotkey_by_desktop()}
+										</Field.Description>
+										<code class="w-fit rounded bg-muted px-1.5 py-0.5 font-mono text-sm select-all"
+											>mawok --toggle</code
+										>
+									</Field.Field>
+								{/if}
 							</SettingsRow>
 						{:else}
 							<SettingsRow modified={modifiedName(view, 'hotkey')}>

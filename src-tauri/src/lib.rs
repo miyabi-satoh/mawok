@@ -25,6 +25,8 @@ mod menu_tracking;
 #[cfg(windows)]
 mod package;
 mod placement;
+#[cfg(target_os = "linux")]
+mod portal_hotkey;
 mod pro;
 mod profile;
 mod secrets;
@@ -212,6 +214,8 @@ struct AppState {
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
+    #[cfg(target_os = "linux")]
+    portal_hotkey: portal_hotkey::PortalHotkey,
     /// 開いているメニューの深さ（macOS）。サブメニューなどで開く・閉じるの通知が入れ子になっても、
     /// いちばん外のメニューを開いたときに外し、閉じたときに戻す
     #[cfg(target_os = "macos")]
@@ -306,8 +310,12 @@ struct SettingsView {
     default_draft_keys: DraftKeys,
     /// ホットキーの「既定に戻す」で戻すキー
     default_hotkey: &'static str,
-    /// ホットキーをアプリでなくデスクトップのキー設定で割り当てるか（Linux の Wayland。toggle.rs）
+    /// ホットキーをアプリでなくデスクトップで割り当てるか（Linux の Wayland。toggle.rs・portal_hotkey.rs）
     hotkey_by_desktop: bool,
+    /// デスクトップが portal で付けたホットキーの表示。portal で付いていなければ None で、画面は `mawok --toggle` の割り当てを案内する
+    desktop_hotkey: Option<String>,
+    /// デスクトップの、ホットキーを割り当て直す画面を開けるか
+    desktop_hotkey_configurable: bool,
     /// ログイン時に起動するか
     autostart: bool,
     language: Language,
@@ -398,6 +406,14 @@ fn settings_view(state: &AppState) -> SettingsView {
         default_draft_keys: DraftKeys::default(),
         default_hotkey: config::DEFAULT_HOTKEY,
         hotkey_by_desktop: hotkey_by_desktop(),
+        #[cfg(target_os = "linux")]
+        desktop_hotkey: state.portal_hotkey.trigger.lock().unwrap().clone(),
+        #[cfg(not(target_os = "linux"))]
+        desktop_hotkey: None,
+        #[cfg(target_os = "linux")]
+        desktop_hotkey_configurable: state.portal_hotkey.configurable.load(Ordering::Relaxed),
+        #[cfg(not(target_os = "linux"))]
+        desktop_hotkey_configurable: false,
         autostart: config.autostart,
         language: config.language,
         theme: config.theme,
@@ -562,6 +578,64 @@ fn on_hotkey(app: &AppHandle) {
     } else {
         show(app);
     }
+}
+
+/// Wayland のホットキーを portal に登録する。portal が無いデスクトップでは、`mawok --toggle` の案内のまま
+#[cfg(target_os = "linux")]
+fn start_portal_hotkey(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let (description, hotkey) = (
+            state.lang().toggle_draft(),
+            state.config.lock().unwrap().hotkey.clone(),
+        );
+        let (activated, changed) = (app.clone(), app.clone());
+        let app_id = app.config().identifier.clone();
+        let started = portal_hotkey::start(
+            &state.portal_hotkey,
+            &app_id,
+            description,
+            &hotkey,
+            move |token| {
+                let app = activated.clone();
+                let _ = activated.run_on_main_thread(move || on_toggle(&app, token.as_deref()));
+            },
+            move || {
+                let app = changed.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) =
+                        portal_hotkey::refresh(&app.state::<AppState>().portal_hotkey).await
+                    {
+                        warn!("couldn't read the desktop hotkey: {error}");
+                    }
+                    emit_settings(&app);
+                });
+            },
+        )
+        .await;
+        match started {
+            Ok(()) => info!("hotkey registered with the desktop portal"),
+            Err(error) => info!("no desktop portal for the hotkey: {error}"),
+        }
+        emit_settings(&app);
+    });
+}
+
+/// デスクトップの、ホットキーを割り当て直す画面を開く
+#[tauri::command]
+async fn configure_desktop_hotkey(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        portal_hotkey::configure(&app.state::<AppState>().portal_hotkey)
+            .await
+            .map_err(|error| error.to_string())?;
+        if let Err(error) = portal_hotkey::refresh(&app.state::<AppState>().portal_hotkey).await {
+            warn!("couldn't read the desktop hotkey: {error}");
+        }
+        emit_settings(&app);
+    }
+    let _ = app;
+    Ok(())
 }
 
 /// `mawok --toggle` で呼ばれたとき。呼んだデスクトップの印があれば、窓を前に出すのに使う
@@ -4657,6 +4731,7 @@ pub fn run() {
             set_draft_key,
             reset_draft_key,
             pause_hotkey,
+            configure_desktop_hotkey,
             resume_hotkey,
             reveal_log_file,
             open_terms_page,
@@ -4837,10 +4912,16 @@ pub fn run() {
                 ai_settings_requested: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
+                #[cfg(target_os = "linux")]
+                portal_hotkey: portal_hotkey::PortalHotkey::default(),
                 #[cfg(target_os = "macos")]
                 menu_depth: std::sync::atomic::AtomicUsize::new(0),
             });
             build_tray(app.handle())?;
+            #[cfg(target_os = "linux")]
+            if hotkey_by_desktop() {
+                start_portal_hotkey(app.handle().clone());
+            }
             #[cfg(target_os = "macos")]
             {
                 let (begin, end) = (app.handle().clone(), app.handle().clone());
