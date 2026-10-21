@@ -94,8 +94,6 @@ objc2-foundation = { version = "0.3.2", features = ["NSError", "NSNotification",
 objc2-app-kit = { version = "0.3.2", features = ["NSMenu", "NSResponder", "NSWindow"] }
 # AI サービスのキーを、ログインのキーチェーンに置く（secrets.rs）
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
-# コマンドのアクションを、子プロセスごと止める（command.rs）
-libc = "0.2.189"
 # ログイン時の起動を、ログイン項目（SMAppService）に登録する（autostart.rs）
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
 # 新しい版を確かめて入れ替える（updater.rs）。Windows は Microsoft Store が更新を受け持つので入れない（→ docs/platform.md「Mac 版の更新」）。
@@ -105,6 +103,10 @@ tauri-plugin-updater = "~2.12.0"
 tauri-nspanel = "2.1.1"
 # ファイルの名前を、打った文字と同じ合成済みの形（NFC）に揃えて補う（folder.rs）。Finder などが付けた名前は分解した形（NFD）のことがある
 unicode-normalization = "0.1.26"
+
+# コマンドのアクションを、子プロセスごと止める（command.rs）
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
 
 # ログイン時の起動（autostart.rs）。macOS はログイン項目（SMAppService）を直接使う
 [target.'cfg(not(target_os = "macos"))'.dependencies]

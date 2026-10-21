@@ -1,0 +1,2 @@
+# worktree に写す git 管理外のファイル（.gitignore と同じ書き方）
+account-server/.dev.vars

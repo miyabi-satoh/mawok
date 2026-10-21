@@ -817,6 +817,9 @@ fn write_clipboard(text: &str, conceal: bool) -> Result<(), arboard::Error> {
     } else {
         set
     };
+    // 印を付ける手段が無い OS（Linux。開発のビルドだけ）では付けずに書く
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let _ = conceal;
     set.text(text)
 }
 
