@@ -146,6 +146,9 @@ pub async fn start(
     let app_id: ashpd::AppID = app_id.parse()?;
     ashpd::register_host_app(app_id).await?;
     let portal = GlobalShortcuts::new().await?;
+    // 知らせを受ける用意は、登録より先に済ませる。登録の後で失敗すると、デスクトップに登録だけが残る
+    let mut activated = portal.receive_activated().await?;
+    let mut changed = portal.receive_shortcuts_changed().await?;
     let session = portal.create_session(Default::default()).await?;
     let shortcut = NewShortcut::new(SHORTCUT_ID, description)
         .preferred_trigger(preferred_trigger(hotkey).as_deref());
@@ -166,7 +169,6 @@ pub async fn start(
         .configurable
         .store(portal.version() >= 2, std::sync::atomic::Ordering::Relaxed);
 
-    let mut activated = portal.receive_activated().await?;
     tokio::spawn(async move {
         while let Some(event) = activated.next().await {
             if event.shortcut_id() != SHORTCUT_ID {
@@ -181,7 +183,6 @@ pub async fn start(
             on_activated(token);
         }
     });
-    let mut changed = portal.receive_shortcuts_changed().await?;
     tokio::spawn(async move {
         while changed.next().await.is_some() {
             on_changed();
