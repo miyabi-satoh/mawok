@@ -605,9 +605,11 @@
 					<div class="flex flex-col items-center gap-2 text-center">
 						<img src="/icon.png" alt="" class="size-16" />
 						<strong>
-							{view.platform === 'macos'
-								? m.settings_app_name_macos()
-								: m.settings_app_name_windows()}
+							{{
+								macos: m.settings_app_name_macos,
+								windows: m.settings_app_name_windows,
+								linux: m.settings_app_name_linux
+							}[view.platform]()}
 						</strong>
 						<span>{m.settings_app_catchphrase()}</span>
 						<span class="text-muted-foreground"
@@ -1224,14 +1226,18 @@
 								<Button
 									variant="outline"
 									size="sm"
-									aria-label={view.platform === 'macos'
-										? m.settings_reveal_log_macos()
-										: m.settings_reveal_log_windows()}
+									aria-label={{
+										macos: m.settings_reveal_log_macos,
+										windows: m.settings_reveal_log_windows,
+										linux: m.settings_reveal_log_linux
+									}[view.platform]()}
 									onclick={() => run('reveal_log_file')}
 								>
-									{view.platform === 'macos'
-										? m.settings_reveal_macos()
-										: m.settings_reveal_windows()}
+									{{
+										macos: m.settings_reveal_macos,
+										windows: m.settings_reveal_windows,
+										linux: m.settings_reveal_linux
+									}[view.platform]()}
 								</Button>
 							</Field.Field>
 						</SettingsRow>
