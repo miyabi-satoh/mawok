@@ -1118,6 +1118,16 @@ describe('設定画面のこのアプリについて', () => {
 			.toBeInTheDocument();
 	});
 
+	it('Linux では Linux の名前とファイルマネージャーの文言にする', async () => {
+		settings.current = { ...view(), platform: 'linux' };
+		const screen = await renderAt(m.settings_category_about);
+
+		await expect.element(screen.getByText(m.settings_app_name_linux())).toBeInTheDocument();
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_reveal_log_linux() }))
+			.toHaveTextContent(m.settings_reveal_linux());
+	});
+
 	it('ログの表示に失敗したら、その旨を表示する', async () => {
 		invoked.mockImplementation((command) =>
 			command === 'reveal_log_file'

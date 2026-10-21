@@ -4059,7 +4059,7 @@ fn reveal_log_file(app: AppHandle) -> Result<(), String> {
     reveal_item_in_dir(&app, target)
 }
 
-/// Finder やエクスプローラーで、パスを選んだ状態にする。MSIX 版では、回された先のパスを渡す
+/// Finder・エクスプローラー・Linux のファイルマネージャーで、パスを選んだ状態にする。MSIX 版では、回された先のパスを渡す
 fn reveal_item_in_dir(app: &AppHandle, path: PathBuf) -> Result<(), String> {
     #[cfg(windows)]
     let path = match (app.path().data_dir(), app.path().local_data_dir()) {
