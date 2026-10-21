@@ -165,7 +165,7 @@ export function quotePath(
 }
 
 /** 補ったパスがフォルダーか（Rust 側がフォルダーの名前にだけ区切りを付ける） */
-export function isFolderPath(path: string, platform: Platform): boolean {
+function isFolderPath(path: string, platform: Platform): boolean {
 	return path.endsWith('/') || (platform === 'windows' && path.endsWith('\\'));
 }
 
