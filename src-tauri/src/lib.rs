@@ -4568,7 +4568,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     // ホットキーを、OS の書き方で項目の右端に添える (macOS は ⌘⇧Space、Windows は Ctrl+Shift+Space)。
     // 登録できていないキーは押しても効かないので添えない。メニューの読める形でないキーは、Tauri が黙って添えずに作る。
     // Windows ではトレイのメニューがウィンドウに付かないので、添えたキーは見せるためだけで別に効かない。
-    // Linux では muda がウィンドウに付かないメニューにキーを付けないので、添えても出ない。
+    // Linux では添えても出ない（docs/platform.md「Linux のそのほか」）。
     // macOS ではメニューを開いている間ホットキーの登録を外すので、押すと項目のキーとして効く (menu_tracking.rs)
     let accelerator = (!hotkey_unavailable).then_some(hotkey.as_str());
     let show_item = MenuItem::with_id(app, "show", lang.toggle_draft(), true, accelerator)?;
