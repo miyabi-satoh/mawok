@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mawok
+Comment=Write text before sending it to a terminal
+Comment[ja]=ターミナルなどに送る前に、文字を書いておく
+Exec=mawok
+Icon=mawok
+StartupWMClass=mawok
+Categories=Utility;
+Terminal=false
