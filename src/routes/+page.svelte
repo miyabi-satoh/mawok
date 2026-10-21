@@ -1212,7 +1212,8 @@
 		<!--
 			コピー時に置き換え辞書で書き換わる範囲を、裏に重ねた透明な div でハイライトする。
 			文字色を透明にし、一致箇所だけ背景色を付ける。padding・border・フォント・折り返しを textarea と揃え、
-			スクロール位置も同期させることで、実際の文字の裏にちょうど重なる。ここ自体は入力を受けない（pointer-events-none）
+			スクロール位置も同期させることで、実際の文字の裏にちょうど重なる。ここ自体は入力を受けない（pointer-events-none）。
+			入力欄の案内もここに出す。placeholder は、WebKitGTK が入力欄より広い幅で折り返し、右端が見切れるため
 		-->
 		<div
 			class="pointer-events-none absolute inset-y-0 left-0 z-0 overflow-hidden rounded-lg border border-transparent px-2.5 py-2 text-base md:text-sm [&_*]:[word-break:inherit]"
@@ -1220,6 +1221,7 @@
 			aria-hidden="true"
 		>
 			<div style="transform: translate({-scrollLeft}px, {-scrollTop}px);">
+				{#if text === '' && guidance}<span class="draft-guidance">{guidance}</span>{/if}
 				{#each previewSegmentsList as segment, index (index)}{#if segment.highlighted}<mark
 							bind:this={markElements[index]}
 							class="rounded-[0.1em] bg-yellow-300/60 text-transparent dark:bg-yellow-400/40"
@@ -1238,7 +1240,7 @@
 			style="font-family: {fontFamily}; font-size: {fontSize}px; line-height: 1.5"
 			spellcheck="false"
 			readonly={busy}
-			placeholder={guidance || undefined}
+			aria-placeholder={guidance || undefined}
 			aria-label={m.draft_label()}
 			role={addressMatches.length > 0 || pathListShown ? 'combobox' : undefined}
 			aria-autocomplete="list"
@@ -1443,10 +1445,6 @@
 
 <style>
 	/*
-		案内は、入力した文字と見間違えないよう、緑みの薄い色の斜体にする。
-		部品の placeholder:text-muted-foreground は @layer utilities の中なので、層の外に書いたこちらが勝つ
-	*/
-	/*
 		テーマは mode-watcher が付ける .dark で見る。prefers-color-scheme で分けると、テーマを固定したときに
 		WebView 側が OS の設定のままで、食い違うことがある（wry#806）
 	*/
@@ -1456,7 +1454,8 @@
 	:global(.dark) main :global(textarea) {
 		color: var(--draft-text-dark, var(--foreground));
 	}
-	main :global(textarea::placeholder) {
+	/* 案内は、入力した文字と見間違えないよう、緑みの薄い色の斜体にする */
+	.draft-guidance {
 		color: var(--draft-guidance);
 		font-style: italic;
 	}

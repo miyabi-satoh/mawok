@@ -45,8 +45,8 @@ test.describe('初めての起動', () => {
 				(draft) => draft.focused,
 				{ label: '入力欄のフォーカス' }
 			);
-			const placeholder = await client.$('textarea').getAttribute('placeholder');
-			assert.ok(placeholder, '入力欄の案内が出ているはず');
+			const guidance = await client.$('textarea').getAttribute('aria-placeholder');
+			assert.ok(guidance, '入力欄の案内が出ているはず');
 			assert.equal(await configExists(), true, '起動したときに設定の置き場ができるはず');
 		} finally {
 			await suite.closeClient(client);

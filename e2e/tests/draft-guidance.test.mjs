@@ -62,18 +62,18 @@ test.describe('下書きの入力欄の案内', () => {
 
 	/** 入力欄に置かれている案内 (置かれていなければ null)。見えているかどうかとは別 */
 	const readGuidance = () =>
-		client.$('textarea').then((textarea) => textarea.getAttribute('placeholder'));
+		client.$('textarea').then((textarea) => textarea.getAttribute('aria-placeholder'));
 
 	/**
-	 * 案内が実際に見えているか。placeholder 属性は入力欄の中身に左右されないので、
-	 * 見えているかどうかは `:placeholder-shown` (入力欄が空のときだけ当たる) で見る
+	 * 案内が実際に見えているか。aria-placeholder は入力欄の中身に左右されないので、
+	 * 見えているかどうかは、入力欄の裏に描く案内 (.draft-guidance) があるかで見る
 	 */
 	const isGuidanceShown = () =>
 		client.execute(() => {
 			const textarea = document.querySelector('textarea');
 			// 入力欄が無いのを「見えていない」と混ぜると、ウィンドウを取り違えても否定の assert が通る
 			if (textarea === null) throw new Error('入力欄が見つかりません (下書き以外のウィンドウ?)');
-			return textarea.matches(':placeholder-shown');
+			return document.querySelector('.draft-guidance') !== null;
 		});
 
 	const openDraftAppearanceSettings = () => openSettings(client, '#draft-guidance');
