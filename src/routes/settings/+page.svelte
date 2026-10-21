@@ -1208,7 +1208,7 @@
 				</Tabs.Content>
 				<Tabs.Content value="about">
 					<SettingsSection>
-						<!-- Windows は Microsoft Store が更新するので、Mac だけに出す -->
+						<!-- 更新は Mac 版だけが自分で行うので、Mac だけに出す（docs/platform.md「Mac 版の更新」） -->
 						{#if view.platform === 'macos'}
 							<SettingsUpdate call={callSettings} />
 						{/if}

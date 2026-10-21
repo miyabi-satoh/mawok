@@ -1125,7 +1125,7 @@ describe('設定画面のこのアプリについて', () => {
 		await expect.element(screen.getByText(m.settings_app_name_linux())).toBeInTheDocument();
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_reveal_log_linux() }))
-			.toBeInTheDocument();
+			.toHaveTextContent(m.settings_reveal_linux());
 	});
 
 	it('ログの表示に失敗したら、その旨を表示する', async () => {
