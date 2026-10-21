@@ -18,7 +18,7 @@ Mawok stays in the {macos:menu bar}{windows:system tray}{linux:tray} and starts 
 ::: linux
 ## Assign the hotkey
 
-If `mawok --toggle` appears in the hotkey field under “Keyboard shortcuts” in Settings, Mawok couldn't register the hotkey. Assign a key to this command in your desktop's settings.
+If `mawok --toggle` appears in the hotkey field under “Keyboard shortcuts” in Settings, assign a key to this command in your desktop's settings. Do the same if you canceled the shortcut your desktop asked to add.
 
 On GNOME:
 
