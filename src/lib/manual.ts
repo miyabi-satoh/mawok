@@ -122,52 +122,62 @@ export function collapseCjkLineBreaks(html: string): string {
 		.join('');
 }
 
-const PLATFORMS: readonly Platform[] = ['macos', 'windows'];
+const PLATFORMS: readonly Platform[] = ['macos', 'windows', 'linux'];
 // 文の中で OS ごとに違う所。中身は Markdown のままで、波かっこは含められない。区切りに縦棒を使わないのは、
-// 表の中に置いても、GitHub などで原典を読んだときに表の列の区切りにならないようにするため
-const INLINE = /\{macos:([^{}]*)\}\{windows:([^{}]*)\}/g;
-const BLOCK_START = /^::: (macos|windows)$/;
+// 表の中に置いても、GitHub などで原典を読んだときに表の列の区切りにならないようにするため。
+// 3つの OS をいつもこの順で全部書く。足りない書き分けを、ある OS で黙って空にせず、描かずに知らせるため
+const INLINE = /\{macos:([^{}]*)\}\{windows:([^{}]*)\}\{linux:([^{}]*)\}/g;
+// 書き分けのつもりで書いたのに、上の形にならなかった所 (OS が欠けた・順が違う)
+const INLINE_LIKE = /\{(?:macos|windows|linux):/;
+const BLOCK_START = /^::: (macos|windows|linux)$/;
 const BLOCK_END = ':::';
 // 印のつもりで書いたのに印にならない行 (字下げした、OS の名前を違えた)。そのまま本文に出てしまうので、描かずに知らせる
 const MARKER_LIKE = /^\s*:::/;
 
 /**
  * 原典の OS ごとの書き分けから、`platform` の分だけを残す。アプリの中では開いた OS が分かるので、
- * 両方を併記せずにその OS の書き方だけを出す (AGENTS.md「マニュアル」)。
- * - 文の中: `{macos:…}{windows:…}`
- * - 段落や項目ごと: `::: macos` か `::: windows` の行から `:::` の行まで。印の行は残さないので、
- *   箇条書きの途中に置いても、前後の項目は1つの箇条書きのままになる
+ * ほかの OS の書き方を併記せずにその OS の書き方だけを出す (AGENTS.md「マニュアル」)。
+ * - 文の中: `{macos:…}{windows:…}{linux:…}`。3つとも書き、出さない OS の側は空にする
+ * - 段落や項目ごと: `::: macos`・`::: windows`・`::: linux` の行から `:::` の行まで。書いていない OS では何も出ない。
+ *   印の行は残さないので、箇条書きの途中に置いても、前後の項目は1つの箇条書きのままになる
  */
 export function selectPlatform(markdown: string, platform: Platform): string {
 	const kept: string[] = [];
+	const index = PLATFORMS.indexOf(platform);
 	let block: { platform: Platform; line: number } | null = null;
-	for (const [index, line] of markdown.split('\n').entries()) {
+	for (const [lineIndex, line] of markdown.split('\n').entries()) {
+		const lineNumber = lineIndex + 1;
 		const start = BLOCK_START.exec(line);
 		if (start) {
 			if (block !== null) {
 				throw new Error(
-					`${index + 1} 行目: ${block.line} 行目の OS の書き分けが閉じる前に、次の書き分けが始まっています`
+					`${lineNumber} 行目: ${block.line} 行目の OS の書き分けが閉じる前に、次の書き分けが始まっています`
 				);
 			}
-			block = { platform: start[1] as Platform, line: index + 1 };
+			block = { platform: start[1] as Platform, line: lineNumber };
 			continue;
 		}
 		if (line === BLOCK_END) {
 			if (block === null)
-				throw new Error(`${index + 1} 行目: 始まっていない OS の書き分けを閉じています`);
+				throw new Error(`${lineNumber} 行目: 始まっていない OS の書き分けを閉じています`);
 			block = null;
 			continue;
 		}
 		if (MARKER_LIKE.test(line)) {
 			throw new Error(
-				`${index + 1} 行目: OS の書き分けの印は、字下げせずに \`::: macos\`・\`::: windows\`・\`:::\` と書きます`
+				`${lineNumber} 行目: OS の書き分けの印は、字下げせずに \`::: macos\`・\`::: windows\`・\`::: linux\`・\`:::\` と書きます`
 			);
 		}
-		if (block === null || block.platform === platform) kept.push(line);
+		const selected = line.replace(INLINE, (_, ...texts: string[]) => texts[index]);
+		if (INLINE_LIKE.test(selected)) {
+			throw new Error(
+				`${lineNumber} 行目: 文の中の OS の書き分けは、\`{macos:…}{windows:…}{linux:…}\` と3つ続けて書きます`
+			);
+		}
+		if (block === null || block.platform === platform) kept.push(selected);
 	}
 	if (block !== null) throw new Error(`${block.line} 行目で始まった OS の書き分けが閉じていません`);
-	const index = PLATFORMS.indexOf(platform);
-	return kept.join('\n').replace(INLINE, (_, ...texts: string[]) => texts[index]);
+	return kept.join('\n');
 }
 
 /**
