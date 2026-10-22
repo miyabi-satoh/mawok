@@ -264,6 +264,24 @@ describe('設定画面の同期のパスワード', () => {
 		expect(callsOf(invoked, 'start_sync')).toHaveLength(0);
 	});
 
+	it('開いた欄は、状態が移ったら閉じ、戻っても押すまで開かない', async () => {
+		pro('needsPassword');
+		const screen = await renderAt(m.settings_category_account);
+		await screen.getByRole('button', { name: m.settings_sync_password_enter() }).click();
+		const form = screen.getByRole('form', { name: m.settings_sync_join_title() });
+		await expect.element(form).toBeVisible();
+		// ほかのデバイスがリセットし、また始めた
+		pro('notStarted');
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_sync_password_create() }))
+			.toBeVisible();
+		pro('needsPassword');
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_sync_password_enter() }))
+			.toBeVisible();
+		expect(form.query()).toBeNull();
+	});
+
 	it('同期していれば、今のパスワードを確かめて変える', async () => {
 		pro('ready');
 		const screen = await renderAt(m.settings_category_account);
