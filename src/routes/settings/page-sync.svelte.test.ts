@@ -251,11 +251,16 @@ describe('設定画面の同期のパスワード', () => {
 		pro('needsPassword');
 		const screen = await renderAt(m.settings_category_account);
 		await screen.getByRole('button', { name: m.settings_sync_password_enter() }).click();
+		await screen.getByLabelText(m.settings_sync_password(), { exact: true }).fill('guess');
 		await screen.getByRole('button', { name: m.settings_sync_password_forgot() }).click();
 		const dialog = screen.getByRole('alertdialog', { name: m.settings_sync_reset_confirm_title() });
 		await dialog.getByRole('button', { name: m.settings_sync_reset_confirm_start() }).click();
 		const form = screen.getByRole('form', { name: m.settings_sync_restart_title() });
 		await expect.element(form).toBeVisible();
+		// 入れる欄に打った文字を、新しいパスワードの欄へ持ち越さない
+		await expect
+			.element(form.getByLabelText(m.settings_sync_password(), { exact: true }))
+			.toHaveValue('');
 		// 作るのをやめたら、入れる所に戻る（窓口の写しは、作り終えるまで消さない）
 		await form.getByRole('button', { name: m.common_cancel() }).click();
 		await expect

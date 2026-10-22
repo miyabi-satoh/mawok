@@ -36,12 +36,13 @@
 	const panel = $derived(syncPanel(view.syncKeyStatus, resetting));
 	/** 作る・入れる欄をボタンで開いたか。1台につき一度きりなので、押すまで欄を出さない */
 	let opened = $state(false);
-	// 状態が移ったら（ほかのデバイスが始めた・リセットした）閉じる。戻ったときに、押していない欄が開いて見えないため
-	$effect(() => {
+	// 状態が移ったら（ほかのデバイスが始めた・リセットした）閉じる。戻ったときに、押していない欄が開いて見えないため。
+	// 描く前に閉じ、移った先の欄が一瞬開いて見えないようにする
+	$effect.pre(() => {
 		void panel;
 		opened = false;
 	});
-	/** 作る・入れる欄を閉じたときの行。リセットの後は、確かめた流れのまま欄を開いて出すので、行は無い */
+	/** 作る・入れる欄を閉じているときの行の文言 */
 	const closedRow = {
 		create: {
 			title: m.settings_sync_start_title,
@@ -88,14 +89,17 @@
 	{#if panel === 'create' || panel === 'enter'}
 		<SettingsRow>
 			{#if resetting || opened}
-				<SyncPasswordForm
-					mode={panel}
-					replace={resetting}
-					{onfailure}
-					ondone={closeForm}
-					oncancel={closeForm}
-					onforgot={panel === 'enter' ? () => (resetOpen = true) : undefined}
-				/>
+				<!-- 忘れたときのリセットで入れる欄から作る欄へ替わったら、打った文字を持ち越さないよう作り直す -->
+				{#key panel}
+					<SyncPasswordForm
+						mode={panel}
+						replace={resetting}
+						{onfailure}
+						ondone={closeForm}
+						oncancel={closeForm}
+						onforgot={panel === 'enter' ? () => (resetOpen = true) : undefined}
+					/>
+				{/key}
 			{:else}
 				{@const row = closedRow[panel]}
 				<Field.Content>
