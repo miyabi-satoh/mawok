@@ -34,6 +34,11 @@
 	/** パスワードを変え終えた知らせを出すか。次に操作するまで出しておく */
 	let changed = $state(false);
 	const panel = $derived(syncPanel(view.syncKeyStatus, resetting));
+	/**
+	 * 作る・入れる欄を開いた状態。1台につき一度きりなので、ボタンで開くまで欄を出さない。
+	 * 開いた欄で持ち、状態が移って欄が替わったら閉じた扱いになる
+	 */
+	let opened = $state<'create' | 'enter' | null>(null);
 
 	// 同期していない状態に移ったら（ほかのデバイスのリセットなど）、書きかけの変更の欄と、変え終えた知らせを片付ける。
 	// 入れ直して戻ったときに、前の欄や知らせが残って見えないため
@@ -53,6 +58,7 @@
 
 	function confirmReset() {
 		resetOpen = false;
+		opened = null;
 		changing = false;
 		changed = false;
 		resetting = true;
@@ -60,19 +66,52 @@
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
-	{#if panel === 'create'}
+	{#if panel === 'create' && (resetting || opened === 'create')}
 		<SettingsRow>
 			<SyncPasswordForm
 				mode="create"
 				replace={resetting}
 				{onfailure}
-				ondone={() => (resetting = false)}
-				oncancel={resetting ? () => (resetting = false) : undefined}
+				ondone={() => {
+					resetting = false;
+					opened = null;
+				}}
+				oncancel={() => {
+					resetting = false;
+					opened = null;
+				}}
 			/>
 		</SettingsRow>
-	{:else if panel === 'enter'}
+	{:else if panel === 'enter' && opened === 'enter'}
 		<SettingsRow>
-			<SyncPasswordForm mode="enter" {onfailure} onforgot={() => (resetOpen = true)} />
+			<SyncPasswordForm
+				mode="enter"
+				{onfailure}
+				ondone={() => (opened = null)}
+				oncancel={() => (opened = null)}
+				onforgot={() => (resetOpen = true)}
+			/>
+		</SettingsRow>
+	{:else if panel === 'create' || panel === 'enter'}
+		<SettingsRow>
+			<Field.Content>
+				<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
+				<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+					<Field.Title>
+						{panel === 'create' ? m.settings_sync_start_title() : m.settings_sync_join_title()}
+					</Field.Title>
+					<Button variant="outline" size="sm" onclick={() => (opened = panel)}>
+						{panel === 'create'
+							? m.settings_sync_password_create()
+							: m.settings_sync_password_enter()}
+					</Button>
+				</Field.Field>
+				<Field.Description class="leading-snug">
+					{panel === 'create'
+						? m.settings_sync_start_description()
+						: m.settings_sync_join_description()}
+				</Field.Description>
+			</Field.Content>
 		</SettingsRow>
 	{:else}
 		{#each kinds as { kind, label } (kind)}

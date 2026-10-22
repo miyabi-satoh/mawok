@@ -326,6 +326,8 @@
 	"settings_sync_password_row": "同期のパスワード",
 	"password_input_show": "パスワードを表示",
 	"settings_sync_password_change": "変更",
+	"settings_sync_password_create": "パスワードを作成",
+	"settings_sync_password_enter": "パスワードを入力",
 	"settings_sync_reset": "同期をリセット...",
 	"settings_sync_reset_confirm_title": "同期をリセットしますか？",
 	"settings_sync_reset_confirm_description": "Mawok のサーバーにある同期データを削除します。各デバイスのデータは残ります。この操作は元に戻せません。",

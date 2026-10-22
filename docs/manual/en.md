@@ -119,8 +119,8 @@ To use a service compatible with OpenAI (such as DeepSeek, OpenRouter, or Ollama
 With Pro, you can sync your settings and history across the devices on your account.
 
 1. Sign in to Mawok under “Account” in Settings. If you don't have Pro, get it from “View Pro pricing”.
-2. Under “Start syncing”, choose a password, enter it twice, and select “Start syncing”.
-3. Sign in on your other devices too, enter the same password, and select “Join syncing”.
+2. Select “Create password”, choose a password, enter it twice, and select “Start syncing”.
+3. Sign in on your other devices too, select “Enter password”, enter the same password, and select “Join syncing”.
 
 To change the password, select “Change” next to “Sync password” under “Account” in Settings. You don't need to enter it again on your other devices.
 

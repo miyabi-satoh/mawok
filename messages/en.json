@@ -335,6 +335,8 @@
 	"settings_sync_password_row": "Sync password",
 	"password_input_show": "Show password",
 	"settings_sync_password_change": "Change",
+	"settings_sync_password_create": "Create password",
+	"settings_sync_password_enter": "Enter password",
 	"settings_sync_reset": "Reset sync...",
 	"settings_sync_reset_confirm_title": "Reset sync?",
 	"settings_sync_reset_confirm_description": "This deletes your sync data on the Mawok server. The data on each device is kept. You can't undo this action.",
