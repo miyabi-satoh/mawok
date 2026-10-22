@@ -1197,11 +1197,12 @@
 									/>
 								</SettingsRow>
 							</SettingsSection>
-							{#if view.proAvailable}
-								<SettingsSync {view} call={callSettings} onfailure={showActionError} />
-							{/if}
+							<!-- サインインしてデバイスを登録してから同期を始めるので、その順に並べる -->
 							{#if view.mawokAccountSignedIn}
 								<SettingsMawokDevices call={callActions} />
+							{/if}
+							{#if view.proAvailable}
+								<SettingsSync {view} call={callSettings} onfailure={showActionError} />
 							{/if}
 						</div>
 					{/if}

@@ -34,6 +34,32 @@
 	/** パスワードを変え終えた知らせを出すか。次に操作するまで出しておく */
 	let changed = $state(false);
 	const panel = $derived(syncPanel(view.syncKeyStatus, resetting));
+	/** 作る・入れる欄をボタンで開いたか。1台につき一度きりなので、押すまで欄を出さない */
+	let opened = $state(false);
+	// 状態が移ったら（ほかのデバイスが始めた・リセットした）閉じる。戻ったときに、押していない欄が開いて見えないため。
+	// 描く前に閉じ、移った先の欄が一瞬開いて見えないようにする
+	$effect.pre(() => {
+		void panel;
+		opened = false;
+	});
+	/** 作る・入れる欄を閉じているときの行の文言 */
+	const closedRow = {
+		create: {
+			title: m.settings_sync_start_title,
+			description: m.settings_sync_start_description,
+			open: m.settings_sync_password_create
+		},
+		enter: {
+			title: m.settings_sync_join_title,
+			description: m.settings_sync_join_description,
+			open: m.settings_sync_password_enter
+		}
+	};
+
+	function closeForm() {
+		resetting = false;
+		opened = false;
+	}
 
 	// 同期していない状態に移ったら（ほかのデバイスのリセットなど）、書きかけの変更の欄と、変え終えた知らせを片付ける。
 	// 入れ直して戻ったときに、前の欄や知らせが残って見えないため
@@ -60,19 +86,33 @@
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
-	{#if panel === 'create'}
+	{#if panel === 'create' || panel === 'enter'}
 		<SettingsRow>
-			<SyncPasswordForm
-				mode="create"
-				replace={resetting}
-				{onfailure}
-				ondone={() => (resetting = false)}
-				oncancel={resetting ? () => (resetting = false) : undefined}
-			/>
-		</SettingsRow>
-	{:else if panel === 'enter'}
-		<SettingsRow>
-			<SyncPasswordForm mode="enter" {onfailure} onforgot={() => (resetOpen = true)} />
+			{#if resetting || opened}
+				<!-- 忘れたときのリセットで入れる欄から作る欄へ替わったら、打った文字を持ち越さないよう作り直す -->
+				{#key panel}
+					<SyncPasswordForm
+						mode={panel}
+						replace={resetting}
+						{onfailure}
+						ondone={closeForm}
+						oncancel={closeForm}
+						onforgot={panel === 'enter' ? () => (resetOpen = true) : undefined}
+					/>
+				{/key}
+			{:else}
+				{@const row = closedRow[panel]}
+				<Field.Content>
+					<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
+					<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+						<Field.Title>{row.title()}</Field.Title>
+						<Button variant="outline" size="sm" onclick={() => (opened = true)}>
+							{row.open()}
+						</Button>
+					</Field.Field>
+					<Field.Description class="leading-snug">{row.description()}</Field.Description>
+				</Field.Content>
+			{/if}
 		</SettingsRow>
 	{:else}
 		{#each kinds as { kind, label } (kind)}

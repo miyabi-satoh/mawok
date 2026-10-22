@@ -89,6 +89,7 @@
 ## Linux のそのほか
 
 - クリップボード: 書いたプロセスが、求めに応じて中身を配る。arboard は最後の `Clipboard` を手放すと配るのをやめるので、プロセスの間ずっと1つ持つ。Wayland では data-control で書き、持たないデスクトップ（GNOME）は XWayland 越しに書く。履歴に残さない印は、KDE の慣習の形式（`x-kde-passwordManagerHint`）。
+- 窓の位置と大きさは記録から戻さない（window-state プラグインに渡す印を空にする）。プラグインは物理ピクセルで記録して戻すが、GTK の倍率（端数の倍率のモニターでは 2 になる）がモニターや窓を作った時点で変わるため、開くたびに大きさがずれる（2026-10 に Hyprland の 1.125 倍と 1 倍のモニターで、720×567 の窓が 1544×1240 と記録され、次は 772×667 で開いた。小さい側にずれると最小の大きさに張り付く）。Wayland ではアプリが窓の位置を決められないので、位置を戻す意味も無い。
 - 入力欄の案内は、placeholder でなく、入力欄の裏の置き換えのハイライトの層に描く。WebKitGTK は placeholder を入力欄より1文字ほど広い幅で折り返し、右端が見切れるため。
 - ログイン時の起動は、XDG autostart の `~/.config/autostart/Mawok.desktop` を自分で読み書きする。デスクトップの設定で切ると `Hidden=true` や `X-GNOME-Autostart-enabled=false` が書かれ、tauri-plugin-autostart はそれを読まずに有効に戻してしまうため（上の「常駐」の決まり）。
 - AI サービスのキーとアカウントのトークンは、Secret Service（GNOME キーリング・KWallet など）に置く。Secret Service が動いていない環境では読み書きできず、使えない旨を出す。

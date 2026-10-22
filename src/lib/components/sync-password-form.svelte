@@ -14,7 +14,7 @@
 
 	/**
 	 * 同期のパスワードの欄（docs/sync.md「同期のパスワード」）。
-	 * create は「同期を開始する」と「同期をリセット...」、enter はほかのデバイスで始めた同期に加わるとき、change は変えるとき。
+	 * create は「同期を始める」と「同期をリセット...」の後、enter はほかのデバイスで始めた同期に加わるとき、change は変えるとき。
 	 * 欄に関わる失敗は欄の下に出し、ほかの失敗は onfailure に渡す（画面のエラーの帯に出す）。
 	 * 窓口の状態が変わっていたら（ほかのデバイスが始めた・リセットした）、oncancel で欄を閉じ、今の状態の欄に任せる。
 	 * replace は create のときだけ使い、窓口の写しを消して始め直す（「同期をリセット」）か
@@ -43,10 +43,22 @@
 
 	const title = $derived(
 		mode === 'create'
-			? m.settings_sync_password_create_title()
+			? replace
+				? m.settings_sync_restart_title()
+				: m.settings_sync_start_title()
 			: mode === 'enter'
-				? m.settings_sync_password_enter_title()
+				? m.settings_sync_join_title()
 				: m.settings_sync_password_change_title()
+	);
+	/** 同じパスワードをどのデバイスでも入れることを、決める側と入れる側の両方で伝える。変えるときは分かっているので出さない */
+	const description = $derived(
+		mode === 'create'
+			? replace
+				? m.settings_sync_restart_description()
+				: m.settings_sync_start_description()
+			: mode === 'enter'
+				? m.settings_sync_join_description()
+				: undefined
 	);
 	const filled = $derived(
 		values.password !== '' &&
@@ -110,6 +122,9 @@
 
 <form class="flex flex-col gap-3" aria-label={title} onsubmit={submit}>
 	<Field.Title>{title}</Field.Title>
+	{#if description}
+		<Field.Description class="leading-snug">{description}</Field.Description>
+	{/if}
 	{#if mode === 'create'}
 		{@render passwordField(
 			'password',
@@ -118,7 +133,6 @@
 			m.settings_sync_password_hint({ count: MIN_SYNC_PASSWORD_CHARS })
 		)}
 		{@render passwordField('confirm', m.settings_sync_password_confirm(), 'new-password')}
-		<p class="text-sm text-muted-foreground">{m.settings_sync_password_warning()}</p>
 	{:else if mode === 'enter'}
 		{@render passwordField('password', m.settings_sync_password(), 'current-password')}
 	{:else}
@@ -128,7 +142,11 @@
 	{/if}
 	<div class="flex flex-wrap items-center gap-2">
 		<Button type="submit" class="w-fit" disabled={busy || !filled}>
-			{mode === 'change' ? m.settings_sync_password_save() : m.settings_sync_start()}
+			{mode === 'change'
+				? m.settings_sync_password_save()
+				: mode === 'enter'
+					? m.settings_sync_join()
+					: m.settings_sync_start()}
 		</Button>
 		{#if oncancel}
 			<Button type="button" variant="ghost" disabled={busy} onclick={oncancel}>
