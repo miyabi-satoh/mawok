@@ -450,8 +450,16 @@ fn settings_view(state: &AppState) -> SettingsView {
     }
 }
 
+/// Linux では位置も大きさも戻さず、毎回既定の大きさで開く（docs/platform.md「Linux のそのほか」）
 fn window_state_flags() -> StateFlags {
-    StateFlags::POSITION | StateFlags::SIZE
+    #[cfg(target_os = "linux")]
+    {
+        StateFlags::empty()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        StateFlags::POSITION | StateFlags::SIZE
+    }
 }
 
 /// ウィンドウの位置と大きさを記録するときの名前。最小の大きさがなかったころの記録（最小より小さいことがある）を戻さないよう、
