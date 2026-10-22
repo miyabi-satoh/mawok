@@ -198,8 +198,8 @@ describe('設定画面の同期のパスワード', () => {
 	it('始めていなければ、パスワードを2回入れて同期を開始する', async () => {
 		pro('notStarted');
 		const screen = await renderAt(m.settings_category_account);
-		const form = screen.getByRole('form', { name: m.settings_sync_password_create_title() });
-		await expect.element(form.getByText(m.settings_sync_password_warning())).toBeVisible();
+		const form = screen.getByRole('form', { name: m.settings_sync_start_title() });
+		await expect.element(form.getByText(m.settings_sync_start_description())).toBeVisible();
 		await expect
 			.element(screen.getByRole('switch', { name: m.settings_sync_settings() }))
 			.not.toBeInTheDocument();
@@ -224,10 +224,10 @@ describe('設定画面の同期のパスワード', () => {
 		pro('needsPassword');
 		failures.unlock_sync = 'sync.wrong_password';
 		const screen = await renderAt(m.settings_category_account);
-		const form = screen.getByRole('form', { name: m.settings_sync_password_enter_title() });
+		const form = screen.getByRole('form', { name: m.settings_sync_join_title() });
 		const field = form.getByLabelText(m.settings_sync_password(), { exact: true });
 		await field.fill('wrong-password');
-		await form.getByRole('button', { name: m.settings_sync_start() }).click();
+		await form.getByRole('button', { name: m.settings_sync_join() }).click();
 		await expect.element(form.getByText(m.sync_password_error_incorrect())).toBeVisible();
 		expect(invoked).toHaveBeenCalledWith('unlock_sync', { password: 'wrong-password' });
 
@@ -247,12 +247,12 @@ describe('設定画面の同期のパスワード', () => {
 		await screen.getByRole('button', { name: m.settings_sync_password_forgot() }).click();
 		const dialog = screen.getByRole('alertdialog', { name: m.settings_sync_reset_confirm_title() });
 		await dialog.getByRole('button', { name: m.settings_sync_reset_confirm_start() }).click();
-		const form = screen.getByRole('form', { name: m.settings_sync_password_create_title() });
+		const form = screen.getByRole('form', { name: m.settings_sync_restart_title() });
 		await expect.element(form).toBeVisible();
 		// 作るのをやめたら、入れる欄に戻る（窓口の写しは、作り終えるまで消さない）
 		await form.getByRole('button', { name: m.common_cancel() }).click();
 		await expect
-			.element(screen.getByRole('form', { name: m.settings_sync_password_enter_title() }))
+			.element(screen.getByRole('form', { name: m.settings_sync_join_title() }))
 			.toBeVisible();
 		expect(callsOf(invoked, 'start_sync')).toHaveLength(0);
 	});
@@ -300,7 +300,7 @@ describe('設定画面の同期のパスワード', () => {
 		// ほかのデバイスのリセットで「入力」へ移り、入れ直して戻る
 		pro('needsPassword');
 		await expect
-			.element(screen.getByRole('form', { name: m.settings_sync_password_enter_title() }))
+			.element(screen.getByRole('form', { name: m.settings_sync_join_title() }))
 			.toBeVisible();
 		pro('ready');
 		await expect
