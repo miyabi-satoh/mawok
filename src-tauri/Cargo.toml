@@ -84,7 +84,7 @@ opt-level = 3
 panic = "abort"
 strip = true
 
-# トレイのメニューを開いている間を知るため（menu_tracking.rs）と、テキストウィンドウの見た目と Space の扱いを読み書きするため（focus.rs）。Tauri（tray-icon）が使うのと同じ版に揃える
+# トレイのメニューを開いている間を知るため（menu_tracking.rs）と、テキストウィンドウの見た目と Space の扱いを読み書きするため（focus.rs）。Tauri（tray-icon）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
 objc2-foundation = { version = "0.3.2", features = ["NSError", "NSNotification", "NSOperation", "NSString", "block2"] }

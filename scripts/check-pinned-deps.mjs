@@ -3,6 +3,7 @@
 // 揃え方は src-tauri/Cargo.toml のコメント、Dependabot が個別に上げないことは .github/dependabot.yml。
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 // 手元が直接使う crate と、同じ版を使っているはずの相手。
 const PINNED = [
@@ -11,7 +12,11 @@ const PINNED = [
 	{ name: 'tauri-winrt-notification', partner: 'notify-rust' },
 	{ name: 'webkit2gtk', partner: 'wry' },
 	{ name: 'gtk', partner: 'tao' },
-	{ name: 'zbus', partner: 'tauri-plugin-single-instance' }
+	{ name: 'zbus', partner: 'tauri-plugin-single-instance' },
+	{ name: 'block2', partner: 'objc2-foundation' },
+	{ name: 'objc2', partner: 'tray-icon' },
+	{ name: 'objc2-foundation', partner: 'tray-icon' },
+	{ name: 'objc2-app-kit', partner: 'tray-icon' }
 ];
 
 const metadata = JSON.parse(
@@ -50,10 +55,22 @@ for (const { name, partner } of PINNED) {
 	}
 }
 
+// Dependabot が相手より先に上げると、ここで落ちる PR が毎月来る。PINNED に足した crate を ignore に足し忘れないよう見る。
+const dependabot = readFileSync('.github/dependabot.yml', 'utf8');
+const ignored = new Set(
+	[...dependabot.matchAll(/dependency-name:\s*'([^']+)'/g)].map((match) => match[1])
+);
+const notIgnored = PINNED.map(({ name }) => name).filter((name) => !ignored.has(name));
+
+if (notIgnored.length > 0) {
+	console.error(
+		`.github/dependabot.yml の cargo の ignore に、揃えている依存が無い: ${notIgnored.join(', ')}`
+	);
+}
 if (errors.length > 0) {
 	console.error(
 		'Tauri の側と揃えている依存の版がずれている (src-tauri/Cargo.toml の版を相手に合わせる):'
 	);
 	for (const error of errors) console.error(`  ${error}`);
-	process.exit(1);
 }
+if (errors.length > 0 || notIgnored.length > 0) process.exit(1);
