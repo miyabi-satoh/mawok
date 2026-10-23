@@ -38,6 +38,8 @@ mod test_support;
 mod text;
 #[cfg(target_os = "linux")]
 mod toggle;
+#[cfg(target_os = "macos")]
+mod tray_press;
 // 境目の型は、Windows でもテストで書き出す。Windows では書き出すだけで使わない
 #[cfg(any(target_os = "macos", test))]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -4612,7 +4614,8 @@ fn tray_tooltip(app: &AppHandle) -> String {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    TrayIconBuilder::with_id(TRAY_ID)
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(TRAY_ICON)
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip(tray_tooltip(app))
@@ -4629,11 +4632,65 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
+    #[cfg(target_os = "macos")]
+    {
+        let app = app.clone();
+        tray.with_inner_tray_icon(move |inner| {
+            if let Some(status_item) = inner.ns_status_item() {
+                tray_press::on_press(&status_item, move || show_tray_menu(&app));
+            }
+        })?;
+    }
     Ok(())
+}
+
+/// show_tray_menu でメニューを開いている間か。メインスレッドでだけ読み書きする
+#[cfg(target_os = "macos")]
+static TRAY_MENU_PRESSED: AtomicBool = AtomicBool::new(false);
+/// show_tray_menu でメニューを開いている間に、トレイの作り直しを頼まれたか
+#[cfg(target_os = "macos")]
+static TRAY_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
+
+/// VoiceOver などから押されたメニューバーのアイコンのメニューを開く (tray_press.rs)
+#[cfg(target_os = "macos")]
+fn show_tray_menu(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    // tray-icon の show_menu は、メニューを閉じるまでトレイを借りたまま戻らない。その間にメニューを差し替えると
+    // 二重に借りて落ちるので、作り直しは閉じてから行う (refresh_tray)
+    TRAY_MENU_PRESSED.store(true, Ordering::Relaxed);
+    if let Err(error) = tray.with_inner_tray_icon(|inner| inner.show_menu()) {
+        error!("couldn't show the tray menu: {error}");
+    }
+    TRAY_MENU_PRESSED.store(false, Ordering::Relaxed);
+    if TRAY_REFRESH_PENDING.swap(false, Ordering::Relaxed) {
+        refresh_tray_now(app);
+    }
 }
 
 /// 表示言語や問題が変わったときに、トレイメニューを作り直す
 fn refresh_tray(app: &AppHandle) {
+    // show_tray_menu がメニューを開いているかはメインスレッドで決まるので、見るのも作り直すのもメインスレッドで行う
+    #[cfg(target_os = "macos")]
+    {
+        let handle = app.clone();
+        let result = app.run_on_main_thread(move || {
+            if TRAY_MENU_PRESSED.load(Ordering::Relaxed) {
+                TRAY_REFRESH_PENDING.store(true, Ordering::Relaxed);
+            } else {
+                refresh_tray_now(&handle);
+            }
+        });
+        if let Err(error) = result {
+            error!("couldn't rebuild the tray menu: {error}");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    refresh_tray_now(app);
+}
+
+fn refresh_tray_now(app: &AppHandle) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
