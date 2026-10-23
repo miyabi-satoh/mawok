@@ -31,7 +31,7 @@ import {
 import { expectStays, waitFor } from '../lib/wait.mjs';
 
 // 日本語入力の変換中のキーを macOS 標準の日本語入力で見る。変換中かどうかの見分けは WKWebView のキーの届き方しだいで、
-// Windows (WebView2 と Microsoft IME) とは別に確かめる要がある。ボタンの名前で押すので、日本語で起動する
+// Windows (WebView2 と日本語の IME) とは別に確かめる要がある。ボタンの名前で押すので、日本語で起動する
 
 test.describe('macOS: 日本語入力の変換中のキー', () => {
 	let other;

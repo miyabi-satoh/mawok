@@ -16,6 +16,7 @@ import {
 } from '../lib/os.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
 import {
+	cancelComposition,
 	convertComposition,
 	NIHON_READING,
 	startComposingInDraft,
@@ -26,7 +27,7 @@ import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
 // 下書きで日本語を変換している間のキー。
-// WebDriver から送る文字は IME を通らないので、SendInput で本物の Microsoft IME をオンにしてローマ字を打つ
+// WebDriver から送る文字は IME を通らないので、SendInput で本物の日本語の IME をオンにしてローマ字を打つ
 
 const suite = createSuite();
 const SENTINEL = 'e2e-sentinel-before';
@@ -130,5 +131,6 @@ test.describe('下書きの IME', () => {
 		await sendKeySequence([[VK.SPACE]]);
 		await expectDraftStaysVisible('変換候補の一覧を出した後', 1500);
 		assert.equal(await getForegroundWindowHandle(), await getDraftWindowHandle());
+		await cancelComposition(async () => (await readDraft(client)).value);
 	});
 });

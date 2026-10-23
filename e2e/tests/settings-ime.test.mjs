@@ -24,8 +24,8 @@ import { expectStays, waitFor } from '../lib/wait.mjs';
 // 置き換え辞書の入力欄で、変換中の Esc はウィンドウを閉じず、変換中の Ctrl+, では何も起きないことを見る。
 // 下書き側の 1.・2.・5. は draft-ime.test.mjs にある。
 //
-// WebDriver から送る文字は IME を通らないので、SendInput で本物の Microsoft IME をオンにしてローマ字を打つ。
-// Microsoft IME が入っている環境が前提
+// WebDriver から送る文字は IME を通らないので、SendInput で本物の日本語の IME をオンにしてローマ字を打つ。
+// 前提は e2e/README.md の「IME のテスト」
 
 const suite = createSuite();
 const FROM_INPUT = 'input[aria-label="置き換える前の文字列"]';
