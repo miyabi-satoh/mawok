@@ -151,7 +151,7 @@ just msix-check msix        # msix/msix.test.mjs だけ
   `neutralizeForeground()` (`lib/input.mjs`) が、前面がシェルのときだけこれを行う。テストの頭 (`lib/setup.mjs` の `newClient`) と、下書きを出す前 (`showDraft`) で呼ぶ。3回試してもシェルが前面のままなら、`前面がシェルのままです: <プロセス名>` で落ちる。
 - **IME の開閉は、最前面のウィンドウではなく「フォーカスのあるウィンドウ」から読む**: テキストウィンドウも設定も中身は WebView2 で、入力欄のキーボードのフォーカスは別プロセス (`msedgewebview2.exe`) の `Chrome_WidgetWin_1` にある。
   IME の開閉はそちらが持っているので、最前面の Tauri のウィンドウに `ImmGetDefaultIMEWnd` を掛けて読んでも、オンにした後も 0 のままになる。
-  `GetGUIThreadInfo(0)` の `hwndFocus` (スレッド ID に 0 を渡すと最前面のスレッドの情報が返る) を相手にして読む (`lib/ime.mjs` の `readImeOpenStatus`)。
+  `GetGUIThreadInfo(0)` の `hwndFocus` (スレッド ID に 0 を渡すと最前面のスレッドの情報が返る) を相手にして読む (`lib/ime.mjs` の `readImeStatus`)。
 
   実測 (`VK_IME_ON` を送る前と後の `IMC_GETOPENSTATUS` の値):
 
