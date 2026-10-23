@@ -12,7 +12,7 @@ import {
 	typeIntoDraft
 } from '../lib/app.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
-import { startComposingInDraft, turnImeOff } from '../lib/ime.mjs';
+import { cancelComposition, startComposingInDraft, turnImeOff } from '../lib/ime.mjs';
 import { beginTestConfig, clearHistory, historyEntryCount } from '../lib/config.mjs';
 import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { expectStays, waitFor } from '../lib/wait.mjs';
@@ -249,6 +249,7 @@ test.describe('下書きの履歴', () => {
 				`${name} で変換が終わらず、候補を選んでいるままのはず`
 			);
 		}
+		await cancelComposition(async () => (await readDraft(client)).value);
 	});
 
 	test('履歴の件数を 0 にすると、コピーしても ↑ で何も出ない', async () => {
