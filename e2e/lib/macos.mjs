@@ -1067,6 +1067,19 @@ async function readAutostartOn() {
 /**
  * 画面がロックされていれば、始める前に落とす。ロックの間はウィンドウが出ず、どの確認も時間切れで落ちるので、原因が分からない
  */
+/**
+ * ログインした画面のセッション (launchd の Aqua) で動いているかを確かめる。herdr のサーバーのように launchd から
+ * 直に立った処理の下 (Background) では、NSWorkspace と LaunchServices に常用のアプリが見えず、前面のアプリ・Dock に
+ * 出ているか・アプリの終了が読めないので、関係の無い所で落ちる
+ */
+export async function assertGuiSession() {
+	const { stdout } = await execFileAsync('launchctl', ['managername']);
+	if (stdout.trim() !== 'Aqua')
+		throw new Error(
+			`ログインした画面のセッションで動いていません (${stdout.trim()})。Terminal などの端末の新しいウィンドウから回してください`
+		);
+}
+
 export async function assertScreenUnlocked() {
 	const { stdout } = await execFileAsync('ioreg', ['-n', 'Root', '-d1', '-a']);
 	if (/<key>CGSSessionScreenIsLocked<\/key>\s*<true\/>/.test(stdout))
@@ -1094,6 +1107,30 @@ export async function assertPermissions({ screenCapture: needScreenCapture = tru
 		throw new Error(
 			`許可がありません。システム設定の「プライバシーとセキュリティ」の${missing.join('と')}で、` +
 				'この確認を流しているアプリ (端末。Claude Code から流すときは、版の番号の名前の項目) をオンにしてください'
+		);
+	}
+}
+
+/**
+ * キーチェーンの許可のダイアログ (SecurityAgent) が出ていないことを見る。
+ * 手元のビルドは ad-hoc 署名なので、入れ直すと常用の Mawok がキーを読むときに OS が許可を求める (docs/platform.md「AI サービスのキーとキーチェーン」)。
+ * 確認はファイルごとに常用の Mawok を起動し直すので、許可しないまま回すと起動のたびにダイアログが積み重なり、フォーカスも奪われてテストが落ちる。
+ * 「常に許可」を押せば同じビルドでは出ないので、回す前に常用の Mawok を動かして確かめる
+ */
+export async function assertNoKeychainPrompt() {
+	if (!(await isMawokRunning())) await launchMawok({ regular: true });
+	const shown = await waitFor(
+		() =>
+			jxa(
+				`const p = se.processes.byName('SecurityAgent'); return p.exists() && p.windows.length > 0;`
+			),
+		Boolean,
+		// キーを読むのは起動の後なので、ダイアログが出るまで少し待つ
+		{ timeout: 5_000, interval: 500, label: 'キーチェーンの許可のダイアログ' }
+	).catch(() => false);
+	if (shown) {
+		throw new Error(
+			'キーチェーンの許可のダイアログが出ています。パスワードを入れて「常に許可」を押してから回してください (同じビルドでは次から出ません)'
 		);
 	}
 }
