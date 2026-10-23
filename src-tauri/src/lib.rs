@@ -4644,19 +4644,53 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// show_tray_menu でメニューを開いている間か。メインスレッドでだけ読み書きする
+#[cfg(target_os = "macos")]
+static TRAY_MENU_PRESSED: AtomicBool = AtomicBool::new(false);
+/// show_tray_menu でメニューを開いている間に、トレイの作り直しを頼まれたか
+#[cfg(target_os = "macos")]
+static TRAY_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
+
 /// VoiceOver などから押されたメニューバーのアイコンのメニューを開く (tray_press.rs)
 #[cfg(target_os = "macos")]
 fn show_tray_menu(app: &AppHandle) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
+    // tray-icon の show_menu は、メニューを閉じるまでトレイを借りたまま戻らない。その間にメニューを差し替えると
+    // 二重に借りて落ちるので、作り直しは閉じてから行う (refresh_tray)
+    TRAY_MENU_PRESSED.store(true, Ordering::Relaxed);
     if let Err(error) = tray.with_inner_tray_icon(|inner| inner.show_menu()) {
         error!("couldn't show the tray menu: {error}");
+    }
+    TRAY_MENU_PRESSED.store(false, Ordering::Relaxed);
+    if TRAY_REFRESH_PENDING.swap(false, Ordering::Relaxed) {
+        refresh_tray_now(app);
     }
 }
 
 /// 表示言語や問題が変わったときに、トレイメニューを作り直す
 fn refresh_tray(app: &AppHandle) {
+    // show_tray_menu がメニューを開いているかはメインスレッドで決まるので、見るのも作り直すのもメインスレッドで行う
+    #[cfg(target_os = "macos")]
+    {
+        let handle = app.clone();
+        let result = app.run_on_main_thread(move || {
+            if TRAY_MENU_PRESSED.load(Ordering::Relaxed) {
+                TRAY_REFRESH_PENDING.store(true, Ordering::Relaxed);
+            } else {
+                refresh_tray_now(&handle);
+            }
+        });
+        if let Err(error) = result {
+            error!("couldn't rebuild the tray menu: {error}");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    refresh_tray_now(app);
+}
+
+fn refresh_tray_now(app: &AppHandle) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };

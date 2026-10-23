@@ -57,6 +57,7 @@ pub fn on_press(status_item: &NSStatusItem, on_press: impl Fn() + 'static) {
         return;
     };
     let Some(button) = status_item.button(mtm) else {
+        log::error!("tray press: the status item has no button");
         return;
     };
     let target = PressTarget::new(mtm, on_press);
