@@ -3,6 +3,7 @@
 // 揃え方は src-tauri/Cargo.toml のコメント、Dependabot が個別に上げないことは .github/dependabot.yml。
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 // 手元が直接使う crate と、同じ版を使っているはずの相手。
 const PINNED = [
@@ -11,8 +12,46 @@ const PINNED = [
 	{ name: 'tauri-winrt-notification', partner: 'notify-rust' },
 	{ name: 'webkit2gtk', partner: 'wry' },
 	{ name: 'gtk', partner: 'tao' },
-	{ name: 'zbus', partner: 'tauri-plugin-single-instance' }
+	{ name: 'zbus', partner: 'tauri-plugin-single-instance' },
+	{ name: 'block2', partner: 'objc2-foundation' },
+	{ name: 'objc2', partner: 'tray-icon' },
+	{ name: 'objc2-foundation', partner: 'tray-icon' },
+	{ name: 'objc2-app-kit', partner: 'tray-icon' }
 ];
+
+// Dependabot が相手より先に上げると、ここで落ちる PR が毎月来る。PINNED に足した crate を ignore に足し忘れないよう見る。
+// 見るのは cargo の欄だけ (次の `- package-ecosystem:` まで)。npm の欄に同じ名前があっても数えない。
+// update-types・versions で絞った項目は、絞った外の版を上げてくるので、外したとは数えない。
+const lines = readFileSync('.github/dependabot.yml', 'utf8')
+	.split('\n')
+	.filter((line) => !/^\s*#/.test(line));
+const sections = [];
+for (const line of lines) {
+	const ecosystem = line.match(/^\s*- package-ecosystem:\s*['"]?([\w-]+)/);
+	if (ecosystem) sections.push({ ecosystem: ecosystem[1], lines: [] });
+	else sections.at(-1)?.lines.push(line);
+}
+const cargoLines = sections.find(({ ecosystem }) => ecosystem === 'cargo')?.lines;
+if (!cargoLines) {
+	console.error('.github/dependabot.yml に cargo の欄が見つからない');
+	process.exit(1);
+}
+const ignored = new Set();
+cargoLines.forEach((line, index) => {
+	const entry = line.match(/^(\s*)- dependency-name:\s*['"]?([^'"\s]+)/);
+	if (!entry) return;
+	const rest = cargoLines.slice(index + 1);
+	const end = rest.findIndex((next) => next.trim() && next.search(/\S/) <= entry[1].length);
+	const fields = end === -1 ? rest : rest.slice(0, end);
+	if (!fields.some((field) => /^\s*(update-types|versions):/.test(field))) ignored.add(entry[2]);
+});
+const notIgnored = PINNED.map(({ name }) => name).filter((name) => !ignored.has(name));
+
+if (notIgnored.length > 0) {
+	console.error(
+		`.github/dependabot.yml の cargo の ignore に、揃えている依存が無い: ${notIgnored.join(', ')}`
+	);
+}
 
 const metadata = JSON.parse(
 	execFileSync(
@@ -55,5 +94,5 @@ if (errors.length > 0) {
 		'Tauri の側と揃えている依存の版がずれている (src-tauri/Cargo.toml の版を相手に合わせる):'
 	);
 	for (const error of errors) console.error(`  ${error}`);
-	process.exit(1);
 }
+if (errors.length > 0 || notIgnored.length > 0) process.exit(1);
