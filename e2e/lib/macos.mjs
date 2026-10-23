@@ -1065,9 +1065,6 @@ async function readAutostartOn() {
 }
 
 /**
- * 画面がロックされていれば、始める前に落とす。ロックの間はウィンドウが出ず、どの確認も時間切れで落ちるので、原因が分からない
- */
-/**
  * ログインした画面のセッション (launchd の Aqua) で動いているかを確かめる。herdr のサーバーのように launchd から
  * 直に立った処理の下 (Background) では、NSWorkspace と LaunchServices に常用のアプリが見えず、前面のアプリ・Dock に
  * 出ているか・アプリの終了が読めないので、関係の無い所で落ちる
@@ -1080,6 +1077,9 @@ export async function assertGuiSession() {
 		);
 }
 
+/**
+ * 画面がロックされていれば、始める前に落とす。ロックの間はウィンドウが出ず、どの確認も時間切れで落ちるので、原因が分からない
+ */
 export async function assertScreenUnlocked() {
 	const { stdout } = await execFileAsync('ioreg', ['-n', 'Root', '-d1', '-a']);
 	if (/<key>CGSSessionScreenIsLocked<\/key>\s*<true\/>/.test(stdout))
