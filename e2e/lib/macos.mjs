@@ -1118,7 +1118,10 @@ export async function assertPermissions({ screenCapture: needScreenCapture = tru
  * 「常に許可」を押せば同じビルドでは出ないので、回す前に常用の Mawok を動かして確かめる
  */
 export async function assertNoKeychainPrompt() {
-	if (!(await isMawokRunning())) await launchMawok({ regular: true });
+	// 確かめるために起動したときは終了して戻す (動いていたかは、この後の holdUserState が控える)。
+	// ダイアログが出ていれば、利用者が「常に許可」を押せるよう動かしたままにする
+	const launched = !(await isMawokRunning());
+	if (launched) await launchMawok({ regular: true });
 	const shown = await waitFor(
 		() =>
 			jxa(
@@ -1128,6 +1131,7 @@ export async function assertNoKeychainPrompt() {
 		// キーを読むのは起動の後なので、ダイアログが出るまで少し待つ
 		{ timeout: 5_000, interval: 500, label: 'キーチェーンの許可のダイアログ' }
 	).catch(() => false);
+	if (launched && !shown) await quitMawok();
 	if (shown) {
 		throw new Error(
 			'キーチェーンの許可のダイアログが出ています。パスワードを入れて「常に許可」を押してから回してください (同じビルドでは次から出ません)'
