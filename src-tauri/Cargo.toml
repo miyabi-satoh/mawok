@@ -133,7 +133,7 @@ webkit2gtk = { version = "2.0.2", features = ["v2_20"] }
 # `mawok --toggle` で呼んだデスクトップの印を窓に渡す（lib.rs の on_toggle）。Tauri（tao）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
 gtk = "0.18.2"
 # `mawok --toggle` を、動いている Mawok に単一起動のプラグインと同じ D-Bus の呼び出しで渡す（toggle.rs）。プラグインが使うのと同じ版
-zbus = "5.19.0"
+zbus = "6.0.0"
 # Wayland のホットキーを、デスクトップの GlobalShortcuts portal に登録する（portal_hotkey.rs）。zbus は Tauri の側と同じく async-io で動かす
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "global_shortcuts"] }
 futures-util = "0.3.34"
