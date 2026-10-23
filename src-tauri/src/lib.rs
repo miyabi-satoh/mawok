@@ -38,6 +38,8 @@ mod test_support;
 mod text;
 #[cfg(target_os = "linux")]
 mod toggle;
+#[cfg(target_os = "macos")]
+mod tray_press;
 // 境目の型は、Windows でもテストで書き出す。Windows では書き出すだけで使わない
 #[cfg(any(target_os = "macos", test))]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -4612,7 +4614,8 @@ fn tray_tooltip(app: &AppHandle) -> String {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    TrayIconBuilder::with_id(TRAY_ID)
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(TRAY_ICON)
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip(tray_tooltip(app))
@@ -4629,7 +4632,27 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
+    #[cfg(target_os = "macos")]
+    {
+        let app = app.clone();
+        tray.with_inner_tray_icon(move |inner| {
+            if let Some(status_item) = inner.ns_status_item() {
+                tray_press::on_press(&status_item, move || show_tray_menu(&app));
+            }
+        })?;
+    }
     Ok(())
+}
+
+/// VoiceOver などから押されたメニューバーのアイコンのメニューを開く (tray_press.rs)
+#[cfg(target_os = "macos")]
+fn show_tray_menu(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    if let Err(error) = tray.with_inner_tray_icon(|inner| inner.show_menu()) {
+        error!("couldn't show the tray menu: {error}");
+    }
 }
 
 /// 表示言語や問題が変わったときに、トレイメニューを作り直す

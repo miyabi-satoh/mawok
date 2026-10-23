@@ -179,8 +179,8 @@ const SCREEN_WINDOWS_PRELUDE = `
 
 /**
  * メニューバーのアイコンのメニューを開く (`openMenu`) と、開いているかを読む (`menuOpen`) JXA の前置き。
- * メニューの要素はアクセシビリティでは閉じていても読め、押すこともできるので、開いているかは、
- * 画面に出ている Mawok のポップアップメニューの層 (kCGPopUpMenuWindowLevel) の窓で見る
+ * VoiceOver の押す操作と同じ AXPress で開く (src-tauri/src/tray_press.rs)。メニューの要素は開いている間だけ読める。
+ * 開いているかは、画面に出ている Mawok のポップアップメニューの層 (kCGPopUpMenuWindowLevel) の窓で見る
  */
 const TRAY_MENU_PRELUDE = `${SCREEN_WINDOWS_PRELUDE}
 	const menuOpen = () => screenWindows().some((w) => w.kCGWindowLayer === 101);
@@ -204,7 +204,7 @@ export function readTrayMenu() {
 }
 
 /**
- * メニューバーのアイコンのメニューの、項目の名前と添えたキー。アクセシビリティでは、閉じていても読める。
+ * 開いているメニューバーのアイコンのメニューの、項目の名前と添えたキー。メニューの要素は開いている間だけ読める。
  * `key` はキーの文字 (無ければ null)、`modifiers` は AXMenuItemCmdModifiers の値
  * (Command を前提に、1 が Shift・2 が Option・4 が Control、8 は Command なし)
  */
