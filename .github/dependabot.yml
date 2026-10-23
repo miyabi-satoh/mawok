@@ -10,13 +10,16 @@ updates:
     directory: '/src-tauri'
     schedule:
       interval: 'monthly'
-    # Tauri（wry・notify-rust）が使うのと同じ版に揃えている crate。Tauri より先に上げると型が合わなくなるので、
-    # Tauri が上がって scripts/check-pinned-deps.mjs が落ちたときに手で上げる。
+    # Tauri（wry・tao・notify-rust・tauri-plugin-single-instance）が使うのと同じ版に揃えている crate（scripts/check-pinned-deps.mjs の PINNED）。
+    # Tauri より先に上げると型が合わなくなるか、2版入るので、Tauri が上がって scripts/check-pinned-deps.mjs が落ちたときに手で上げる。
     # 0.x の 0.38 → 0.39 は minor として扱われ、semver-major の指定では止まらないので、版を問わず外す
     ignore:
       - dependency-name: 'webview2-com'
       - dependency-name: 'windows-core'
       - dependency-name: 'tauri-winrt-notification'
+      - dependency-name: 'webkit2gtk'
+      - dependency-name: 'gtk'
+      - dependency-name: 'zbus'
       # sha2 と hkdf は同じ digest の版で組む (src-tauri/src/sync_key.rs の Hkdf::<Sha256>)。片方だけ上がるとビルドが通らず、
       # sha2 を上げると Tauri (wry・tauri-codegen) の使う 0.10 と2版入る。Tauri が移ったら、2つを手で一緒に上げる
       - dependency-name: 'sha2'
