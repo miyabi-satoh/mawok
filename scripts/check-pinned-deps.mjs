@@ -21,7 +21,7 @@ const PINNED = [
 
 // Dependabot が相手より先に上げると、ここで落ちる PR が毎月来る。PINNED に足した crate を ignore に足し忘れないよう見る。
 // 見るのは cargo の欄だけ (次の `- package-ecosystem:` まで)。npm の欄に同じ名前があっても数えない。
-// update-types で絞った項目は、絞った外の版を上げてくるので、外したとは数えない。
+// update-types・versions で絞った項目は、絞った外の版を上げてくるので、外したとは数えない。
 const lines = readFileSync('.github/dependabot.yml', 'utf8')
 	.split('\n')
 	.filter((line) => !/^\s*#/.test(line));
@@ -43,7 +43,7 @@ cargoLines.forEach((line, index) => {
 	const rest = cargoLines.slice(index + 1);
 	const end = rest.findIndex((next) => next.trim() && next.search(/\S/) <= entry[1].length);
 	const fields = end === -1 ? rest : rest.slice(0, end);
-	if (!fields.some((field) => /^\s*update-types:/.test(field))) ignored.add(entry[2]);
+	if (!fields.some((field) => /^\s*(update-types|versions):/.test(field))) ignored.add(entry[2]);
 });
 const notIgnored = PINNED.map(({ name }) => name).filter((name) => !ignored.has(name));
 
