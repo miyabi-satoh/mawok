@@ -12,6 +12,7 @@ pub const AI_PREFIX: &str = "@ai";
 /// 行頭にあれば、残りをコマンドとしてその機のシェルで実行する宛先
 pub const SH_PREFIX: &str = "@sh";
 /// 言語を替えても同じ既定の校正の定型文を見分けるための ID。
+/// 前の既定の英訳の ID は使い回さない。英訳を書き換えて設定に持つ行と、別の定型文が同じ ID になるため。
 const DEFAULT_PROOFREAD_SNIPPET_ID: &str = "bfaf6464995d48d589cf0224cb3fe10d";
 /// 言語を替えても同じ既定の並べ替えの定型文を見分けるための ID。
 const DEFAULT_SORT_SNIPPET_ID: &str = "9c4d11698d17426c8e930b8118ffb2f2";
@@ -51,12 +52,12 @@ pub fn default_snippets(lang: Lang) -> Vec<Snippet> {
     let (proofread, proofread_instruction, sort) = match lang {
         Lang::Ja => (
             "校正",
-            "次の文章の誤字・脱字と文法の誤りだけを直してください。言い回しと言語は変えず、直した文章だけを返してください。",
+            "次の文章の誤字・脱字と文法の誤りだけを直してください。言い回しと言語は変えず、直した文章だけを返してください。直す所が無ければ、元の文章をそのまま返してください。",
             "行を並べ替え",
         ),
         Lang::En => (
             "Proofread",
-            "Fix only the spelling and grammar mistakes in the following text. Do not change the wording or the language. Return only the corrected text.",
+            "Fix only the spelling and grammar mistakes in the following text. Do not change the wording or the language. Return only the corrected text. If there is nothing to fix, return the text unchanged.",
             "Sort lines",
         ),
     };
