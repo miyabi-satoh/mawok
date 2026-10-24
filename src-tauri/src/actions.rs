@@ -52,12 +52,12 @@ pub fn default_snippets(lang: Lang) -> Vec<Snippet> {
     let (proofread, proofread_instruction, sort) = match lang {
         Lang::Ja => (
             "校正",
-            "次の文章の誤字・脱字と文法の誤りだけを、言い回しと言語は変えずに直してください。説明は付けず、文章だけを返してください (直す所が無ければそのまま)。",
+            "次の文章の誤字・脱字と文法の誤りだけを、言い回しと言語は変えずに直してください。説明は付けず、直した文章だけを返してください。直す所が無ければ、元の文章をそのまま返してください。",
             "行を並べ替え",
         ),
         Lang::En => (
             "Proofread",
-            "Fix only the spelling and grammar mistakes in the following text, without changing the wording or the language. Return only the text with no explanation, unchanged if nothing needs fixing.",
+            "Fix only the spelling and grammar mistakes in the following text, without changing the wording or the language. Return only the corrected text, with no explanation. If nothing needs fixing, return the text unchanged.",
             "Sort lines",
         ),
     };
