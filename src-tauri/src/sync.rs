@@ -4025,9 +4025,9 @@ mod tests {
     #[test]
     fn default_snippets_from_another_device_do_not_conflict_with_the_local_defaults() {
         let sort = default_snippet(1, crate::i18n::Lang::system());
-        // 相手は、英訳を別の表示言語で持ち、並べ替えを同期する行にして、別の文字コードで書いている
+        // 相手は、校正を別の表示言語で持ち、並べ替えを同期する行にして、別の文字コードで書いている
         for lang in [crate::i18n::Lang::Ja, crate::i18n::Lang::En] {
-            let translate = Snippet {
+            let proofread = Snippet {
                 enabled: false,
                 ..default_snippet(0, lang)
             };
@@ -4046,21 +4046,21 @@ mod tests {
                 ),
                 remote(
                     SETTINGS,
-                    &row_id('n', &translate.id),
+                    &row_id('n', &proofread.id),
                     3,
-                    row_value(&translate),
+                    row_value(&proofread),
                 ),
                 remote(
                     SETTINGS,
                     "o_snippets",
                     4,
-                    json!([translate.id, their_sort.id]),
+                    json!([proofread.id, their_sort.id]),
                 ),
             ];
             for result in receive_snippets(&items) {
                 assert_eq!(
                     result.config.snippets,
-                    Some(vec![translate.clone(), sort.clone()]),
+                    Some(vec![proofread.clone(), sort.clone()]),
                     "{lang:?}"
                 );
                 // 並べ替えは手元で同期しない行。その id を抜いた並びを書き戻さない
@@ -4079,13 +4079,13 @@ mod tests {
 
     #[test]
     fn unsyncing_a_default_snippet_never_written_writes_the_mark_once() {
-        let mut translate = default_snippet(0, crate::i18n::Lang::system());
-        translate.sync = false;
-        let key = ItemKey::new(SETTINGS, row_id('n', &translate.id));
-        // 既定の定型文のままのデバイスで、最初の操作として英訳を同期から外した
+        let mut proofread = default_snippet(0, crate::i18n::Lang::system());
+        proofread.sync = false;
+        let key = ItemKey::new(SETTINGS, row_id('n', &proofread.id));
+        // 既定の定型文のままのデバイスで、最初の操作として校正を同期から外した
         let local = Config {
             snippets: Some(vec![
-                translate,
+                proofread,
                 default_snippet(1, crate::i18n::Lang::system()),
             ]),
             ..Config::default()
@@ -4109,16 +4109,16 @@ mod tests {
         }
     }
 
-    /// 英訳（既定で同期する既定の定型文）を、同期しない行として持つデバイス
-    fn translate_unsynced() -> (Config, ItemKey) {
-        let translate = Snippet {
+    /// 校正（既定で同期する既定の定型文）を、同期しない行として持つデバイス
+    fn proofread_unsynced() -> (Config, ItemKey) {
+        let proofread = Snippet {
             sync: false,
             ..default_snippet(0, crate::i18n::Lang::system())
         };
-        let key = ItemKey::new(SETTINGS, row_id('n', &translate.id));
+        let key = ItemKey::new(SETTINGS, row_id('n', &proofread.id));
         let local = Config {
             snippets: Some(vec![
-                translate,
+                proofread,
                 default_snippet(1, crate::i18n::Lang::system()),
             ]),
             ..Config::default()
@@ -4128,7 +4128,7 @@ mod tests {
 
     #[test]
     fn an_unsynced_default_snippet_already_on_the_server_gets_no_mark() {
-        let (local, key) = translate_unsynced();
+        let (local, key) = proofread_unsynced();
         let arrivals = [
             (
                 "value",
@@ -4161,8 +4161,8 @@ mod tests {
 
     #[test]
     fn a_mark_refused_because_the_item_exists_is_not_written_again() {
-        let (local, key) = translate_unsynced();
-        // 読んだ後に、ほかのデバイスが英訳を書いた
+        let (local, key) = proofread_unsynced();
+        // 読んだ後に、ほかのデバイスが校正を書いた
         let theirs = ConflictItem {
             key: key.clone(),
             seq: Some(5),
@@ -4193,7 +4193,7 @@ mod tests {
 
     #[test]
     fn a_mark_is_written_no_later_than_the_order_without_its_row() {
-        let (mut local, key) = translate_unsynced();
+        let (mut local, key) = proofread_unsynced();
         // 並びより後に積まれる行で、1回の書き込みの上限を超える
         for index in 0..WRITE_BATCH_SIZE {
             local.replacements.push(Replacement {
@@ -4220,7 +4220,7 @@ mod tests {
     #[test]
     fn a_default_snippet_unsynced_on_another_device_stays_as_an_unsynced_row() {
         let sort = default_snippet(1, crate::i18n::Lang::system());
-        let translate = Snippet {
+        let proofread = Snippet {
             sync: false,
             ..default_snippet(0, crate::i18n::Lang::system())
         };
@@ -4230,7 +4230,7 @@ mod tests {
             body: "echo".into(),
             ..Snippet::default()
         };
-        let mark_key = ItemKey::new(SETTINGS, row_id('n', &translate.id));
+        let mark_key = ItemKey::new(SETTINGS, row_id('n', &proofread.id));
         // どれが先に届いても同じ
         for (mark_seq, other_seq) in [(2, 3), (3, 2)] {
             let items = [
@@ -4240,7 +4240,7 @@ mod tests {
             for result in receive_snippets(&items) {
                 assert_eq!(
                     result.config.snippets,
-                    Some(vec![translate.clone(), sort.clone()]),
+                    Some(vec![proofread.clone(), sort.clone()]),
                     "mark at {mark_seq}"
                 );
                 assert!(snippet_writes(&result).is_empty(), "mark at {mark_seq}");
@@ -4258,7 +4258,7 @@ mod tests {
             for result in receive_snippets(&items) {
                 assert_eq!(
                     result.config.snippets,
-                    Some(vec![translate.clone(), sort.clone(), custom.clone()]),
+                    Some(vec![proofread.clone(), sort.clone(), custom.clone()]),
                     "mark at {mark_seq}"
                 );
                 assert!(snippet_writes(&result).is_empty(), "mark at {mark_seq}");
@@ -4278,7 +4278,7 @@ mod tests {
     #[test]
     fn a_default_snippet_deleted_on_another_device_does_not_come_back() {
         let sort = default_snippet(1, crate::i18n::Lang::system());
-        let translate = default_snippet(0, crate::i18n::Lang::En);
+        let proofread = default_snippet(0, crate::i18n::Lang::En);
         let custom = Snippet {
             id: "a".repeat(32),
             name: "自作".into(),
@@ -4286,7 +4286,7 @@ mod tests {
             ..Snippet::default()
         };
         let items = [
-            deleted(&ItemKey::new(SETTINGS, row_id('n', &translate.id)), 2),
+            deleted(&ItemKey::new(SETTINGS, row_id('n', &proofread.id)), 2),
             remote(SETTINGS, &row_id('n', &custom.id), 3, row_value(&custom)),
             remote(SETTINGS, "o_snippets", 4, json!([custom.id])),
         ];
