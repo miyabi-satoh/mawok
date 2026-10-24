@@ -44,19 +44,19 @@ pub fn sh_command(line: &str) -> Option<&str> {
 }
 
 /// 既定の定型文。定型文を変えていないときに、今の表示言語で使う。
-/// AI の見本（校正。どの表示言語でも同じ意味で使え、元と同じ言語で返させる）と、どの OS にも入っているコマンドの見本（`sort`。標準入力を並べ替えて返す）を1つずつ。
+/// AI の見本（校正。どの表示言語でも使える）と、どの OS にも入っているコマンドの見本（`sort`。標準入力を並べ替えて返す）を1つずつ。
 /// Windows の `sort` はシステムの文字コードで読み書きするので、Shift_JIS にする。
 /// 文字コードの既定が OS で違うコマンドの見本は、同期しない行にしておく（docs/sync.md「同期する単位」）
 pub fn default_snippets(lang: Lang) -> Vec<Snippet> {
     let (proofread, proofread_instruction, sort) = match lang {
         Lang::Ja => (
             "校正",
-            "次の文章の誤字・脱字と文法の誤りを直してください。言い回しは変えず、元の文章と同じ言語で、直した文章だけを返してください。",
+            "次の文章の誤字・脱字と文法の誤りだけを直してください。言い回しと言語は変えず、直した文章だけを返してください。",
             "行を並べ替え",
         ),
         Lang::En => (
             "Proofread",
-            "Fix the spelling and grammar mistakes in the following text. Keep the wording and the language of the original. Return only the corrected text.",
+            "Fix only the spelling and grammar mistakes in the following text. Do not change the wording or the language. Return only the corrected text.",
             "Sort lines",
         ),
     };
