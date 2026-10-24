@@ -11,8 +11,9 @@ use crate::{
 pub const AI_PREFIX: &str = "@ai";
 /// 行頭にあれば、残りをコマンドとしてその機のシェルで実行する宛先
 pub const SH_PREFIX: &str = "@sh";
-/// 言語を替えても同じ既定の翻訳の定型文を見分けるための ID。
-const DEFAULT_TRANSLATE_SNIPPET_ID: &str = "6b6a77e6d4f846f2a8bbf953fbd0e0d3";
+/// 言語を替えても同じ既定の校正の定型文を見分けるための ID。
+/// 前の既定の英訳の ID は使い回さない。英訳を書き換えて設定に持つ行と、別の定型文が同じ ID になるため。
+const DEFAULT_PROOFREAD_SNIPPET_ID: &str = "bfaf6464995d48d589cf0224cb3fe10d";
 /// 言語を替えても同じ既定の並べ替えの定型文を見分けるための ID。
 const DEFAULT_SORT_SNIPPET_ID: &str = "9c4d11698d17426c8e930b8118ffb2f2";
 
@@ -44,19 +45,19 @@ pub fn sh_command(line: &str) -> Option<&str> {
 }
 
 /// 既定の定型文。定型文を変えていないときに、今の表示言語で使う。
-/// AI の見本（英訳）と、どの OS にも入っているコマンドの見本（`sort`。標準入力を並べ替えて返す）を1つずつ。
+/// AI の見本（校正。どの表示言語でも使える）と、どの OS にも入っているコマンドの見本（`sort`。標準入力を並べ替えて返す）を1つずつ。
 /// Windows の `sort` はシステムの文字コードで読み書きするので、Shift_JIS にする。
 /// 文字コードの既定が OS で違うコマンドの見本は、同期しない行にしておく（docs/sync.md「同期する単位」）
 pub fn default_snippets(lang: Lang) -> Vec<Snippet> {
-    let (translate, translate_instruction, sort) = match lang {
+    let (proofread, proofread_instruction, sort) = match lang {
         Lang::Ja => (
-            "英訳",
-            "次の文章を、自然な英語に訳してください。訳した文章だけを返してください。",
+            "校正",
+            "次の文章の誤字・脱字と文法の誤りだけを、言い回しと言語は変えずに直してください。説明は付けず、直した文章だけを返してください。直す所が無ければ、元の文章をそのまま返してください。",
             "行を並べ替え",
         ),
         Lang::En => (
-            "Translate to English",
-            "Translate the following text into natural English. Return only the translated text.",
+            "Proofread",
+            "Fix only the spelling and grammar mistakes in the following text, without changing the wording or the language. Return only the corrected text, with no explanation. If nothing needs fixing, return the text unchanged.",
             "Sort lines",
         ),
     };
@@ -67,9 +68,9 @@ pub fn default_snippets(lang: Lang) -> Vec<Snippet> {
     };
     [
         (
-            DEFAULT_TRANSLATE_SNIPPET_ID,
-            translate,
-            ai_line(translate_instruction),
+            DEFAULT_PROOFREAD_SNIPPET_ID,
+            proofread,
+            ai_line(proofread_instruction),
             ActionEncoding::Utf8,
             true,
         ),

@@ -107,7 +107,7 @@ test.describe('既定の定型文の「行を並べ替え」', () => {
 			const rows = await client.execute(() => {
 				const panel = document.querySelector('[role="tabpanel"]:not([hidden])');
 				const names = [...panel.querySelectorAll('input')].filter((input) =>
-					['英訳', '行を並べ替え'].includes(input.value)
+					['校正', '行を並べ替え'].includes(input.value)
 				);
 				return names.map((input) => {
 					// 名前の欄から上へたどり、本文の欄 (textarea) を含む最初の要素を行とみなす
@@ -124,7 +124,7 @@ test.describe('既定の定型文の「行を並べ替え」', () => {
 			});
 			console.log('設定の行:', JSON.stringify(rows));
 			const sort = rows.find((row) => row.name === '行を並べ替え');
-			const translate = rows.find((row) => row.name === '英訳');
+			const proofread = rows.find((row) => row.name === '校正');
 			assert.equal(sort?.command, '@sh sort');
 			assert.equal(sort?.encoding, 'shift_jis');
 			assert.deepEqual(sort?.options, [
@@ -134,7 +134,7 @@ test.describe('既定の定型文の「行を並べ替え」', () => {
 				'JIS (ISO-2022-JP)',
 				'UTF-16 LE'
 			]);
-			assert.equal(translate?.encoding, null, '@ai の行には文字コードの選択が出ないはず');
+			assert.equal(proofread?.encoding, null, '@ai の行には文字コードの選択が出ないはず');
 		} finally {
 			await closeDraftSettings(client, draftHandle);
 		}
