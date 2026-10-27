@@ -260,7 +260,7 @@ describe('設定画面の同期のパスワード', () => {
 		await dialog
 			.getByRole('button', { name: m.settings_sync_data_delete_confirm(), exact: true })
 			.click();
-		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('delete_sync_data', undefined));
+		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('delete_sync_data'));
 	});
 
 	it.each(['notStarted', 'none'] as const)('同期データの削除を出さない (%s)', async (status) => {
@@ -333,7 +333,7 @@ describe('設定画面の同期のパスワード', () => {
 		await screen.getByRole('button', { name: m.settings_sync_password_change() }).click();
 		const form = screen.getByRole('form', { name: m.settings_sync_password_change_title() });
 		await expect.element(form).toBeVisible();
-		// ほかのデバイスのリセットで「入力」へ移り、入れ直して戻る
+		// ほかのデバイスが削除して始め直したので「入力」へ移り、入れ直して戻る
 		pro('needsPassword');
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_sync_password_enter() }))

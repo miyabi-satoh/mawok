@@ -11,7 +11,8 @@
 	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
 	import type { SettingsView } from '$lib/settings.svelte';
-	import { syncPanel } from '$lib/sync-password';
+	import { syncPanel, syncStateChanged } from '$lib/sync-password';
+	import { invoke } from '@tauri-apps/api/core';
 
 	/**
 	 * アカウントの同期。同期のパスワード（始める・入れる・変える・データの削除）と、種類ごとの切り替えを置く
@@ -73,6 +74,15 @@
 		{ kind: 'snippets', label: m.settings_sync_snippets },
 		{ kind: 'history', label: m.settings_sync_history }
 	] as const satisfies readonly { kind: SyncKind; label: () => string }[];
+
+	async function deleteSyncData() {
+		try {
+			await invoke('delete_sync_data');
+		} catch (error) {
+			// 窓口の状態が変わっていた（Pro が終わったなど）ときは、鍵の状態を読み直してあり、欄が今の状態へ移るので出さない
+			if (!syncStateChanged(error)) onfailure(error);
+		}
+	}
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
@@ -167,7 +177,7 @@
 		</AlertDialog.Header>
 		<AlertDialog.Footer>
 			<AlertDialog.Cancel>{m.common_cancel()}</AlertDialog.Cancel>
-			<AlertDialog.Action variant="destructive" onclick={() => void call('delete_sync_data')}>
+			<AlertDialog.Action variant="destructive" onclick={deleteSyncData}>
 				{m.settings_sync_data_delete_confirm()}
 			</AlertDialog.Action>
 		</AlertDialog.Footer>

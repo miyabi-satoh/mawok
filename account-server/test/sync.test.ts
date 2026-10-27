@@ -182,6 +182,17 @@ describe('sync', () => {
 			reset: true,
 			items: []
 		});
+		expect(
+			(await getSync(env, account, { since: 0, limit: 10, rebuild: false })).key_id
+		).toBeNull();
+		// 削除を知らないデバイスの書き込みとパスワードの変更は、鍵の食い違いとして断る
+		expect(
+			await putSync(env, account, {
+				key_id: KEY,
+				items: [{ collection: 'settings', id: 'late', base_seq: null, deleted: false, data: 'AQ==' }]
+			})
+		).toMatchObject({ ok: false, error: 'key_mismatch' });
+		expect(await putSyncKey(env, account, key(KEY, 'rewrapped'))).toBe('key_mismatch');
 		expect(await startSyncKey(env, account, key('b'.repeat(16), 'two'))).toEqual({ seq: 3 });
 		expect(await startSyncKey(env, account, { key_id: KEY })).toBe('invalid_request');
 	});

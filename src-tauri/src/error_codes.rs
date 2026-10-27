@@ -11,7 +11,7 @@ pub const BACKUP_RESTORE_PARTIAL: &str = "backup.restore_partial";
 pub const SYNC_WRONG_PASSWORD: &str = "sync.wrong_password";
 /// 同期のパスワードが短すぎる
 pub const SYNC_PASSWORD_TOO_SHORT: &str = "sync.password_too_short";
-/// 窓口の同期の状態が、画面を出したときから変わっていた（ほかのデバイスが始めた・リセットした・Pro が終わった）。
+/// 窓口の同期の状態が、画面を出したときから変わっていた（ほかのデバイスが始めた・同期データを削除した・Pro が終わった）。
 /// 鍵の状態は読み直してあるので、画面はエラーを出さずに、今の状態の欄へ移る
 pub const SYNC_STATE_CHANGED: &str = "sync.state_changed";
 /// キーを割り当てられない理由（`draft_keys::Rejection::code`）

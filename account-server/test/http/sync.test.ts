@@ -177,12 +177,6 @@ describe('sync HTTP', () => {
 			reset: true,
 			items: []
 		});
-		const old = await put(token, {
-			key_id: KEY,
-			items: [{ collection: 'settings', id: 'one', base_seq: null, deleted: false, data: 'AQ==' }]
-		});
-		expect(old.status).toBe(409);
-		expect(await old.json()).toEqual({ error: 'key_mismatch' });
 		expect(
 			(
 				await app('/v1/sync/start', token, {

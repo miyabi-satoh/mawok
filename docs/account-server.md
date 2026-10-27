@@ -88,7 +88,7 @@
 - 1項目は 256 KiB、アカウント全体は 16 MiB、1回に書くのは 100 項目までにする。暗号文だけでも、窓口の容量と通信量を際限なく使わないため。
 - Pro が終わった写しは 90 日後に消す。サブスクが無いアカウントの写しも消す。
 - Mawok は `GET /v1/sync` で受け取り、`PUT /v1/sync` でまとめて書く。同期を始めるときは `POST /v1/sync/start`、削除するときは `DELETE /v1/sync` を使う。
-  - 包んだ鍵: `GET /v1/sync/key` → `{ key_id, wrapped_key }`（始めていなければどちらも `null`）。`DELETE /v1/sync` は写しと鍵を消し、古い位置のデバイスに削除を知らせる。`POST /v1/sync/start` は `{ key_id, wrapped_key }` を受け、包んだ鍵がまだ無いときだけ受け、あれば 409 の `already_started` で何も変えない（状態の古いデバイスが、ほかのデバイスの始めた同期を消さないため）。`PUT /v1/sync` は、包んだ鍵の無い写しには `key_mismatch` で書かせない。`PUT /v1/sync/key` に `{ key_id, wrapped_key }` を送ると、同期のパスワードを変えた包み直しに置き換える。`key_id` が今のものと違えば 409 の `key_mismatch` で置き換えない。窓口は包んだ鍵を読まず、1024 字までの文字列として置く。
+  - 包んだ鍵: `GET /v1/sync/key` → `{ key_id, wrapped_key }`（始めていなければどちらも `null`）。`DELETE /v1/sync` は写しと鍵を消し、古い位置のデバイスに削除を知らせる。`POST /v1/sync/start` は `{ key_id, wrapped_key }` を、包んだ鍵がまだ無いときだけ受け、あれば 409 の `already_started` で何も変えない（状態の古いデバイスが、ほかのデバイスの始めた同期を消さないため）。`PUT /v1/sync` は、包んだ鍵の無い写しには `key_mismatch` で書かせない。`PUT /v1/sync/key` に `{ key_id, wrapped_key }` を送ると、同期のパスワードを変えた包み直しに置き換える。`key_id` が今のものと違えば 409 の `key_mismatch` で置き換えない。窓口は包んだ鍵を読まず、1024 字までの文字列として置く。
   - 読む: `GET /v1/sync?since=<seq>&limit=<n>&rebuild=1` → `{ key_id, seq, reset, items: [{ collection, id, seq, deleted, data }], more, next }`。`data` は暗号文の base64 で、消した記録では `null`。1ページは既定 200・上限 500 項目（書く 100 項目とは別の数）。消した記録も返すので、知らない項目の分は読み捨てる。
   - `more` が true なら `since=next` で続きを取る。`since=0` から始めたときと `reset: true` を受けたときは、組み直しの途中なので続きに `rebuild=1` を付ける。`more` が false になったときの `next` を次の `since` にする。
   - 書く: `PUT /v1/sync` に `{ key_id, items: [{ collection, id, base_seq, deleted, data }] }`。`base_seq` は最後に見たその項目の `seq`（新しい項目は `null`）。応答は `{ seq, items: [{ collection, id, seq }] }`。
