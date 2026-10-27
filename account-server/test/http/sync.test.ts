@@ -214,7 +214,7 @@ describe('sync HTTP', () => {
 			204
 		);
 		expect(await key()).toEqual({ key_id: KEY, wrapped_key: 'two' });
-		// ほかのデバイスがリセットした後の、前の鍵の包み直しは置かない。
+		// ほかのデバイスが同期データを削除して始め直した後の、前の鍵の包み直しは置かない。
 		const replaced = await send('PUT', '/v1/sync/key', {
 			key_id: 'b'.repeat(16),
 			wrapped_key: 'three'
