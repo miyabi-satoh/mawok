@@ -127,4 +127,22 @@ describe('restoreChangeText', () => {
 			})
 		});
 	});
+
+	it('テキストウィンドウの見出しの下の項目は、見出しを付けて示す', () => {
+		const changes: BackupDifference[] = [
+			{
+				id: 's_show_text_window_buttons',
+				current: { type: 'show_text_window_buttons', value: true },
+				restored: { type: 'show_text_window_buttons', value: false }
+			}
+		];
+		expect(restoreChangeText(changes, 'ja').changes).toBe(
+			m.backup_restore_changes({
+				names: m.backup_label_sub({
+					group: m.settings_section_draft_window(),
+					item: m.settings_draft_buttons()
+				})
+			})
+		);
+	});
 });

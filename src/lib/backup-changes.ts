@@ -18,6 +18,10 @@ function rowName(row: Row): string {
 	}
 }
 
+/** 設定の画面では見出しの「テキストウィンドウ」が何の設定かを示すので、見出しの出ない一覧では付けて出す */
+const draftWindowLabel = (item: string) =>
+	m.backup_label_sub({ group: m.settings_section_draft_window(), item });
+
 /** 項目の名前。設定の画面でのその項目のラベルと同じ言い方にし、行は種類と行の名前にする */
 function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefined {
 	switch (value.type) {
@@ -26,11 +30,11 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 		case 'theme':
 			return m.settings_theme();
 		case 'text_window_always_on_top':
-			return m.settings_draft_always_on_top();
+			return draftWindowLabel(m.settings_draft_always_on_top());
 		case 'hide_text_window_on_blur':
-			return m.settings_hide_draft_on_blur();
+			return draftWindowLabel(m.settings_hide_draft_on_blur());
 		case 'show_text_window_buttons':
-			return m.settings_draft_buttons();
+			return draftWindowLabel(m.settings_draft_buttons());
 		case 'text_history_size':
 			return m.settings_draft_history_size();
 		case 'trim_trailing_whitespace':
