@@ -189,7 +189,9 @@ describe('sync', () => {
 		expect(
 			await putSync(env, account, {
 				key_id: KEY,
-				items: [{ collection: 'settings', id: 'late', base_seq: null, deleted: false, data: 'AQ==' }]
+				items: [
+					{ collection: 'settings', id: 'late', base_seq: null, deleted: false, data: 'AQ==' }
+				]
 			})
 		).toMatchObject({ ok: false, error: 'key_mismatch' });
 		expect(await putSyncKey(env, account, key(KEY, 'rewrapped'))).toBe('key_mismatch');
