@@ -138,7 +138,7 @@ test.describe('下書きを出す・隠す', () => {
 		assert.equal((await readDraft(client)).value, text, '書きかけが残っているはず');
 	});
 
-	test('「ほかのアプリに移ったら下書きを隠す」をオフにすると、ほかのアプリをクリックしても隠れない', async () => {
+	test('テキストウィンドウの「ほかのアプリに移ったら隠す」をオフにすると、ほかのアプリをクリックしても隠れない', async () => {
 		await invokeApp(client, 'set_hide_draft_on_blur', { enabled: false });
 		try {
 			await showDraftAndWaitVisible();

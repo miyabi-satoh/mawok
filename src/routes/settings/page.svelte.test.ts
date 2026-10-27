@@ -1535,7 +1535,7 @@ describe('設定画面のクリップボードの履歴に残さない', () => {
 	});
 });
 
-describe('設定画面の下書きを常に最前面に表示', () => {
+describe('設定画面のテキストウィンドウの「常に最前面に表示」', () => {
 	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), textWindowAlwaysOnTop: false };
 		const screen = await render(Page);
@@ -1554,7 +1554,7 @@ describe('設定画面の下書きを常に最前面に表示', () => {
 	});
 });
 
-describe('設定画面の下書きにボタンを表示', () => {
+describe('設定画面のテキストウィンドウの「ボタンを表示」', () => {
 	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), showTextWindowButtons: false };
 		const screen = await render(Page);
@@ -1573,7 +1573,7 @@ describe('設定画面の下書きにボタンを表示', () => {
 	});
 });
 
-describe('設定画面のほかのアプリに移ったら下書きを隠す', () => {
+describe('設定画面のテキストウィンドウの「ほかのアプリに移ったら隠す」', () => {
 	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), hideTextWindowOnBlur: false };
 		const screen = await render(Page);

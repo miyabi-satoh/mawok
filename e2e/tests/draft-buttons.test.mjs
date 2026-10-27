@@ -189,7 +189,7 @@ test.describe('下書きのボタン', () => {
 		}
 	});
 
-	test('歯車で設定が開き、「テキストウィンドウにボタンを表示」をオフにすると、出し直された下書きに上下どちらの列もない', async () => {
+	test('歯車で設定が開き、テキストウィンドウの「ボタンを表示」をオフにすると、出し直された下書きに上下どちらの列もない', async () => {
 		// 前・次も出る状態にしてから始める
 		await copyDraft(client, 'git status');
 		await showDraftAndWaitVisible();

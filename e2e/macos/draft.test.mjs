@@ -134,7 +134,7 @@ test.describe('macOS: 出す・書く・コピーする', () => {
 		assert.equal(shown.value, 'kakikake');
 	});
 
-	test('1. の 10.: 「ほかのアプリに移ったら隠す」がオフなら、ほかのアプリをクリックしても出たまま', async () => {
+	test('1. の 10.: テキストウィンドウの「ほかのアプリに移ったら隠す」がオフなら、ほかのアプリをクリックしても出たまま', async () => {
 		await relaunchWithTestConfig({ hideTextWindowOnBlur: false });
 		await target.activate();
 		await showDraft();

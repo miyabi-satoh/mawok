@@ -817,7 +817,7 @@ const HIDE_ON_BLUR_DELAY: std::time::Duration = std::time::Duration::from_millis
 /// フォーカスが外れた後に、下書きを隠すかを決める材料
 #[derive(Debug, Clone, Copy)]
 struct BlurCheck {
-    /// 設定の「ほかのアプリに移ったら下書きを隠す」
+    /// 設定のテキストウィンドウの「ほかのアプリに移ったら隠す」
     enabled: bool,
     visible: bool,
     /// 出してから一度でもフォーカスが入ったか。Windows で前面に出せなかったとき（前面の制限）など、

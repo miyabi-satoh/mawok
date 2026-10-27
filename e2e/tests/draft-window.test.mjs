@@ -227,7 +227,7 @@ test.describe('下書きのウィンドウ', () => {
 		assert.equal(await isWindowAbove(hwnd, pasteTarget.hwnd), true, '下書きが上にあるはず');
 	});
 
-	test('「下書きを常に最前面に表示」をオフにすると、ほかのウィンドウをクリックしたときに後ろへ回り、ホットキーで前面に出る', async () => {
+	test('テキストウィンドウの「常に最前面に表示」をオフにすると、ほかのウィンドウをクリックしたときに後ろへ回り、ホットキーで前面に出る', async () => {
 		await invokeApp(client, 'set_draft_always_on_top', { enabled: false });
 		try {
 			await showDraftAndWaitVisible();
