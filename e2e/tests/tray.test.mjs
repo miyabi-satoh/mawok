@@ -253,7 +253,7 @@ test.describe('トレイ', () => {
 		await showDraftAndWaitVisible();
 		const [draftHandle] = await client.getWindowHandles();
 		const { hwnd } = await openTrayMenu(pid);
-		// 「ほかのアプリに移ったら下書きウィンドウを隠す」がオンなので、アイコンを押して下書きからフォーカスが外れた時点で隠れる
+		// テキストウィンドウの「ほかのアプリに移ったら隠す」がオンなので、アイコンを押して下書きからフォーカスが外れた時点で隠れる
 		await waitDraftHidden('トレイのアイコンを押して隠れる下書き');
 		await clickTrayMenuItem(hwnd, TRAY_MENU_JA.settings);
 		// 前面になる前の Esc は、設定ウィンドウに届かない

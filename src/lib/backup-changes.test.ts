@@ -128,20 +128,21 @@ describe('restoreChangeText', () => {
 		});
 	});
 
-	it('テキストウィンドウの見出しの下の項目は、見出しを付けて示す', () => {
+	it.each([
+		['text_window_always_on_top', m.settings_draft_always_on_top],
+		['hide_text_window_on_blur', m.settings_hide_draft_on_blur],
+		['show_text_window_buttons', m.settings_draft_buttons]
+	] as const)('テキストウィンドウの見出しの下の項目 %s は、見出しを付けて示す', (type, item) => {
 		const changes: BackupDifference[] = [
 			{
-				id: 's_show_text_window_buttons',
-				current: { type: 'show_text_window_buttons', value: true },
-				restored: { type: 'show_text_window_buttons', value: false }
+				id: `s_${type}`,
+				current: { type, value: true },
+				restored: { type, value: false }
 			}
 		];
 		expect(restoreChangeText(changes, 'ja').changes).toBe(
 			m.backup_restore_changes({
-				names: m.backup_label_sub({
-					group: m.settings_section_draft_window(),
-					item: m.settings_draft_buttons()
-				})
+				names: m.backup_label_sub({ group: m.settings_section_draft_window(), item: item() })
 			})
 		);
 	});
