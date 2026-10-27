@@ -14,7 +14,7 @@
 	import { syncPanel } from '$lib/sync-password';
 
 	/**
-	 * アカウントの同期。同期のパスワード（始める・入れる・変える・リセット）と、種類ごとの切り替えを置く
+	 * アカウントの同期。同期のパスワード（始める・入れる・変える・データの削除）と、種類ごとの切り替えを置く
 	 * （docs/sync.md「同期のパスワード」）。onfailure は、欄に出さない失敗を画面のエラーの帯に出す
 	 */
 	let {
@@ -26,17 +26,15 @@
 		call: Call;
 		onfailure: (error: unknown) => void;
 	} = $props();
-	let resetOpen = $state(false);
-	/** 「同期をリセット」を確かめて、新しいパスワードを作っている途中か */
-	let resetting = $state(false);
+	let deleteOpen = $state(false);
 	/** 同期のパスワードを変える欄を出しているか */
 	let changing = $state(false);
 	/** パスワードを変え終えた知らせを出すか。次に操作するまで出しておく */
 	let changed = $state(false);
-	const panel = $derived(syncPanel(view.syncKeyStatus, resetting));
+	const panel = $derived(syncPanel(view.syncKeyStatus));
 	/** 作る・入れる欄をボタンで開いたか。1台につき一度きりなので、押すまで欄を出さない */
 	let opened = $state(false);
-	// 状態が移ったら（ほかのデバイスが始めた・リセットした）閉じる。戻ったときに、押していない欄が開いて見えないため。
+	// 状態が移ったら（ほかのデバイスが始めた・同期データを削除した）閉じる。戻ったときに、押していない欄が開いて見えないため。
 	// 描く前に閉じ、移った先の欄が一瞬開いて見えないようにする
 	$effect.pre(() => {
 		void panel;
@@ -57,11 +55,10 @@
 	};
 
 	function closeForm() {
-		resetting = false;
 		opened = false;
 	}
 
-	// 同期していない状態に移ったら（ほかのデバイスのリセットなど）、書きかけの変更の欄と、変え終えた知らせを片付ける。
+	// 同期していない状態に移ったら（ほかのデバイスによる削除など）、書きかけの変更の欄と、変え終えた知らせを片付ける。
 	// 入れ直して戻ったときに、前の欄や知らせが残って見えないため
 	$effect(() => {
 		if (view.syncKeyStatus === 'ready') return;
@@ -76,30 +73,13 @@
 		{ kind: 'snippets', label: m.settings_sync_snippets },
 		{ kind: 'history', label: m.settings_sync_history }
 	] as const satisfies readonly { kind: SyncKind; label: () => string }[];
-
-	function confirmReset() {
-		resetOpen = false;
-		changing = false;
-		changed = false;
-		resetting = true;
-	}
 </script>
 
 <SettingsSection title={m.settings_section_sync()}>
 	{#if panel === 'create' || panel === 'enter'}
 		<SettingsRow>
-			{#if resetting || opened}
-				<!-- 忘れたときのリセットで入れる欄から作る欄へ替わったら、打った文字を持ち越さないよう作り直す -->
-				{#key panel}
-					<SyncPasswordForm
-						mode={panel}
-						replace={resetting}
-						{onfailure}
-						ondone={closeForm}
-						oncancel={closeForm}
-						onforgot={panel === 'enter' ? () => (resetOpen = true) : undefined}
-					/>
-				{/key}
+			{#if opened}
+				<SyncPasswordForm mode={panel} {onfailure} ondone={closeForm} oncancel={closeForm} />
 			{:else}
 				{@const row = closedRow[panel]}
 				<Field.Content>
@@ -155,9 +135,6 @@
 							>
 								{m.settings_sync_password_change()}
 							</Button>
-							<Button variant="outline" size="sm" onclick={() => (resetOpen = true)}>
-								{m.settings_sync_reset()}
-							</Button>
 						</div>
 					</Field.Field>
 					{#if changed}
@@ -168,20 +145,30 @@
 			</SettingsRow>
 		{/if}
 	{/if}
+	{#if view.syncKeyStatus === 'ready' || view.syncKeyStatus === 'needsPassword'}
+		<SettingsRow>
+			<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
+				<Field.Title>{m.settings_sync_data_row()}</Field.Title>
+				<Button variant="outline" size="sm" onclick={() => (deleteOpen = true)}>
+					{m.settings_sync_data_delete()}
+				</Button>
+			</Field.Field>
+		</SettingsRow>
+	{/if}
 </SettingsSection>
 
-<AlertDialog.Root bind:open={resetOpen}>
+<AlertDialog.Root bind:open={deleteOpen}>
 	<AlertDialog.Content>
 		<AlertDialog.Header>
-			<AlertDialog.Title>{m.settings_sync_reset_confirm_title()}</AlertDialog.Title>
+			<AlertDialog.Title>{m.settings_sync_data_delete_confirm_title()}</AlertDialog.Title>
 			<AlertDialog.Description
-				>{m.settings_sync_reset_confirm_description()}</AlertDialog.Description
+				>{m.settings_sync_data_delete_confirm_description()}</AlertDialog.Description
 			>
 		</AlertDialog.Header>
 		<AlertDialog.Footer>
 			<AlertDialog.Cancel>{m.common_cancel()}</AlertDialog.Cancel>
-			<AlertDialog.Action variant="destructive" onclick={confirmReset}>
-				{m.settings_sync_reset_confirm_start()}
+			<AlertDialog.Action variant="destructive" onclick={() => void call('delete_sync_data')}>
+				{m.settings_sync_data_delete_confirm()}
 			</AlertDialog.Action>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>

@@ -14,25 +14,20 @@
 
 	/**
 	 * 同期のパスワードの欄（docs/sync.md「同期のパスワード」）。
-	 * create は「同期を始める」と「同期をリセット...」の後、enter はほかのデバイスで始めた同期に加わるとき、change は変えるとき。
+	 * create は「同期を始める」とき、enter はほかのデバイスで始めた同期に加わるとき、change は変えるとき。
 	 * 欄に関わる失敗は欄の下に出し、ほかの失敗は onfailure に渡す（画面のエラーの帯に出す）。
-	 * 窓口の状態が変わっていたら（ほかのデバイスが始めた・リセットした）、oncancel で欄を閉じ、今の状態の欄に任せる。
-	 * replace は create のときだけ使い、窓口の写しを消して始め直す（「同期をリセット」）か
+	 * 窓口の状態が変わっていたら（ほかのデバイスが始めた・同期データを削除した）、oncancel で欄を閉じ、今の状態の欄に任せる。
 	 */
 	let {
 		mode,
 		onfailure,
 		ondone,
-		oncancel,
-		onforgot,
-		replace = false
+		oncancel
 	}: {
 		mode: 'create' | 'enter' | 'change';
-		replace?: boolean;
 		onfailure: (error: unknown) => void;
 		ondone?: () => void;
 		oncancel?: () => void;
-		onforgot?: () => void;
 	} = $props();
 
 	const id = $props.id();
@@ -43,9 +38,7 @@
 
 	const title = $derived(
 		mode === 'create'
-			? replace
-				? m.settings_sync_restart_title()
-				: m.settings_sync_start_title()
+			? m.settings_sync_start_title()
 			: mode === 'enter'
 				? m.settings_sync_join_title()
 				: m.settings_sync_password_change_title()
@@ -53,9 +46,7 @@
 	/** 同じパスワードをどのデバイスでも入れることを、決める側と入れる側の両方で伝える。変えるときは分かっているので出さない */
 	const description = $derived(
 		mode === 'create'
-			? replace
-				? m.settings_sync_restart_description()
-				: m.settings_sync_start_description()
+			? m.settings_sync_start_description()
 			: mode === 'enter'
 				? m.settings_sync_join_description()
 				: undefined
@@ -73,7 +64,7 @@
 		if (Object.keys(errors).length > 0) return;
 		busy = true;
 		try {
-			if (mode === 'create') await invoke('start_sync', { password, replace });
+			if (mode === 'create') await invoke('start_sync', { password });
 			else if (mode === 'enter') await invoke('unlock_sync', { password });
 			else await invoke('change_sync_password', { current, password });
 		} catch (error) {
@@ -151,11 +142,6 @@
 		{#if oncancel}
 			<Button type="button" variant="ghost" disabled={busy} onclick={oncancel}>
 				{m.common_cancel()}
-			</Button>
-		{/if}
-		{#if onforgot}
-			<Button type="button" variant="link" disabled={busy} onclick={onforgot}>
-				{m.settings_sync_password_forgot()}
 			</Button>
 		{/if}
 	</div>

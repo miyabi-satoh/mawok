@@ -54,7 +54,8 @@ import {
 	purgeSync,
 	putSync,
 	putSyncKey,
-	resetSync,
+	startSyncKey,
+	deleteSync,
 	SYNC_REQUEST_BYTES,
 	syncQuery
 } from './sync';
@@ -302,23 +303,21 @@ app.put('/v1/sync/key', async (c) => {
 	return c.body(null, 204);
 });
 
-/** 始める・リセットする (→ docs/account-server.md「同期」)。始めるのは、包んだ鍵がまだ無いときだけ。 */
-async function startSync(c: Context<App>, replace: boolean) {
+app.post('/v1/sync/start', async (c) => {
 	const accountId = await syncAccount(c);
 	if (accountId instanceof Response) return accountId;
-	const result = await resetSync(
-		c.env,
-		accountId,
-		await c.req.json().catch(() => undefined),
-		replace
-	);
+	const result = await startSyncKey(c.env, accountId, await c.req.json().catch(() => undefined));
 	if (result === 'invalid_request') return c.json({ error: result }, 400);
 	if (result === 'already_started') return c.json({ error: result }, 409);
 	return c.json(result);
-}
+});
 
-app.post('/v1/sync/start', (c) => startSync(c, false));
-app.post('/v1/sync/reset', (c) => startSync(c, true));
+app.delete('/v1/sync', async (c) => {
+	const accountId = await syncAccount(c);
+	if (accountId instanceof Response) return accountId;
+	await deleteSync(c.env, accountId);
+	return c.body(null, 204);
+});
 
 /**
  * AI の中継。残りがあれば Gemini へ送り、返事が届いたら使った原価を引いて、Gemini の返事をそのまま返す。

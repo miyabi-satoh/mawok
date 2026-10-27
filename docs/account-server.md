@@ -84,15 +84,15 @@
 
 - 有効な Pro（試用中を含む）は、同じアカウントに結んだ Mawok の間で、設定を項目ごとに、テキストウィンドウの履歴を最大 100 件で同期する。アプリは同期の鍵で中身を暗号化し、窓口は暗号文と、鍵の見分けの印と、同期のパスワードで包んだ鍵だけを置く（`docs/sync.md`「同期のパスワード」）。窓口が内容を読まず、ログにも残さないため。
 - 書く要求は、デバイスが最後に見た版と照らして全項目を一度に書く。1つでも食い違えば何も書かず、今の暗号文を返す。並行したデバイスの更新を混ぜず、アプリが取り直してから送り直せるようにするため。
-- 消した項目は記録として 90 日置く。古い記録を掃除した後のデバイスには、窓口の写しで組み直すよう知らせる。同期をリセットして新しい鍵で始め直すときも、前の写しを消して同じ組み直しをさせる。
+- 消した項目は記録として 90 日置く。古い記録を掃除した後のデバイスには、窓口の写しで組み直すよう知らせる。同期データを削除したときも、前の位置を持つデバイスに同じ組み直しを知らせる。
 - 1項目は 256 KiB、アカウント全体は 16 MiB、1回に書くのは 100 項目までにする。暗号文だけでも、窓口の容量と通信量を際限なく使わないため。
 - Pro が終わった写しは 90 日後に消す。サブスクが無いアカウントの写しも消す。
-- Mawok は `GET /v1/sync` で受け取り、`PUT /v1/sync` でまとめて書く。同期を始めるときは `POST /v1/sync/start`、リセットするときだけ `POST /v1/sync/reset` を使う。
-  - 包んだ鍵: `GET /v1/sync/key` → `{ key_id, wrapped_key }`（始めていなければどちらも `null`）。`POST /v1/sync/start` と `POST /v1/sync/reset` は `{ key_id, wrapped_key }` を受け、写しを消して新しい鍵で始め直す。start は包んだ鍵がまだ無いときだけ受け、あれば 409 の `already_started` で何も変えない（状態の古いデバイスが、ほかのデバイスの始めた同期を消さないため）。`PUT /v1/sync` は、包んだ鍵の無い写しには `key_mismatch` で書かせない。`PUT /v1/sync/key` に `{ key_id, wrapped_key }` を送ると、同期のパスワードを変えた包み直しに置き換える。`key_id` が今のものと違えば 409 の `key_mismatch` で置き換えない。窓口は包んだ鍵を読まず、1024 字までの文字列として置く。
+- Mawok は `GET /v1/sync` で受け取り、`PUT /v1/sync` でまとめて書く。同期を始めるときは `POST /v1/sync/start`、削除するときは `DELETE /v1/sync` を使う。
+  - 包んだ鍵: `GET /v1/sync/key` → `{ key_id, wrapped_key }`（始めていなければどちらも `null`）。`DELETE /v1/sync` は写しと鍵を消し、古い位置のデバイスに削除を知らせる。`POST /v1/sync/start` は `{ key_id, wrapped_key }` を受け、包んだ鍵がまだ無いときだけ受け、あれば 409 の `already_started` で何も変えない（状態の古いデバイスが、ほかのデバイスの始めた同期を消さないため）。`PUT /v1/sync` は、包んだ鍵の無い写しには `key_mismatch` で書かせない。`PUT /v1/sync/key` に `{ key_id, wrapped_key }` を送ると、同期のパスワードを変えた包み直しに置き換える。`key_id` が今のものと違えば 409 の `key_mismatch` で置き換えない。窓口は包んだ鍵を読まず、1024 字までの文字列として置く。
   - 読む: `GET /v1/sync?since=<seq>&limit=<n>&rebuild=1` → `{ key_id, seq, reset, items: [{ collection, id, seq, deleted, data }], more, next }`。`data` は暗号文の base64 で、消した記録では `null`。1ページは既定 200・上限 500 項目（書く 100 項目とは別の数）。消した記録も返すので、知らない項目の分は読み捨てる。
   - `more` が true なら `since=next` で続きを取る。`since=0` から始めたときと `reset: true` を受けたときは、組み直しの途中なので続きに `rebuild=1` を付ける。`more` が false になったときの `next` を次の `since` にする。
   - 書く: `PUT /v1/sync` に `{ key_id, items: [{ collection, id, base_seq, deleted, data }] }`。`base_seq` は最後に見たその項目の `seq`（新しい項目は `null`）。応答は `{ seq, items: [{ collection, id, seq }] }`。
-- `reset: true` なら、窓口の写しで組み直す。組み直しの途中で `key_id` が変わったら、別のデバイスが reset したので最初から組み直す。`conflict` は `conflicts` の今の項目（窓口に無い項目は `seq: null`）に合わせてから書き直し、`conflicts` が空なら同じ要求を送り直す。`key_mismatch` は鍵の状態を確かめ直す（同期のパスワードを入れ直すか、リセットする）。413 の `limit` は `item`・`total`・`request` のどれが大きすぎたかを表す。
+- `reset: true` なら、窓口の写しで組み直す。組み直しの途中で別の `key_id` が返ったら、鍵の状態を確かめ直す。`conflict` は `conflicts` の今の項目（窓口に無い項目は `seq: null`）に合わせてから書き直し、`conflicts` が空なら同じ要求を送り直す。`key_mismatch` は鍵の状態を確かめ直す（同期のパスワードを入れるか、新しく同期を始める）。413 の `limit` は `item`・`total`・`request` のどれが大きすぎたかを表す。
 
 ## Mawok の側
 

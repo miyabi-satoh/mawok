@@ -219,7 +219,7 @@ function conflictsFor(items: SyncItem[], current: Map<string, StoredItem>): Conf
 }
 
 // purge が消す予定の消した記録と同じ要求にほかの項目があっても、一部だけを書かないよう purged_seq も照らす。
-// 包んだ鍵の無い写しには書かせない。同期を始める (resetSync) までは鍵が決まっていないため。
+// 包んだ鍵の無い写しには書かせない。同期を始める (startSyncKey) までは鍵が決まっていないため。
 const accountUnchanged =
 	'account_id = ? AND seq = ? AND bytes = ? AND purged_seq = ? AND key_id = ? AND wrapped_key IS NOT NULL';
 const accountMatches = `EXISTS (SELECT 1 FROM sync_accounts WHERE ${accountUnchanged})`;
@@ -374,38 +374,37 @@ function keyRequest(body: unknown): { key_id: string; wrapped_key: string } | un
 	return validKeyId(key_id) && validWrappedKey(wrapped_key) ? { key_id, wrapped_key } : undefined;
 }
 
-/**
- * 新しい鍵で同期を始める。前の暗号文と消した記録を一度に外し、同期のパスワードで包んだ新しい鍵を置く。
- * `replace` が false (「同期を開始」) なら、包んだ鍵がまだ無いときだけ始め、あれば何もせずに undefined を返す。
- * 古い状態のデバイスが、ほかのデバイスの始めた同期を消さないため。true (「同期をリセット」) は、あっても置き換える。
- */
-export async function resetSync(
+/** 包んだ鍵が無いときだけ始め、古いデバイスが既存の同期を消さないようにする。 */
+export async function startSyncKey(
 	env: Env,
 	accountId: string,
-	body: unknown,
-	replace: boolean
+	body: unknown
 ): Promise<{ seq: number } | 'invalid_request' | 'already_started'> {
 	const request = keyRequest(body);
 	if (!request) return 'invalid_request';
-	// 始めていない写しだけを書き換える条件。D1 の batch は1つのトランザクションなので、消すのと置くのが分かれない。
-	const notStarted = replace
-		? ''
-		: 'AND NOT EXISTS (SELECT 1 FROM sync_accounts WHERE account_id = ? AND wrapped_key IS NOT NULL)';
-	const guard = replace ? [] : [accountId];
 	const [, account] = await env.DB.batch([
-		env.DB.prepare(`DELETE FROM sync_items WHERE account_id = ? ${notStarted}`).bind(
-			accountId,
-			...guard
-		),
+		env.DB.prepare(
+			'DELETE FROM sync_items WHERE account_id = ? AND NOT EXISTS (SELECT 1 FROM sync_accounts WHERE account_id = ? AND wrapped_key IS NOT NULL)'
+		).bind(accountId, accountId),
 		env.DB.prepare(
 			`INSERT INTO sync_accounts (account_id, key_id, wrapped_key, seq, purged_seq, bytes) VALUES (?, ?, ?, 0, 0, 0)
 			ON CONFLICT (account_id) DO UPDATE SET key_id = excluded.key_id, wrapped_key = excluded.wrapped_key, bytes = 0,
 			seq = sync_accounts.seq + 1, purged_seq = sync_accounts.seq + 1
-			${replace ? '' : 'WHERE sync_accounts.wrapped_key IS NULL'} RETURNING seq`
+			WHERE sync_accounts.wrapped_key IS NULL RETURNING seq`
 		).bind(accountId, request.key_id, request.wrapped_key)
 	]);
 	const row = account.results[0] as { seq: number } | undefined;
 	return row ? { seq: row.seq } : 'already_started';
+}
+
+/** 古い位置を持つデバイスに削除を知らせるため、行と進みを残す。 */
+export async function deleteSync(env: Env, accountId: string): Promise<void> {
+	await env.DB.batch([
+		env.DB.prepare('DELETE FROM sync_items WHERE account_id = ?').bind(accountId),
+		env.DB.prepare(
+			'UPDATE sync_accounts SET key_id = NULL, wrapped_key = NULL, bytes = 0, seq = seq + 1, purged_seq = seq + 1 WHERE account_id = ?'
+		).bind(accountId)
+	]);
 }
 
 /** 同期の鍵の見分けと、包んだ鍵。まだ同期を始めていなければ、どちらも null。 */
@@ -420,7 +419,7 @@ export async function getSyncKey(env: Env, accountId: string) {
 
 /**
  * 同期のパスワードを変えたデバイスが、同じ鍵を包み直して置き換える。
- * 鍵が替わった後 (ほかのデバイスがリセットした) の古い鍵では置き換えない。
+ * 鍵が替わった後 (ほかのデバイスが同期データを削除した) の古い鍵では置き換えない。
  */
 export async function putSyncKey(
 	env: Env,

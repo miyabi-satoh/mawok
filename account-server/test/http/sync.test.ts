@@ -157,8 +157,8 @@ describe('sync HTTP', () => {
 		expect(await response.json()).toEqual({ error: 'too_large', limit: 'item' });
 	});
 
-	it('resets an old key and requires peers to rebuild from the server copy', async () => {
-		const email = 'sync-reset@example.com';
+	it('deletes sync data and allows a new start', async () => {
+		const email = 'sync-delete@example.com';
 		const { token } = await linkApp(email);
 		await makePro(email);
 		await start(token);
@@ -166,21 +166,32 @@ describe('sync HTTP', () => {
 			key_id: KEY,
 			items: [{ collection: 'settings', id: 'one', base_seq: null, deleted: false, data: 'AQ==' }]
 		});
-		expect(
-			await (
-				await app('/v1/sync/reset', token, {
-					method: 'POST',
-					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ key_id: 'b'.repeat(16), wrapped_key: 'wrapped-b' })
-				})
-			).json()
-		).toEqual({ seq: 2 });
+		expect((await app('/v1/sync', token, { method: 'DELETE' })).status).toBe(204);
+		expect(await (await app('/v1/sync/key', token)).json()).toEqual({
+			key_id: null,
+			wrapped_key: null
+		});
 		expect(await (await app('/v1/sync?since=1', token)).json()).toMatchObject({
-			key_id: 'b'.repeat(16),
+			key_id: null,
 			seq: 2,
 			reset: true,
 			items: []
 		});
+		const old = await put(token, {
+			key_id: KEY,
+			items: [{ collection: 'settings', id: 'one', base_seq: null, deleted: false, data: 'AQ==' }]
+		});
+		expect(old.status).toBe(409);
+		expect(await old.json()).toEqual({ error: 'key_mismatch' });
+		expect(
+			(
+				await app('/v1/sync/start', token, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ key_id: 'b'.repeat(16), wrapped_key: 'wrapped-b' })
+				})
+			).status
+		).toBe(200);
 	});
 
 	it('keeps the wrapped key with the key id, and replaces it only for the same key', async () => {
@@ -201,7 +212,7 @@ describe('sync HTTP', () => {
 			200
 		);
 		expect(await key()).toEqual({ key_id: KEY, wrapped_key: 'one' });
-		// 始めた後の「同期を開始」は 409。始め直すのはリセットだけ (場合ごとの中身は test/sync.test.ts)。
+		// 始めた後の「同期を開始」は 409。始め直すには削除が必要 (場合ごとの中身は test/sync.test.ts)。
 		const again = await send('POST', '/v1/sync/start', { key_id: KEY, wrapped_key: 'other' });
 		expect(again.status).toBe(409);
 		expect(await again.json()).toEqual({ error: 'already_started' });
