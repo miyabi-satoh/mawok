@@ -123,14 +123,9 @@ const ENTRIES: Entry[] = [
 			})
 	},
 	{
-		route: 'POST /v1/sync/reset',
+		route: 'DELETE /v1/sync',
 		guards: ['token', 'limit-account'],
-		send: (s) =>
-			app('/v1/sync/reset', s.token, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ key_id: 'a'.repeat(16), wrapped_key: 'wrapped' })
-			})
+		send: (s) => app('/v1/sync', s.token, { method: 'DELETE' })
 	},
 	{
 		route: 'GET /v1/sync/key',

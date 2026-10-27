@@ -124,7 +124,7 @@ With Pro, you can sync your settings and history across the devices on your acco
 
 To change the password, select “Change” next to “Sync password” under “Account” in Settings. You don't need to enter it again on your other devices.
 
-If you forget your password, there is no way to recover it. Select “Forgot password?” or “Reset sync...” to start over with a new password. Your sync data on the Mawok server is deleted, but the data on each device is kept. Enter the new password on your other devices.
+If you forget your password, it cannot be recovered. In Settings, under “Account”, select “Delete...” next to “Sync data” to delete the sync data, then start syncing with a new password. The data on each device is kept. On your other devices, join syncing with the new password.
 
 To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. Right after copying, it may not have arrived yet. Wait a moment and show the text window again.
 

@@ -3067,13 +3067,10 @@ async fn adopt_sync_key(app: &AppHandle, key: [u8; 32]) {
     request_sync(app);
 }
 
-/// 同期を始める。新しい鍵を作って同期のパスワードで包み、窓口に置く。各デバイスの設定と履歴は消さない。
-/// `replace` が false（「同期を開始」）なら、窓口にまだ包んだ鍵が無いときだけ始める（ほかのデバイスがもう始めていれば、
-/// 画面を「入力」へ移す）。true（「同期をリセット」）なら、窓口の写しを消して新しい鍵で始め直す。
-/// ほかのデバイスは、新しいパスワードを入れるまで同期が止まる
+/// 新しい鍵を同期のパスワードで包み、窓口に鍵が無いときだけ同期を始める。
 #[tauri::command]
-async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(), String> {
-    info!("start sync (replace: {replace})");
+async fn start_sync(app: AppHandle, password: String) -> Result<(), String> {
+    info!("start sync");
     if !sync_key::password_long_enough(&password) {
         return Err(error_codes::SYNC_PASSWORD_TOO_SHORT.to_string());
     }
@@ -3091,8 +3088,7 @@ async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(
     }
     // 窓口より先に手元へ置く。窓口が受け付けた後に手元へ置けないと、窓口だけが新しい鍵になり、このデバイスが加われない
     store_sync_key(key).await?;
-    let started =
-        account::start_sync(&client, &token, &sync_key::key_id(&key), &wrapped, replace).await;
+    let started = account::start_sync(&client, &token, &sync_key::key_id(&key), &wrapped).await;
     match started {
         Ok(true) => {
             adopt_sync_key(&app, key).await;
@@ -3133,7 +3129,34 @@ async fn start_sync(app: AppHandle, password: String, replace: bool) -> Result<(
     }
 }
 
-/// 窓口の包んだ鍵と、その鍵の見分けを読む。どちらかが無い（ほかのデバイスでリセットされて写しが消えた）ときは、
+/// 窓口の同期データと包んだ鍵、このデバイスの同期の鍵を消す。各デバイスの設定と履歴は消さない。
+/// 始め直すのは「同期を始める」に任せ、ほかのデバイスは次の同期で鍵の食い違いに気づいて「同期を始める」へ移る
+#[tauri::command]
+async fn delete_sync_data(app: AppHandle) -> Result<(), String> {
+    info!("delete sync data");
+    let state = app.state::<AppState>();
+    let refresh = state.sync_key_refresh.lock().await;
+    let (token, generation) = token_in_generation(&app).await?;
+    let client = http_client(&app)?;
+    if let Err(error) = account::delete_sync(&client, &token).await {
+        drop(refresh);
+        return Err(account_failure(&app, "couldn't delete sync data", error).await);
+    }
+    if !pro_generation_is_current(&app, generation) {
+        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
+    }
+    let cleared = run_blocking(account_credentials::clear_key).await;
+    if let Ok(Err(error)) | Err(error) = cleared {
+        warn!("couldn't clear the sync key: {error}");
+    }
+    *state.sync_key.lock().unwrap() = None;
+    *state.sync_key_id.lock().unwrap() = None;
+    clear_sync_state(&app).await;
+    set_sync_key_status(&app, SyncKeyStatus::NotStarted);
+    Ok(())
+}
+
+/// 窓口の包んだ鍵と、その鍵の見分けを読む。どちらかが無い（ほかのデバイスで同期データが削除されて写しが消えた）ときは、
 /// 状態を読み直して画面の欄を移す。読み直しは鍵の排他を取るので、失敗したときは受け取った排他を放してから行う
 async fn read_wrapped_key<'a>(
     app: &AppHandle,
@@ -3195,7 +3218,7 @@ async fn change_sync_password(
     let (token, generation) = token_in_generation(&app).await?;
     let client = http_client(&app)?;
     let (refresh, key_id, wrapped) = read_wrapped_key(&app, &client, &token, refresh).await?;
-    // 先に窓口の鍵と手元の鍵を照らす。ほかのデバイスがリセットして手元の鍵が古いと、前のパスワードは開けず、
+    // 先に窓口の鍵と手元の鍵を照らす。ほかのデバイスが同期データを削除して手元の鍵が古いと、前のパスワードは開けず、
     // 「パスワードが正しくありません」が出続けるため。違えば状態を読み直して「入力」の欄へ移す
     let local = *app.state::<AppState>().sync_key.lock().unwrap();
     if local.as_ref().map(sync_key::key_id) != Some(key_id) {
@@ -3214,7 +3237,7 @@ async fn change_sync_password(
     }
     match account::put_sync_key(&client, &token, &sync_key::key_id(&key), &rewrapped).await {
         Ok(true) => Ok(()),
-        // 開いた後に、ほかのデバイスがリセットした
+        // 開いた後に、ほかのデバイスが同期データを削除した
         Ok(false) => {
             drop(refresh);
             Err(recheck_sync_key(&app).await)
@@ -4867,6 +4890,7 @@ pub fn run() {
             close_manual_window,
             open_license_source,
             start_sync,
+            delete_sync_data,
             unlock_sync,
             change_sync_password,
             mawok_devices,

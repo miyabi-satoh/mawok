@@ -2307,7 +2307,8 @@ where
     let mut items = Vec::new();
     loop {
         let reply = fetch(since, rebuilding).await?;
-        if reply.key_id.as_deref().is_some_and(|id| id != key_id) {
+        // 鍵が無い（null）のは、ほかのデバイスが同期データを削除したため。違う鍵と同じに、鍵の状態を確かめ直させる
+        if reply.key_id.as_deref() != Some(key_id) {
             return Err(Error::KeyMismatch);
         }
         if reply.reset {
@@ -5138,6 +5139,14 @@ mod tests {
         let mut other = page(false, false, 1, &[]);
         other.key_id = Some("other".into());
         let (result, _) = read_fake_pages(1, vec![other]);
+        assert!(matches!(result, Err(Error::KeyMismatch)));
+    }
+
+    #[test]
+    fn a_page_without_a_key_stops_the_read() {
+        let mut deleted = page(true, false, 1, &[]);
+        deleted.key_id = None;
+        let (result, _) = read_fake_pages(1, vec![deleted]);
         assert!(matches!(result, Err(Error::KeyMismatch)));
     }
 

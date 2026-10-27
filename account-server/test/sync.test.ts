@@ -9,7 +9,9 @@ import {
 	putSync,
 	putSyncKey,
 	purgeSync,
-	resetSync,
+	startSyncKey,
+	deleteSync,
+	getSyncKey,
 	shouldReset
 } from '../src/sync';
 import { newAccount } from './helpers';
@@ -19,7 +21,7 @@ const KEY = 'a'.repeat(16);
 /** 書けるのは同期を始めた (包んだ鍵を置いた) 写しだけ。 */
 async function startedAccount() {
 	const account = await newAccount();
-	await resetSync(env, account, { key_id: KEY, wrapped_key: 'wrapped' }, false);
+	await startSyncKey(env, account, { key_id: KEY, wrapped_key: 'wrapped' });
 	return account;
 }
 
@@ -157,26 +159,43 @@ describe('sync', () => {
 		);
 	});
 
-	it('starts only a copy without a wrapped key, and resets one that has it', async () => {
+	it('starts only once, deletes the copy and key, then starts again', async () => {
 		const account = await newAccount();
 		const key = (id: string, wrapped_key: string) => ({ key_id: id, wrapped_key });
-		expect(await resetSync(env, account, key(KEY, 'one'), false)).toEqual({ seq: 0 });
+		expect(await startSyncKey(env, account, key(KEY, 'one'))).toEqual({ seq: 0 });
 		await putSync(env, account, {
 			key_id: KEY,
 			items: [{ collection: 'settings', id: 'kept', base_seq: null, deleted: false, data: 'AQ==' }]
 		});
-		// 古い状態のデバイスが始めても、ほかのデバイスの始めた同期を消さない。
-		expect(await resetSync(env, account, key('b'.repeat(16), 'two'), false)).toBe(
-			'already_started'
-		);
+		expect(await startSyncKey(env, account, key('b'.repeat(16), 'two'))).toBe('already_started');
 		expect(
 			(await getSync(env, account, { since: 0, limit: 10, rebuild: false })).items
 		).toHaveLength(1);
-		expect(await resetSync(env, account, key('b'.repeat(16), 'two'), true)).toEqual({ seq: 2 });
-		expect(await getSync(env, account, { since: 0, limit: 10, rebuild: false })).toMatchObject({
-			key_id: 'b'.repeat(16),
+		await deleteSync(env, account);
+		expect(await getSyncKey(env, account)).toEqual({ key_id: null, wrapped_key: null });
+		expect(
+			await env.DB.prepare('SELECT seq, purged_seq, bytes FROM sync_accounts WHERE account_id = ?')
+				.bind(account)
+				.first()
+		).toEqual({ seq: 2, purged_seq: 2, bytes: 0 });
+		expect(await getSync(env, account, { since: 1, limit: 10, rebuild: false })).toMatchObject({
+			reset: true,
 			items: []
 		});
-		expect(await resetSync(env, account, { key_id: KEY }, true)).toBe('invalid_request');
+		expect(
+			(await getSync(env, account, { since: 0, limit: 10, rebuild: false })).key_id
+		).toBeNull();
+		// 削除を知らないデバイスの書き込みとパスワードの変更は、鍵の食い違いとして断る
+		expect(
+			await putSync(env, account, {
+				key_id: KEY,
+				items: [
+					{ collection: 'settings', id: 'late', base_seq: null, deleted: false, data: 'AQ==' }
+				]
+			})
+		).toMatchObject({ ok: false, error: 'key_mismatch' });
+		expect(await putSyncKey(env, account, key(KEY, 'rewrapped'))).toBe('key_mismatch');
+		expect(await startSyncKey(env, account, key('b'.repeat(16), 'two'))).toEqual({ seq: 3 });
+		expect(await startSyncKey(env, account, { key_id: KEY })).toBe('invalid_request');
 	});
 });

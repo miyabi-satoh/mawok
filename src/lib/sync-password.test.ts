@@ -56,15 +56,10 @@ describe('syncPasswordFailure', () => {
 
 describe('syncPanel', () => {
 	it('鍵の状態から、作る・入れる・同期の設定のどれを出すか決める', () => {
-		expect(syncPanel('notStarted', false)).toBe('create');
-		expect(syncPanel('needsPassword', false)).toBe('enter');
-		expect(syncPanel('ready', false)).toBe('settings');
+		expect(syncPanel('notStarted')).toBe('create');
+		expect(syncPanel('needsPassword')).toBe('enter');
+		expect(syncPanel('ready')).toBe('settings');
 		// 窓口と照らす前（起動の直後など）は、今の同期の設定を出しておく
-		expect(syncPanel('none', false)).toBe('settings');
-	});
-
-	it('リセットを確かめた後は、どの状態でも新しいパスワードを作る', () => {
-		expect(syncPanel('ready', true)).toBe('create');
-		expect(syncPanel('needsPassword', true)).toBe('create');
+		expect(syncPanel('none')).toBe('settings');
 	});
 });

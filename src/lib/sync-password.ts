@@ -40,7 +40,7 @@ export function syncPasswordFailure(
 }
 
 /**
- * 窓口の同期の状態が、欄を出したときから変わっていた（ほかのデバイスが始めた・リセットした・Pro が終わった）か
+ * 窓口の同期の状態が、欄を出したときから変わっていた（ほかのデバイスが始めた・同期データを削除した・Pro が終わった）か
  * （src-tauri/src/error_codes.rs の SYNC_STATE_CHANGED）。Rust 側が鍵の状態を読み直してあるので、エラーは出さず、
  * 出している欄を閉じて、今の状態の欄に任せる
  */
@@ -48,15 +48,9 @@ export function syncStateChanged(error: unknown): boolean {
 	return errorCode(error) === ERROR_CODES.SYNC_STATE_CHANGED;
 }
 
-/**
- * 設定の「アカウント」の同期の所に出すもの（docs/sync.md「同期のパスワード」）。
- * `resetting` は、「同期をリセット」を確かめて、新しいパスワードを作っている途中か
- */
-export function syncPanel(
-	status: SyncKeyStatus,
-	resetting: boolean
-): 'create' | 'enter' | 'settings' {
-	if (resetting || status === 'notStarted') return 'create';
+/** 設定の「アカウント」の同期の所に出すもの（docs/sync.md「同期のパスワード」）。 */
+export function syncPanel(status: SyncKeyStatus): 'create' | 'enter' | 'settings' {
+	if (status === 'notStarted') return 'create';
 	if (status === 'needsPassword') return 'enter';
 	return 'settings';
 }

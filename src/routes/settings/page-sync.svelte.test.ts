@@ -221,7 +221,7 @@ describe('設定画面の同期のパスワード', () => {
 		await form.getByLabelText(m.settings_sync_password_confirm()).fill('password1');
 		await form.getByRole('button', { name: m.settings_sync_start() }).click();
 		await vi.waitFor(() =>
-			expect(invoked).toHaveBeenCalledWith('start_sync', { password: 'password1', replace: false })
+			expect(invoked).toHaveBeenCalledWith('start_sync', { password: 'password1' })
 		);
 	});
 
@@ -247,26 +247,32 @@ describe('設定画面の同期のパスワード', () => {
 		await expect.element(field).toHaveAttribute('type', 'password');
 	});
 
-	it('パスワードを忘れたら、確かめてから新しいパスワードで始め直す', async () => {
-		pro('needsPassword');
+	it.each(['ready', 'needsPassword'] as const)('同期データを削除できる (%s)', async (status) => {
+		pro(status);
 		const screen = await renderAt(m.settings_category_account);
-		await screen.getByRole('button', { name: m.settings_sync_password_enter() }).click();
-		await screen.getByLabelText(m.settings_sync_password(), { exact: true }).fill('guess');
-		await screen.getByRole('button', { name: m.settings_sync_password_forgot() }).click();
-		const dialog = screen.getByRole('alertdialog', { name: m.settings_sync_reset_confirm_title() });
-		await dialog.getByRole('button', { name: m.settings_sync_reset_confirm_start() }).click();
-		const form = screen.getByRole('form', { name: m.settings_sync_restart_title() });
-		await expect.element(form).toBeVisible();
-		// 入れる欄に打った文字を、新しいパスワードの欄へ持ち越さない
 		await expect
-			.element(form.getByLabelText(m.settings_sync_password(), { exact: true }))
-			.toHaveValue('');
-		// 作るのをやめたら、入れる所に戻る（窓口の写しは、作り終えるまで消さない）
-		await form.getByRole('button', { name: m.common_cancel() }).click();
-		await expect
-			.element(screen.getByRole('button', { name: m.settings_sync_password_enter() }))
+			.element(screen.getByText(m.settings_sync_data_row(), { exact: true }))
 			.toBeVisible();
-		expect(callsOf(invoked, 'start_sync')).toHaveLength(0);
+		await screen.getByRole('button', { name: m.settings_sync_data_delete() }).click();
+		const dialog = screen.getByRole('alertdialog', {
+			name: m.settings_sync_data_delete_confirm_title()
+		});
+		await dialog
+			.getByRole('button', { name: m.settings_sync_data_delete_confirm(), exact: true })
+			.click();
+		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('delete_sync_data'));
+	});
+
+	it.each(['notStarted', 'none'] as const)('同期データの削除を出さない (%s)', async (status) => {
+		settings.current = settingsView({
+			mawokAccountSignedIn: true,
+			proAvailable: true,
+			syncKeyStatus: status
+		});
+		const screen = await renderAt(m.settings_category_account);
+		await expect
+			.element(screen.getByText(m.settings_sync_data_row(), { exact: true }))
+			.not.toBeInTheDocument();
 	});
 
 	it('開いた欄は、状態が移ったら閉じ、戻っても押すまで開かない', async () => {
@@ -275,7 +281,7 @@ describe('設定画面の同期のパスワード', () => {
 		await screen.getByRole('button', { name: m.settings_sync_password_enter() }).click();
 		const form = screen.getByRole('form', { name: m.settings_sync_join_title() });
 		await expect.element(form).toBeVisible();
-		// ほかのデバイスがリセットし、また始めた
+		// ほかのデバイスが削除し、また始めた
 		pro('notStarted');
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_sync_password_create() }))
@@ -327,7 +333,7 @@ describe('設定画面の同期のパスワード', () => {
 		await screen.getByRole('button', { name: m.settings_sync_password_change() }).click();
 		const form = screen.getByRole('form', { name: m.settings_sync_password_change_title() });
 		await expect.element(form).toBeVisible();
-		// ほかのデバイスのリセットで「入力」へ移り、入れ直して戻る
+		// ほかのデバイスが削除して始め直したので「入力」へ移り、入れ直して戻る
 		pro('needsPassword');
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_sync_password_enter() }))

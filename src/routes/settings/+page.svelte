@@ -458,7 +458,7 @@
 	/** キーの記録中でないときのキー。記録中の Esc は記録の中止なので、そちらが受け取る */
 	function onKeydown(event: KeyboardEvent) {
 		const platform = settings.current?.platform;
-		// 確かめや選ぶ画面のダイアログ（AI の了解・同期のリセット・バックアップから戻す）を出している間は、Esc で設定画面を閉じない
+		// 確かめや選ぶ画面のダイアログ（AI の了解・同期データの削除・バックアップから戻す）を出している間は、Esc で設定画面を閉じない
 		if (document.querySelector('[role="alertdialog"]')) return;
 		// 行の「…」メニューなど、開いている部品が受け持った Esc（bits-ui が preventDefault する）では、設定画面は閉じない。
 		// フォーカスの位置では、開いた直後のまだメニューに移っていない間を見分けられず、

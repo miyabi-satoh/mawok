@@ -274,18 +274,15 @@ pub async fn sync_key(client: &reqwest::Client, token: &str) -> Result<SyncKey, 
     })
 }
 
-/// 新しい鍵で同期を始める。`replace` が false（同期を開始）なら、窓口にまだ包んだ鍵が無いときだけ始め、
-/// あれば `Ok(false)`（ほかのデバイスがもう始めた）。true（同期をリセット）なら、窓口の前の写しを消して置き換える
+/// 包んだ鍵が無いときだけ同期を始める。既に始まっていれば `Ok(false)`。
 pub async fn start_sync(
     client: &reqwest::Client,
     token: &str,
     key_id: &str,
     wrapped_key: &str,
-    replace: bool,
 ) -> Result<bool, AccountError> {
-    let path = if replace { "reset" } else { "start" };
     let request = client
-        .post(format!("{ACCOUNT_URL}/v1/sync/{path}"))
+        .post(format!("{ACCOUNT_URL}/v1/sync/start"))
         .json(&json!({ "key_id": key_id, "wrapped_key": wrapped_key }));
     match send_signed(request, token).await {
         Ok(_) => Ok(true),
@@ -294,7 +291,13 @@ pub async fn start_sync(
     }
 }
 
-/// 同期のパスワードを変えた、包み直した鍵を置く。窓口の鍵が `key_id` と違えば（ほかのデバイスがリセットした）`Ok(false)`
+/// 窓口の同期データと鍵を消す。
+pub async fn delete_sync(client: &reqwest::Client, token: &str) -> Result<(), AccountError> {
+    let request = client.delete(format!("{ACCOUNT_URL}/v1/sync"));
+    send_signed(request, token).await.map(|_| ())
+}
+
+/// 同期のパスワードを変えた、包み直した鍵を置く。窓口の鍵が `key_id` と違えば（ほかのデバイスが同期データを削除した）`Ok(false)`
 pub async fn put_sync_key(
     client: &reqwest::Client,
     token: &str,
