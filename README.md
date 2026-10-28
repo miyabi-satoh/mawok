@@ -9,15 +9,15 @@
 - 音声入力ツールによっては、ターミナル（またはその中で動くアプリ）に直接入力できない。
 - ターミナルに直接日本語を打つと、IME がオフになっていることに気づかず、Enter で意図しない内容を送ってしまう。
 
-対応 OS は macOS と Windows です。
+対応 OS は macOS・Windows・Linux です。Linux のデスクトップは、Ubuntu 24.04 以上の GNOME と、Hyprland に対応します。
 
 ## 入れ方
 
-どちらの OS も、配布の準備中です。Windows 版は、公開後に Microsoft Store から入れられるようになります。
+どの OS も、配布の準備中です。Windows 版は、公開後に Microsoft Store から入れられるようになります。
 
 ## 使い方
 
-使い方は、アプリのメニューバー（Windows はタスクトレイ）のメニューの「使い方」で読めます。原典は [docs/manual/ja.md](docs/manual/ja.md)（英語は [docs/manual/en.md](docs/manual/en.md)）です。OS で違う所は `{macos:…}{windows:…}` や `::: macos` の印で書き分けてあり、アプリでは開いた OS の分だけを出します。
+使い方は、アプリのメニューバー（Windows はタスクトレイ、Linux はトレイ）のメニューの「使い方」で読めます。原典は [docs/manual/ja.md](docs/manual/ja.md)（英語は [docs/manual/en.md](docs/manual/en.md)）です。OS で違う所は `{macos:…}{windows:…}{linux:…}` や `::: macos` の印で書き分けてあり、アプリでは開いた OS の分だけを出します。
 
 ## ライセンス
 
