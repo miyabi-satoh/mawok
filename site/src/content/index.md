@@ -12,7 +12,7 @@ hero:
   - src: ./images/settings-copy.png
     alt: 設定画面の「コピーの整え」。末尾の空白文字を取り除く、クリップボードの履歴に残さない、文字を揃える（句読点・英字・数字・空白・記号・カタカナ）、置き換え辞書が並び、辞書には「ください → 下さい」など3件が入っている
 color: '#33358a'
-platforms: [windows, macos]
+platforms: [windows, macos, linux]
 status: coming-soon
 ---
 
