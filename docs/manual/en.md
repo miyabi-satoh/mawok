@@ -83,6 +83,7 @@ Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}
 - Type `@` at the start of the first line to see addressee suggestions. Press `Tab` or `Enter` to choose one.
 - On an `@sh` line, type the start of a file or folder name and press `Tab` to complete it. If several match, they appear below the first line. Press `Tab` again to go through them.
 - The text from before the run stays in the history, so you can bring it back and try again.
+- How AI replies depends on the AI service and model. If you get a preamble or explanation you don’t want, describe the form you want in the instruction too, such as `@ai Translate into Japanese. Only the translation`.
 - The command receives the lines below the first, and its output becomes the result.{macos:}{windows: Commands run in cmd.}{linux:}
 ::: macos
 - If a command is not found, write its full path.
