@@ -18,7 +18,7 @@ const product = defineCollection({
       hero: z.array(z.object({ src: image(), alt: z.string() })).min(1).max(3),
       // 帯の色。白い文字を載せるので、白とのコントラスト比 4.5 以上の暗めの色にする
       color: z.string().regex(/^#[0-9a-f]{6}$/i),
-      platforms: z.array(z.enum(['windows', 'macos'])).min(1),
+      platforms: z.array(z.enum(['windows', 'macos', 'linux'])).min(1),
       // platforms と status は amiiby-site の front matter に合わせて持つ。今は表示に使わず、ダウンロードの欄は常に準備中を出す
       status: z.enum(['coming-soon']),
     }),
