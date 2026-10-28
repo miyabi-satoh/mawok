@@ -5,7 +5,7 @@ description: Mawok は、音声入力などで書いた文章を、ターミナ�
 lead: |
   チャット欄やターミナルに直接打っていて、書きかけのまま Enter で送ってしまったこと、ありませんか？
   Mawok は、その手前で一呼吸おくための場所です。Enter を押しても何も送れない。だが、それがいい。
-badges: [無料, Windows / Mac（Apple シリコン）/ Linux]
+badges: [無料, Windows, Mac（Apple シリコン）, Linux]
 hero:
   - src: ./images/draft.png
     alt: テキストウィンドウ。打ち合わせの連絡の文が3行入っていて、上の列に「定型文」のボタンと設定の歯車、下の列に今のフォルダー（「ホーム」）のボタンと、コピーのボタン（Ctrl Enter）がある
