@@ -14,7 +14,7 @@ import { readTaskbarButtons, WINDOW_TYPE } from './window.mjs';
 // MSIX 版は tauri-driver で動かせない (パッケージの中の mawok.exe を WebDriver から起動できない) ので、
 // パッケージの中から WebView2 の開発者ツールの口 (CDP) を開けて起動し、画面が呼ぶのと同じコマンドを
 // `window.__TAURI_INTERNALS__.invoke` で送る。結果は OS の側 (レジストリ・エクスプローラー・
-// 通知の履歴・タスクバーの画素・ファイル) で読む。
+// タスクバーの画素・ファイル) で読む。
 //
 // ここのスクリプトは、立ち上げたままの PowerShell (`os.mjs` の runPowerShell) の中で動く。`exit` は書かない
 
@@ -57,7 +57,7 @@ ConvertTo-Json -Compress -InputObject @{ familyName = $p.PackageFamilyName; inst
 	return JSON.parse(stdout.trim());
 }
 
-/** パッケージの AUMID (通知の差出人・スタートメニューからの起動に使う名前) */
+/** パッケージの AUMID (スタートメニューからの起動に使う名前) */
 export function appUserModelId(pkg) {
 	return `${pkg.familyName}!${APPLICATION_ID}`;
 }
