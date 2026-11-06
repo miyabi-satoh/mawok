@@ -12,7 +12,7 @@ export function describeError(error: unknown): string {
 	return stack ? `${head}\n${stack}` : head;
 }
 
-/** Rust 側が返した失敗の符号。コマンドは失敗を符号の文字列で返す */
+/** Rust 側が返した失敗の符号。コマンドは失敗を文字列で返す（符号か、符号の無い失敗はその文） */
 export function errorCode(error: unknown): string {
 	return String(error);
 }
