@@ -342,11 +342,6 @@ export function writeTestSettings(settings) {
 	writeSettings(CONFIG_PATH, settings);
 }
 
-/** 置き場の中身をそのまま読む */
-export async function readConfigBytes() {
-	return fs.readFile(CONFIG_PATH);
-}
-
 /** E2E のテスト間で下書きの履歴が混ざらないように消す */
 export async function clearHistory() {
 	await fs.rm(HISTORY_PATH, { force: true });

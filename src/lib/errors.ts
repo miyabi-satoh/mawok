@@ -12,13 +12,9 @@ export function describeError(error: unknown): string {
 	return stack ? `${head}\n${stack}` : head;
 }
 
-/**
- * Rust 側が返した失敗の符号。符号だけの文字列でも、`{ code, ... }` の形でも取り出す。
- * どちらでもなければ、受け取ったものをそのまま文字列にする
- */
+/** Rust 側が返した失敗の符号。コマンドは失敗を文字列で返す（符号か、符号の無い失敗はその文） */
 export function errorCode(error: unknown): string {
-	const code = typeof error === 'object' && error !== null && (error as { code?: unknown }).code;
-	return typeof code === 'string' ? code : String(error);
+	return String(error);
 }
 
 /**

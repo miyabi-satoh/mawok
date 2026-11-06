@@ -58,7 +58,7 @@ ConvertTo-Json -Compress -InputObject @{ familyName = $p.PackageFamilyName; inst
 }
 
 /** パッケージの AUMID (スタートメニューからの起動に使う名前) */
-export function appUserModelId(pkg) {
+function appUserModelId(pkg) {
 	return `${pkg.familyName}!${APPLICATION_ID}`;
 }
 

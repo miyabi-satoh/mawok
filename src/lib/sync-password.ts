@@ -48,6 +48,12 @@ export function syncStateChanged(error: unknown): boolean {
 	return errorCode(error) === ERROR_CODES.SYNC_STATE_CHANGED;
 }
 
+/** 同期を始める・同期に加わるときの題名と説明。閉じた行と開いた欄で同じものを出す */
+export const SYNC_JOIN_TEXT = {
+	create: { title: m.settings_sync_start_title, description: m.settings_sync_start_description },
+	enter: { title: m.settings_sync_join_title, description: m.settings_sync_join_description }
+};
+
 /** 設定の「アカウント」の同期の所に出すもの（docs/sync.md「同期のパスワード」）。 */
 export function syncPanel(status: SyncKeyStatus): 'create' | 'enter' | 'settings' {
 	if (status === 'notStarted') return 'create';
