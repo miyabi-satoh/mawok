@@ -1,6 +1,5 @@
 import type { DraftKeys } from '$lib/keys';
-import type { SettingsView, Snippet } from '$lib/settings.svelte';
-import { newSnippet } from '$lib/snippets';
+import type { SettingsView } from '$lib/settings.svelte';
 
 /** Rust 側の既定のキー（src-tauri/src/draft_keys.rs）の写し */
 export const DEFAULT_DRAFT_KEYS: DraftKeys = {
@@ -8,8 +7,7 @@ export const DEFAULT_DRAFT_KEYS: DraftKeys = {
 	settings: 'CommandOrControl+Comma',
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
-	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	changeFolder: 'CommandOrControl+KeyD'
+	historyNewer: 'CommandOrControl+Alt+ArrowDown'
 };
 
 /** テストで Rust 側から届く設定。既定の値に overrides を重ねる */
@@ -49,15 +47,6 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		textColorLight: '',
 		textColorDark: '',
 		inputGuidance: null,
-		aiService: 'none',
-		aiConsented: false,
-		aiModels: {},
-		aiBaseUrl: '',
-		defaultAiModels: {
-			gemini: 'gemini-3.5-flash-lite',
-			anthropic: 'claude-haiku-4-5',
-			openai: 'gpt-5.4-nano'
-		},
 		proAvailable: false,
 		syncKeyStatus: 'none',
 		mawokAccountSignedIn: false,
@@ -74,9 +63,4 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		platform: 'macos',
 		...overrides
 	};
-}
-
-/** AI に頼む定型文の1件 */
-export function aiSnippet(name: string, instruction: string): Snippet {
-	return newSnippet(name, `@ai ${instruction}`);
 }

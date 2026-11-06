@@ -32,7 +32,7 @@ import { expectStays, waitFor } from '../lib/wait.mjs';
 
 // ほかのアプリがグローバルに取っていることの多い Cmd+Shift+〈文字〉は避ける (取られていると、記録に届かない)
 const pressNewHotkey = () => keyCode(KEY.j, ['command down', 'option down', 'shift down']);
-// 既定のキー（Cmd+D はフォルダーへ移動など）とも、入力欄の編集のキーとも重ならないキー
+// 既定のキーとも、入力欄の編集のキーとも重ならないキー
 const pressNewCopyKey = () => keyCode(KEY.g, ['command down']);
 
 /** メニューから設定を開き、「キー操作」の分類を出す */
@@ -98,7 +98,7 @@ test.describe('macOS: ホットキーと下書きのキーの変更', () => {
 
 	test('20. の 2.: 「コピーして閉じる」のキーを変えると、そのキーでコピーして閉じ、元のキーでは閉じない', async () => {
 		await openKeySettings();
-		await record('「コピーして閉じる・実行」のキーを変更', pressNewCopyKey, '⌘G');
+		await record('「コピーして閉じる」のキーを変更', pressNewCopyKey, '⌘G');
 		await closeSettings();
 
 		await setClipboard('before-keys');
@@ -120,14 +120,14 @@ test.describe('macOS: ホットキーと下書きのキーの変更', () => {
 		await openKeySettings();
 		// 既定のままだと「既定に戻す」は押せず、押しても何も起きないまま通ってしまう
 		assert.match(
-			await elementName(SETTINGS_TITLE, 'AXButton', '「コピーして閉じる・実行」のキーを変更'),
+			await elementName(SETTINGS_TITLE, 'AXButton', '「コピーして閉じる」のキーを変更'),
 			/\(今は ⌘G\)/,
 			'既定でないキーから始める'
 		);
-		await pressInSettings('AXButton', '「コピーして閉じる・実行」のキーを変更');
+		await pressInSettings('AXButton', '「コピーして閉じる」のキーを変更');
 		await pressInSettings('AXButton', '既定に戻す');
 		await waitFor(
-			() => elementName(SETTINGS_TITLE, 'AXButton', '「コピーして閉じる・実行」のキーを変更'),
+			() => elementName(SETTINGS_TITLE, 'AXButton', '「コピーして閉じる」のキーを変更'),
 			(name) => name?.includes('(今は ⌘Enter)'),
 			{ label: '「コピーして閉じる」が既定に戻る' }
 		);

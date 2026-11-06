@@ -66,7 +66,6 @@ const LOCK_PATH = recordPath('.e2e.lock');
 export const DEFAULT_HOTKEY = 'CommandOrControl+Shift+Space';
 
 // config.rs の既定値の写し。置き場に書いていない項目は、アプリがこの値で動く。
-// ただし定型文は、書いていなければアプリは既定の定型文 (校正・行を並べ替え) を使う。テストは書いた行だけを比べるので、ここでは空にしておく
 const DEFAULT_CONFIG = {
 	hotkey: DEFAULT_HOTKEY,
 	autostart: true,
@@ -84,8 +83,7 @@ const DEFAULT_CONFIG = {
 	textFontFamily: '',
 	textFontSize: 16,
 	textColorLight: '',
-	textColorDark: '',
-	aiService: 'none'
+	textColorDark: ''
 };
 
 // draft_keys.rs の既定のキーの写し
@@ -94,8 +92,7 @@ const DEFAULT_DRAFT_KEYS = {
 	settings: 'CommandOrControl+Comma',
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
-	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	changeFolder: 'CommandOrControl+KeyD'
+	historyNewer: 'CommandOrControl+Alt+ArrowDown'
 };
 
 /**

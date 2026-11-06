@@ -67,7 +67,7 @@ const ENTRIES: Entry[] = [
 				ip: s.ip
 			})
 	},
-	{ route: 'GET /v1/balance', guards: ['token'], send: (s) => app('/v1/balance', s.token) },
+	{ route: 'GET /v1/account', guards: ['token'], send: (s) => app('/v1/account', s.token) },
 	// トークンを外すだけなので、トークンが無くても 204 を返す。
 	{
 		route: 'DELETE /v1/token',
@@ -83,16 +83,6 @@ const ENTRIES: Entry[] = [
 		route: 'DELETE /v1/devices/:id',
 		guards: ['token', 'limit-account'],
 		send: (s) => app('/v1/devices/x', s.token, { method: 'DELETE' })
-	},
-	{
-		route: 'POST /v1/ai',
-		guards: ['token'],
-		send: (s) =>
-			app('/v1/ai', s.token, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ user: 'x' })
-			})
 	},
 	{
 		route: 'GET /v1/sync',
@@ -200,18 +190,18 @@ const ENTRIES: Entry[] = [
 	{
 		route: 'POST /account/buy',
 		guards: ['csrf', 'session-401'],
-		send: form('/account/buy', { next: '/account/' })
+		send: form('/account/buy', { next: '/account/', plan: 'monthly' })
 	},
 	{
 		route: 'POST /account/billing',
 		guards: ['csrf', 'session-401'],
 		send: form('/account/billing', {})
 	},
-	{ route: 'GET /account/buy', guards: ['session-page'], send: get('/account/buy') },
+	{ route: 'GET /account/buy', guards: ['session-page'], send: get('/account/buy?plan=monthly') },
 	{
 		route: 'GET /account/buy/done',
 		guards: ['session-page'],
-		send: get('/account/buy/done?next=%2Faccount%2F&session_id=cs_x')
+		send: get('/account/buy/done?next=%2Faccount%2F')
 	}
 ];
 
@@ -237,21 +227,10 @@ describe('guards', () => {
 		expect([...new Set(routes)].sort()).toEqual(ENTRIES.map((e) => e.route).sort());
 	});
 
-	it('stops every entry when a pricing value is missing', async () => {
-		vi.spyOn(console, 'error').mockImplementation(() => {});
-		const broken = { ...env, USD_JPY: undefined } as unknown as Env;
-		for (const { route } of ENTRIES) {
-			const [method, path] = route.split(' ');
-			expect((await server.request(path, { method }, broken)).status, route).toBe(500);
-		}
-	});
-
 	it('refuses the app entries without a valid token', async () => {
 		const { token } = await linkApp('guard-token@example.com');
 		const revoked = (await linkApp('guard-revoked@example.com')).token;
 		await app('/v1/token', revoked, { method: 'DELETE' });
-		// トークンを確かめる前に Gemini へ送っていないことも見る。
-		const fetch = vi.spyOn(globalThis, 'fetch');
 		for (const entry of guarded('token')) {
 			for (const [name, t] of [
 				['no token', undefined],
@@ -263,10 +242,8 @@ describe('guards', () => {
 				expect(await res.json(), `${entry.route} (${name})`).toEqual({ error: 'unauthorized' });
 			}
 		}
-		expect(fetch).not.toHaveBeenCalled();
 		// 正しいトークンなら通る (表の要求の形が守りのほかで止まっていないことを見る)。
-		vi.restoreAllMocks();
-		expect((await app('/v1/balance', token)).status).toBe(200);
+		expect((await app('/v1/account', token)).status).toBe(200);
 	});
 
 	it('shows the sign-in page on the account pages without a session', async () => {

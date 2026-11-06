@@ -40,6 +40,21 @@ export async function addSubscription(
 	return id;
 }
 
+/** サブスクの払った請求書を、台帳に置く。台帳にあれば、そのサブスクは試用でない (→ src/pro.ts)。 */
+export async function addProPurchase(
+	accountId: string,
+	subscriptionId: string,
+	{ amount = 480, invoice = `in_${subscriptionId}` }: { amount?: number; invoice?: string } = {}
+) {
+	await env.DB.prepare(
+		`INSERT INTO purchases (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
+		 amount, currency, managed_payments, card_country, buyer_country, domestic, stripe_subscription_id, created_at)
+		 VALUES (?, ?, 'mawok-pro', ?, ?, ?, 'jpy', 0, 'JP', 'JP', 1, ?, 0)`
+	)
+		.bind(randomHex(16), accountId, `invoice:${invoice}`, `pi_${invoice}`, amount, subscriptionId)
+		.run();
+}
+
 /**
  * 送り主 (IP) は、指定が無ければ毎回変える。IP ごとの上限を確かめるテスト以外で当たらないように。
  * 言語は、指定が無ければ日本語のブラウザにする。
@@ -152,7 +167,7 @@ export async function accountId(email: string) {
 	return row!.id;
 }
 
-/** 画面を通さずにアカウントを作る (残高などの単体テスト用)。 */
+/** 画面を通さずにアカウントを作る (単体テスト用)。 */
 export async function newAccount() {
 	const id = randomHex(16);
 	await env.DB.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)')
@@ -161,51 +176,10 @@ export async function newAccount() {
 	return id;
 }
 
-/** 付与ごとの残り。購入の分が先、無料の分が後。 */
-export async function grantsOf(account: string) {
-	const { results } = await env.DB.prepare(
-		`SELECT purchase_id IS NULL AS free, granted, remaining, revoked FROM grants
-		 WHERE account_id = ? ORDER BY purchase_id IS NULL, created_at, rowid`
-	)
-		.bind(account)
-		.all<{ free: number; granted: number; remaining: number; revoked: number }>();
-	return results;
-}
-
 export function app(path: string, token: string | undefined, init: RequestInit = {}) {
 	const headers = new Headers(init.headers);
 	if (token) headers.set('authorization', `Bearer ${token}`);
 	return request(path, { ...init, headers });
-}
-
-export function sendAi(
-	token: string | undefined,
-	body: unknown = { system: '丁寧に', user: 'こんにちは' }
-) {
-	return app('/v1/ai', token, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify(body)
-	});
-}
-
-/** Gemini の返事を差し替える。`usage` のトークン数で原価が決まる。 */
-export function geminiAnswers(
-	usage: Record<string, number> = { total_input_tokens: 1000, total_output_tokens: 800 },
-	status = 200
-) {
-	return vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-		Response.json(
-			status === 200
-				? {
-						status: 'completed',
-						steps: [{ type: 'model_output', content: [{ type: 'text', text: '整えた文' }] }],
-						usage
-					}
-				: { error: { code: status, message: 'nope' }, usage },
-			{ status }
-		)
-	);
 }
 
 /** Stripe と同じ形の `Stripe-Signature` を作る。 */
@@ -238,61 +212,4 @@ export async function webhook(
 		},
 		body
 	});
-}
-
-/** Checkout Session の知らせ。知らせの id は毎回変える (Stripe の送り直しを試すときは `id` に同じものを渡す)。 */
-export function completed(
-	sessionId: string,
-	account: string,
-	overrides: Record<string, unknown> = {},
-	{ type = 'checkout.session.completed', id = `evt_${crypto.randomUUID()}` } = {}
-) {
-	return {
-		id,
-		type,
-		data: {
-			object: {
-				id: sessionId,
-				client_reference_id: account,
-				payment_intent: `pi_${sessionId}`,
-				payment_status: 'paid',
-				metadata: { product: 'mawok-ai' },
-				...overrides
-			}
-		}
-	};
-}
-
-/**
- * 付ける前に取り直す Checkout Session を、Stripe と同じ形で返すよう差し替える。
- * 返すのは、問い合わせた id で `account` が買った、払われた Session (`overrides` で変える)。
- */
-export function stripeSessions(account: string, overrides: Record<string, unknown> = {}) {
-	return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-		const id = new URL(String(url)).pathname.split('/').pop()!;
-		return Response.json({
-			id,
-			client_reference_id: account,
-			payment_status: 'paid',
-			currency: 'jpy',
-			amount_total: 300,
-			metadata: { product: 'mawok-ai', buyer_country: 'JP' },
-			managed_payments: { enabled: false },
-			line_items: {
-				data: [{ quantity: 1, price: { id: 'price_credits', unit_amount: 300, currency: 'jpy' } }]
-			},
-			payment_intent: {
-				id: `pi_${id}`,
-				latest_charge: { payment_method_details: { card: { country: 'JP' } } }
-			},
-			...overrides
-		});
-	});
-}
-
-/** 買って残高を付ける。 */
-export async function buy(account: string, sessionId: string) {
-	stripeSessions(account);
-	expect((await webhook(completed(sessionId, account))).status).toBe(200);
-	vi.restoreAllMocks();
 }

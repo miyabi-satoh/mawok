@@ -1,13 +1,10 @@
 mod account;
 mod account_credentials;
-mod actions;
-mod ai;
 mod atomic_file;
 mod autostart;
 mod backup;
 #[cfg(test)]
 mod bindings;
-mod command;
 mod config;
 mod debounce;
 mod diagnostics;
@@ -15,7 +12,6 @@ mod draft_keys;
 mod error_codes;
 mod events;
 mod focus;
-mod folder;
 mod hex;
 mod history_store;
 mod hotkey;
@@ -74,8 +70,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use crate::{
-    ai::AiService,
-    config::{ActionEncoding, ActionOutput, Config, Language, Snippet, Theme},
+    config::{Config, Language, Snippet, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     hotkey::Registrar as _,
     i18n::Lang,
@@ -89,7 +84,7 @@ pub(crate) const APP_NAME: &str = "Mawok";
 const LOG_FILE_STEM: &str = APP_NAME;
 const TERMS_URL: &str = "https://mawok.amiiby.com/terms/";
 const PRIVACY_URL: &str = "https://mawok.amiiby.com/privacy/";
-/// 運営者と問い合わせのページ。AI の不適切な出力も、ここから知らせてもらう（Microsoft Store Policies 11.16）
+/// 運営者と問い合わせのページ
 const CONTACT_URL: &str = "https://amiiby.com/about/";
 const SETTINGS_WINDOW: &str = "settings";
 /// 第三者のソフトウェアのライセンスを出すウィンドウ。設定の「このアプリについて」から開き、設定を閉じたら一緒に閉じる
@@ -127,46 +122,23 @@ struct DraftState {
     focused_since_shown: AtomicBool,
 }
 
-/// アクションの実行（actions.rs・ai.rs）
+/// Mawok のアカウントの窓口とのやり取り（account.rs）
 #[derive(Default)]
-struct ActionState {
-    /// 使い回す HTTP クライアント。最初に窓口か AI とやり取りするときに作る
+struct AccountState {
+    /// 使い回す HTTP クライアント。最初に窓口とやり取りするときに作る
     client: OnceLock<reqwest::Client>,
-    /// テキストウィンドウで移った作業フォルダー。None ならホームフォルダー（folder.rs）
-    folder: Mutex<Option<PathBuf>>,
-    /// 最近移ったフォルダー（folder.rs の remember）。最初に使うときにファイルから読む
-    recent_folders: Mutex<Option<Vec<PathBuf>>>,
-    /// アクションに振った番号の最大。起動中ずっと増やすので、窓を読み込み直しても番号は戻らない
-    last_request: AtomicU64,
-    /// 走っているアクションと、取り消した番号
-    requests: Mutex<ActionRequests>,
-    /// AI サービスのキーをキーチェーンから読んでいる数。読んでいる間は、フォーカスが外れても下書きを隠さない
-    reading_key: AtomicUsize,
-    /// フォルダーを選ぶ画面を出しているか。出している間は、フォーカスが外れても下書きを隠さない（pick_folder）
-    picking_folder: AtomicBool,
-    /// キーを読んでいる間に、フォーカスが外れても隠さずに見送ったか。読み終えたら、下書きにフォーカスを戻すかどうかに使う
-    blur_kept_for_key: AtomicBool,
+    /// Mawok のアカウントのトークンを資格情報管理から読んでいる数。読んでいる間は、フォーカスが外れても下書きを隠さない
+    reading_credential: AtomicUsize,
+    /// トークンを読んでいる間に、フォーカスが外れても隠さずに見送ったか。読み終えたら、下書きにフォーカスを戻すかどうかに使う
+    blur_kept_for_credential: AtomicBool,
     /// Mawok のアカウントと結ぶため、127.0.0.1 で戻りを待ち受けているタスク（start_mawok_sign_in）
     mawok_sign_in: Mutex<Option<PendingMawokSignIn>>,
     /// Mawok のアカウントと結ぶ申し込みに振った番号の最大
     mawok_sign_in_id: AtomicU64,
-    /// AI サービス・了解・キーを変えるコマンドを1つずつ流す。
-    /// キーチェーンを待つ間に別のコマンドが設定を変えると、確かめた前提が崩れるため（キーを消した後に、保存前のキーで上書きするなど）
-    settings: tauri::async_runtime::Mutex<()>,
+    /// トークンを置く処理と消す処理を1つずつ流す。サインインの終わりとサインアウトが重なっても、Pro の状態とトークンが食い違わないようにする。
+    /// サインアウトは、この排他の中で同期の記録を消すので、同期の記録の排他（`AppState.sync_commit`）より先に取る
+    token: tauri::async_runtime::Mutex<()>,
 }
-
-/// アクションの番号は begin_action が振り、画面はその番号で run_action と cancel_action を呼ぶ。コマンドは届いた順に走るとは限らないので、
-/// 取り消しが実行より先に走っても、後から始まった古い実行が新しい実行を打ち切らないよう、番号で見分ける
-#[derive(Default)]
-struct ActionRequests {
-    /// 走っているアクションの番号と、それを打ち切る関数
-    running: Option<(u64, AbortAction)>,
-    /// これまでに始めたか取り消した番号の最大。これ以下の番号のアクションは始めない
-    settled_through: u64,
-}
-
-/// アクションの実行を打ち切る関数
-type AbortAction = Box<dyn Fn() + Send>;
 
 /// 設定と、トレイに出す問題。設定画面から変えると、ここと設定の置き場の両方を更新する
 struct AppState {
@@ -183,8 +155,6 @@ struct AppState {
     problems: Mutex<Problems>,
     /// 設定ウィンドウを作っている最中か。作成は非同期なので、連打で2つ作ろうとするのを止める
     settings_opening: AtomicBool,
-    /// 現在選んでいる AI サービスのキーが資格情報管理にあるか。None は未確認。
-    ai_key_available: Mutex<Option<(AiService, bool)>>,
     /// 最後に窓口が答えた Pro の状態。通信できない間は、期限の7日後までだけ使う。
     pro_state: Mutex<Option<pro::State>>,
     /// 資格情報管理で Mawok のアカウントトークンを読めたか。Pro の案内をサインイン前と区別する。
@@ -211,8 +181,6 @@ struct AppState {
     sync_debounce: debounce::Debounce,
     /// テキストウィンドウを出したことをきっかけに、最後に同期を頼んだ時刻
     synced_on_show: Mutex<Option<Instant>>,
-    /// テキストウィンドウから AI の設定を頼まれた。設定ウィンドウが、開いたときに受け取る
-    ai_settings_requested: AtomicBool,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -249,24 +217,6 @@ impl AppState {
             .unwrap()
             .as_ref()
             .is_some_and(|pro| pro.available_at(pro::now()))
-    }
-
-    /// `service` のキーが資格情報管理にあるか。確かめていないか、確かめたのが別の AI サービスなら None
-    fn ai_key_available(&self, service: AiService) -> Option<bool> {
-        self.ai_key_available
-            .lock()
-            .unwrap()
-            .and_then(|(checked, available)| (checked == service).then_some(available))
-    }
-
-    /// `service` のキーがあるかを覚える
-    fn remember_ai_key(&self, service: AiService, available: bool) {
-        *self.ai_key_available.lock().unwrap() = Some((service, available));
-    }
-
-    /// 覚えていたキーのあるなしを忘れ、未確認に戻す
-    fn forget_ai_key(&self) {
-        *self.ai_key_available.lock().unwrap() = None;
     }
 }
 
@@ -334,7 +284,7 @@ struct SettingsView {
     text_history_size: u16,
     trim_trailing_whitespace: bool,
     replacements: Vec<Replacement>,
-    /// 定型文。登録した順。変えていなければ、今の表示言語の既定の定型文
+    /// 定型文。登録した順
     snippets: Vec<Snippet>,
     /// 同期を使える Pro か
     pro_available: bool,
@@ -360,15 +310,6 @@ struct SettingsView {
     text_color_light: String,
     /// 下書きの入力欄の文字色（ダーク）。小文字の #rrggbb。空なら標準の色
     text_color_dark: String,
-    ai_service: AiService,
-    /// 今の AI サービスと送り先（OpenAI ならベース URL も）に了解しているか
-    ai_consented: bool,
-    /// AI サービスごとに設定したモデル。書いていないサービスは既定のモデル
-    ai_models: BTreeMap<AiService, String>,
-    /// AI サービスごとの既定のモデル。既定は Rust 側だけで決める
-    default_ai_models: BTreeMap<AiService, String>,
-    /// AI サービスが OpenAI のときに送る API の URL。空なら OpenAI（`CONSTANTS.OPENAI_BASE_URL`）
-    ai_base_url: String,
     /// アプリのバージョン。ログの先頭に出しているものと同じ
     version: String,
     /// 表示言語の設定と OS の言語から決めた Paraglide のロケール
@@ -398,15 +339,6 @@ fn settings_view(state: &AppState) -> SettingsView {
         sync_kinds: sync::kinds(&config),
         sync_excluded_settings: config.sync_excluded_settings.clone(),
         locale: lang.code(),
-        ai_service: config.ai_service,
-        ai_consented: config.ai_consented(),
-        ai_models: config.ai_models,
-        ai_base_url: config.ai_base_url,
-        default_ai_models: AiService::ALL
-            .into_iter()
-            .filter(|service| *service != AiService::None)
-            .map(|service| (service, service.default_model().to_string()))
-            .collect(),
         platform: Platform::current(),
         hotkey: config.hotkey,
         modified_settings,
@@ -434,9 +366,7 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_history_size: config.text_history_size,
         trim_trailing_whitespace: config.trim_trailing_whitespace,
         replacements: config.replacements,
-        snippets: config
-            .snippets
-            .unwrap_or_else(|| actions::default_snippets(lang)),
+        snippets: config.snippets,
         pro_available,
         sync_key_status: state.shown_sync_key_status(),
         mawok_account_signed_in: state.mawok_account_signed_in.load(Ordering::Relaxed),
@@ -504,14 +434,7 @@ fn hide_draft_for_settings(app: &AppHandle) {
         app.state::<DraftState>()
             .hidden_for_settings
             .store(true, Ordering::Relaxed);
-        notify_draft_hidden(app);
     }
-}
-
-/// 下書きウィンドウを隠したことを画面に知らせる。アクションは取り消さずに続け、隠れている間に届いた結果は、画面が出し直したときに差し替える。
-/// フォーカスが外れたときと閉じるボタンは画面を通らずに隠すので、隠すところで知らせる
-fn notify_draft_hidden(app: &AppHandle) {
-    let _ = app.emit(events::DRAFT_HIDDEN, ());
 }
 
 fn show(app: &AppHandle) {
@@ -829,11 +752,9 @@ struct BlurCheck {
     settings_focused: bool,
     /// 設定ウィンドウを作っている最中か
     settings_opening: bool,
-    /// AI サービスのキーを読んでいる最中か。macOS はキーチェーンの許可のダイアログを前面に出すので、
+    /// Mawok のアカウントのトークンを読んでいる最中か。macOS はキーチェーンの許可のダイアログを前面に出すので、
     /// フォーカスが外れても、ユーザーがほかへ移ったわけではない（許可に応じている間に下書きが消えないようにする）
-    reading_ai_key: bool,
-    /// フォルダーを選ぶ画面を出しているか。画面にフォーカスが移っても、ユーザーがほかへ移ったわけではない
-    picking_folder: bool,
+    reading_credential: bool,
 }
 
 /// 隠すのは、出ていて、一度フォーカスが入った後に外れたままで、それが設定ウィンドウのためではないときだけ
@@ -844,8 +765,7 @@ fn should_hide_on_blur(check: BlurCheck) -> bool {
         && !check.focused
         && !check.settings_focused
         && !check.settings_opening
-        && !check.reading_ai_key
-        && !check.picking_folder
+        && !check.reading_credential
 }
 
 /// 初めての起動として下書きを出すか。設定の置き場がなかったうえで、作れたときだけ。
@@ -886,25 +806,21 @@ fn hide_on_blur(app: &AppHandle) {
         focused: window.is_focused().unwrap_or(true),
         settings_focused: is_settings_focused(app),
         settings_opening: state.settings_opening.load(Ordering::Relaxed),
-        reading_ai_key: app
-            .state::<ActionState>()
-            .reading_key
+        reading_credential: app
+            .state::<AccountState>()
+            .reading_credential
             .load(Ordering::Relaxed)
             > 0,
-        picking_folder: app
-            .state::<ActionState>()
-            .picking_folder
-            .load(Ordering::Relaxed),
     };
     if !should_hide_on_blur(check) {
-        if check.reading_ai_key
+        if check.reading_credential
             && should_hide_on_blur(BlurCheck {
-                reading_ai_key: false,
+                reading_credential: false,
                 ..check
             })
         {
-            app.state::<ActionState>()
-                .blur_kept_for_key
+            app.state::<AccountState>()
+                .blur_kept_for_credential
                 .store(true, Ordering::Relaxed);
         }
         return;
@@ -915,11 +831,10 @@ fn hide_on_blur(app: &AppHandle) {
     }
 }
 
-/// 下書きウィンドウを、戻り先へフォーカスを戻さずに隠す。隠せたら画面に知らせる
+/// 下書きウィンドウを、戻り先へフォーカスを戻さずに隠す
 fn hide_draft_in_place(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
     let _ = app.save_window_state(window_state_flags());
     window.hide()?;
-    notify_draft_hidden(app);
     Ok(())
 }
 
@@ -930,9 +845,7 @@ fn hide_draft_and_return(app: &AppHandle, state: &DraftState) -> Result<(), Stri
     state.hidden_for_settings.store(false, Ordering::Relaxed);
     let window = main_window(app).ok_or("main window not found")?;
     let target = *state.return_target.lock().unwrap();
-    focus::hide_and_return(app, &window, target).map_err(|error| error.to_string())?;
-    notify_draft_hidden(app);
-    Ok(())
+    focus::hide_and_return(app, &window, target).map_err(|error| error.to_string())
 }
 
 /// クリップボードへ文字列を書く。`conceal` のときは、クリップボードの履歴・同期・管理アプリに残さないよう印を付ける。
@@ -1162,10 +1075,6 @@ fn save_received_config(
         if let Err(error) = clear_draft_history_file(app, true) {
             warn!("couldn't clear draft history after sync: {error}");
         }
-    }
-    // キーはサービスごと、OpenAI はベース URL ごとに置くので、替わったら確かめ直す
-    if next.ai_service != current.ai_service || next.ai_base_url != current.ai_base_url {
-        state.forget_ai_key();
     }
     Ok(Some(rejected))
 }
@@ -1499,23 +1408,6 @@ fn open_settings_window(app: AppHandle) {
     open_settings(&app);
 }
 
-/// 下書きウィンドウの AI のエラーの帯から、設定ウィンドウを「AI」で開く。
-/// 開いている設定ウィンドウにはイベントで、これから作る設定ウィンドウには目印で伝える
-#[tauri::command]
-fn open_ai_settings(app: AppHandle) {
-    app.state::<AppState>()
-        .ai_settings_requested
-        .store(true, Ordering::SeqCst);
-    open_settings(&app);
-    let _ = app.emit_to(SETTINGS_WINDOW, events::AI_SETTINGS_REQUESTED, ());
-}
-
-/// 設定ウィンドウが、「AI」で開くよう頼まれていたかを受け取る。受け取ったら頼みは消える
-#[tauri::command]
-fn take_ai_settings_request(state: tauri::State<'_, AppState>) -> bool {
-    state.ai_settings_requested.swap(false, Ordering::SeqCst)
-}
-
 /// 下書きウィンドウの設定のキー（既定は Cmd+, / Ctrl+,）で、設定ウィンドウを開閉する。
 /// 設定ウィンドウが存在する場合は、開いているか見えているかに関わらず閉じる。
 #[tauri::command]
@@ -1556,7 +1448,7 @@ fn set_snippets(app: AppHandle, snippets: Vec<Snippet>) -> Result<Vec<Snippet>, 
     // トレイには関わらないので、打つたびに作り直さない
     let mut snippets = snippets;
     config::repair_item_ids(&mut snippets)?;
-    save_as_typed(&app, |config| config.snippets = Some(snippets.clone()))?;
+    save_as_typed(&app, |config| config.snippets = snippets.clone())?;
     emit_settings(&app);
     Ok(snippets)
 }
@@ -1568,16 +1460,12 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     if snippet.body.trim().is_empty() {
         return Err("the snippet body is empty".to_string());
     }
-    let state = app.state::<AppState>();
-    let lang = state.lang();
-    let exists = state
+    let exists = app
+        .state::<AppState>()
         .config
         .lock()
         .unwrap()
         .snippets
-        .clone()
-        // 既定の定型文のままなら、この後に書き出す既定の定型文と比べる
-        .unwrap_or_else(|| actions::default_snippets(lang))
         .iter()
         .any(|existing| existing.body == snippet.body);
     if exists {
@@ -1587,18 +1475,69 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     let mut snippet = snippet;
     config::repair_item_ids(std::slice::from_mut(&mut snippet))?;
     info!("add snippet");
-    // 既定の定型文のままなら、既定の定型文を書き出してから足す。足した1件だけを書くと、既定の定型文が消える
-    save_as_typed(&app, |config| {
-        config
-            .snippets
-            .get_or_insert_with(|| actions::default_snippets(lang))
-            .push(snippet.clone())
-    })?;
+    save_as_typed(&app, |config| config.snippets.push(snippet.clone()))?;
     emit_settings(&app);
     // 設定画面は定型文の並びを自分で持っていて settings-changed では写し直さないので、足した1件を別に知らせる。
     // 知らせないと、設定画面を開いたままにしていたとき、次に設定画面で直したときの保存で消える
     let _ = app.emit(events::SNIPPET_ADDED, &snippet);
     Ok(true)
+}
+
+/// トークンを読み終えたら、読んでいる間にフォーカスが外れたのを見送っていたときだけ、下書きウィンドウにフォーカスを戻す。
+/// macOS はキーチェーンの許可のダイアログにフォーカスを移し、閉じても下書きには戻さない。戻さないと、フォーカスが外れた知らせがもう来ず、
+/// ほかのアプリへ移っても下書きが隠れない。Windows の資格情報マネージャーは読むときにダイアログを出さないので、戻さない
+fn refocus_draft_after_credential_prompt(app: &AppHandle) {
+    let kept = app
+        .state::<AccountState>()
+        .blur_kept_for_credential
+        .swap(false, Ordering::Relaxed);
+    if !kept || !cfg!(target_os = "macos") {
+        return;
+    }
+    let handle = app.clone();
+    // macOS のパネルの操作（make_key_window）はメインスレッドでしか行えないので、async の処理から呼ばれてもメインスレッドに移して行う
+    let result = app.run_on_main_thread(move || {
+        let Some(window) = main_window(&handle) else {
+            return;
+        };
+        if window.is_visible().unwrap_or(false)
+            && !window.is_focused().unwrap_or(true)
+            && !is_settings_focused(&handle)
+        {
+            info!("refocus the draft after reading the account token");
+            focus::refocus_draft(&handle, &window);
+        }
+    });
+    if let Err(error) = result {
+        error!("refocus the draft: couldn't run on the main thread: {error}");
+    }
+}
+
+/// Mawok のアカウントのトークンを読んでいる間の印
+struct ReadingCredential(AppHandle);
+
+impl ReadingCredential {
+    fn start(app: &AppHandle) -> Self {
+        app.state::<AccountState>()
+            .reading_credential
+            .fetch_add(1, Ordering::Relaxed);
+        Self(app.clone())
+    }
+}
+
+impl Drop for ReadingCredential {
+    /// 重なって読んでいたときは、最後に読み終えたときだけフォーカスを戻す
+    /// （先に読み終えた方が、まだ出ているほかの許可のダイアログからフォーカスを奪わないように）
+    fn drop(&mut self) {
+        let before = self
+            .0
+            .state::<AccountState>()
+            .reading_credential
+            .fetch_sub(1, Ordering::Relaxed);
+        if before == 1 {
+            refocus_draft_after_credential_prompt(&self.0);
+        }
+    }
 }
 
 /// 待つことのある処理（資格情報管理、同期のパスワードからの鍵の導出、バックアップのファイルの読み書き）を、メインスレッドを止めずに別のスレッドで走らせる。
@@ -1609,184 +1548,6 @@ async fn run_blocking<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(task)
         .await
         .map_err(|error| error.to_string())
-}
-
-/// AI サービスのキーがあるかを、キーチェーンを待つ間メインスレッドを止めずに確かめる
-/// `user` は資格情報管理に置くときの名前（`Config::ai_credential_user`）
-async fn ai_key_exists(service: AiService, user: String) -> Result<bool, String> {
-    run_blocking(move || match service {
-        AiService::Mawok => account_credentials::has_token(),
-        _ => secrets::exists(&user),
-    })
-    .await?
-    .inspect_err(|error| warn!("couldn't check the AI key: {error}"))
-}
-
-/// 送る内容と扱いを了解する。画面が出した AI サービスと送り先（OpenAI ならベース URL）が、今のものと違えば断る。
-#[tauri::command]
-async fn consent_ai(app: AppHandle, service: AiService, base_url: String) -> Result<(), String> {
-    info!("acknowledge AI with {}", service.name());
-    let action_state = app.state::<ActionState>();
-    let _settings = action_state.settings.lock().await;
-    let (current, current_url) = {
-        let state = app.state::<AppState>();
-        let config = state.config.lock().unwrap();
-        (config.ai_service, config.ai_base_url.clone())
-    };
-    if current != service || service == AiService::None {
-        return Err(format!(
-            "the AI service changed to {} before consenting",
-            current.name(),
-        ));
-    }
-    if service == AiService::OpenAi && current_url != base_url {
-        return Err("the base URL changed before consenting".to_string());
-    }
-    update_config(&app, |config| {
-        config.ai_consent = Some(service);
-        // 記録するのは、検査済みの今のベース URL。OpenAI でなければ送り先の URL は無い
-        config.ai_consent_base_url = if service == AiService::OpenAi {
-            current_url
-        } else {
-            String::new()
-        };
-    })?;
-    Ok(())
-}
-
-/// AI サービスを替える。キーとモデルと了解の記録はサービスごとに残す。
-#[tauri::command]
-async fn set_ai_service(app: AppHandle, service: AiService) -> Result<(), String> {
-    info!("set AI service: {}", service.name());
-    let action_state = app.state::<ActionState>();
-    let _settings = action_state.settings.lock().await;
-    app.state::<AppState>().forget_ai_key();
-    update_config(&app, |config| config.ai_service = service)
-}
-
-/// AI サービスのモデル。空文字（前後の空白だけのものを含む）で既定のモデルに戻す
-#[tauri::command]
-fn set_ai_model(app: AppHandle, service: AiService, model: String) -> Result<(), String> {
-    let model = model.trim().to_string();
-    info!(
-        "set AI model for {}: {}",
-        service.name(),
-        if model.is_empty() { "default" } else { &model }
-    );
-    update_config(&app, |config| {
-        if model.is_empty() {
-            config.ai_models.remove(&service);
-        } else {
-            config.ai_models.insert(service, model);
-        }
-    })
-}
-
-/// AI サービスが OpenAI のときに送る API の URL。空か OpenAI の URL で既定に戻す。
-/// 送り先が変わるので、OpenAI への了解を取り直す（docs/actions.md「AI（`@ai`）」）
-#[tauri::command]
-async fn set_ai_base_url(app: AppHandle, url: String) -> Result<(), String> {
-    let url = ai::normalize_base_url(&url).ok_or_else(|| "invalid base URL".to_string())?;
-    let action_state = app.state::<ActionState>();
-    let _settings = action_state.settings.lock().await;
-    if app.state::<AppState>().config.lock().unwrap().ai_base_url == url {
-        return Ok(());
-    }
-    // ログにはホストだけを出す。パスに秘密を入れるサービスがありうるため
-    let host = reqwest::Url::parse(&url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_string));
-    info!("set AI base URL: {}", host.as_deref().unwrap_or("default"));
-    // 了解は送り先の URL と組で記録しているので、替えた先には了解していないことになる（Config::ai_consented）
-    update_config(&app, |config| config.ai_base_url = url)?;
-    // キーは送り先ごとに置くので、替えた先のキーを確かめ直す
-    app.state::<AppState>().forget_ai_key();
-    Ok(())
-}
-
-/// 今の表示言語の既定の定型文。設定画面は、打っている途中の定型文を消さないよう、並びを自分で持ち、
-/// これを後ろに足してから set_snippets で保存する
-#[tauri::command]
-fn default_snippets(app: AppHandle) -> Vec<Snippet> {
-    actions::default_snippets(app.state::<AppState>().lang())
-}
-
-/// 今の AI サービスと、そのキーを資格情報管理に置くときの名前
-fn ai_service_and_user(app: &AppHandle) -> (AiService, String) {
-    let state = app.state::<AppState>();
-    let config = state.config.lock().unwrap();
-    (config.ai_service, config.ai_credential_user())
-}
-
-/// 今の AI サービスのキーがあるか。中身は読まない
-#[tauri::command]
-async fn has_ai_key(app: AppHandle) -> Result<bool, String> {
-    // 確かめている間に、キーの保存・削除やサービスの切り替えがキャッシュを書き換えて、古い結果で上書きしないようにする
-    let action_state = app.state::<ActionState>();
-    let _settings = action_state.settings.lock().await;
-    let (service, user) = ai_service_and_user(&app);
-    if service == AiService::None {
-        app.state::<AppState>().forget_ai_key();
-        return Ok(false);
-    }
-    let available = match ai_key_exists(service, user).await {
-        Ok(available) => available,
-        Err(error) => {
-            app.state::<AppState>().forget_ai_key();
-            apply_config(&app);
-            return Err(error);
-        }
-    };
-    app.state::<AppState>().remember_ai_key(service, available);
-    apply_config(&app);
-    Ok(available)
-}
-
-/// 今の AI サービスのキーを入れる（入れ直す）。前後の空白は取り除く。キーはログに残さない
-#[tauri::command]
-async fn set_ai_key(app: AppHandle, key: String) -> Result<(), String> {
-    let action_state = app.state::<ActionState>();
-    let _settings = action_state.settings.lock().await;
-    let (service, user) = ai_service_and_user(&app);
-    // Mawok はキーを入れず、アカウントと結んで受け取る（start_mawok_sign_in）
-    if service == AiService::None || service == AiService::Mawok {
-        return Err(actions::Failure::Disabled.code().to_string());
-    }
-    info!("set the AI key for {}", service.name());
-    let key = key.trim().to_string();
-    if key.is_empty() {
-        return Err("the key is empty".to_string());
-    }
-    // 了解の記録を消す保存を先にする。キーの保存の後で終了しても、入れ直したキーが了解なしで使われないようにするため。
-    // キーの保存が失敗しても、記録は消えたまま（了解のダイアログをもう一度出すだけ）なので、画面には知らせる
-    save_config(&app, |config| config.ai_consent = None)?;
-    let written = run_blocking(move || secrets::write(&user, &key))
-        .await
-        .and_then(|result| result.inspect_err(|error| error!("couldn't save the AI key: {error}")));
-    if written.is_ok() {
-        app.state::<AppState>().remember_ai_key(service, true);
-    }
-    apply_config(&app);
-    written
-}
-
-/// 今の AI サービスのキーを消す。選択・了解・ほかの AI サービスのキーは残す
-#[tauri::command]
-async fn delete_ai_key(app: AppHandle) -> Result<(), String> {
-    let action_state = app.state::<ActionState>();
-    let _settings = action_state.settings.lock().await;
-    let (service, user) = ai_service_and_user(&app);
-    // Mawok はキーを持たない。トークンはサインアウトで消す（sign_out_mawok）
-    if service == AiService::None || service == AiService::Mawok {
-        return Err(actions::Failure::Disabled.code().to_string());
-    }
-    info!("delete the AI key for {}", service.name());
-    run_blocking(move || secrets::delete(&user))
-        .await?
-        .inspect_err(|error| error!("couldn't delete the AI key: {error}"))?;
-    app.state::<AppState>().remember_ai_key(service, false);
-    apply_config(&app);
-    Ok(())
 }
 
 /// Mawok のアカウントと結ぶ申し込み。終わりの知らせと組にする番号
@@ -1819,19 +1580,23 @@ struct PendingMawokSignIn {
     task: tauri::async_runtime::JoinHandle<()>,
 }
 
-/// 窓口とのやり取りにも、AI のアクションと同じ HTTP クライアントを使い回す
+/// 窓口とのやり取りに使い回す HTTP クライアント
 fn http_client(app: &AppHandle) -> Result<reqwest::Client, String> {
-    let state = app.state::<ActionState>();
+    let state = app.state::<AccountState>();
     if let Some(client) = state.client.get() {
         return Ok(client.clone());
     }
     let client = reqwest::Client::builder()
-        .connect_timeout(ai::CONNECT_TIMEOUT)
-        .timeout(ai::TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|error| error.to_string())?;
     Ok(state.client.get_or_init(|| client).clone())
 }
+
+/// 窓口への問い合わせの時間の上限。つながらないときは早めにあきらめ、同期は履歴ごと送り受けするので、遅い回線でも待てる長さにする
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// 設定か履歴を続けて変えたときは最後から3秒だけ待ち、1回の同期へまとめる。
 fn schedule_sync_after_change(app: &AppHandle) {
@@ -2028,11 +1793,7 @@ async fn run_sync(app: &AppHandle) {
                 info!("sync server reset the local record");
             }
             let app_state = app.state::<AppState>();
-            let _commit = lock_sync_commit(
-                app,
-                result.changed && ai_destination_changes(&config, &result.config),
-            )
-            .await;
+            let _commit = app_state.sync_commit.lock().await;
             if app_state.sync_record_generation.load(Ordering::SeqCst) != record_generation {
                 // サインアウトや鍵の替わりで記録を消した後。この結果は、前の鍵・前のアカウントのもの
                 return;
@@ -2168,34 +1929,6 @@ async fn save_sync_record(
     saved
 }
 
-/// AI の送り先（AI サービスか、OpenAI のベース URL）が替わるか。キーの置き場の名前が替わるので、
-/// キーを扱うコマンドと同じ排他（`ActionState.settings`）の中で替える
-fn ai_destination_changes(before: &Config, after: &Config) -> bool {
-    before.ai_service != after.ai_service || before.ai_base_url != after.ai_base_url
-}
-
-/// 同期の結果や、同期の外で作った設定と記録を置く間の排他。AI の送り先が替わるなら（`ai_destination_changes`）、
-/// AI サービスを替えるコマンドと同じ排他も取る。
-/// サインアウトは、その排他の中で同期の記録を消すので、記録の排他より先に取る
-async fn lock_sync_commit(app: &AppHandle, ai_service_changes: bool) -> SyncCommitGuard<'_> {
-    let settings = if ai_service_changes {
-        Some(app.state::<ActionState>().inner().settings.lock().await)
-    } else {
-        None
-    };
-    let commit = app.state::<AppState>().inner().sync_commit.lock().await;
-    SyncCommitGuard {
-        _commit: commit,
-        _settings: settings,
-    }
-}
-
-/// `lock_sync_commit` で取った排他。取ったのと逆の順に返すよう、記録の排他を先に置く
-struct SyncCommitGuard<'a> {
-    _commit: tokio::sync::MutexGuard<'a, ()>,
-    _settings: Option<tokio::sync::MutexGuard<'a, ()>>,
-}
-
 /// 同期やバックアップから入れた設定を、開いている窓とトレイに反映する。
 fn apply_received_config(app: &AppHandle) {
     apply_config(app);
@@ -2311,10 +2044,7 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
     let state = app.state::<AppState>();
     // 排他を待つ間に同期の結果が入ると世代が進むので、今の設定から作り直して、もう一度保存する
     for _ in 0..RESTORE_ATTEMPTS {
-        let (current, _) = config_with_generation(&state);
-        let ai_service_changes =
-            ai_destination_changes(&current, &sync::restore_backup(&current, &backed_up));
-        let _commit = lock_sync_commit(&app, ai_service_changes).await;
+        let _commit = state.sync_commit.lock().await;
         // 同期の排他の中で、戻す直前の設定を残す。外で残すと、その後に入った同期の結果が戻す前の設定から漏れ、
         // 戻したことを戻せない
         back_up_now(&app).await?;
@@ -2322,10 +2052,6 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
         let next = sync::restore_backup(&current, &backed_up);
         if next == current {
             return Ok(());
-        }
-        // 排他を取った後に AI の送り先の替わりが入った。AI サービスを替えるコマンドの排他も取り直す
-        if ai_destination_changes(&current, &next) && !ai_service_changes {
-            continue;
         }
         if let Some(rejected) = save_received_config(&app, generation, true, next)? {
             // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
@@ -2397,8 +2123,11 @@ async fn start_mawok_sign_in(app: AppHandle) -> Result<MawokSignIn, String> {
         // ブラウザが開かなくても、画面の「ページを開き直す」から開ける
         warn!("couldn't open the sign-in page: {error}");
     }
-    let action_state = app.state::<ActionState>();
-    let id = action_state.mawok_sign_in_id.fetch_add(1, Ordering::SeqCst) + 1;
+    let account_state = app.state::<AccountState>();
+    let id = account_state
+        .mawok_sign_in_id
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
     let shown = MawokSignIn { id };
     let task_app = app.clone();
     let task = tauri::async_runtime::spawn(async move {
@@ -2411,8 +2140,8 @@ async fn start_mawok_sign_in(app: AppHandle) -> Result<MawokSignIn, String> {
         info!("signing in to the Mawok account ended (signed in: {signed_in})");
         // 終わった申し込みを片付ける。やり直した後の新しい申し込みは残す
         {
-            let action_state = task_app.state::<ActionState>();
-            let mut pending = action_state.mawok_sign_in.lock().unwrap();
+            let account_state = task_app.state::<AccountState>();
+            let mut pending = account_state.mawok_sign_in.lock().unwrap();
             if pending
                 .as_ref()
                 .is_some_and(|pending| pending.shown.id == id)
@@ -2425,7 +2154,7 @@ async fn start_mawok_sign_in(app: AppHandle) -> Result<MawokSignIn, String> {
             MawokSignInEnded { id, signed_in },
         );
     });
-    let previous = action_state
+    let previous = account_state
         .mawok_sign_in
         .lock()
         .unwrap()
@@ -2554,8 +2283,8 @@ async fn read_callback(
 
 /// 受け取ったトークンを置き、サインインした状態にする。置けなければ false
 async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
-    let action_state = app.state::<ActionState>();
-    let _settings = action_state.settings.lock().await;
+    let account_state = app.state::<AccountState>();
+    let _token = account_state.token.lock().await;
     clear_pro_state(app).await;
     let saved = run_blocking(move || account_credentials::write_token(&token))
         .await
@@ -2563,8 +2292,6 @@ async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
         .inspect_err(|error| error!("couldn't save the Mawok account token: {error}"))
         .is_ok();
     if saved {
-        app.state::<AppState>()
-            .remember_ai_key(AiService::Mawok, true);
         app.state::<AppState>()
             .mawok_account_signed_in
             .store(true, Ordering::Relaxed);
@@ -2580,7 +2307,7 @@ async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
 /// 続いている申し込み。設定の「アカウント」を開き直したときに、サインインの途中であることを出し直す
 #[tauri::command]
 fn mawok_sign_in_pending(app: AppHandle) -> Option<MawokSignIn> {
-    app.state::<ActionState>()
+    app.state::<AccountState>()
         .mawok_sign_in
         .lock()
         .unwrap()
@@ -2592,7 +2319,7 @@ fn mawok_sign_in_pending(app: AppHandle) -> Option<MawokSignIn> {
 #[tauri::command]
 fn cancel_mawok_sign_in(app: AppHandle) {
     let pending = app
-        .state::<ActionState>()
+        .state::<AccountState>()
         .mawok_sign_in
         .lock()
         .unwrap()
@@ -2606,7 +2333,7 @@ fn cancel_mawok_sign_in(app: AppHandle) {
 #[tauri::command]
 fn reopen_mawok_sign_in_page(app: AppHandle) -> Result<(), String> {
     let url = app
-        .state::<ActionState>()
+        .state::<AccountState>()
         .mawok_sign_in
         .lock()
         .unwrap()
@@ -2652,7 +2379,7 @@ async fn refresh_mawok_account_status(
         clear_if_needed().await;
         return Ok(None);
     }
-    let reading = ReadingAiKey::start(app);
+    let reading = ReadingCredential::start(app);
     let read = run_blocking(account_credentials::read_token).await?;
     drop(reading);
     if stale() {
@@ -2681,7 +2408,7 @@ async fn refresh_mawok_account_status(
                 .mawok_account_signed_in
                 .store(false, Ordering::Relaxed);
             apply_config(app);
-            return Err(actions::Failure::KeyUnreadable.code().to_string());
+            return Err(error_codes::ACCOUNT_TOKEN_UNREADABLE.to_string());
         }
     };
     let client = http_client(app)?;
@@ -2919,13 +2646,11 @@ async fn clear_pro_state(app: &AppHandle) {
 
 /// 手元のトークンを消し、サインインしていない状態にする
 async fn forget_mawok_token(app: &AppHandle) -> Result<(), String> {
-    let action_state = app.state::<ActionState>();
-    let _settings = action_state.settings.lock().await;
+    let account_state = app.state::<AccountState>();
+    let _token = account_state.token.lock().await;
     run_blocking(account_credentials::delete_token)
         .await?
         .inspect_err(|error| error!("couldn't delete the Mawok account token: {error}"))?;
-    app.state::<AppState>()
-        .remember_ai_key(AiService::Mawok, false);
     clear_pro_state(app).await;
     Ok(())
 }
@@ -2987,7 +2712,7 @@ async fn account_failure(app: &AppHandle, context: &str, error: account::Account
             if let Err(error) = forget_mawok_token(app).await {
                 warn!("couldn't forget the Mawok account token: {error}");
             }
-            actions::Failure::SignInRequired.code().to_string()
+            error_codes::ACCOUNT_SIGN_IN_REQUIRED.to_string()
         }
         // Pro が終わっていた。Pro の状態を読み直すと、同期の所が閉じる
         account::AccountError::Http(403) => {
@@ -3001,7 +2726,7 @@ async fn account_failure(app: &AppHandle, context: &str, error: account::Account
         // 送った要求の形が窓口と合わない。利用者には直せないので、ログを見るよう案内する
         account::AccountError::Http(status) => {
             warn!("{context}: HTTP {status}");
-            actions::Failure::Unexpected.code().to_string()
+            error_codes::UNEXPECTED.to_string()
         }
         account::AccountError::Other(detail) => {
             warn!("{context}: {detail}");
@@ -3014,12 +2739,10 @@ async fn account_failure(app: &AppHandle, context: &str, error: account::Account
 async fn mawok_token() -> Result<String, String> {
     match run_blocking(account_credentials::read_token).await? {
         Ok(token) => Ok(token),
-        Err(secrets::ReadError::NotFound) => {
-            Err(actions::Failure::SignInRequired.code().to_string())
-        }
+        Err(secrets::ReadError::NotFound) => Err(error_codes::ACCOUNT_SIGN_IN_REQUIRED.to_string()),
         Err(secrets::ReadError::Unreadable(detail)) => {
             error!("couldn't read the Mawok account token: {detail}");
-            Err(actions::Failure::KeyUnreadable.code().to_string())
+            Err(error_codes::ACCOUNT_TOKEN_UNREADABLE.to_string())
         }
     }
 }
@@ -3034,7 +2757,7 @@ async fn unwrap_sync_key(wrapped: String, password: String) -> Result<[u8; 32], 
         // 新しい版が包んだ鍵など。この版では開けない
         Err(sync_key::UnwrapError::Unreadable(detail)) => {
             warn!("couldn't read the wrapped sync key: {detail}");
-            Err(actions::Failure::Unexpected.code().to_string())
+            Err(error_codes::UNEXPECTED.to_string())
         }
     }
 }
@@ -3191,7 +2914,7 @@ async fn unlock_sync(app: AppHandle, password: String) -> Result<(), String> {
     let key = unwrap_sync_key(wrapped, password).await?;
     if sync_key::key_id(&key) != key_id {
         warn!("the wrapped sync key doesn't match its key ID");
-        return Err(actions::Failure::Unexpected.code().to_string());
+        return Err(error_codes::UNEXPECTED.to_string());
     }
     // 開いている間に、サインアウトや別のアカウントへのサインインが済んでいたら、置かない
     if !pro_generation_is_current(&app, generation) {
@@ -3229,7 +2952,7 @@ async fn change_sync_password(
     let key = unwrap_sync_key(wrapped, current).await?;
     if local != Some(key) {
         warn!("the wrapped sync key doesn't match its key ID");
-        return Err(actions::Failure::Unexpected.code().to_string());
+        return Err(error_codes::UNEXPECTED.to_string());
     }
     let rewrapped = run_blocking(move || sync_key::wrap(&key, &password)).await??;
     if !pro_generation_is_current(&app, generation) {
@@ -3273,561 +2996,15 @@ async fn sign_out_mawok_device(app: AppHandle, id: String) -> Result<(), String>
     }
 }
 
-/// 残高を買い足す入口をブラウザで開く
-#[tauri::command]
-fn open_mawok_buy_page(app: AppHandle) -> Result<(), String> {
-    let lang = app.state::<AppState>().lang();
-    open_page(&app, &account::buy_page_url(lang.code()))
-}
-
 /// Pro の料金ページをブラウザーで開く。デバイスの画面の案内にも使う。
 #[tauri::command]
 fn open_mawok_pro_page(app: AppHandle) -> Result<(), String> {
     open_page(&app, &account::pro_page_url())
 }
 
-/// 失敗したときに画面へ渡すもの。code は符号（actions.rs の Failure::code）。
-/// detail は実行先自身の言葉（actions.rs の ActionError::screen_detail）。
-/// 利用者自身の下書きの断片を含みうるのでログには残さず、画面にだけ渡す。exit_code はコマンドの終了コード
-#[derive(Debug, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(rename_all = "camelCase")]
-struct ActionFailure {
-    code: String,
-    detail: Option<String>,
-    exit_code: Option<i32>,
-}
-
-impl From<actions::Failure> for ActionFailure {
-    fn from(failure: actions::Failure) -> Self {
-        Self {
-            code: failure.code().to_string(),
-            detail: None,
-            exit_code: None,
-        }
-    }
-}
-
-impl From<&str> for ActionFailure {
-    fn from(code: &str) -> Self {
-        Self {
-            code: code.to_string(),
-            detail: None,
-            exit_code: None,
-        }
-    }
-}
-
-impl From<actions::ActionError> for ActionFailure {
-    fn from(error: actions::ActionError) -> Self {
-        Self {
-            code: error.failure.code().to_string(),
-            detail: error.screen_detail,
-            exit_code: error.exit_code,
-        }
-    }
-}
-
-/// 宛先の行を実行し、結果の文を返す。行頭が `@ai` なら指示文と実行する文を AI サービスへ送り、`@sh` ならシェルで実行する。
-/// 画面から渡された行をそのまま実行する（テキストウィンドウの1行目に書いた行も実行するため）。
-/// 結果の出し方が「出さない」なら、結果は空の文を返す。
-/// 失敗したら符号（actions.rs の Failure::code）を返し、詳しい中身はログにだけ残す。送った文と結果はログに書かない。
-/// `request` は begin_action で受け取った番号。より大きい番号のアクションを始めるか、
-/// cancel_action でこの番号以上を取り消すと、この実行を打ち切り（コマンドは子プロセスごと止める）、`action.cancelled` を返す
-#[tauri::command]
-async fn run_action(
-    app: AppHandle,
-    request: u64,
-    text: String,
-    line: String,
-    output: ActionOutput,
-    encoding: ActionEncoding,
-) -> Result<String, ActionFailure> {
-    let state = app.state::<ActionState>();
-    if request <= state.requests.lock().unwrap().settled_through {
-        info!("action {request} cancelled before it started");
-        return Err(error_codes::ACTION_CANCELLED.into());
-    }
-    let stopper = command::Stopper::default();
-    let discard_output = output == ActionOutput::None;
-    let tauri::async_runtime::JoinHandle::Tokio(task) =
-        match (actions::ai_instruction(&line), actions::sh_command(&line)) {
-            (Some(instruction), _) => start_ai_action(
-                &app,
-                request,
-                ai::Prompt::new(instruction, &text),
-                discard_output,
-            )?,
-            (None, Some(command)) => start_command_action(
-                &app,
-                request,
-                text,
-                command.to_string(),
-                encoding,
-                discard_output,
-                stopper.clone(),
-            )?,
-            // 画面は、宛先が `@ai`・`@sh` の行だけを渡す
-            (None, None) => {
-                return Err(actions::ActionError::new(
-                    actions::Failure::Unexpected,
-                    "the line has no executable addressee",
-                )
-                .into())
-            }
-        };
-    let abort = task.abort_handle();
-    {
-        let mut requests = state.requests.lock().unwrap();
-        // 始める前の確かめの後に、この番号を取り消したか、より新しいアクションが始まっていたら、始めずに打ち切る
-        if request <= requests.settled_through {
-            drop(requests);
-            stopper.stop();
-            abort.abort();
-            info!("action {request} cancelled before it started");
-            return Err(error_codes::ACTION_CANCELLED.into());
-        }
-        requests.settled_through = request;
-        // 前のアクションが残っていれば打ち切る（画面は1つずつしか実行しないが、取り消しの知らせが遅れたときのため）
-        if let Some((previous, abort_previous)) = requests.running.replace((
-            request,
-            Box::new(move || {
-                stopper.stop();
-                abort.abort();
-            }),
-        )) {
-            info!("action {previous} cancelled by action {request}");
-            abort_previous();
-        }
-    }
-    let result = task.await;
-    {
-        let mut requests = state.requests.lock().unwrap();
-        if requests
-            .running
-            .as_ref()
-            .is_some_and(|(running, _)| *running == request)
-        {
-            requests.running = None;
-        }
-    }
-    match result {
-        Ok(Ok(text)) => {
-            info!("action {request} finished");
-            Ok(text)
-        }
-        Ok(Err(error)) => {
-            warn!(
-                "action {request} failed: {} ({})",
-                error.failure.code(),
-                error.detail
-            );
-            Err(error.into())
-        }
-        // 打ち切った。取り消しのログは cancel_action と次のアクションが出す
-        Err(error) if error.is_cancelled() => Err(error_codes::ACTION_CANCELLED.into()),
-        Err(error) => {
-            error!("action {request} panicked: {error}");
-            Err(actions::Failure::Unexpected.into())
-        }
-    }
-}
-
-type ActionTask = tauri::async_runtime::JoinHandle<Result<String, actions::ActionError>>;
-
-/// AI のアクションを始める。AI サービスのキーを読み、指示文と実行する文を送る。`discard_output` なら返事は捨てる
-fn start_ai_action(
-    app: &AppHandle,
-    request: u64,
-    prompt: ai::Prompt,
-    discard_output: bool,
-) -> Result<ActionTask, ActionFailure> {
-    let (service, model, base_url, user, available, key_available) = {
-        let state = app.state::<AppState>();
-        let config = state.config.lock().unwrap().clone();
-        let key_available = state.ai_key_available(config.ai_service);
-        (
-            config.ai_service,
-            config.ai_model(),
-            config.openai_base_url().to_string(),
-            config.ai_credential_user(),
-            config.ai_available(key_available),
-            key_available,
-        )
-    };
-    if !available {
-        // サービスを選んであり、キーが無いと分かっていれば、キーを入れるよう知らせる。ほかは AI を使える状態にするよう知らせる
-        let failure = if service == AiService::Mawok && key_available == Some(false) {
-            actions::Failure::SignInRequired
-        } else if service != AiService::None && key_available == Some(false) {
-            actions::Failure::NoKey
-        } else {
-            actions::Failure::Disabled
-        };
-        return Err(failure.into());
-    }
-    info!("action {request} started ({}, {model})", service.name());
-    let task_app = app.clone();
-    Ok(tauri::async_runtime::spawn(async move {
-        let reading = ReadingAiKey::start(&task_app);
-        let read = run_blocking(move || match service {
-            AiService::Mawok => account_credentials::read_token(),
-            _ => secrets::read(&user),
-        })
-        .await;
-        drop(reading);
-        let key = match read {
-            Ok(Ok(key)) => key,
-            Ok(Err(secrets::ReadError::NotFound)) => {
-                let failure = if service == AiService::Mawok {
-                    actions::Failure::SignInRequired
-                } else {
-                    actions::Failure::NoKey
-                };
-                return Err(actions::ActionError::new(failure, "no key"));
-            }
-            Ok(Err(secrets::ReadError::Unreadable(detail))) => {
-                return Err(actions::ActionError::new(
-                    actions::Failure::KeyUnreadable,
-                    detail,
-                ))
-            }
-            Err(error) => {
-                return Err(actions::ActionError::new(
-                    actions::Failure::Unexpected,
-                    error,
-                ))
-            }
-        };
-        let client = http_client(&task_app)
-            .map_err(|error| actions::ActionError::new(actions::Failure::Unexpected, error))?;
-        let output = ai::send(&client, service, &key, &model, &base_url, &prompt).await?;
-        Ok(if discard_output {
-            String::new()
-        } else {
-            output
-        })
-    }))
-}
-
-/// コマンドのアクションを始める。作業フォルダーは、テキストウィンドウで移ったフォルダー（移っていなければホームフォルダー）
-fn start_command_action(
-    app: &AppHandle,
-    request: u64,
-    text: String,
-    command: String,
-    encoding: ActionEncoding,
-    discard_output: bool,
-    stopper: command::Stopper,
-) -> Result<ActionTask, ActionFailure> {
-    if command.trim().is_empty() {
-        warn!("action {request} refused: the command is empty");
-        return Err(actions::Failure::Unexpected.into());
-    }
-    let moved_to = app.state::<ActionState>().folder.lock().unwrap().clone();
-    let folder = match moved_to {
-        // 移った後にフォルダーが消えていれば、ホームで動かさずに断る。思っていない場所で動くと、相対パスのコマンドが別のファイルに触れるため
-        Some(folder) if !folder.is_dir() => {
-            warn!("action {request} refused: the working folder is gone");
-            return Err(actions::Failure::FolderMissing.into());
-        }
-        Some(folder) => folder,
-        None => app.path().home_dir().map_err(|error| {
-            error!("couldn't find the home folder: {error}");
-            ActionFailure::from(actions::Failure::CommandNotStarted)
-        })?,
-    };
-    info!("action {request} started (command)");
-    Ok(tauri::async_runtime::spawn(async move {
-        command::run(&command, &text, encoding, discard_output, &folder, stopper).await
-    }))
-}
-
-/// キーを読み終えたら、読んでいる間にフォーカスが外れたのを見送っていたときだけ、下書きウィンドウにフォーカスを戻す。
-/// macOS はキーチェーンの許可のダイアログにフォーカスを移し、閉じても下書きには戻さない。戻さないと、フォーカスが外れた知らせがもう来ず、
-/// ほかのアプリへ移っても下書きが隠れない。Windows の資格情報マネージャーは読むときにダイアログを出さないので、戻さない
-fn refocus_draft_after_key_prompt(app: &AppHandle) {
-    let kept = app
-        .state::<ActionState>()
-        .blur_kept_for_key
-        .swap(false, Ordering::Relaxed);
-    if !kept || !cfg!(target_os = "macos") {
-        return;
-    }
-    refocus_draft_on_main_thread(app, "reading the AI key");
-}
-
-/// 出ている下書きにフォーカスが無く、設定ウィンドウにも無ければ、下書きにフォーカスを戻す。
-/// macOS のパネルの操作（make_key_window）はメインスレッドでしか行えないので、async のコマンドから呼ばれてもメインスレッドに移して行う
-fn refocus_draft_on_main_thread(app: &AppHandle, after: &'static str) {
-    let handle = app.clone();
-    let result = app.run_on_main_thread(move || {
-        let Some(window) = main_window(&handle) else {
-            return;
-        };
-        if window.is_visible().unwrap_or(false)
-            && !window.is_focused().unwrap_or(true)
-            && !is_settings_focused(&handle)
-        {
-            info!("refocus the draft after {after}");
-            focus::refocus_draft(&handle, &window);
-        }
-    });
-    if let Err(error) = result {
-        error!("refocus the draft: couldn't run on the main thread: {error}");
-    }
-}
-
-/// AI サービスのキーを読んでいる間の印。アクションを打ち切って捨てられたときも、読み終えたことにする
-struct ReadingAiKey(AppHandle);
-
-impl ReadingAiKey {
-    fn start(app: &AppHandle) -> Self {
-        app.state::<ActionState>()
-            .reading_key
-            .fetch_add(1, Ordering::Relaxed);
-        Self(app.clone())
-    }
-}
-
-impl Drop for ReadingAiKey {
-    /// アクションを打ち切って捨てられたときも通る。重なって読んでいたときは、最後に読み終えたときだけフォーカスを戻す
-    /// （先に読み終えた方が、まだ出ているほかの許可のダイアログからフォーカスを奪わないように）
-    fn drop(&mut self) {
-        let before = self
-            .0
-            .state::<ActionState>()
-            .reading_key
-            .fetch_sub(1, Ordering::Relaxed);
-        if before == 1 {
-            refocus_draft_after_key_prompt(&self.0);
-        }
-    }
-}
-
-/// アクションの番号を振る。画面は実行を始める前に呼び、受け取った番号で run_action と cancel_action を呼ぶ。
-/// 番号を受け取る前に取り消したときは、受け取ってから cancel_action を呼ぶ
-#[tauri::command]
-fn begin_action(state: tauri::State<'_, ActionState>) -> u64 {
-    state.last_request.fetch_add(1, Ordering::Relaxed) + 1
-}
-
-/// `request` までの番号のアクションを取り消す。走っていれば打ち切り、まだ始まっていなければ始めない
-#[tauri::command]
-fn cancel_action(state: tauri::State<'_, ActionState>, request: u64) {
-    let mut requests = state.requests.lock().unwrap();
-    requests.settled_through = requests.settled_through.max(request);
-    if requests
-        .running
-        .as_ref()
-        .is_some_and(|(running, _)| *running <= request)
-    {
-        let (running, abort) = requests.running.take().unwrap();
-        drop(requests);
-        info!("action {running} cancelled");
-        abort();
-    }
-}
-
-/// 今の作業フォルダーの見せる形（folder.rs の display）。移っていなければホームフォルダー
-#[tauri::command]
-fn current_folder(app: AppHandle) -> Result<String, String> {
-    let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    Ok(folder::display(&working_folder(&app, &home), &home))
-}
-
-/// 今の作業フォルダー。移っていなければホームフォルダー
-fn working_folder(app: &AppHandle, home: &std::path::Path) -> PathBuf {
-    app.state::<ActionState>()
-        .folder
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| home.to_path_buf())
-}
-
-/// コマンドのアクションの作業フォルダーを、打たれたパスへ移す（folder.rs の resolve）。空ならホームに戻る。
-/// 移った先をテキストウィンドウのタイトルバーに出す（ホームならアプリの名前だけ）。移れなければ符号を返す。
-/// つながらないネットワークのパスではファイルシステムの確かめが長く止まるので、画面を止めないよう async にし、確かめる間はロックを持たない。
-/// 利用者のフォルダーの名前はログに書かない
-#[tauri::command]
-async fn change_folder(app: AppHandle, input: String) -> Result<(), String> {
-    let home = app.path().home_dir().map_err(|error| {
-        error!("couldn't find the home folder: {error}");
-        folder::FolderError::NotFound.code().to_string()
-    })?;
-    let base = working_folder(&app, &home);
-    let resolved = folder::resolve(&base, &home, &input).map_err(|error| {
-        info!("couldn't change the working folder: {}", error.code());
-        // メニューの最近のフォルダーから選んで、消えていたら外す（メニューは、あるかを確かめずに出すため）
-        let input = std::path::Path::new(input.trim());
-        if folder::is_gone(error, input) {
-            forget_folder(&app, input);
-        }
-        error.code().to_string()
-    })?;
-    let title = if resolved == home {
-        APP_NAME.to_string()
-    } else {
-        format!("{APP_NAME} — {}", folder::display(&resolved, &home))
-    };
-    remember_folder(&app, &resolved, &home);
-    *app.state::<ActionState>().folder.lock().unwrap() = (resolved != home).then_some(resolved);
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        if let Err(error) = window.set_title(&title) {
-            warn!("couldn't set the title of the draft window: {error}");
-        }
-    }
-    info!("changed the working folder");
-    Ok(())
-}
-
-fn recent_folders_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path()
-        .app_local_data_dir()
-        .ok()
-        .map(|dir| dir.join(folder::RECENT_FILE_NAME))
-}
-
-/// 最近のフォルダーを、まだ読んでいなければファイルから読んでから渡す
-fn with_recent_folders<T>(app: &AppHandle, f: impl FnOnce(&mut Vec<PathBuf>) -> T) -> T {
-    let state = app.state::<ActionState>();
-    let mut recent = state.recent_folders.lock().unwrap();
-    let recent = recent.get_or_insert_with(|| {
-        recent_folders_path(app)
-            .map(|path| folder::load_recent(&path))
-            .unwrap_or_default()
-    });
-    f(recent)
-}
-
-/// 最近のフォルダーを書く。書けなければ警告だけにする
-fn save_recent_folders(app: &AppHandle, recent: &[PathBuf]) {
-    if let Some(path) = recent_folders_path(app) {
-        if let Err(error) = folder::save_recent(&path, recent) {
-            warn!("couldn't save the recent folders: {error}");
-        }
-    }
-}
-
-/// 移った先を最近のフォルダーに入れて書く。書けなくても移るのは止めない（次に覚え直せる）
-fn remember_folder(app: &AppHandle, folder: &std::path::Path, home: &std::path::Path) {
-    let recent = with_recent_folders(app, |recent| {
-        folder::remember(recent, folder, home);
-        recent.clone()
-    });
-    save_recent_folders(app, &recent);
-}
-
-/// 移れなかったフォルダーを最近のフォルダーから外して書く
-fn forget_folder(app: &AppHandle, folder: &std::path::Path) {
-    let Some(recent) = with_recent_folders(app, |recent| {
-        folder::forget(recent, folder).then(|| recent.clone())
-    }) else {
-        return;
-    };
-    save_recent_folders(app, &recent);
-}
-
-/// テキストウィンドウの下のフォルダーのボタンとメニューに出すもの（folder.rs の menu）
-#[tauri::command]
-fn folder_menu(app: AppHandle) -> Result<folder::FolderMenu, String> {
-    let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    let current = working_folder(&app, &home);
-    let recent = with_recent_folders(&app, |recent| recent.clone());
-    Ok(folder::menu(&current, &home, &recent))
-}
-
-/// 欄に打ちかけのパスを、今の作業フォルダーから見て補う（folder.rs の complete）。
-/// change_folder と同じく、つながらないフォルダーで画面を止めないよう async にする。フォルダーの名前はログに書かない
-#[tauri::command]
-async fn complete_folder(
-    app: AppHandle,
-    input: String,
-) -> Result<folder::FolderCompletion, String> {
-    let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    let base = working_folder(&app, &home);
-    Ok(folder::complete(&base, &home, &input))
-}
-
-/// `@sh` の行の打ちかけのパスを、今の作業フォルダーから見て補う（folder.rs の complete_path）。
-/// complete_folder と同じく async にし、フォルダーの名前はログに書かない
-#[tauri::command]
-async fn complete_path(app: AppHandle, input: String) -> Result<folder::FolderCompletion, String> {
-    let home = app.path().home_dir().map_err(|error| error.to_string())?;
-    let base = working_folder(&app, &home);
-    Ok(folder::complete_path(&base, &home, &input))
-}
-
-/// OS のフォルダーを選ぶ画面を今の作業フォルダーから出し、選んだフォルダーへ移る（change_folder と同じく確かめる）。
-/// 選ばずに閉じたら false。画面を出している間は、フォーカスが外れても下書きを隠さず、閉じたら下書きにフォーカスを戻す
-#[tauri::command]
-async fn pick_folder(app: AppHandle) -> Result<bool, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let home = app.path().home_dir().map_err(|error| {
-        error!("couldn't find the home folder: {error}");
-        folder::FolderError::NotFound.code().to_string()
-    })?;
-    // フォルダーがあるかは、ロックを放してから確かめる。つながらないネットワークのフォルダーで、ほかのコマンドを待たせないため
-    let moved_to = app.state::<ActionState>().folder.lock().unwrap().clone();
-    let base = moved_to.filter(|folder| folder.is_dir()).unwrap_or(home);
-    let Some(window) = main_window(&app) else {
-        return Err("main window not found".to_string());
-    };
-    // 選ぶ画面を開くまでの間に押し直されても、2つ目は開かない。2つ開くと、先に閉じた方で印が外れ、残った方の裏で下書きが隠れるため
-    if app
-        .state::<ActionState>()
-        .picking_folder
-        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-        .is_err()
-    {
-        return Ok(false);
-    }
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .set_directory(&base)
-        .set_parent(&window)
-        .pick_folder(move |picked| {
-            let _ = sender.send(picked);
-        });
-    let picked = receiver.await.ok().flatten();
-    app.state::<ActionState>()
-        .picking_folder
-        .store(false, Ordering::Relaxed);
-    refocus_draft_on_main_thread(&app, "picking a folder");
-    let Some(path) = picked.and_then(|picked| picked.into_path().ok()) else {
-        return Ok(false);
-    };
-    change_folder(app, path.to_string_lossy().into_owned()).await?;
-    Ok(true)
-}
-
-/// 下書きウィンドウが隠れている間に終わったアクションを、OS の通知で知らせる。
-/// 文言は画面が表示言語で作る。押しても何もしない（Tauri の通知は、押したことを受け取れない）。
-/// 文言はアクションの名前を含み、利用者が付けた名前なのでログには書かない
-#[tauri::command]
-fn notify_action_finished(app: AppHandle, message: String) {
-    show_notification(&app, message);
-}
-
-/// OS の通知を出す。文言だけで、押しても何もしない
+/// OS の通知を出す。文言だけで、押しても何もしない。新しい版を見つけたことを知らせる（updater.rs）
+#[cfg(target_os = "macos")]
 fn show_notification(app: &AppHandle, message: String) {
-    // MSIX 版は、差出人をパッケージの AUMID にしないと出ない。プラグインは識別子（com.amiiby.mawok）を差出人にする
-    #[cfg(windows)]
-    if let Some(app_id) = package::app_user_model_id() {
-        // show は WinRT を待つ同期の呼び出しなので、メインスレッドを止めないよう別のスレッドで出す（プラグインも別に出す）
-        tauri::async_runtime::spawn_blocking(move || {
-            if let Err(error) = tauri_winrt_notification::Toast::new(app_id)
-                .title(&message)
-                .show()
-            {
-                warn!("couldn't show the notification: {error}");
-            }
-        });
-        return;
-    }
     use tauri_plugin_notification::NotificationExt;
     if let Err(error) = app.notification().builder().title(message).show() {
         warn!("couldn't show the notification: {error}");
@@ -4752,7 +3929,7 @@ fn macos_app_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     STARTED_AT.get_or_init(Instant::now);
-    // AI のアクションの HTTPS の暗号の実装（Cargo.toml の reqwest の注を参照）。reqwest のクライアントを作る前に入れる
+    // 窓口とやり取りする HTTPS の暗号の実装（Cargo.toml の reqwest の注を参照）。reqwest のクライアントを作る前に入れる
     if rustls::crypto::ring::default_provider()
         .install_default()
         .is_err()
@@ -4787,6 +3964,8 @@ pub fn run() {
         let _ = args;
         show(app)
     }));
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_notification::init());
     let builder = builder
         .plugin(diagnostics::log_plugin())
         .plugin(
@@ -4799,8 +3978,6 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
@@ -4808,7 +3985,7 @@ pub fn run() {
                 .build(),
         )
         .manage(DraftState::default())
-        .manage(ActionState::default())
+        .manage(AccountState::default())
         .invoke_handler(tauri::generate_handler![
             commit,
             preview_replacement_matches,
@@ -4820,8 +3997,6 @@ pub fn run() {
             settings_backups,
             back_up_settings,
             restore_settings_backup,
-            open_ai_settings,
-            take_ai_settings_request,
             open_settings_window,
             toggle_settings_window,
             close_settings_window,
@@ -4846,32 +4021,13 @@ pub fn run() {
             set_replacements,
             set_snippets,
             add_snippet,
-            consent_ai,
-            set_ai_service,
-            set_ai_model,
-            set_ai_base_url,
-            default_snippets,
-            has_ai_key,
-            set_ai_key,
-            delete_ai_key,
             start_mawok_sign_in,
             mawok_sign_in_pending,
             cancel_mawok_sign_in,
             reopen_mawok_sign_in_page,
             mawok_account_status,
             sign_out_mawok,
-            open_mawok_buy_page,
             open_mawok_pro_page,
-            run_action,
-            change_folder,
-            complete_folder,
-            complete_path,
-            folder_menu,
-            pick_folder,
-            current_folder,
-            begin_action,
-            cancel_action,
-            notify_action_finished,
             set_hotkey,
             set_draft_key,
             reset_draft_key,
@@ -5040,7 +4196,6 @@ pub fn run() {
                 config: Mutex::new(config),
                 problems: Mutex::new(problems),
                 settings_opening: AtomicBool::new(false),
-                ai_key_available: Mutex::new(None),
                 pro_state: Mutex::new(pro_state),
                 mawok_account_signed_in: AtomicBool::new(false),
                 pro_generation: AtomicUsize::new(0),
@@ -5055,7 +4210,6 @@ pub fn run() {
                 sync_schedule: Mutex::new(SyncSchedule::default()),
                 sync_debounce: debounce::Debounce::default(),
                 synced_on_show: Mutex::new(None),
-                ai_settings_requested: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "linux")]
@@ -5136,18 +4290,6 @@ pub fn run() {
                 }
                 RunEvent::ExitRequested { code, .. } => info!("exit requested (code: {code:?})"),
                 RunEvent::Exit => {
-                    // 走っているコマンドを子プロセスごと止める。残すと、アプリを終えた後も動き続ける
-                    let running = app
-                        .state::<ActionState>()
-                        .requests
-                        .lock()
-                        .unwrap()
-                        .running
-                        .take();
-                    if let Some((request, abort)) = running {
-                        info!("action {request} cancelled by exit");
-                        abort();
-                    }
                     // 書き込み中の履歴を書き切ってから終わる
                     drop(HISTORY_FILE_LOCK.lock());
                     info!("exit")
@@ -5257,8 +4399,7 @@ mod tests {
             focused: false,
             settings_focused: false,
             settings_opening: false,
-            reading_ai_key: false,
-            picking_folder: false,
+            reading_credential: false,
         }
     }
 
@@ -5362,19 +4503,10 @@ mod tests {
     }
 
     #[test]
-    fn keeps_draft_while_reading_ai_key() {
+    fn keeps_draft_while_reading_credential() {
         // macOS のキーチェーンの許可のダイアログにフォーカスが移っても、隠さない
         assert!(!should_hide_on_blur(BlurCheck {
-            reading_ai_key: true,
-            ..blurred()
-        }));
-    }
-
-    #[test]
-    fn keeps_draft_while_picking_folder() {
-        // OS のフォルダーを選ぶ画面にフォーカスが移っても、隠さない
-        assert!(!should_hide_on_blur(BlurCheck {
-            picking_folder: true,
+            reading_credential: true,
             ..blurred()
         }));
     }

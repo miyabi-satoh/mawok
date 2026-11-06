@@ -69,12 +69,6 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 			});
 		case 'input_guidance':
 			return m.settings_draft_guidance();
-		case 'ai_service':
-			return m.settings_ai_service();
-		case 'ai_models':
-			return m.settings_ai_model();
-		case 'ai_base_url':
-			return m.settings_ai_base_url();
 		case 'hotkey':
 			return m.settings_hotkey();
 		case 'text_window_keys':

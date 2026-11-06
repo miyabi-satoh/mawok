@@ -1,45 +1,35 @@
 /**
  * Stripe からの知らせの処理 (→ docs/account-server.md「購入」)。入口と署名の確かめは src/index.ts。
  */
-import { proUntilSql } from './credits';
+import { proUntilSql } from './pro';
 import { sendMail } from './mail';
-import { pricing } from './pricing';
 import {
 	cancelSubscription,
 	confirmProInvoice,
-	confirmPurchase,
 	getSubscription,
-	isPaidProInvoice,
-	PRODUCT,
 	PRO_PRODUCT,
 	ProInvoiceError,
-	proForSale,
 	type StripeConfig
 } from './stripe';
 import { now, randomHex } from './util';
 
 /**
  * アカウントを消したあと、購入の記録を残す期間。適格請求書の写しと帳簿の保存期間 (7年) に、うるう年の分を足す
- * (3つのアプリで揃える決まり)。使った分の記録も同じ期間残す。
+ * (3つのアプリで揃える決まり)。
  */
 const PURCHASE_RETENTION = 7 * 366 * 24 * 60 * 60;
 
 /**
  * 保存の期間を過ぎた記録を消す。購入の台帳は、アカウントから外れて期間を過ぎたもの (期間は外した日時から数える。
- * アカウントが無いまま届いた購入は、購入の日時から)。使った分の記録は、購入の分は台帳と一緒に消え、無料の分は日時で消す。
- * 知らせは少ないので、受けるたびに片付ける。
+ * アカウントが無いまま届いた購入は、購入の日時から)。知らせは少ないので、受けるたびに片付ける。
  */
 export function forgetOldRecords(env: Env) {
 	const before = now() - PURCHASE_RETENTION;
 	return env.DB.batch([
 		env.DB.prepare(
 			`DELETE FROM purchases
-			 WHERE account_id IS NULL AND coalesce(detached_at, created_at) <= ?
-			   AND NOT EXISTS (SELECT 1 FROM grants WHERE purchase_id = purchases.id)`
+			 WHERE account_id IS NULL AND coalesce(detached_at, created_at) <= ?`
 		).bind(before),
-		env.DB.prepare('DELETE FROM consumptions WHERE purchase_id IS NULL AND created_at <= ?').bind(
-			before
-		),
 		env.DB.prepare('DELETE FROM stripe_revoked_payments WHERE created_at <= ?').bind(before)
 	]);
 }
@@ -59,17 +49,6 @@ export async function handleStripeEvent(
 ): Promise<'failed' | void> {
 	switch (type) {
 		case 'invoice.paid': {
-			if (!proForSale(config)) {
-				if (await isPaidProInvoice(config, String(object.id))) {
-					await reportProInvoiceProblem(
-						env,
-						String(object.id),
-						'Pro の Price がそろっていません。'
-					);
-					return 'failed';
-				}
-				return;
-			}
 			let paid;
 			try {
 				paid = await confirmProInvoice(config, String(object.id));
@@ -194,52 +173,7 @@ export async function handleStripeEvent(
 				.run();
 			return;
 		}
-		// カードは completed の時点で払われている。MP の Session では後から払う方法も選べ、払われると async_payment_succeeded が届く。
-		case 'checkout.session.completed':
-		case 'checkout.session.async_payment_succeeded': {
-			const metadata = object.metadata as Record<string, string> | null;
-			if (metadata?.product !== PRODUCT || object.payment_status !== 'paid') return;
-			const purchase = await confirmPurchase(config, String(object.id));
-			if (!purchase) return;
-			// 台帳に残してから、残高を付ける。1つのトランザクションにし、確かめる処理と付ける処理を分けない。
-			// アカウントが無ければ、台帳には結び付き無しで残し、残高は付けない。
-			// 返金・不審請求の知らせが先に届いていれば、取り消し済みとして残し、残高は付けない。
-			const t = now();
-			await env.DB.batch([
-				env.DB.prepare(
-					`INSERT INTO purchases
-					   (id, account_id, product, stripe_checkout_session_id, stripe_payment_intent_id,
-					    amount, currency, managed_payments, card_country, buyer_country, domestic, created_at,
-					    revoked_at)
-					 VALUES (?1, (SELECT id FROM accounts WHERE id = ?2), ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12, ?11,
-					   (SELECT created_at FROM stripe_revoked_payments WHERE payment_intent_id = ?5))
-					 ON CONFLICT DO NOTHING`
-				).bind(
-					randomHex(16),
-					purchase.accountId,
-					PRODUCT,
-					purchase.sessionId,
-					purchase.paymentIntentId,
-					purchase.amount,
-					purchase.currency,
-					purchase.managedPayments ? 1 : 0,
-					purchase.cardCountry,
-					purchase.buyerCountry,
-					t,
-					purchase.domestic ? 1 : 0
-				),
-				env.DB.prepare(
-					`INSERT INTO grants (id, account_id, purchase_id, granted, remaining, created_at)
-					 SELECT ?1, account_id, id, ?2, ?2, ?3 FROM purchases
-					 WHERE stripe_checkout_session_id = ?4 AND account_id IS NOT NULL AND revoked_at IS NULL
-					 ON CONFLICT DO NOTHING`
-				).bind(randomHex(16), pricing(env).purchaseGrant, t, purchase.sessionId),
-				// 支払いの画面の予約を外す。次の買い足しで、払い終えた画面へ送らないように。
-				env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(purchase.accountId)
-			]);
-			return;
-		}
-		// 全額を返金したとき・不審請求を申し立てられたときは、その購入の残りを取り消す。使った分は取り戻さない。
+		// 全額を返金したとき・不審請求を申し立てられたときは、その支払いの Pro を取り消し、Stripe 側のサブスクも打ち切る。
 		case 'charge.refunded':
 		case 'charge.dispute.created': {
 			if (type === 'charge.refunded' && object.refunded !== true) return;
@@ -255,21 +189,6 @@ export async function handleStripeEvent(
 					`UPDATE purchases SET revoked_at = ?
 					 WHERE stripe_payment_intent_id = ? AND revoked_at IS NULL`
 				).bind(t, object.payment_intent),
-				env.DB.prepare(
-					`UPDATE grants SET revoked = revoked + remaining, remaining = 0 WHERE purchase_id IN
-					   (SELECT id FROM purchases WHERE stripe_payment_intent_id = ?)`
-				).bind(object.payment_intent),
-				env.DB.prepare(
-					`UPDATE grants SET revoked = revoked + remaining, remaining = 0
-					 WHERE account_id = (SELECT account_id FROM purchases WHERE stripe_payment_intent_id = ?1)
-					   AND (SELECT product FROM purchases WHERE stripe_payment_intent_id = ?1) = '${PRO_PRODUCT}'
-					   AND kind = 'pro' AND expires_at > ?2
-					   -- 二重に払われた片方を返金しても、残るサブスクの Pro で付けた分は取り消さない
-					   AND NOT EXISTS (
-					     SELECT 1 FROM subscriptions
-					     WHERE account_id = grants.account_id AND revoked_at IS NULL AND ${proUntilSql} > ?2
-					       AND id != (SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?1))`
-				).bind(object.payment_intent, t),
 				env.DB.prepare(
 					`UPDATE subscriptions SET revoked_at = coalesce(revoked_at, ?)
 					 WHERE id = (SELECT stripe_subscription_id FROM purchases WHERE stripe_payment_intent_id = ?)`

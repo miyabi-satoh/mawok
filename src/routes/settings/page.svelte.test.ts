@@ -19,7 +19,7 @@ import {
 import { newSnippet } from '$lib/snippets';
 import { callsOf } from '$lib/test-support/calls';
 import { emit } from '$lib/test-support/events';
-import { aiSnippet as ai, DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
+import { DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
 import Page from './+page.svelte';
 import { renderAt } from './render-at';
 
@@ -150,9 +150,6 @@ describe('既定の値から変えた設定の印', () => {
 	it('すべての印の名前に対応する行を出す', async () => {
 		settings.current = settingsView({
 			modifiedSettings: [...CONSTANTS.MODIFIED_SETTINGS],
-			// ベース URL の行は OpenAI のときだけ出る
-			aiService: 'openai',
-			aiModels: { openai: 'gpt-custom' },
 			mawokAccountSignedIn: true,
 			proAvailable: true
 		});
@@ -170,7 +167,6 @@ describe('既定の値から変えた設定の印', () => {
 			m.settings_category_draft,
 			m.settings_category_copy,
 			m.settings_category_snippets,
-			m.settings_category_ai,
 			m.settings_category_account
 		]) {
 			await screen.getByRole('tab', { name: category() }).click();
@@ -1302,7 +1298,7 @@ describe('設定画面のキー操作', () => {
 		};
 		const screen = await renderAt(m.settings_category_keys);
 
-		await expect.element(screen.getByText(m.settings_key_changeFolder())).toBeVisible();
+		await expect.element(screen.getByText(m.settings_key_historyOlder())).toBeVisible();
 		await expect.element(screen.getByText(m.settings_key_none())).toBeVisible();
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_key_reset_action() }))
@@ -1440,19 +1436,17 @@ describe('設定画面のキー操作', () => {
 
 	it('ホットキーが下書きの操作と重なって断られたら、登録できない旨ではなく重なりを出す', async () => {
 		invoked.mockImplementation((command) =>
-			command === 'set_hotkey'
-				? Promise.reject('keys.action.changeFolder')
-				: Promise.resolve(undefined)
+			command === 'set_hotkey' ? Promise.reject('keys.action.snippets') : Promise.resolve(undefined)
 		);
 		const screen = await renderAt(m.settings_category_keys);
 		await screen.getByRole('button', { name: hotkeyButtonName }).click();
 
-		await userEvent.keyboard('{Meta>}d{/Meta}');
+		await userEvent.keyboard('{Meta>}k{/Meta}');
 
 		await expect
 			.element(
 				screen.getByText(
-					m.settings_key_used_by_action({ keys: '⌘D', action: m.settings_key_changeFolder() })
+					m.settings_key_used_by_action({ keys: '⌘K', action: m.settings_key_snippets() })
 				)
 			)
 			.toBeVisible();
@@ -1592,189 +1586,9 @@ describe('設定画面のテキストウィンドウの「ほかのアプリに�
 	});
 });
 
-describe('設定画面の AI サービス', () => {
-	let responses: Record<string, unknown>;
-
+describe('設定画面の定型文の編集・絞り込み', () => {
 	beforeEach(() => {
-		responses = { has_ai_key: false };
-		invoked.mockImplementation((command, args) =>
-			command in responses
-				? Promise.resolve(responses[command])
-				: Promise.resolve(savedRows(command, args))
-		);
-	});
-
-	it('設定画面を開いただけではキーを確かめず、「AI」の分類を開くと確かめる', async () => {
-		settings.current = { ...view(), aiService: 'gemini' };
-		const screen = await render(Page);
-		await tick();
-		expect(invoked).not.toHaveBeenCalledWith('has_ai_key', undefined);
-
-		await screen.getByRole('tab', { name: m.settings_category_ai() }).click();
-
-		await expect
-			.element(screen.getByText(m.settings_ai_key_absent(), { exact: true }))
-			.toBeVisible();
-		expect(invoked).toHaveBeenCalledWith('has_ai_key', undefined);
-	});
-
-	it('AI サービスの選択肢を「使わない」から表示し、選んだサービスの送り先の説明を出す', async () => {
-		const screen = await renderAt(m.settings_category_ai);
-
-		const service = screen.getByRole('combobox', { name: m.settings_ai_service() });
-		await expect.element(service).toHaveValue('none');
-		await expect.element(service).toHaveDisplayValue(m.settings_ai_service_none());
-		expect(
-			service.element().closest('[data-slot=field]')?.nextElementSibling?.getAttribute('data-slot')
-		).not.toBe('field-description');
-
-		settings.current = { ...view(), aiService: 'anthropic' };
-		await expect.element(service).toHaveDisplayValue('Anthropic');
-		await expect
-			.element(screen.getByText(m.settings_ai_service_description_anthropic()))
-			.toBeVisible();
-	});
-
-	it('「使わない」ではキーとモデルを隠し、サービスを選ぶと表示する', async () => {
-		const screen = await renderAt(m.settings_category_ai);
-
-		await expect
-			.element(screen.getByText(m.settings_ai_key(), { exact: true }))
-			.not.toBeInTheDocument();
-		await expect.element(screen.getByLabelText(m.settings_ai_model())).not.toBeInTheDocument();
-
-		settings.current = { ...view(), aiService: 'gemini' };
-		await expect.element(screen.getByText(m.settings_ai_key(), { exact: true })).toBeVisible();
-		await expect.element(screen.getByLabelText(m.settings_ai_model())).toBeVisible();
-
-		await screen
-			.getByRole('combobox', { name: m.settings_ai_service() })
-			.selectOptions(m.settings_ai_service_none());
-		expect(invoked).toHaveBeenCalledWith('set_ai_service', { service: 'none' });
-	});
-
-	it('キーを保存すると、了解だけのダイアログを出し、了解を保存する', async () => {
-		settings.current = { ...view(), aiService: 'gemini' };
-		invoked.mockImplementation((command, args) => {
-			if (command === 'set_ai_key') {
-				responses.has_ai_key = true;
-				settings.current = { ...settings.current!, aiConsented: false };
-				return Promise.resolve(undefined);
-			}
-			if (command === 'consent_ai') {
-				settings.current = { ...settings.current!, aiConsented: true };
-				return Promise.resolve(undefined);
-			}
-			return command in responses
-				? Promise.resolve(responses[command])
-				: Promise.resolve(savedRows(command, args));
-		});
-		const screen = await renderAt(m.settings_category_ai);
-
-		await screen.getByRole('button', { name: m.settings_ai_key_enter() }).click();
-		await screen.getByLabelText(m.settings_ai_key_input()).fill('secret-key');
-		responses.has_ai_key = true;
-		await screen.getByRole('button', { name: m.settings_ai_key_save() }).click();
-		await expect
-			.element(screen.getByText(m.settings_ai_key_present(), { exact: true }))
-			.toBeVisible();
-		await expect.element(screen.getByLabelText(m.settings_ai_key_input())).not.toBeInTheDocument();
-
-		const dialog = screen.getByRole('alertdialog');
-		await expect.element(dialog).toHaveFocus();
-		await expect.element(dialog.getByText(m.settings_ai_consent_where_gemini())).toBeVisible();
-		await expect.element(dialog.getByText(m.settings_ai_consent_handling_gemini())).toBeVisible();
-		await expect
-			.element(dialog.getByRole('button'))
-			.toMatchTextContent(m.settings_ai_consent_accept());
-		expect(dialog.getByRole('button').elements()).toHaveLength(1);
-		await dialog.getByRole('button', { name: m.settings_ai_consent_accept() }).click();
-
-		await vi.waitFor(() =>
-			expect(invoked).toHaveBeenCalledWith('consent_ai', { service: 'gemini', baseUrl: '' })
-		);
-		await expect.element(screen.getByRole('alertdialog')).not.toBeInTheDocument();
-	});
-
-	it('キーがあり了解の記録が無ければ、分類を開いたときに了解を求める', async () => {
-		settings.current = { ...view(), aiService: 'gemini', aiConsented: false };
-		responses.has_ai_key = true;
-		const screen = await renderAt(m.settings_category_ai);
-
-		const dialog = screen.getByRole('alertdialog');
-		await expect.element(dialog).toHaveFocus();
-		await expect
-			.element(dialog.getByRole('button'))
-			.toMatchTextContent(m.settings_ai_consent_accept());
-		expect(dialog.getByRole('button').elements()).toHaveLength(1);
-	});
-
-	it('了解済みのサービスでは、キーを入れ直すと了解をもう一度出す', async () => {
-		settings.current = {
-			...view(),
-			aiService: 'gemini',
-			aiConsented: true,
-			aiModels: { gemini: 'custom-model' }
-		};
-		responses.has_ai_key = true;
-		invoked.mockImplementation((command, args) => {
-			if (command === 'set_ai_key') {
-				settings.current = { ...settings.current!, aiConsented: false };
-				return Promise.resolve(undefined);
-			}
-			return command in responses
-				? Promise.resolve(responses[command])
-				: Promise.resolve(savedRows(command, args));
-		});
-		const screen = await renderAt(m.settings_category_ai);
-
-		await expect.element(screen.getByLabelText(m.settings_ai_model())).toHaveValue('custom-model');
-		await screen.getByRole('button', { name: m.settings_ai_key_replace() }).click();
-		await screen.getByLabelText(m.settings_ai_key_input()).fill('secret-key');
-		await screen.getByRole('button', { name: m.settings_ai_key_save() }).click();
-		await expect.element(screen.getByRole('alertdialog')).toBeVisible();
-	});
-
-	it('了解を出している間に「使わない」を選ぶと、了解を送らずに閉じる', async () => {
-		settings.current = { ...view(), aiService: 'gemini' };
-		responses.has_ai_key = true;
-		const screen = await renderAt(m.settings_category_ai);
-
-		await expect.element(screen.getByRole('alertdialog')).toBeVisible();
-		settings.current = view();
-		await expect.element(screen.getByRole('alertdialog')).not.toBeInTheDocument();
-		expect(invoked).not.toHaveBeenCalledWith('consent_ai', expect.anything());
-	});
-
-	it('モデルは既定のときも既定のモデルを欄に出し、打つと保存し、空にすると既定に戻す', async () => {
-		settings.current = { ...view(), aiService: 'gemini' };
-		const screen = await renderAt(m.settings_category_ai);
-		const model = screen.getByLabelText(m.settings_ai_model());
-
-		await expect.element(model).toHaveValue('gemini-3.5-flash-lite');
-		await model.fill('gemini-3.8-flash');
-		expect(invoked).toHaveBeenLastCalledWith('set_ai_model', {
-			service: 'gemini',
-			model: 'gemini-3.8-flash'
-		});
-
-		// 打って消している途中は空のまま。離れたら既定を出す
-		await model.fill('');
-		await expect.element(model).toHaveValue('');
-		expect(invoked).toHaveBeenLastCalledWith('set_ai_model', { service: 'gemini', model: '' });
-		(model.element() as HTMLInputElement).blur();
-		await expect.element(model).toHaveValue('gemini-3.5-flash-lite');
-	});
-});
-
-describe('設定画面の定型文の宛先・既定・絞り込み', () => {
-	let defaults: Snippet[];
-
-	beforeEach(() => {
-		defaults = [];
-		invoked.mockImplementation((command, args) =>
-			Promise.resolve(command === 'default_snippets' ? defaults : savedRows(command, args))
-		);
+		invoked.mockImplementation((command, args) => Promise.resolve(savedRows(command, args)));
 	});
 
 	/** set_snippets に渡された定型文の並び */
@@ -1783,28 +1597,13 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 
 	/** 絞り込みの欄が出る6件。当てる行は「要約」 */
 	const sixSnippets = () => [
-		...['A', 'B', 'C', 'D', 'E'].map((name) => ai(name, name.toLowerCase())),
-		ai('要約', 'まとめて')
+		...['A', 'B', 'C', 'D', 'E'].map((name) => newSnippet(name, name.toLowerCase())),
+		newSnippet('要約', 'まとめて')
 	];
 
-	it('既定の定型文を追加すると、今の定型文の後ろに追加して保存する', async () => {
-		const mine = ai('要約', '要約してください。');
-		defaults = [ai('ビジネス向け', '丁寧に書き直してください。')];
-		settings.current = { ...view(), snippets: [mine] };
-		const screen = await renderAt(m.settings_category_snippets);
-
-		await screen.getByRole('button', { name: m.settings_snippets_add_defaults() }).click();
-
-		await vi.waitFor(() =>
-			expect(invoked).toHaveBeenCalledWith('set_snippets', {
-				snippets: [mine, ...defaults]
-			})
-		);
-		await expect.element(screen.getByRole('button', { name: /^ビジネス向け/ })).toBeVisible();
-	});
-
 	it('定型文を打って別の分類へ移り、戻っても、打った内容が残り、続けて打った内容で保存する', async () => {
-		settings.current = { ...view(), snippets: [ai('', '')] };
+		// 名前も本文も空の行は読み込みで捨てるので、本文を入れておく
+		settings.current = { ...view(), snippets: [newSnippet('', 'x')] };
 		const screen = await renderAt(m.settings_category_snippets);
 		await openRows(screen);
 
@@ -1813,96 +1612,18 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		await screen.getByRole('tab', { name: m.settings_category_snippets() }).click();
 
 		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('要約');
-		await screen.getByLabelText(m.settings_snippets_body()).fill('@ai 要約してください。');
+		await screen.getByLabelText(m.settings_snippets_body()).fill('要約してください。');
 
 		const saved = savedSnippets();
 		// 最初の保存で Rust（のモック）が振った ID を、続きの保存でも渡す
-		expect(saved.at(-1)).toEqual([{ ...ai('要約', '要約してください。'), id: 'snippets-0' }]);
+		expect(saved.at(-1)).toEqual([
+			{ ...newSnippet('要約', '要約してください。'), id: 'snippets-0' }
+		]);
 		expect(saved.every((snippets) => snippets.length === 1)).toBe(true);
 	});
 
-	it('@sh の行でだけ文字コードを、@ai・@sh の行でだけ結果の出し方を出し、選んだ出し方と文字コードを保存する', async () => {
-		const screen = await renderAt(m.settings_category_snippets);
-		await screen.getByRole('button', { name: m.settings_snippets_add() }).click();
-		const body = screen.getByLabelText(m.settings_snippets_body());
-		const output = screen.getByRole('radio', { name: m.settings_snippets_output_none() });
-		const encoding = screen.getByRole('combobox', { name: m.settings_snippets_encoding() });
-
-		// どの行が出すものかの決まりは rowAddressee の単体テストで見る
-		await body.fill('お疲れさまです。');
-		await expect.element(output).not.toBeInTheDocument();
-		await expect.element(encoding).not.toBeInTheDocument();
-
-		await body.fill('@sh tr a-z A-Z');
-		await output.click();
-		await encoding.selectOptions('Shift_JIS');
-		await vi.waitFor(() =>
-			expect(savedSnippets().at(-1)).toEqual([
-				{
-					...newSnippet('', '@sh tr a-z A-Z'),
-					id: 'snippets-0',
-					output: 'none',
-					encoding: 'shift_jis'
-				}
-			])
-		);
-
-		// 文字コードはコマンドの標準入力と標準出力にだけ効くので、`@ai` の行では出さない
-		await body.fill('@ai 訳して');
-		await expect.element(output).toBeVisible();
-		await expect.element(encoding).not.toBeInTheDocument();
-	});
-
-	it('開いたまま表示言語を替えたら、画面で変えていない定型文は新しい言語の定型文に写し直す', async () => {
-		settings.current = { ...view(), snippets: [ai('ビジネス向け', '丁寧に')] };
-		const screen = await renderAt(m.settings_category_snippets);
-		await expect.element(screen.getByRole('button', { name: /^ビジネス向け/ })).toBeVisible();
-
-		settings.current = {
-			...settings.current,
-			revision: settings.current.revision + 1,
-			locale: 'en',
-			snippets: [ai('Business', 'Politely')]
-		};
-
-		await expect.element(screen.getByRole('button', { name: /^Business/ })).toBeVisible();
-		expect(callsOf(invoked, 'set_snippets')).toEqual([]);
-	});
-
-	it('表示言語を替えて写し直しても、開いていた行は開いたままにする', async () => {
-		settings.current = { ...view(), snippets: [ai('ビジネス向け', '丁寧に')] };
-		const screen = await renderAt(m.settings_category_snippets);
-		await openRows(screen);
-
-		settings.current = {
-			...settings.current,
-			revision: settings.current.revision + 1,
-			locale: 'en',
-			snippets: [ai('Business', 'Politely')]
-		};
-
-		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('Business');
-	});
-
-	it('定型文を画面で変えていたら、表示言語を替えても写し直さない', async () => {
-		settings.current = { ...view(), snippets: [ai('', '')] };
-		const screen = await renderAt(m.settings_category_snippets);
-		await openRows(screen);
-		await screen.getByLabelText(m.settings_snippets_name()).fill('要約');
-
-		settings.current = {
-			...settings.current,
-			revision: settings.current.revision + 1,
-			locale: 'en',
-			snippets: [ai('Business', 'Politely')]
-		};
-
-		await tick();
-		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('要約');
-	});
-
 	it('どの行にもスイッチを出し、切ると、消さずに使わない定型文として保存する', async () => {
-		const a = ai('A', 'a');
+		const a = newSnippet('A', 'a');
 		const greeting = newSnippet('挨拶', 'お疲れさまです。');
 		settings.current = { ...view(), snippets: [a, greeting] };
 		const screen = await renderAt(m.settings_category_snippets);
@@ -1923,7 +1644,7 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		await screen.getByRole('searchbox', { name: m.settings_snippets_filter() }).fill('まとめ');
 
 		await expect.element(screen.getByRole('button', { name: /^要約/ })).toBeVisible();
-		expect(screen.getByRole('button', { name: 'A @ai a' }).all()).toHaveLength(0);
+		expect(screen.getByRole('button', { name: 'A a' }).all()).toHaveLength(0);
 		expect(screen.getByLabelText(m.settings_reorder_drag()).all()).toHaveLength(0);
 		// 絞り込んでいる間は、メニューに移動を出さず削除だけにする
 		await screen.getByRole('button', { name: m.settings_row_menu({ name: '要約' }) }).click();
@@ -1940,7 +1661,7 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 		await screen.getByRole('button', { name: /^要約/ }).click();
 
 		await screen.getByLabelText(m.settings_snippets_name()).fill('短く');
-		await screen.getByLabelText(m.settings_snippets_body()).fill('@ai 短く');
+		await screen.getByLabelText(m.settings_snippets_body()).fill('短く');
 
 		await expect.element(screen.getByLabelText(m.settings_snippets_name())).toHaveValue('短く');
 	});
@@ -1955,18 +1676,6 @@ describe('設定画面の定型文の宛先・既定・絞り込み', () => {
 
 		await expect.element(screen.getByText(m.settings_filter_no_match())).toBeVisible();
 		await expect.element(filter).toHaveValue('まとめ');
-	});
-
-	it('既定の定型文を追加すると、絞り込みを解いて足した行を見せる', async () => {
-		settings.current = { ...view(), snippets: sixSnippets() };
-		defaults = [ai('ビジネス向け', '丁寧に書き直してください。')];
-		const screen = await renderAt(m.settings_category_snippets);
-		await screen.getByRole('searchbox', { name: m.settings_snippets_filter() }).fill('まとめ');
-
-		await screen.getByRole('button', { name: m.settings_snippets_add_defaults() }).click();
-
-		await expect.element(screen.getByRole('button', { name: /^ビジネス向け/ })).toBeVisible();
-		await expect.element(screen.getByRole('button', { name: 'A @ai a' })).toBeVisible();
 	});
 
 	it('名前も本文も空の行は、「未入力」と出す', async () => {

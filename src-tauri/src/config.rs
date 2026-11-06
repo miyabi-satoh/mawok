@@ -6,7 +6,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    ai::AiService,
     draft_keys::{self, DraftAction, DraftKeys, Platform},
     text::{CharWidths, PunctuationStyle, Replacement},
 };
@@ -37,7 +36,7 @@ pub enum Theme {
     Dark,
 }
 
-/// 定型文の1件。下書きで定型文のキーで出す一覧から選ぶ。選ぶと、挿入するか、宛先へ出す（docs/actions.md「定型文」）
+/// 定型文の1件。下書きで定型文のキーで出す一覧から選ぶと、本文を挿入する
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -47,13 +46,8 @@ pub struct Snippet {
     pub id: String,
     /// 一覧で選ぶときの見出し。空なら、画面側で本文の最初の空でない行を代わりに出す
     pub name: String,
-    /// 登録した文。1行だけで行頭が宛先（`@ai`・`@sh`）なら、選ぶと今のテキストを中身にして出す。
-    /// ほかは、選ぶと挿入する（docs/actions.md「定型文」）
+    /// 登録した文。選ぶと挿入する
     pub body: String,
-    /// 宛先が `@ai`・`@sh` の行の、結果の出し方
-    pub output: ActionOutput,
-    /// 宛先が `@sh` の行の、標準入力と標準出力の文字コード
-    pub encoding: ActionEncoding,
     /// 消さずに一覧から外せるようにするため、1件ずつ切れる（置き換え辞書と同じ）
     pub enabled: bool,
     /// ほかのデバイスと同期するか
@@ -66,53 +60,9 @@ impl Default for Snippet {
             id: String::new(),
             name: String::new(),
             body: String::new(),
-            output: ActionOutput::default(),
-            encoding: ActionEncoding::default(),
             enabled: true,
             sync: true,
         }
-    }
-}
-
-/// 宛先へ出した結果の出し方。
-/// コマンドが下書きを使うか、結果を返すかは Mawok から見分けられないので、定型文ごとに持つ
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(rename_all = "lowercase")]
-pub enum ActionOutput {
-    /// 実行した文（選んだ範囲、なければ全体）を結果で置き換える
-    #[default]
-    Replace,
-    /// 範囲を選んでいたらその後ろに、なければカーソルの位置に結果を入れる
-    Insert,
-    /// 下書きに出さない。コマンドは終了コードが 0 なら、出力によらず成功
-    None,
-}
-
-/// `@sh` のコマンドとやりとりする文字コード（docs/actions.md「コマンド」）。標準入力へ渡す文と、標準出力を読むときに使う。
-/// Windows の `sort` のように、UTF-8 ではなくシステムの文字コード（日本語なら Shift_JIS）で読み書きするコマンドがあるため、定型文ごとに持つ
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-pub enum ActionEncoding {
-    #[default]
-    #[serde(rename = "utf-8")]
-    Utf8,
-    #[serde(rename = "shift_jis")]
-    ShiftJis,
-    #[serde(rename = "euc-jp")]
-    EucJp,
-    #[serde(rename = "iso-2022-jp")]
-    Iso2022Jp,
-    #[serde(rename = "utf-16le")]
-    Utf16Le,
-}
-
-impl ActionEncoding {
-    /// ログとエラーに出す名前（serde の名前）
-    pub fn name(self) -> String {
-        choice_name(&self)
     }
 }
 
@@ -152,8 +102,8 @@ pub struct Config {
     pub trim_trailing_whitespace: bool,
     /// クリップボードへ渡すときに適用する置き換え辞書。最長一致で適用し、左側が同じ項目は並びで最初を使う
     pub replacements: Vec<Replacement>,
-    /// 定型文。一覧には登録した順に並べる。None なら既定の定型文（今の表示言語のもの、actions::default_snippets）、空の並びなら定型文なし
-    pub snippets: Option<Vec<Snippet>>,
+    /// 定型文。一覧には登録した順に並べる
+    pub snippets: Vec<Snippet>,
     /// クリップボードへ渡すときに、句読点をどちらに揃えるか
     pub punctuation_style: PunctuationStyle,
     /// クリップボードへ渡すときに、全角と半角を文字の種類ごとにどちらへ揃えるか
@@ -171,60 +121,6 @@ pub struct Config {
     /// 下書きの入力欄に出す案内。None なら既定の案内（画面側で今の言語とホットキーから作る）、空文字なら出さない。
     /// 既定のままのときは、置き場に書かない
     pub input_guidance: Option<String>,
-    /// AI のアクションに使う AI サービス
-    pub ai_service: AiService,
-    /// 送る内容と扱いを了解した AI サービス。AI サービスを替えたら了解を取り直す
-    pub ai_consent: Option<AiService>,
-    /// OpenAI に了解したときのベース URL（`ai_base_url` と同じ形）。替えたら送り先が変わるので、了解を取り直す。
-    /// 了解と同じく同期しない
-    pub ai_consent_base_url: String,
-    /// AI サービスごとのモデル。書いていないサービスは既定のモデルを使う。空文字は持たない
-    pub ai_models: BTreeMap<AiService, String>,
-    /// AI サービスが OpenAI のときに送る API の URL（`ai::normalize_base_url` で揃えたもの）。空なら OpenAI。
-    /// OpenAI と互換のサービスに送るときに替える。モデルと組で使うので、モデルと同じく同期する
-    pub ai_base_url: String,
-}
-
-impl Config {
-    /// AI が使えるか。サービス・キー・了解の記録がそろっていること。キーが未確認なら使えるものとして扱う
-    pub fn ai_available(&self, key_available: Option<bool>) -> bool {
-        self.ai_service != AiService::None && key_available != Some(false) && self.ai_consented()
-    }
-
-    /// 今の AI サービスと送り先に了解しているか
-    pub fn ai_consented(&self) -> bool {
-        self.ai_consent == Some(self.ai_service)
-            && (self.ai_service != AiService::OpenAi
-                || self.ai_consent_base_url == self.ai_base_url)
-    }
-
-    /// AI サービスが OpenAI のときに送る API の URL
-    pub fn openai_base_url(&self) -> &str {
-        if self.ai_base_url.is_empty() {
-            crate::ai::OPENAI_BASE_URL
-        } else {
-            &self.ai_base_url
-        }
-    }
-
-    /// 今の AI サービスのキーを資格情報管理に置くときの名前。OpenAI のベース URL を替えてあれば、その URL ごとに分ける。
-    /// 分けないと、OpenAI のキーを入れたまま送り先を替えたときに、OpenAI のキーを別のサービスへ送ってしまう
-    pub fn ai_credential_user(&self) -> String {
-        let user = self.ai_service.credential_user();
-        if self.ai_service == AiService::OpenAi && !self.ai_base_url.is_empty() {
-            format!("{user} {}", self.ai_base_url)
-        } else {
-            user.to_string()
-        }
-    }
-
-    /// 今の AI サービスで使うモデル
-    pub fn ai_model(&self) -> String {
-        self.ai_models
-            .get(&self.ai_service)
-            .cloned()
-            .unwrap_or_else(|| self.ai_service.default_model().to_string())
-    }
 }
 
 /// 文字色を小文字の #rrggbb に揃える。#rgb も受け付ける。空は空（標準の色）のまま。
@@ -278,7 +174,7 @@ impl Default for Config {
             text_history_size: DEFAULT_DRAFT_HISTORY_SIZE,
             trim_trailing_whitespace: true,
             replacements: Vec::new(),
-            snippets: None,
+            snippets: Vec::new(),
             punctuation_style: PunctuationStyle::default(),
             char_widths: CharWidths::default(),
             exclude_from_clipboard_history: true,
@@ -287,11 +183,6 @@ impl Default for Config {
             text_color_light: String::new(),
             text_color_dark: String::new(),
             input_guidance: None,
-            ai_service: AiService::default(),
-            ai_consent: None,
-            ai_consent_base_url: String::new(),
-            ai_models: BTreeMap::new(),
-            ai_base_url: String::new(),
         }
     }
 }
@@ -316,7 +207,6 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
     ModifiedSetting::DraftKey(DraftAction::Snippets),
     ModifiedSetting::DraftKey(DraftAction::HistoryOlder),
     ModifiedSetting::DraftKey(DraftAction::HistoryNewer),
-    ModifiedSetting::DraftKey(DraftAction::ChangeFolder),
     ModifiedSetting::Value {
         name: key::AUTOSTART,
         differs: |config, defaults| config.autostart != defaults.autostart,
@@ -387,21 +277,6 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
             config.char_widths != defaults.char_widths
                 || config.punctuation_style != defaults.punctuation_style
         },
-    },
-    ModifiedSetting::Value {
-        name: key::AI_SERVICE,
-        differs: |config, defaults| config.ai_service != defaults.ai_service,
-    },
-    ModifiedSetting::Value {
-        name: key::AI_MODELS,
-        differs: |config, _| {
-            config.ai_service != AiService::None
-                && config.ai_models.contains_key(&config.ai_service)
-        },
-    },
-    ModifiedSetting::Value {
-        name: key::AI_BASE_URL,
-        differs: |config, defaults| config.ai_base_url != defaults.ai_base_url,
     },
     ModifiedSetting::Value {
         name: key::SYNC_SETTINGS,
@@ -495,15 +370,9 @@ pub mod key {
     pub const TEXT_COLOR_LIGHT: &str = "text_color_light";
     pub const TEXT_COLOR_DARK: &str = "text_color_dark";
     pub const INPUT_GUIDANCE: &str = "input_guidance";
-    pub const AI_SERVICE: &str = "ai_service";
-    pub const AI_CONSENT: &str = "ai_consent";
-    pub const AI_CONSENT_BASE_URL: &str = "ai_consent_base_url";
-    pub const AI_MODELS: &str = "ai_models";
-    pub const AI_BASE_URL: &str = "ai_base_url";
 }
 
 /// 置き場に書く項目。既定と違う値だけを持つ（docs/config.md）。
-/// 定型文は、既定の定型文のまま（`None`）なら書かず、利用者が変えたら空の並びでも書く
 pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     let defaults = Config::default();
     let mut entries = BTreeMap::new();
@@ -533,6 +402,7 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     field!(key::TEXT_HISTORY_SIZE, text_history_size);
     field!(key::TRIM_TRAILING_WHITESPACE, trim_trailing_whitespace);
     field!(key::REPLACEMENTS, replacements);
+    field!(key::SNIPPETS, snippets);
     field!(key::PUNCTUATION_STYLE, punctuation_style);
     field!(key::ALPHABET_WIDTH, char_widths.alphabet);
     field!(key::DIGIT_WIDTH, char_widths.digit);
@@ -548,29 +418,11 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     field!(key::TEXT_COLOR_LIGHT, text_color_light);
     field!(key::TEXT_COLOR_DARK, text_color_dark);
     field!(key::INPUT_GUIDANCE, input_guidance);
-    field!(key::AI_SERVICE, ai_service);
-    field!(key::AI_CONSENT, ai_consent);
-    field!(key::AI_CONSENT_BASE_URL, ai_consent_base_url);
-    field!(key::AI_BASE_URL, ai_base_url);
-    // 既定のモデルと同じものは書かない。版を上げて既定のモデルを替えたときに、変えていない人へ届くようにする
-    let models: BTreeMap<&AiService, &String> = config
-        .ai_models
-        .iter()
-        .filter(|(service, model)| !model.is_empty() && model.as_str() != service.default_model())
-        .collect();
-    put(
-        key::AI_MODELS,
-        json(&models),
-        json(BTreeMap::<AiService, String>::new()),
-    );
     put(
         key::TEXT_WINDOW_KEYS,
         stored_draft_keys(config),
         Value::Object(Default::default()),
     );
-    if let Some(snippets) = &config.snippets {
-        entries.insert(key::SNIPPETS.to_string(), json(snippets));
-    }
     entries
 }
 
@@ -619,7 +471,7 @@ pub fn from_entries(entries: &BTreeMap<String, Value>) -> Result<Loaded, String>
             // ホットキーとキー操作は、互いの重なりを見るので最後に組で読む。行は1行ずつ読む
             key::HOTKEY | key::TEXT_WINDOW_KEYS => {}
             key::REPLACEMENTS => config.replacements = read_rows(name, value, &mut skipped),
-            key::SNIPPETS => config.snippets = Some(read_rows(name, value, &mut skipped)),
+            key::SNIPPETS => config.snippets = read_rows(name, value, &mut skipped),
             _ => match apply_setting(&mut config, name, value) {
                 Some(true) => {}
                 Some(false) => skipped.push(name.clone()),
@@ -724,20 +576,6 @@ pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> Option<b
         key::TEXT_COLOR_LIGHT => set_color(&mut config.text_color_light, value),
         key::TEXT_COLOR_DARK => set_color(&mut config.text_color_dark, value),
         key::INPUT_GUIDANCE => set(&mut config.input_guidance, value),
-        key::AI_SERVICE => set(&mut config.ai_service, value),
-        key::AI_CONSENT => set(&mut config.ai_consent, value),
-        key::AI_CONSENT_BASE_URL => set_checked(&mut config.ai_consent_base_url, value, |url| {
-            crate::ai::normalize_base_url(url).as_deref() == Some(url.as_str())
-        }),
-        // 空のモデルは持たない。画面でも「既定のモデル」として項目ごと外す
-        key::AI_MODELS => set_checked(&mut config.ai_models, value, |models| {
-            models
-                .values()
-                .all(|model| !model.is_empty() && model.trim() == model)
-        }),
-        key::AI_BASE_URL => set_checked(&mut config.ai_base_url, value, |url| {
-            crate::ai::normalize_base_url(url).as_deref() == Some(url.as_str())
-        }),
         _ => return None,
     })
 }
@@ -785,10 +623,7 @@ pub(crate) fn repair_item_ids<T: SyncRow>(items: &mut [T]) -> Result<bool, Strin
 /// 設定の行の ID を、種類ごとに直す。
 fn repair_item_ids_in_config(config: &mut Config) -> Result<bool, String> {
     let replacements = repair_item_ids(&mut config.replacements)?;
-    let snippets = match &mut config.snippets {
-        Some(snippets) => repair_item_ids(snippets)?,
-        None => false,
-    };
+    let snippets = repair_item_ids(&mut config.snippets)?;
     Ok(replacements || snippets)
 }
 
@@ -873,73 +708,32 @@ mod tests {
                 ..CharWidths::default()
             },
             text_font_size: MAX_DRAFT_FONT_SIZE,
+            snippets: vec![Snippet {
+                id: "b".repeat(32),
+                name: "挨拶".to_string(),
+                body: "お世話になっております。".to_string(),
+                ..Snippet::default()
+            }],
             text_color_dark: "#123456".to_string(),
             input_guidance: Some(String::new()),
-            ai_service: AiService::Gemini,
-            ai_consent: Some(AiService::Gemini),
-            ai_models: BTreeMap::from([(AiService::Gemini, "custom-model".to_string())]),
-            ai_base_url: "http://localhost:11434/v1".to_string(),
             ..Config::default()
         };
         assert_eq!(round_trip(&config), config);
         let entries = stored_entries(&config);
         assert_eq!(entries["digit_width"], json!("half"));
         assert!(!entries.contains_key("alphabet_width"));
-        assert!(!entries.contains_key("snippets"));
+        assert!(!entries.contains_key("sync_settings"));
     }
 
     #[test]
-    fn keeps_snippets_emptied_by_the_user_apart_from_the_defaults() {
-        let emptied = Config {
-            snippets: Some(Vec::new()),
-            ..Config::default()
-        };
-        assert_eq!(stored_entries(&emptied)["snippets"], json!([]));
-        assert_eq!(round_trip(&emptied).snippets, Some(Vec::new()));
-    }
-
-    #[test]
-    fn stores_only_the_keys_and_models_that_differ_from_their_defaults() {
+    fn stores_only_the_keys_that_differ_from_their_defaults() {
         let mut config = Config::default();
         config.text_window_keys.copy = "CommandOrControl+KeyJ".to_string();
-        config.ai_models = BTreeMap::from([
-            (
-                AiService::Gemini,
-                AiService::Gemini.default_model().to_string(),
-            ),
-            (AiService::Anthropic, "custom".to_string()),
-        ]);
         let entries = stored_entries(&config);
         assert_eq!(
             entries["text_window_keys"],
             json!({ "copy": "CommandOrControl+KeyJ" })
         );
-        assert_eq!(entries["ai_models"], json!({ "anthropic": "custom" }));
-    }
-
-    #[test]
-    fn consent_to_openai_covers_only_the_base_url_consented_to() {
-        let consented = Config {
-            ai_service: AiService::OpenAi,
-            ai_consent: Some(AiService::OpenAi),
-            ai_base_url: "https://api.deepseek.com".to_string(),
-            ai_consent_base_url: "https://api.deepseek.com".to_string(),
-            ..Config::default()
-        };
-        assert!(consented.ai_consented());
-        // 同期などで送り先が替わったら、了解していないものとして取り直す
-        let moved = Config {
-            ai_base_url: "http://localhost:11434/v1".to_string(),
-            ..consented.clone()
-        };
-        assert!(!moved.ai_consented());
-        // ほかのサービスには、ベース URL は関わらない
-        let gemini = Config {
-            ai_service: AiService::Gemini,
-            ai_consent: Some(AiService::Gemini),
-            ..moved
-        };
-        assert!(gemini.ai_consented());
     }
 
     #[test]
@@ -948,11 +742,6 @@ mod tests {
             ("theme".to_string(), json!(3)),
             ("text_font_size".to_string(), json!(MAX_DRAFT_FONT_SIZE + 1)),
             ("language".to_string(), json!("ja")),
-            // 揃えていない形のベース URL
-            (
-                "ai_base_url".to_string(),
-                json!("https://api.deepseek.com/"),
-            ),
             ("a_setting_of_a_newer_version".to_string(), json!(true)),
             (
                 "replacements".to_string(),
@@ -966,7 +755,7 @@ mod tests {
         assert_eq!(loaded.config.replacements.len(), 1);
         assert_eq!(
             loaded.skipped,
-            ["ai_base_url", "replacements[1]", "text_font_size", "theme"]
+            ["replacements[1]", "text_font_size", "theme"]
         );
         // 行の ID が無かったので振り直し、呼ぶ側が書き戻す
         assert!(loaded.repaired_item_ids);

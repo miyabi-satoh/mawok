@@ -18,12 +18,9 @@ export class SnippetsEditor {
 	filter = $state('');
 
 	readonly call: Call;
-	/** 定型文を写したときの表示言語 */
-	#snippetsLocale: string | undefined;
 
 	constructor(view: SettingsView | null, call: Call) {
 		this.call = call;
-		this.#snippetsLocale = view?.locale;
 		this.snippets = new RowList(
 			view?.snippets ?? [],
 			async (snippets) => okValue(await this.call<Snippet[]>('set_snippets', { snippets })),
@@ -31,19 +28,8 @@ export class SnippetsEditor {
 		);
 	}
 
-	/**
-	 * 表示言語が替わったら、定型文を写し直す。既定の定型文（変えていない定型文）は言語ごとに違うので、
-	 * 写し直さないと前の言語の定型文を出し続け、1行直すと前の言語のまま保存してしまう。画面で変えていたら写し直さない
-	 */
-	followLocale(view: SettingsView) {
-		if (view.locale === this.#snippetsLocale) return;
-		this.#snippetsLocale = view.locale;
-		this.snippets.recopy(view.snippets);
-	}
-
 	/** 同期やバックアップから戻すことで設定が替わったら、定型文を写し直す。画面で変えていても写す（RowList.recopy の force） */
 	recopy(view: SettingsView) {
-		this.#snippetsLocale = view.locale;
 		this.snippets.recopy(view.snippets, true);
 	}
 
@@ -57,13 +43,5 @@ export class SnippetsEditor {
 		const row = this.snippets.addBlank(newSnippet('', ''));
 		this.expanded.add(row.key);
 		return row.key;
-	}
-
-	async addDefaultSnippets() {
-		const defaults = await this.call<Snippet[]>('default_snippets');
-		if (!defaults.ok) return;
-		// 足した行が絞り込みで隠れないよう、絞り込みを解く
-		this.filter = '';
-		this.snippets.add(...defaults.value);
 	}
 }

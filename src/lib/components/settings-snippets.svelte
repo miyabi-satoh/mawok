@@ -6,20 +6,15 @@
 	import SettingsSection from '$lib/components/settings-section.svelte';
 	import SettingsSyncNote from '$lib/components/settings-sync-note.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import * as Field from '$lib/components/ui/field';
-	import * as NativeSelect from '$lib/components/ui/native-select';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import * as ToggleGroup from '$lib/components/ui/toggle-group';
 	import { m } from '$lib/paraglide/messages';
 	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
-	import { ENCODINGS, OUTPUTS } from '$lib/action-options';
-	import { rowAddressee } from '$lib/addressee';
 	import { firstLine, snippetLabel } from '$lib/snippets';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { Switch } from '$lib/components/ui/switch';
 	import { focusFirstField } from '$lib/focus-field';
 	import { showsFilter } from '$lib/list-filter';
-	import type { ActionEncoding, ActionOutput, SettingsView } from '$lib/settings.svelte';
+	import type { SettingsView } from '$lib/settings.svelte';
 
 	/**
 	 * 設定画面の「定型文」の分類。定型文の並び。
@@ -60,7 +55,7 @@
 								}}
 							/>
 						{/if}
-						<!-- 一覧から外すスイッチ。消さずに取っておくのは、挿入する文でも実行する行でも同じなので、どの行にも出す -->
+						<!-- 一覧から外すスイッチ。消さずに取っておける -->
 						<Switch
 							aria-label={label
 								? m.settings_snippets_enabled({ name: label })
@@ -75,7 +70,6 @@
 						/>
 					{/snippet}
 					{#snippet body(row)}
-						{@const addressee = rowAddressee(row.body)}
 						<div class="flex flex-col gap-1.5">
 							<span id="snippet-{row.key}-body" class="text-xs text-muted-foreground">
 								{m.settings_snippets_body()}
@@ -95,61 +89,6 @@
 								}
 							/>
 						</div>
-						<!-- 結果の出し方は `@ai`・`@sh` の行にだけ、文字コードは `@sh` の標準入力と標準出力にだけ効くので、効く行でだけ出す -->
-						{#if addressee}
-							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-								<Field.Title
-									id="snippet-{row.key}-output"
-									class="text-xs font-normal text-muted-foreground"
-								>
-									{m.settings_snippets_output()}
-								</Field.Title>
-								<ToggleGroup.Root
-									type="single"
-									variant="outline"
-									size="sm"
-									aria-labelledby="snippet-{row.key}-output"
-									bind:value={
-										() => row.output,
-										(output) => {
-											if (!output || output === row.output) return;
-											row.output = output as ActionOutput;
-											editor.snippets.save();
-										}
-									}
-								>
-									{#each OUTPUTS as { value, name } (value)}
-										<ToggleGroup.Item {value}>{name()}</ToggleGroup.Item>
-									{/each}
-								</ToggleGroup.Root>
-							</Field.Field>
-							{#if !addressee.ai}
-								<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-									<Field.Title
-										id="snippet-{row.key}-encoding"
-										class="text-xs font-normal text-muted-foreground"
-									>
-										{m.settings_snippets_encoding()}
-									</Field.Title>
-									<NativeSelect.Root
-										size="sm"
-										aria-labelledby="snippet-{row.key}-encoding"
-										bind:value={
-											() => row.encoding,
-											(encoding) => {
-												if (!encoding || encoding === row.encoding) return;
-												row.encoding = encoding as ActionEncoding;
-												editor.snippets.save();
-											}
-										}
-									>
-										{#each ENCODINGS as { value, name } (value)}
-											<NativeSelect.Option {value}>{name}</NativeSelect.Option>
-										{/each}
-									</NativeSelect.Root>
-								</Field.Field>
-							{/if}
-						{/if}
 					{/snippet}
 				</ReorderableRows>
 				<div class="flex gap-2">
@@ -160,9 +99,6 @@
 					>
 						<PlusIcon data-icon="inline-start" />
 						{m.settings_snippets_add()}
-					</Button>
-					<Button variant="outline" size="sm" onclick={() => editor.addDefaultSnippets()}>
-						{m.settings_snippets_add_defaults()}
 					</Button>
 				</div>
 			</SettingsRow>

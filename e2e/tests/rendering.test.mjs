@@ -5,13 +5,9 @@ import {
 	expandAllRows,
 	hideDraft,
 	invokeApp,
-	readAlert,
-	runDraft,
-	setDraftValue,
 	setJapanese,
 	showDraftAndWaitVisible,
 	typeIntoDraft,
-	waitAlert,
 	waitDraftHidden,
 	waitForWindowCount,
 	waitSettingsWindow
@@ -44,9 +40,6 @@ import { waitFor } from '../lib/wait.mjs';
 // 重なり・はみ出し・省略・潰れを lib/rendering.mjs で調べ、画面を e2e/screenshots/ に撮る。
 // 撮った画面は人とエージェントが目で見る (バランスや余白の不揃いは機械では決めにくいため)。
 // 状態を作るのに要る設定は 設定の置き場で入れる。
-// アクションは一覧を開いて撮るだけで、選ばない。この機の資格情報管理に本物のキーがあれば、選んだ時点で
-// AI サービスへ送ってしまうため (画面の invoke は差し替えられず、送る手前で止める口もない)。
-// 同じ理由で、アクションの失敗は撮らない。失敗の帯は、送らずに出せる「宛先の後ろが空」で撮る
 
 const suite = createSuite();
 
@@ -72,16 +65,11 @@ const TEST_CONFIG = {
 	snippets: [
 		{ name: 'かくにん', body: '一つずつ質問してください。\n以上です。' },
 		{ name: '', body: 'git status' },
-		// 選ぶと宛先へ出す行 (一覧に並ぶ。設定では、結果の出し方と @sh の文字コードが出る)
-		{ name: '英訳', body: '@ai 英語に訳してください。', output: 'replace' },
-		{ name: '行を並べ替え', body: '@sh sort', output: 'replace', encoding: 'shift_jis' },
 		{
 			name: 'とても長い名前の定型文で、一覧の幅に収まりきらないときの見え方を確かめるためのもの',
 			body: '本文も長めにしておきます。'.repeat(8)
 		}
-	],
-	aiService: 'gemini',
-	aiConsent: 'gemini'
+	]
 };
 
 const DRAFT_TEXT = 'お手数ですが、確認してください。\ne.g. git status の結果も添えてください。';
@@ -295,20 +283,6 @@ test.describe('描かれ方', () => {
 		});
 	});
 
-	test('下書き: 失敗の帯 (宛先の後ろが空)', async () => {
-		// @ai だけの行を実行すると、AI へは送らずに帯が出る。表示言語を替えると帯が消えるので、
-		// 出ていなければ出し直す
-		await setDraftValue(client, '@ai');
-		await inspectDraft(client, 'alert', {
-			prepare: async () => {
-				if ((await readAlert(client)) === null) {
-					await runDraft();
-					await waitAlert(client, '宛先の後ろが空の帯');
-				}
-			}
-		});
-	});
-
 	test('設定: 分類ごと', async () => {
 		const [draftHandle] = await client.getWindowHandles();
 		await invokeApp(client, 'open_settings_window');
@@ -332,21 +306,14 @@ test.describe('描かれ方', () => {
 			}
 		}
 
-		// 宛先の行を開いた状態。@sh の行には文字コードの選択が出る
+		// 定型文の行を開いた状態
 		await client.$('[role="tab"][data-value="snippets"]').click();
 		const snippetsPanel = await client.$('[role="tabpanel"]:not([hidden])');
 		await expandAllRows(client, snippetsPanel);
 		try {
 			await inspect(client, 'settings-snippets-open', {
 				hwnd: settingsHwnd,
-				minSize: SETTINGS_MIN_SIZE,
-				// 狭い幅では文字コードの選択が下に隠れるので、そこまで送ってから撮る
-				prepare: () =>
-					client.execute(() =>
-						document
-							.querySelector('[role="tabpanel"]:not([hidden]) select')
-							?.scrollIntoView({ block: 'center' })
-					)
+				minSize: SETTINGS_MIN_SIZE
 			});
 		} catch (error) {
 			found.push(error.message);

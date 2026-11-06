@@ -16,12 +16,10 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    account, actions,
-    ai::AiService,
+    account,
     config::{self, json, valid_item_id, Config, Language, Snippet, SyncRow, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     history_store::{self, History},
-    i18n::Lang,
     sync_key,
     text::{KatakanaWidth, PunctuationStyle, Replacement, WidthStyle},
 };
@@ -527,9 +525,6 @@ pub const SYNCABLE_SETTING_NAMES: &[&str] = &[
     config::key::TEXT_COLOR_LIGHT,
     config::key::TEXT_COLOR_DARK,
     config::key::INPUT_GUIDANCE,
-    config::key::AI_SERVICE,
-    config::key::AI_MODELS,
-    config::key::AI_BASE_URL,
 ];
 
 pub fn known_syncable_setting(name: &str) -> bool {
@@ -645,9 +640,7 @@ pub fn config_items(config: &Config) -> BTreeMap<ItemKey, Value> {
     items.insert(hotkey_item(), json(config.hotkey.clone()));
     items.insert(text_window_keys_item(), draft_keys_value(config));
     put_rows(&mut items, 'r', "replacements", &config.replacements);
-    if let Some(snippets) = &config.snippets {
-        put_rows(&mut items, 'n', "snippets", snippets);
-    }
+    put_rows(&mut items, 'n', "snippets", &config.snippets);
     items
 }
 
@@ -709,79 +702,10 @@ fn apply_value(config: &mut Config, item: &ItemKey, value: &Value) -> bool {
         }
         Some(Kind::Setting(name)) => config::apply_setting(config, name, value).unwrap_or(false),
         Some(Kind::Replacement(id)) => apply_row(&mut config.replacements, id, value),
-        Some(Kind::Snippet(id)) => apply_snippet_row(config, id, value),
+        Some(Kind::Snippet(id)) => apply_row(&mut config.snippets, id, value),
         Some(Kind::Order("replacements")) => apply_order(&mut config.replacements, value),
-        // 入れられない並びのために、既定の定型文を書き出さない
-        Some(Kind::Order("snippets")) => {
-            order_ids(value).is_some() && apply_order(synced_snippets(config), value)
-        }
+        Some(Kind::Order("snippets")) => apply_order(&mut config.snippets, value),
         _ => false,
-    }
-}
-
-/// 定型文の行。既定の定型文のままのデバイスでは、同期しない既定の定型文だけを設定に書き出す
-/// （docs/sync.md「同期する単位」）。同期する行は、届いたものだけにする。
-fn synced_snippets(config: &mut Config) -> &mut Vec<Snippet> {
-    let language = config.language;
-    config
-        .snippets
-        .get_or_insert_with(|| unsynced_defaults(language, None))
-}
-
-fn default_snippets_for(language: Language) -> Vec<Snippet> {
-    actions::default_snippets(Lang::resolve(language, Lang::system()))
-}
-
-/// 設定に書き出す既定の定型文。同期しないものと、ほかのデバイスが同期から外した `detached` の id のもの。
-fn unsynced_defaults(language: Language, detached: Option<&str>) -> Vec<Snippet> {
-    let mut defaults = default_snippets_for(language);
-    for snippet in &mut defaults {
-        if detached == Some(snippet.id.as_str()) {
-            snippet.sync = false;
-        }
-    }
-    defaults.retain(|snippet| !snippet.sync);
-    defaults
-}
-
-/// 既定で同期する既定の定型文か。
-fn synced_default_snippet(id: &str) -> bool {
-    actions::default_snippets(crate::i18n::Lang::En)
-        .iter()
-        .any(|snippet| snippet.id == id && snippet.sync)
-}
-
-fn apply_snippet_row(config: &mut Config, id: &str, value: &Value) -> bool {
-    // 入れられない行のために、既定の定型文を書き出さない
-    if parse::<Snippet>(value).is_none() {
-        return false;
-    }
-    let rows = synced_snippets(config);
-    let is_new = rows.iter().all(|row| row.id != id);
-    if !apply_row(rows, id, value) {
-        return false;
-    }
-    if is_new {
-        seat_default_snippet(rows);
-    }
-    true
-}
-
-/// 末尾に足した行が既定の定型文なら、既定の並びで次にある同期しない既定の定型文の前へ動かす。
-/// 同期しない行は直前の行の後ろに置く決まりなので、並びが届いたときに、既定の並びのとおりに付いて動く。
-fn seat_default_snippet(rows: &mut Vec<Snippet>) {
-    let defaults = actions::default_snippets(crate::i18n::Lang::En);
-    let Some(added) = rows.last() else {
-        return;
-    };
-    let follower = defaults
-        .iter()
-        .position(|default| default.id == added.id)
-        .and_then(|position| defaults.get(position + 1))
-        .and_then(|next| rows.iter().position(|row| row.id == next.id && !row.sync));
-    if let Some(index) = follower {
-        let row = rows.pop().expect("a row was just added");
-        rows.insert(index, row);
     }
 }
 
@@ -874,26 +798,14 @@ fn apply_order<T: SyncRow>(rows: &mut Vec<T>, value: &Value) -> bool {
 fn remove_local(config: &mut Config, item: &ItemKey) -> bool {
     match kind(item) {
         Some(Kind::Replacement(id)) => remove_row(&mut config.replacements, id),
-        Some(Kind::Snippet(id)) => config
-            .snippets
-            .as_mut()
-            .is_some_and(|rows| remove_row(rows, id)),
+        Some(Kind::Snippet(id)) => remove_row(&mut config.snippets, id),
         _ => false,
     }
 }
 fn detach_local(config: &mut Config, item: &ItemKey) -> bool {
     match kind(item) {
         Some(Kind::Replacement(id)) => detach_row(&mut config.replacements, id),
-        Some(Kind::Snippet(id)) => match &mut config.snippets {
-            Some(rows) => detach_row(rows, id),
-            // 既定の定型文のままのデバイスでは、外された既定の定型文を同期しない行として書き出す。
-            // 書き出さないと、並びが届いたときに、誰も消していないのに手元から消える
-            None if synced_default_snippet(id) => {
-                config.snippets = Some(unsynced_defaults(config.language, Some(id)));
-                true
-            }
-            None => false,
-        },
+        Some(Kind::Snippet(id)) => detach_row(&mut config.snippets, id),
         _ => false,
     }
 }
@@ -917,13 +829,7 @@ fn detached(config: &Config, item: &ItemKey) -> bool {
             .replacements
             .iter()
             .any(|row| row.id == id && !row.sync),
-        Some(Kind::Snippet(id)) => match &config.snippets {
-            Some(rows) => rows.iter().any(|row| row.id == id && !row.sync),
-            // 既定の定型文のままでも、同期しない既定の定型文は手元の行
-            None => actions::default_snippets(crate::i18n::Lang::En)
-                .iter()
-                .any(|row| row.id == id && !row.sync),
-        },
+        Some(Kind::Snippet(id)) => config.snippets.iter().any(|row| row.id == id && !row.sync),
         _ => false,
     }
 }
@@ -941,7 +847,7 @@ fn synced_ids<T: SyncRow>(rows: &[T]) -> BTreeSet<&str> {
 fn settled_value(config: &Config, key: &ItemKey, value: &Value) -> Value {
     let synced = match kind(key) {
         Some(Kind::Order("replacements")) => synced_ids(&config.replacements),
-        Some(Kind::Order("snippets")) => synced_ids(config.snippets.as_deref().unwrap_or_default()),
+        Some(Kind::Order("snippets")) => synced_ids(&config.snippets),
         _ => return value.clone(),
     };
     let Some(ids) = order_ids(value) else {
@@ -988,9 +894,7 @@ fn dedupe_initial_config_rows(config: &mut Config, state: &State, initial: &Init
         changed |= dedupe_initial_rows(&mut config.replacements, &on_server("r_"));
     }
     if initial.for_kind(SyncKind::Snippets) {
-        if let Some(snippets) = &mut config.snippets {
-            changed |= dedupe_initial_rows(snippets, &on_server("n_"));
-        }
+        changed |= dedupe_initial_rows(&mut config.snippets, &on_server("n_"));
     }
     changed
 }
@@ -1337,8 +1241,7 @@ fn reconcile_as(
         .filter(|remote| sync_enabled(local, &remote.key))
         .cloned()
         .collect();
-    // 言語を先に入れてから、None の定型文を既定から実体化する。並びは最後にしないと同じ回の行を並べ替えられない。
-    // 外した印は行より先に入れる。行が先に既定の定型文を実体化すると、外された既定の定型文を残せない。
+    // 並びは最後にしないと、同じ回に届いた行を並べ替えられない
     sorted.sort_by_key(|item| {
         (
             match kind(&item.key) {
@@ -1418,30 +1321,6 @@ fn reconcile_as(
     let held = |state: &State, name: &str| state.ignored.contains_key(name);
     let at = |name: &str| pending.get(name).copied().unwrap_or(0);
     let mut writes = Vec::new();
-    // 既定で同期する既定の定型文を、一度も書かないまま同期から外した。窓口に項目が無いと、ほかのデバイスには
-    // 並びから消えたことしか伝わらず、消した行と見分けられないので、外した印を書く。
-    // 何回かに分けて書くときに、その行を抜いた並びだけが先に届かないよう、ほかの項目より前に積む
-    if kinds(&config).snippets {
-        for default in actions::default_snippets(crate::i18n::Lang::En) {
-            let key = ItemKey::new(SETTINGS, row_id('n', &default.id));
-            let name = key.name();
-            if default.sync
-                && detached(&config, &key)
-                && !state.items.contains_key(&name)
-                && !state.retired.contains_key(&name)
-                && !held(&state, &name)
-            {
-                writes.push(Write {
-                    at: at(&name),
-                    key,
-                    base_seq: None,
-                    deleted: false,
-                    plain: None,
-                    detached: true,
-                });
-            }
-        }
-    }
     for (key, value) in &now {
         let name = key.name();
         if held(&state, &name) || state.too_large.contains_key(&name) {
@@ -1530,9 +1409,6 @@ pub enum SyncValue {
     TextColorLight(String),
     TextColorDark(String),
     InputGuidance(Option<String>),
-    AiService(AiService),
-    AiModels(BTreeMap<AiService, String>),
-    AiBaseUrl(String),
     Hotkey(String),
     TextWindowKeys(DraftKeys),
     TextFontFamily(String),
@@ -1568,13 +1444,11 @@ pub struct Backup {
     pub changes: Vec<BackupDifference>,
 }
 
-/// バックアップへ戻した後の設定。デバイスごとに決める項目（ログイン時の起動・AI の了解・同期のスイッチと除外）は今のまま残す。
+/// バックアップへ戻した後の設定。デバイスごとに決める項目（ログイン時の起動・同期のスイッチと除外）は今のまま残す。
 /// 戻した値は、手元で変えた値として同期でほかのデバイスにも届く
 pub fn restore_backup(current: &Config, backup: &Config) -> Config {
     let mut restored = Config {
         autostart: current.autostart,
-        ai_consent: current.ai_consent,
-        ai_consent_base_url: current.ai_consent_base_url.clone(),
         sync_settings: current.sync_settings,
         sync_keys: current.sync_keys,
         sync_replacements: current.sync_replacements,
@@ -1583,15 +1457,8 @@ pub fn restore_backup(current: &Config, backup: &Config) -> Config {
         sync_excluded_settings: current.sync_excluded_settings.clone(),
         ..backup.clone()
     };
-    // 今が行を持っていて、バックアップが既定の定型文のままなら、既定の定型文を行として戻す。
-    // 既定のままという表現に戻すと行の項目が無くなり、同期している行を消したものとしてほかのデバイスからも消す
-    if restored.snippets.is_none() && current.snippets.is_some() {
-        restored.snippets = Some(default_snippets_for(restored.language));
-    }
     match_restore_rows(&mut restored.replacements, &current.replacements);
-    if let (Some(restored), Some(current)) = (&mut restored.snippets, &current.snippets) {
-        match_restore_rows(restored, current);
-    }
+    match_restore_rows(&mut restored.snippets, &current.snippets);
     restored
 }
 
@@ -1602,7 +1469,7 @@ pub fn backup_differences(current: &Config, restored: &Config) -> Vec<BackupDiff
         for row in &mut config.replacements {
             row.sync = true;
         }
-        for row in config.snippets.iter_mut().flatten() {
+        for row in &mut config.snippets {
             row.sync = true;
         }
         config
@@ -1645,11 +1512,7 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
     }
     Some(match kind(key)? {
         Kind::Replacement(id) => row(&config.replacements, id, SyncValue::Replacement),
-        Kind::Snippet(id) => row(
-            config.snippets.as_deref().unwrap_or_default(),
-            id,
-            SyncValue::Snippet,
-        ),
+        Kind::Snippet(id) => row(&config.snippets, id, SyncValue::Snippet),
         Kind::Order(_) => return None,
         Kind::Setting(name) if name == hotkey_name() => SyncValue::Hotkey(config.hotkey.clone()),
         Kind::Setting(name) if name == text_window_keys_name() => {
@@ -1688,9 +1551,6 @@ fn sync_value(config: &Config, key: &ItemKey) -> Option<SyncValue> {
                 SyncValue::TextColorDark(config.text_color_dark.clone())
             }
             config::key::INPUT_GUIDANCE => SyncValue::InputGuidance(config.input_guidance.clone()),
-            config::key::AI_SERVICE => SyncValue::AiService(config.ai_service),
-            config::key::AI_MODELS => SyncValue::AiModels(config.ai_models.clone()),
-            config::key::AI_BASE_URL => SyncValue::AiBaseUrl(config.ai_base_url.clone()),
             config::key::TEXT_FONT_FAMILY => {
                 SyncValue::TextFontFamily(config.text_font_family.clone())
             }
@@ -2589,20 +2449,7 @@ pub async fn sync_once(
 /// 手元で変えた同期の項目（oplog に積む名前）。保存の前と後の設定を、窓口に置く粒度で比べる。
 /// 同期を止めている種類の項目も積む。後でオンにしたときに、止めていた間に変えたものとして送る
 pub fn changed_items(before: &Config, after: &Config) -> Vec<String> {
-    // 片方だけが既定の定型文のまま（None）なら、その側は既定の行を持つものとして比べる。初めて定型文を変えたときに、
-    // 触っていない既定の行まで今の時刻で積むと、ほかのデバイスで先に直した既定の行を後勝ちで巻き戻す。
-    // 既定の行は、変える前の言語のものにする（両方 None で言語だけ替えたときは、行を積まない）
-    let both_default = before.snippets.is_none() && after.snippets.is_none();
-    let items = |config: &Config| {
-        if both_default || config.snippets.is_some() {
-            return config_items(config);
-        }
-        config_items(&Config {
-            snippets: Some(default_snippets_for(before.language)),
-            ..config.clone()
-        })
-    };
-    let (before, after) = (items(before), items(after));
+    let (before, after) = (config_items(before), config_items(after));
     before
         .keys()
         .chain(after.keys())
@@ -2730,10 +2577,10 @@ mod tests {
     #[test]
     fn a_kind_started_later_is_initial_only_for_that_kind() {
         let local = Config {
-            snippets: Some(vec![
+            snippets: vec![
                 snippet('a', "same".to_string()),
                 snippet('b', "same".to_string()),
-            ]),
+            ],
             replacements: vec![replacement('c', "same"), replacement('d', "same")],
             ..Config::default()
         };
@@ -2759,12 +2606,12 @@ mod tests {
                 SETTINGS,
                 &snippet_key.id,
                 10,
-                row_value(&local.snippets.as_ref().unwrap()[0]),
+                row_value(&local.snippets[0]),
             )],
             "key",
             10,
         );
-        assert_eq!(result.config.snippets.unwrap().len(), 1);
+        assert_eq!(result.config.snippets.len(), 1);
         assert_eq!(result.config.replacements.len(), 2);
     }
 
@@ -2871,14 +2718,12 @@ mod tests {
             enabled: true,
             sync: true,
         });
-        let mut snippets = actions::default_snippets(crate::i18n::Lang::En);
-        snippets.push(Snippet {
+        config.snippets.push(Snippet {
             id,
             name: "name".into(),
             body: "body".into(),
             ..Snippet::default()
         });
-        config.snippets = Some(snippets);
         for key in config_items(&config).into_keys() {
             assert_eq!(key.collection, SETTINGS, "{}", key.id);
             assert!(valid_wire_id(&key.id), "{}", key.id);
@@ -2893,14 +2738,11 @@ mod tests {
             sync_settings: false,
             sync_history: false,
             yielded_draft_keys: crate::draft_keys::DraftAction::ALL.to_vec(),
-            ai_consent_base_url: "http://localhost:11434/v1".to_string(),
             ..Config::default()
         };
         let items = config_items(&config);
         for name in [
             "autostart",
-            "ai_consent",
-            "ai_consent_base_url",
             "sync_settings",
             "sync_history",
             "yielded_draft_keys",
@@ -2934,13 +2776,6 @@ mod tests {
         assert!(!config_items(&config)
             .keys()
             .any(|key| key.id.starts_with("r_")));
-    }
-
-    #[test]
-    fn conversion_omits_default_snippets_not_written_to_config() {
-        assert!(!config_items(&Config::default())
-            .keys()
-            .any(|key| key.id.starts_with("n_") || key.id == "o_snippets"));
     }
 
     #[test]
@@ -3327,10 +3162,8 @@ mod tests {
             text_color_light: "#112233".into(),
             text_color_dark: "#aabbcc".into(),
             input_guidance: Some("guide".into()),
-            ai_service: AiService::Gemini,
             ..Config::default()
         };
-        config.ai_models.insert(AiService::Gemini, "model".into());
         *config.text_window_keys.get_mut(DraftAction::HistoryOlder) = "Alt+KeyP".into();
         config.text_window_keys.get_mut(DraftAction::Copy).clear();
         config.replacements.push(Replacement {
@@ -3340,17 +3173,13 @@ mod tests {
             enabled: false,
             sync: true,
         });
-        let mut snippets = actions::default_snippets(crate::i18n::Lang::En);
-        snippets.push(Snippet {
+        config.snippets.push(Snippet {
             id: id.clone(),
             name: "name".into(),
             body: "body".into(),
-            output: crate::config::ActionOutput::Insert,
-            encoding: crate::config::ActionEncoding::ShiftJis,
             enabled: false,
             sync: true,
         });
-        config.snippets = Some(snippets);
         let items = config_items(&config);
         let mut restored = Config::default();
         for (key, value) in items.iter().filter(|(key, _)| !is_order(key)) {
@@ -3622,12 +3451,12 @@ mod tests {
         *config.text_window_keys.get_mut(DraftAction::HistoryOlder) = "Alt+KeyP".into();
         config
             .text_window_keys
-            .get_mut(DraftAction::ChangeFolder)
+            .get_mut(DraftAction::HistoryNewer)
             .clear();
-        config.yielded_draft_keys = vec![DraftAction::ChangeFolder];
+        config.yielded_draft_keys = vec![DraftAction::HistoryNewer];
         let value = config_items(&config)[&text_window_keys_item()].clone();
         assert_eq!(value["history_older"], json!("Alt+KeyP"));
-        assert!(value.get("change_folder").is_none(), "{value}");
+        assert!(value.get("history_newer").is_none(), "{value}");
 
         let mut received = Config::default();
         assert!(apply_value(&mut received, &text_window_keys_item(), &value));
@@ -3637,8 +3466,8 @@ mod tests {
         );
         // 書いていない操作は、重なりが無ければ既定のキーを使う
         assert_eq!(
-            received.text_window_keys.get(DraftAction::ChangeFolder),
-            DraftKeys::default().get(DraftAction::ChangeFolder)
+            received.text_window_keys.get(DraftAction::HistoryNewer),
+            DraftKeys::default().get(DraftAction::HistoryNewer)
         );
     }
 
@@ -3734,26 +3563,14 @@ mod tests {
     }
 
     #[test]
-    fn editing_one_default_snippet_names_only_that_row() {
-        let before = Config::default();
-        let mut snippets = default_snippets_for(before.language);
-        let edited = snippets.iter().position(|snippet| snippet.sync).unwrap();
-        snippets[edited].body.push('!');
-        let key = ItemKey::new(SETTINGS, row_id('n', &snippets[edited].id));
-        let after = Config {
-            snippets: Some(snippets),
-            ..before.clone()
+    fn editing_one_snippet_names_only_that_row() {
+        let before = Config {
+            snippets: vec![snippet('a', "a".into()), snippet('b', "b".into())],
+            ..Config::default()
         };
-        assert_eq!(changed_items(&before, &after), [key.name()]);
-        // 既定の定型文のまま言語だけを替えても、既定の行は積まない
-        let switched = Config {
-            language: Language::Ja,
-            ..before.clone()
-        };
-        assert_eq!(
-            changed_items(&before, &switched),
-            [setting_item("language").name()]
-        );
+        let mut after = before.clone();
+        after.snippets[1].body.push('!');
+        assert_eq!(changed_items(&before, &after), [row_key('n', 'b').name()]);
     }
 
     #[test]
@@ -4013,315 +3830,6 @@ mod tests {
         assert!(decode_plain(&future).is_none());
     }
 
-    fn default_snippet(index: usize, lang: crate::i18n::Lang) -> Snippet {
-        actions::default_snippets(lang).swap_remove(index)
-    }
-
-    /// 既定の定型文のままのデバイスが、初めての同期でない回と初めての同期で受け取る
-    fn receive_snippets(items: &[RemoteItem]) -> [Reconcile; 2] {
-        let local = Config::default();
-        [Some(recorded(&local)), None].map(|state| reconcile(&local, state, items, "key", 9))
-    }
-
-    #[test]
-    fn default_snippets_from_another_device_do_not_conflict_with_the_local_defaults() {
-        let sort = default_snippet(1, crate::i18n::Lang::system());
-        // 相手は、校正を別の表示言語で持ち、並べ替えを同期する行にして、別の文字コードで書いている
-        for lang in [crate::i18n::Lang::Ja, crate::i18n::Lang::En] {
-            let proofread = Snippet {
-                enabled: false,
-                ..default_snippet(0, lang)
-            };
-            let their_sort = Snippet {
-                encoding: crate::config::ActionEncoding::ShiftJis,
-                output: crate::config::ActionOutput::Insert,
-                sync: true,
-                ..sort.clone()
-            };
-            let items = [
-                remote(
-                    SETTINGS,
-                    &row_id('n', &their_sort.id),
-                    2,
-                    row_value(&their_sort),
-                ),
-                remote(
-                    SETTINGS,
-                    &row_id('n', &proofread.id),
-                    3,
-                    row_value(&proofread),
-                ),
-                remote(
-                    SETTINGS,
-                    "o_snippets",
-                    4,
-                    json!([proofread.id, their_sort.id]),
-                ),
-            ];
-            for result in receive_snippets(&items) {
-                assert_eq!(
-                    result.config.snippets,
-                    Some(vec![proofread.clone(), sort.clone()]),
-                    "{lang:?}"
-                );
-                // 並べ替えは手元で同期しない行。その id を抜いた並びを書き戻さない
-                assert!(snippet_writes(&result).is_empty(), "{lang:?}");
-            }
-        }
-    }
-
-    fn snippet_writes(result: &Reconcile) -> Vec<&Write> {
-        result
-            .writes
-            .iter()
-            .filter(|write| write.key.id.starts_with("n_") || write.key.id == "o_snippets")
-            .collect()
-    }
-
-    #[test]
-    fn unsyncing_a_default_snippet_never_written_writes_the_mark_once() {
-        let mut proofread = default_snippet(0, crate::i18n::Lang::system());
-        proofread.sync = false;
-        let key = ItemKey::new(SETTINGS, row_id('n', &proofread.id));
-        // 既定の定型文のままのデバイスで、最初の操作として校正を同期から外した
-        let local = Config {
-            snippets: Some(vec![
-                proofread,
-                default_snippet(1, crate::i18n::Lang::system()),
-            ]),
-            ..Config::default()
-        };
-        for (first_sync, state) in [(false, Some(recorded(&Config::default()))), (true, None)] {
-            let since = state.as_ref().map_or(0, |state| state.since);
-            let mut first = FakeTransport::reading([read(since, [])]).after_seq(since);
-            let result = run(&mut first, &local, state).unwrap();
-            let [mark] = &first.written(&key.id)[..] else {
-                panic!("first sync: {first_sync}, the mark is written once");
-            };
-            assert!(mark.detached && !mark.deleted, "first sync: {first_sync}");
-            assert_eq!(mark.base_seq, None, "first sync: {first_sync}");
-            assert_eq!(result.config, local, "first sync: {first_sync}");
-
-            let mut second = FakeTransport::reading([read(first.seq, first.stored.clone())])
-                .after_seq(first.seq);
-            let next = run(&mut second, &local, Some(result.state)).unwrap();
-            assert!(second.writes.is_empty(), "first sync: {first_sync}");
-            assert_eq!(next.config, local, "first sync: {first_sync}");
-        }
-    }
-
-    /// 校正（既定で同期する既定の定型文）を、同期しない行として持つデバイス
-    fn proofread_unsynced() -> (Config, ItemKey) {
-        let proofread = Snippet {
-            sync: false,
-            ..default_snippet(0, crate::i18n::Lang::system())
-        };
-        let key = ItemKey::new(SETTINGS, row_id('n', &proofread.id));
-        let local = Config {
-            snippets: Some(vec![
-                proofread,
-                default_snippet(1, crate::i18n::Lang::system()),
-            ]),
-            ..Config::default()
-        };
-        (local, key)
-    }
-
-    #[test]
-    fn an_unsynced_default_snippet_already_on_the_server_gets_no_mark() {
-        let (local, key) = proofread_unsynced();
-        let arrivals = [
-            (
-                "value",
-                remote(
-                    SETTINGS,
-                    &key.id,
-                    6,
-                    row_value(&default_snippet(0, crate::i18n::Lang::En)),
-                ),
-            ),
-            ("deleted", deleted(&key, 6)),
-            ("mark", detached_mark(&key, 6)),
-        ];
-        for (first_sync, state) in [(false, Some(recorded(&local))), (true, None)] {
-            for (arrival, item) in &arrivals {
-                let case = format!("first sync: {first_sync}, {arrival}");
-                let result = reconcile(&local, state.clone(), std::slice::from_ref(item), "key", 6);
-                assert!(
-                    !result.writes.iter().any(|write| write.key == key),
-                    "{case}"
-                );
-                assert_eq!(result.config, local, "{case}");
-                assert!(!result.changed, "{case}");
-
-                let next = reconcile(&local, Some(result.state), &[], "key", 6);
-                assert!(!next.writes.iter().any(|write| write.key == key), "{case}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_mark_refused_because_the_item_exists_is_not_written_again() {
-        let (local, key) = proofread_unsynced();
-        // 読んだ後に、ほかのデバイスが校正を書いた
-        let theirs = ConflictItem {
-            key: key.clone(),
-            seq: Some(5),
-            deleted: false,
-            plain: Some(Plain::value(row_value(&default_snippet(
-                0,
-                crate::i18n::Lang::En,
-            )))),
-        };
-        let mut first = FakeTransport::reading([read(1, [])])
-            .failing([Error::Conflict(vec![theirs])])
-            .after_seq(5);
-        let result = run(&mut first, &local, Some(recorded(&Config::default()))).unwrap();
-        let [refused] = &first.written(&key.id)[..] else {
-            panic!("the mark is tried once");
-        };
-        assert!(refused.detached);
-        assert!(!first.stored.iter().any(|item| item.key == key));
-        assert_eq!(result.config, local);
-        assert!(!result.changed);
-
-        let mut second =
-            FakeTransport::reading([read(first.seq, first.stored.clone())]).after_seq(first.seq);
-        let next = run(&mut second, &local, Some(result.state)).unwrap();
-        assert!(second.writes.is_empty());
-        assert_eq!(next.config, local);
-    }
-
-    #[test]
-    fn a_mark_is_written_no_later_than_the_order_without_its_row() {
-        let (mut local, key) = proofread_unsynced();
-        // 並びより後に積まれる行で、1回の書き込みの上限を超える
-        for index in 0..WRITE_BATCH_SIZE {
-            local.replacements.push(Replacement {
-                id: format!("{index:032x}"),
-                from: index.to_string(),
-                to: "to".into(),
-                enabled: true,
-                sync: true,
-            });
-        }
-        let mut transport = FakeTransport::reading([read(1, [])]).after_seq(1);
-        run(&mut transport, &local, Some(recorded(&Config::default()))).unwrap();
-        assert!(transport.writes.len() > 1);
-        let batch_of = |id: &str| {
-            transport
-                .writes
-                .iter()
-                .position(|batch| batch.iter().any(|write| write.key.id == id))
-                .unwrap_or_else(|| panic!("{id} is written"))
-        };
-        assert!(batch_of(&key.id) <= batch_of("o_snippets"));
-    }
-
-    #[test]
-    fn a_default_snippet_unsynced_on_another_device_stays_as_an_unsynced_row() {
-        let sort = default_snippet(1, crate::i18n::Lang::system());
-        let proofread = Snippet {
-            sync: false,
-            ..default_snippet(0, crate::i18n::Lang::system())
-        };
-        let custom = Snippet {
-            id: "a".repeat(32),
-            name: "自作".into(),
-            body: "echo".into(),
-            ..Snippet::default()
-        };
-        let mark_key = ItemKey::new(SETTINGS, row_id('n', &proofread.id));
-        // どれが先に届いても同じ
-        for (mark_seq, other_seq) in [(2, 3), (3, 2)] {
-            let items = [
-                detached_mark(&mark_key, mark_seq),
-                remote(SETTINGS, "o_snippets", other_seq, json!([])),
-            ];
-            for result in receive_snippets(&items) {
-                assert_eq!(
-                    result.config.snippets,
-                    Some(vec![proofread.clone(), sort.clone()]),
-                    "mark at {mark_seq}"
-                );
-                assert!(snippet_writes(&result).is_empty(), "mark at {mark_seq}");
-            }
-            let items = [
-                detached_mark(&mark_key, mark_seq),
-                remote(
-                    SETTINGS,
-                    &row_id('n', &custom.id),
-                    other_seq,
-                    row_value(&custom),
-                ),
-                remote(SETTINGS, "o_snippets", 4, json!([custom.id])),
-            ];
-            for result in receive_snippets(&items) {
-                assert_eq!(
-                    result.config.snippets,
-                    Some(vec![proofread.clone(), sort.clone(), custom.clone()]),
-                    "mark at {mark_seq}"
-                );
-                assert!(snippet_writes(&result).is_empty(), "mark at {mark_seq}");
-            }
-        }
-    }
-
-    #[test]
-    fn an_empty_order_without_a_mark_does_not_write_out_the_synced_default() {
-        let sort = default_snippet(1, crate::i18n::Lang::system());
-        for result in receive_snippets(&[remote(SETTINGS, "o_snippets", 2, json!([]))]) {
-            assert_eq!(result.config.snippets, Some(vec![sort.clone()]));
-            assert!(snippet_writes(&result).is_empty());
-        }
-    }
-
-    #[test]
-    fn a_default_snippet_deleted_on_another_device_does_not_come_back() {
-        let sort = default_snippet(1, crate::i18n::Lang::system());
-        let proofread = default_snippet(0, crate::i18n::Lang::En);
-        let custom = Snippet {
-            id: "a".repeat(32),
-            name: "自作".into(),
-            body: "echo".into(),
-            ..Snippet::default()
-        };
-        let items = [
-            deleted(&ItemKey::new(SETTINGS, row_id('n', &proofread.id)), 2),
-            remote(SETTINGS, &row_id('n', &custom.id), 3, row_value(&custom)),
-            remote(SETTINGS, "o_snippets", 4, json!([custom.id])),
-        ];
-        for result in receive_snippets(&items) {
-            assert_eq!(
-                result.config.snippets,
-                Some(vec![sort.clone(), custom.clone()])
-            );
-            let written = |prefix: &str| {
-                result
-                    .writes
-                    .iter()
-                    .any(|write| write.key.id.starts_with(prefix))
-            };
-            assert!(!written("n_") && !written("o_snippets"));
-        }
-    }
-
-    #[test]
-    fn an_unusable_snippet_item_leaves_the_default_snippets_unwritten() {
-        let items = [
-            remote(
-                SETTINGS,
-                &row_id('n', &"a".repeat(32)),
-                2,
-                json!("not a row"),
-            ),
-            remote(SETTINGS, "o_snippets", 3, json!("not an order")),
-        ];
-        for result in receive_snippets(&items) {
-            assert_eq!(result.config.snippets, None);
-        }
-    }
-
     #[test]
     fn a_swapped_hotkey_and_key_arriving_together_are_both_applied() {
         let local = Config::default();
@@ -4552,15 +4060,15 @@ mod tests {
             ..Snippet::default()
         };
         let local = Config {
-            snippets: Some(vec![snippet('c', "手元")]),
+            snippets: vec![snippet('c', "手元")],
             ..Config::default()
         };
         let theirs = Config {
-            snippets: Some(vec![
+            snippets: vec![
                 snippet('e', "新2"),
                 snippet('d', "新1"),
                 snippet('c', "手元"),
-            ]),
+            ],
             ..Config::default()
         };
         let their_items = config_items(&theirs);
@@ -4584,7 +4092,6 @@ mod tests {
                 .config
                 .snippets
                 .iter()
-                .flatten()
                 .map(|row| row.name.as_str())
                 .collect::<Vec<_>>(),
             ["新2", "新1", "手元"]
@@ -4708,11 +4215,11 @@ mod tests {
         };
         // 初めての同期。窓口には相手の行と並びがあり、手元には手元だけの行がある
         let local = Config {
-            snippets: Some(vec![named('f', "手元")]),
+            snippets: vec![named('f', "手元")],
             ..Config::default()
         };
         let theirs = Config {
-            snippets: Some(vec![named('e', "相手2"), named('d', "相手1")]),
+            snippets: vec![named('e', "相手2"), named('d', "相手1")],
             ..Config::default()
         };
         let their_items = config_items(&theirs);
@@ -4746,7 +4253,6 @@ mod tests {
             .config
             .snippets
             .iter()
-            .flatten()
             .map(|row| row.name.as_str())
             .collect();
         assert_eq!(names, ["相手2", "相手1", "手元"]);
@@ -4756,11 +4262,10 @@ mod tests {
     #[test]
     fn discarding_a_result_keeps_a_written_order_that_was_the_local_order() {
         let rows = |ids: [char; 3]| Config {
-            snippets: Some(
-                ids.into_iter()
-                    .map(|id| snippet(id, id.to_string()))
-                    .collect(),
-            ),
+            snippets: ids
+                .into_iter()
+                .map(|id| snippet(id, id.to_string()))
+                .collect(),
             ..Config::default()
         };
         let before = recorded(&rows(['d', 'e', 'f']));
@@ -4986,10 +4491,10 @@ mod tests {
     #[test]
     fn only_the_item_over_the_size_limit_is_left_unwritten() {
         let config = Config {
-            snippets: Some(vec![
+            snippets: vec![
                 snippet('a', "x".repeat(MAX_ENCRYPTED_ITEM_BYTES)),
                 snippet('b', "small".into()),
-            ]),
+            ],
             ..Config::default()
         };
         let large = row_key('n', 'a');
@@ -5006,7 +4511,7 @@ mod tests {
         assert!(again.writes.is_empty());
 
         let mut shortened = config.clone();
-        shortened.snippets.as_mut().unwrap()[0].body = "short".into();
+        shortened.snippets[0].body = "short".into();
         let mut third = FakeTransport::reading([read(first.seq, [])]).after_seq(first.seq);
         let result = run(&mut third, &shortened, Some(unchanged.state)).unwrap();
         assert_eq!(third.written(&large.id)[0].base_seq, None);
@@ -5287,11 +4792,7 @@ mod tests {
         let mut mine = snippet('b', "mine".into());
         mine.sync = false;
         let local = Config {
-            snippets: Some(vec![
-                snippet('a', "a".into()),
-                mine,
-                snippet('c', "c".into()),
-            ]),
+            snippets: vec![snippet('a', "a".into()), mine, snippet('c', "c".into())],
             ..Config::default()
         };
         // 相手は、手元で同期から外している行を同期している
@@ -5303,7 +4804,6 @@ mod tests {
                 .config
                 .snippets
                 .iter()
-                .flatten()
                 .map(|row| &row.id[..1])
                 .collect();
             assert_eq!(ids, ["c", "a", "b"], "first sync: {first_sync}");
@@ -5320,7 +4820,7 @@ mod tests {
     #[test]
     fn an_order_naming_a_row_not_held_locally_is_not_written_back() {
         let local = Config {
-            snippets: Some(vec![snippet('a', "a".into()), snippet('c', "c".into())]),
+            snippets: vec![snippet('a', "a".into()), snippet('c', "c".into())],
             ..Config::default()
         };
         // 相手の並びにある b は、手元では消したか、読み捨てた行
@@ -5332,7 +4832,6 @@ mod tests {
                 .config
                 .snippets
                 .iter()
-                .flatten()
                 .map(|row| &row.id[..1])
                 .collect();
             assert_eq!(ids, ["c", "a"], "first sync: {first_sync}");
@@ -5350,16 +4849,14 @@ mod tests {
     fn a_batch_written_before_a_failure_stays_in_the_record() {
         let base = Config::default();
         let mut local = base.clone();
-        local.snippets = Some(
-            (0..WRITE_BATCH_SIZE)
-                .map(|index| Snippet {
-                    id: format!("{index:032x}"),
-                    name: "name".into(),
-                    body: "body".into(),
-                    ..Snippet::default()
-                })
-                .collect(),
-        );
+        local.snippets = (0..WRITE_BATCH_SIZE)
+            .map(|index| Snippet {
+                id: format!("{index:032x}"),
+                name: "name".into(),
+                body: "body".into(),
+                ..Snippet::default()
+            })
+            .collect();
         let before = recorded(&base);
         let mut first = FakeTransport::reading([read(1, [])]).after_seq(1);
         // 1回目のまとまりは書け、2回目のまとまりが落ちる
@@ -5375,8 +4872,7 @@ mod tests {
         };
         // 書けた行を、次の回までに手元で直す。自分の書き込みを読み戻しても、食い違いにならない
         let mut edited = local.clone();
-        let rows = edited.snippets.as_mut().unwrap();
-        let row = rows.iter_mut().find(|row| row.id == id).unwrap();
+        let row = edited.snippets.iter_mut().find(|row| row.id == id).unwrap();
         row.body = "edited".into();
         let mut second =
             FakeTransport::reading([read(first.seq, first.stored.clone())]).after_seq(first.seq);
@@ -6262,15 +5758,6 @@ mod tests {
                 stopped.writes.iter().all(|write| write.key != key),
                 "{kind:?}"
             );
-            if kind == SyncKind::Snippets {
-                assert!(
-                    stopped
-                        .writes
-                        .iter()
-                        .all(|write| !write.key.id.starts_with("n_")),
-                    "default snippet marks stay unwritten while snippets are off"
-                );
-            }
 
             let active = reconcile(&Config::default(), Some(old), &[], "key", 2);
             assert!(

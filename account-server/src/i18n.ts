@@ -5,7 +5,7 @@
 import type { Context } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { SaleRegion } from './pages';
-import type { ProPlan } from './pricing';
+import type { ProPlan } from './pro';
 import { isHttps } from './util';
 
 export type Lang = 'ja' | 'en';
@@ -86,46 +86,23 @@ const ja = {
 	signOut: 'サインアウトする',
 	linkTitle: 'デバイスを登録',
 	linkConfirm: (name: string, email: string) =>
-		`「${name}」を ${email} のアカウントに登録します。登録したデバイスの Mawok は、アカウントのクレジットで AI アクションを使えます。`,
+		`「${name}」を ${email} のアカウントに登録します。アカウントで Pro を申し込んでいれば、登録したデバイスの Mawok で設定と履歴を同期できます。`,
 	approve: 'このデバイスを登録する',
 	linkInvalidTitle: 'このページは開けません',
 	linkInvalid: 'Mawok の設定の「アカウント」で「サインイン」を押して、もう一度開いてください。',
-	buyTitle: 'クレジットを購入',
 	// 価格は本番の Stripe の Price と、紹介・規約類に合わせる。
 	confirmTitle: 'お申し込み内容の最終確認',
 	confirmItemLabel: '買うもの',
-	confirmItem: 'Mawok の AI アクションのクレジット (期限なし)',
 	confirmPriceLabel: '価格',
-	confirmPrice: '300 円 (税込み)',
 	confirmPaymentLabel: '支払い',
-	confirmPayment: {
-		domestic: '1 回だけの支払いで、自動の更新はありません。次の画面 (Stripe) でカードで払います。',
-		overseas:
-			'1 回だけの支払いで、自動の更新はありません。次の画面で払い方を選びます。後払いの払い方では、払う時期はその払い方の定めによります。販売と決済は Link (Sold through Link, LLC) が代わりに行い、カードの明細には「LINK.COM*」と出ます。お住まいの国の通貨に換えた額で表示されることがあります。'
-	} as Record<SaleRegion, string>,
 	confirmDeliveryLabel: '提供の時期',
-	confirmDelivery: '支払いが済むとすぐ、このアカウントにクレジットが付きます。',
-	confirmRefundLabel: '返金',
-	confirmRefund: {
-		domestic: (tokushoho: string) =>
-			`購入後の返金は、原則としてできません。例外は[特定商取引法に基づく表記](${tokushoho})のとおりです。`,
-		overseas: (tokushoho: string) =>
-			`購入後の返金は、原則としてできません。例外は[特定商取引法に基づく表記](${tokushoho})のとおりです。ただし Link が代わりに売った購入は、購入から60 日以内は [Link の返金ポリシー](${LINK_REFUND_POLICY})が優先し、Link が返金することがあります。`
-	} as Record<SaleRegion, (tokushoho: string) => string>,
 	buyConsent: '{terms}・{privacy}・{conditions}に同意のうえ、進んでください。',
 	confirmButton: '申し込みを確定して支払いへ',
 	backToPricing: '料金ページへ戻る',
-	checkoutNote: (tokushoho: string) =>
-		`支払いが済むとすぐ、Mawok のアカウントにクレジットが付きます。購入後の返金は、原則としてできません。詳しくは[特定商取引法に基づく表記](${tokushoho})をご覧ください。`,
-	notForSale: 'いまはクレジットを買えません。',
 	buyBusy: '支払いの画面を用意しています。少ししてから、もう一度押してください。',
-	checkingPurchase: '支払いを確認しています。このままお待ちください。',
-	purchaseNotYet:
-		'支払いをまだ確認できていません。少ししてから、もう一度確認してください。買い直す前に、領収のメールが届いていないかも確かめてください。',
 	checkingPro: '申し込みを確認しています。このままお待ちください。',
 	proNotYet: '申し込みをまだ確認できていません。少ししてから、もう一度確認してください。',
 	checkAgain: 'もう一度確認',
-	bought: 'クレジットを購入しました。Mawok の設定に戻ると、残りに反映されます。',
 	proTitle: 'Mawok Pro',
 	proUnavailable: 'いまは Pro を申し込めません。',
 	proSubscribe: 'Pro の料金を見る',
@@ -151,7 +128,7 @@ const ja = {
 	},
 	proDelivery: (trial: boolean): string =>
 		trial
-			? '申し込みが済むとすぐ、このアカウントで Pro を使えます。毎月の AI アクションのクレジットは、試用の間は付かず、最初の支払いの後から付きます。'
+			? '申し込みが済むとすぐ、このアカウントで Pro を使えます。'
 			: '支払いが済むとすぐ、このアカウントで Pro を使えます。',
 	japanTime: (date: string) => `${date} (日本時間)`,
 	proCancelLabel: '解約と返金',
@@ -172,8 +149,6 @@ const ja = {
 		`${date} から課金が始まります。止めるときは「支払いを管理」から解約してください。`,
 	manageBilling: '支払いを管理',
 	accountTitle: 'アカウント',
-	balance: (percent: number) => `AI アクションのクレジット: 残り ${percent}%`,
-	noBalance: 'AI アクションのクレジットはありません。',
 	appsTitle: '登録しているデバイス',
 	appsNone: '登録しているデバイスはありません。',
 	appLinkedAt: (name: string, date: string) => `${name} (${date} に登録)`,
@@ -232,47 +207,22 @@ const en: typeof ja = {
 	signOut: 'Sign out',
 	linkTitle: 'Link a device',
 	linkConfirm: (name: string, email: string) =>
-		`Link "${name}" to the account ${email}. Mawok on a linked device can use this account's credit for AI actions.`,
+		`Link "${name}" to the account ${email}. With Pro on this account, Mawok on a linked device can sync settings and history.`,
 	approve: 'Link this device',
 	linkInvalidTitle: 'This page cannot be opened',
 	linkInvalid: 'In Mawok settings, open Account and click Sign in to open it again.',
-	buyTitle: 'Buy credits',
 	confirmTitle: 'Review your order',
 	confirmItemLabel: 'What you buy',
-	confirmItem: 'Mawok AI action credit (does not expire)',
 	confirmPriceLabel: 'Price',
-	confirmPrice: '300 yen (tax included)',
 	confirmPaymentLabel: 'Payment',
-	confirmPayment: {
-		domestic:
-			'This is a one-time payment and does not renew automatically. You pay by card on the next page (Stripe).',
-		overseas:
-			'This is a one-time payment and does not renew automatically. You choose how to pay on the next page. With a pay-later method, you pay when that method requires. The sale and payment are handled on our behalf by Link (Sold through Link, LLC), and your card statement shows "LINK.COM*". The amount may be shown in your local currency.'
-	},
 	confirmDeliveryLabel: 'When it is provided',
-	confirmDelivery: 'The credit is added to this account as soon as the payment is complete.',
-	confirmRefundLabel: 'Refunds',
-	confirmRefund: {
-		domestic: (tokushoho: string) =>
-			`Purchases are generally non-refundable. For exceptions, see the [Specified Commercial Transactions Act notice](${tokushoho}).`,
-		overseas: (tokushoho: string) =>
-			`Purchases are generally non-refundable. For exceptions, see the [Specified Commercial Transactions Act notice](${tokushoho}). For a purchase sold through Link, however, [Link's refund policy](${LINK_REFUND_POLICY}) takes precedence within 60 days of purchase, and Link may issue a refund.`
-	},
 	buyConsent: 'By continuing, you agree to the {terms}, the {privacy}, and the {conditions}.',
 	confirmButton: 'Confirm and continue to payment',
 	backToPricing: 'Back to pricing',
-	checkoutNote: (tokushoho: string) =>
-		`The credit is added to your Mawok account as soon as the payment is complete. Purchases are generally non-refundable. For details, see the [Specified Commercial Transactions Act notice](${tokushoho}).`,
-	notForSale: 'AI action credit is not available for purchase right now.',
 	buyBusy: 'Preparing the payment page. Please try again in a moment.',
-	checkingPurchase: 'Confirming your payment. Please wait.',
-	purchaseNotYet:
-		"We couldn't confirm your payment yet. Please check again in a moment. Before buying again, check whether a receipt email has arrived.",
 	checkingPro: 'Confirming your subscription. Please wait.',
 	proNotYet: "We couldn't confirm your subscription yet. Please check again in a moment.",
 	checkAgain: 'Check again',
-	bought:
-		'AI action credit has been added. Go back to Mawok settings to see your remaining credit.',
 	proTitle: 'Mawok Pro',
 	proUnavailable: 'Pro is not available right now.',
 	proSubscribe: 'See Pro pricing',
@@ -298,7 +248,7 @@ const en: typeof ja = {
 	},
 	proDelivery: (trial: boolean) =>
 		trial
-			? 'Pro is available on this account as soon as you subscribe. Monthly AI action credit is not added during the trial; it begins after your first payment.'
+			? 'Pro is available on this account as soon as you subscribe.'
 			: 'Pro is available on this account as soon as payment is complete.',
 	japanTime: (date: string) => `${date} (Japan time)`,
 	proCancelLabel: 'Cancellation and refunds',
@@ -319,8 +269,6 @@ const en: typeof ja = {
 		`Billing starts on ${date}. To stop it, cancel through “Manage billing”.`,
 	manageBilling: 'Manage billing',
 	accountTitle: 'Account',
-	balance: (percent: number) => `AI action credit: ${percent}% left`,
-	noBalance: 'No AI action credit.',
 	appsTitle: 'Linked devices',
 	appsNone: 'No devices are linked.',
 	appLinkedAt: (name: string, date: string) => `${name} (linked on ${date})`,

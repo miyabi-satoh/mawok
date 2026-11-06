@@ -2,28 +2,24 @@
  * Mawok の窓口 (→ docs/account-server.md「窓口（mawok.amiiby.com）」)。
  *
  * - `/v1/links/token`: Mawok を結ぶときに届けたコードを、アプリ用のトークンに替える。
- * - `/v1/ai`・`/v1/balance`・`/v1/token`: アプリ用のトークンで呼ぶ、中継・残高・サインアウト。
+ * - `/v1/account`・`/v1/token`: アプリ用のトークンで呼ぶ、アカウントと Pro の状態・サインアウト。
  * - `/v1/devices`: アプリ用のトークンで呼ぶ、サインインしているデバイスの一覧と、ほかのデバイスのサインアウト。
  * - `/v1/sync`: アプリ用のトークンで呼ぶ、Pro の設定と履歴の同期と、同期のパスワードで包んだ鍵。
  * - `/v1/stripe/webhook`: Stripe からの支払いの知らせ (処理は src/webhook.ts)。
- * - `/account/`: 人が開く画面 (サインイン・Mawok を結ぶ・買う)。
+ * - `/account/`: 人が開く画面 (サインイン・Mawok を結ぶ・Pro を申し込む)。
  * - それ以外: 紹介と規約類の静的なページ (wrangler.jsonc の assets)。
  */
 import { Hono, type Context } from 'hono';
 import { csrf } from 'hono/csrf';
-import { parsePrompt, relay } from './ai';
-import { balance, charge, grantFreeStatement, proOf, topUp } from './credits';
 import { messages, resolveLang, type Lang } from './i18n';
-import { isProPlan, pricing, type ProPlan } from './pricing';
+import { isProPlan, proOf, type ProPlan } from './pro';
 import { sendMail } from './mail';
 import {
 	approvePage,
 	checkingPurchasePage,
-	confirmPage,
 	proConfirmPage,
 	confirmSignInPage,
 	homePage,
-	LEGAL_PAGES,
 	mailSentPage,
 	messagePage,
 	signInPage,
@@ -37,8 +33,6 @@ import {
 	createProCheckoutSession,
 	billingPortalUrl,
 	expireCheckoutSession,
-	createCheckoutSession,
-	proForSale,
 	StripeError,
 	stripeConfig,
 	type StripeConfig,
@@ -68,6 +62,7 @@ import {
 	safeNext,
 	ACCOUNT,
 	ACCOUNT_HOME,
+	PRICING_PATH,
 	sha256Hex
 } from './util';
 
@@ -79,29 +74,17 @@ const EMAIL_LOGIN_TTL = 15 * 60;
 const EMAIL_LOGINS_PER_HOUR = 5;
 /** 上の上限を数える幅。上限を「1時間に何通」で決めているので、その1時間。 */
 const EMAIL_LOGIN_WINDOW = 3600;
-/** 支払いから戻った先で、残高が付くのを自動で確かめ直す回数 (3秒おき)。webhook は数秒で届くことが多い。 */
+/** 支払いから戻った先で、Pro が有効になるのを自動で確かめ直す回数 (3秒おき)。webhook は数秒で届くことが多い。 */
 const PURCHASE_CHECKS = 10;
 /**
  * 支払いの画面の期限。Stripe が受け付ける最も短い30分に、同じ予約で頼み直せる5分を足す
  * (Stripe は頼むたびに期限が30分以上先かを確かめる)。
  */
 const CHECKOUT_TTL = 35 * 60;
-/**
- * 中継の最中とみなす長さ。Gemini を待つ上限 (src/ai.ts) より長くする。
- * Worker が途中で止まって印が残っても、これを過ぎれば次の中継を受ける。
- */
-const IN_FLIGHT_TTL = 120;
 
 type App = { Bindings: Env };
 // `/account` と `/account/` を同じ画面にする (紹介のページは末尾に `/` を付けてリンクする)。
 export const app = new Hono<App>({ strict: false });
-
-// 値付けの値が欠けていれば、どの入口も DB に書く前に止める (→ docs/account-server.md「値付けの値」)。
-// サインインのリンクを使ってから 500 になるような、やり直せない途中で止まらないように。
-app.use(async (c, next) => {
-	pricing(c.env);
-	await next();
-});
 
 /**
  * 上限に当たったら true。既定は送り主 (IP) ごとに数え、`key` を渡せばそれごと (アカウントごとなど) に数える。
@@ -171,22 +154,15 @@ async function appAccount(c: Context<App>): Promise<string | undefined> {
 	return row?.account_id;
 }
 
-/** Mawok の設定に出す残り。 */
-app.get('/v1/balance', async (c) => {
+/** Mawok の設定に出す、アカウントと Pro の状態。 */
+app.get('/v1/account', async (c) => {
 	const accountId = await appAccount(c);
 	if (!accountId) return c.json({ error: 'unauthorized' }, 401);
 	const account = await c.env.DB.prepare('SELECT id, email FROM accounts WHERE id = ?')
 		.bind(accountId)
 		.first<{ id: string; email: string }>();
-	const pro = await topUp(c.env, accountId);
-	const { remaining, percent } = await balance(c.env, accountId);
-	const { renews: _renews, ...proResponse } = pro;
-	return c.json({
-		account_id: account?.id,
-		email: account?.email,
-		remaining_percent: remaining > 0 ? percent : 0,
-		pro: proResponse
-	});
+	const { renews: _renews, ...pro } = await proOf(c.env, accountId);
+	return c.json({ account_id: account?.id, email: account?.email, pro });
 });
 
 /** Mawok でのサインアウト。トークンを外す。 */
@@ -319,58 +295,10 @@ app.delete('/v1/sync', async (c) => {
 	return c.body(null, 204);
 });
 
-/**
- * AI の中継。残りがあれば Gemini へ送り、返事が届いたら使った原価を引いて、Gemini の返事をそのまま返す。
- * 返事が届かなかった回は引かない。失敗の返事でも、Gemini が使った分を返せば引く。
- */
-app.post('/v1/ai', async (c) => {
-	const accountId = await appAccount(c);
-	if (!accountId) return c.json({ error: 'unauthorized' }, 401);
-	const prompt = parsePrompt(await c.req.json().catch(() => undefined));
-	if (prompt === undefined) return c.json({ error: 'bad_request' }, 400);
-	if (prompt === 'too_long') return c.json({ error: 'too_long' }, 413);
-	const { rates } = pricing(c.env);
-	await topUp(c.env, accountId);
-	const t = now();
-	// 同じアカウントは同時に1件だけ。印を取ってから残りを確かめるので、並べて送って残りを超えて使わせないように。
-	const owner = randomHex(16);
-	const started = await c.env.DB.prepare(
-		`INSERT INTO ai_in_flight (account_id, owner, started_at) VALUES (?1, ?2, ?3)
-		 ON CONFLICT (account_id) DO UPDATE SET owner = ?2, started_at = ?3 WHERE started_at <= ?4`
-	)
-		.bind(accountId, owner, t, t - IN_FLIGHT_TTL)
-		.run();
-	if (started.meta.changes !== 1) return c.json({ error: 'busy' }, 409);
-	const release = () =>
-		c.env.DB.prepare('DELETE FROM ai_in_flight WHERE account_id = ? AND owner = ?')
-			.bind(accountId, owner)
-			.run();
-	if ((await balance(c.env, accountId)).remaining <= 0) {
-		await release();
-		return c.json({ error: 'no_credit' }, 402);
-	}
-	// 中継・引くこと・印を外すことを1つにまとめ、waitUntil に渡す。Mawok で取り消して接続が切れても、
-	// Gemini が使った分を引き、印を外すまで続けさせる (呼び出しが終わると、waitUntil に渡していない処理は打ち切られうる)。
-	const work = (async () => {
-		try {
-			const result = await relay(c.env, prompt, rates);
-			await charge(c.env, accountId, result.cost);
-			return result;
-		} finally {
-			await release();
-		}
-	})();
-	c.executionCtx.waitUntil(work.catch(() => {}));
-	const result = await work;
-	if (result.ok) return c.body(result.body, 200, { 'content-type': 'application/json' });
-	// Gemini の失敗は、状態だけを Mawok へ返す (Mawok は利用者のキーで送ったときと同じく分ける)。
-	return c.json({ error: 'upstream', upstream_status: result.status }, 502);
-});
-
 // ---- Stripe からの知らせ ----
 
 /**
- * 残高を付けるのはここだけ。支払いの画面から戻った先では付けない (戻らずに閉じられることもあるため)。
+ * Pro を有効にするのはここだけ。支払いの画面から戻った先では有効にしない (戻らずに閉じられることもあるため)。
  * 知らせは id で記録し、処理し終えたものは送り直されても処理し直さない。失敗したら 500 を返し、Stripe の送り直しで処理し直す。
  * どの処理も、何度行っても結果が同じになるように書く (記録する前に落ちても送り直されるため)。
  */
@@ -431,10 +359,9 @@ accountApp.get('/', async (c) => {
 		.all<LinkedApp>();
 	const pro = await proOf(c.env, account.id);
 	return c.html(
-		homePage(lang, account.email, await balance(c.env, account.id), apps, saleRegion(c), {
+		homePage(lang, account.email, apps, saleRegion(c), {
 			pro,
-			billing: stripeConfig(c.env) !== undefined,
-			bought: c.req.query('bought') === '1'
+			billing: stripeConfig(c.env) !== undefined
 		})
 	);
 });
@@ -525,15 +452,9 @@ accountApp.post('/login/email/verify', async (c) => {
 		);
 	}
 	const account = await upsertAccount(c.env, login.email, t).first<{ id: string }>();
-	await signedIn(c, account!.id);
+	await startSession(c, account!.id);
 	return c.redirect(safeNext(login.next), 303);
 });
-
-/** サインインが済んだ。無料の分をまだ付けていなければ、ここで付ける (→ src/credits.ts)。 */
-async function signedIn(c: Context<App>, accountId: string) {
-	await startSession(c, accountId);
-	await grantFreeStatement(c.env, accountId).run();
-}
 
 // ---- Google でサインイン ----
 
@@ -604,7 +525,7 @@ async function externalSignedIn(
 ) {
 	const accountId = await externalAccount(c.env, provider, user.subject, user.email);
 	if (!accountId) return c.html(signIn(c, lang, user.next, conflict), 409);
-	await signedIn(c, accountId);
+	await startSession(c, accountId);
 	return c.redirect(safeNext(user.next), 303);
 }
 
@@ -736,86 +657,42 @@ function linkInvalidPage(lang: Lang) {
 	return messagePage(lang, messages[lang].linkInvalidTitle, messages[lang].linkInvalid);
 }
 
-// ---- 残高を買う ----
+// ---- Pro を申し込む ----
 
 /** アクセス元の IP の国 (Cloudflare が付ける)。手元で動かすときなど、分からなければ `undefined`。 */
 function buyerCountry(c: Context<App>): string | undefined {
 	return c.req.raw.cf?.country as string | undefined;
 }
 
-/** 買うボタンを出すか、出すならどちらの売り方の説明を添えるか。 */
+/** 申し込みのボタンを出すか、出すならどちらの売り方の説明を添えるか。 */
 function saleRegion(c: Context<App>): SaleRegion | undefined {
 	if (!stripeConfig(c.env)) return undefined;
 	return usesManagedPayments(buyerCountry(c)) ? 'overseas' : 'domestic';
 }
 
-function notForSalePage(lang: Lang) {
-	return messagePage(lang, messages[lang].buyTitle, messages[lang].notForSale);
-}
 function proUnavailablePage(lang: Lang) {
 	return messagePage(lang, messages[lang].proTitle, messages[lang].proUnavailable);
 }
 
-/** 料金ページから来る、支払いの直前の最終確認画面。 */
+/** 料金ページから来る、支払いの直前の最終確認画面。プランが無ければ料金ページへ戻す。 */
 accountApp.get('/buy', async (c) => {
 	const lang = resolveLang(c);
-	const account = await currentAccount(c);
 	const plan = c.req.query('plan');
-	// サインインの後に同じ最終確認へ戻れるよう、選んだプランを戻り先に残す。
-	if (!account)
-		return c.html(
-			signIn(c, lang, isProPlan(plan) ? `${ACCOUNT}/buy?plan=${plan}` : `${ACCOUNT}/buy`)
-		);
-	if (isProPlan(plan)) {
-		const config = stripeConfig(c.env);
-		if (!config || !proForSale(config)) return c.html(proUnavailablePage(lang), 404);
-		const pro = await proOf(c.env, account.id);
-		if (pro.active) return c.redirect(ACCOUNT_HOME, 303);
-		const trial = !(await hadSubscription(c.env, account.id));
-		return c.html(
-			proConfirmPage(lang, account.email, plan, saleRegion(c)!, {
-				trial,
-				now: now()
-			})
-		);
-	}
-	const region = saleRegion(c);
-	if (!region) return c.html(notForSalePage(lang), 404);
-	return c.html(confirmPage(lang, account.email, region));
-});
-
-/** 最終確認の画面から、支払いの画面へ送る。買い終えたらアカウントの画面へ戻す。 */
-accountApp.post('/buy', async (c) => {
-	const lang = resolveLang(c);
-	const form = await c.req.parseBody();
-	const next = safeNext(formString(form, 'next'));
-	const proPlan = formString(form, 'plan');
+	if (!isProPlan(plan)) return c.redirect(PRICING_PATH, 303);
 	const account = await currentAccount(c);
-	if (!account) return c.html(signIn(c, lang, next), 401);
-	const config = stripeConfig(c.env);
-	if (!config) return c.html(notForSalePage(lang), 404);
-	if (isProPlan(proPlan)) return startProCheckout(c, account, config, proPlan, lang, next);
-	return openCheckout(c, account, config, lang, next, '', messages[lang].buyTitle, (checkout) => {
-		const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang });
-		return createCheckoutSession(config, {
-			...checkout.session,
-			// `{CHECKOUT_SESSION_ID}` は Stripe が置き換える (URLSearchParams に通すと括弧が符号化されるので、後ろに足す)。
-			successUrl: `${checkout.origin}${ACCOUNT}/buy/done?${done}&session_id={CHECKOUT_SESSION_ID}`,
-			// Stripe の画面で戻ったら、買い直せる最終確認の画面へ戻す。
-			cancelUrl: `${checkout.origin}${ACCOUNT}/buy?lang=${checkout.lang}`,
-			submitMessage: checkout.session.managedPayments
-				? undefined
-				: messages[checkout.lang].checkoutNote(LEGAL_PAGES.tokushoho),
-			idempotencyKey: `mawok-checkout-${checkout.id}`
-		});
-	});
+	// サインインの後に同じ最終確認へ戻れるよう、選んだプランを戻り先に残す。
+	if (!account) return c.html(signIn(c, lang, `${ACCOUNT}/buy?plan=${plan}`));
+	if (!stripeConfig(c.env)) return c.html(proUnavailablePage(lang), 404);
+	if ((await proOf(c.env, account.id)).active) return c.redirect(ACCOUNT_HOME, 303);
+	const trial = !(await hadSubscription(c.env, account.id));
+	return c.html(proConfirmPage(lang, account.email, plan, saleRegion(c)!, { trial, now: now() }));
 });
 
 /** 支払いの画面の予約。`session` は Checkout Session を作るときにそのまま渡す分。 */
-type Checkout<P> = {
+type Checkout = {
 	id: string;
-	/** 予約に残っている売りもの。ほかのタブが先に取った予約なら、押したものと違うことがある。 */
-	price: P;
+	/** 予約に残っているプラン。ほかのタブが先に取った予約なら、押したものと違うことがある。 */
+	plan: ProPlan;
 	next: string;
 	lang: Lang;
 	origin: string;
@@ -830,27 +707,29 @@ type Checkout<P> = {
 };
 
 /**
- * 支払いの画面の予約を取り、画面を作って送る。開いている画面があれば同じ画面へ送り、2つのタブや、確かめを待つ間の買い直しで
+ * 最終確認の画面から、支払いの画面へ送る。申し込み終えたらアカウントの画面へ戻す。
+ * 支払いの画面の予約を取り、開いている画面があれば同じ画面へ送り、2つのタブや、確かめを待つ間の申し込み直しで
  * 二重に払わせないように。払い終えた画面を開き直すと、Stripe が払い終えたことを示す。
- * `price` は残高なら空、Pro ならプラン。違うものを押し直すと、古い支払い画面は閉じる。
+ * 違うプランを押し直すと、古い支払い画面は閉じる。
  */
-async function openCheckout<P extends '' | ProPlan>(
-	c: Context<App>,
-	account: { id: string; email: string },
-	config: StripeConfig,
-	lang: Lang,
-	next: string,
-	price: P,
-	title: string,
-	create: (checkout: Checkout<P>) => Promise<{ id: string; url: string }>
-) {
+accountApp.post('/buy', async (c) => {
+	const lang = resolveLang(c);
+	const form = await c.req.parseBody();
+	const next = safeNext(formString(form, 'next'));
+	const plan = formString(form, 'plan');
+	const account = await currentAccount(c);
+	if (!account) return c.html(signIn(c, lang, next), 401);
+	if (!isProPlan(plan)) return c.redirect(PRICING_PATH, 303);
+	const config = stripeConfig(c.env);
+	if (!config) return c.html(proUnavailablePage(lang), 404);
+	if ((await proOf(c.env, account.id)).active) return c.redirect(next, 303);
 	const t = now();
 	const old = await c.env.DB.prepare(
 		'SELECT id, price, session_id FROM checkouts WHERE account_id = ? AND expires_at > ?'
 	)
 		.bind(account.id, t)
 		.first<{ id: string; price: string; session_id: string | null }>();
-	if (old && old.price !== price) {
+	if (old && old.price !== plan) {
 		if (old.session_id) await expireCheckoutSession(config, old.session_id);
 		await c.env.DB.prepare('DELETE FROM checkouts WHERE id = ?').bind(old.id).run();
 	}
@@ -868,7 +747,7 @@ async function openCheckout<P extends '' | ProPlan>(
 			t + CHECKOUT_TTL,
 			usesManagedPayments(buyerCountry(c)) ? 1 : 0,
 			buyerCountry(c) ?? null,
-			price
+			plan
 		)
 	]);
 	const row = (await c.env.DB.prepare(
@@ -884,16 +763,16 @@ async function openCheckout<P extends '' | ProPlan>(
 			expires_at: number;
 			managed_payments: number;
 			buyer_country: string | null;
-			price: P;
+			price: ProPlan;
 		}>())!;
 	if (row.url) return c.redirect(row.url, 303);
 	// 画面がまだ無い予約 (ほかのタブが頼んでいる最中か、頼んだあとに失敗した) は、同じキーで頼み直す。
 	// Stripe は作り終えた Session をそのまま返すので、画面は1つのまま。
 	let session: { id: string; url: string };
 	try {
-		session = await create({
+		session = await createProSession(c, config, {
 			id: row.id,
-			price: row.price,
+			plan: row.price,
 			next: row.next,
 			lang: row.lang,
 			origin: new URL(c.req.url).origin,
@@ -909,7 +788,7 @@ async function openCheckout<P extends '' | ProPlan>(
 	} catch (e) {
 		// 同じ予約をほかのタブが頼んでいる最中。予約は残し、押し直してもらう。
 		if (e instanceof StripeError && e.status === 409) {
-			return c.html(messagePage(lang, title, messages[lang].buyBusy), 409);
+			return c.html(messagePage(lang, messages[lang].proTitle, messages[lang].buyBusy), 409);
 		}
 		// 応答が届かなかったときは、Stripe が作ったかどうか分からない。予約を残し、押し直したら同じキーで頼み直す。
 		if (!(e instanceof StripeError)) throw e;
@@ -921,42 +800,43 @@ async function openCheckout<P extends '' | ProPlan>(
 		.bind(session.url, session.id, row.id)
 		.run();
 	return c.redirect(session.url, 303);
+});
+
+/** 予約の中身で Pro の Checkout Session を作る。試用を受けたことがあるアカウントには試用を渡さない。 */
+async function createProSession(c: Context<App>, config: StripeConfig, checkout: Checkout) {
+	const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang });
+	return createProCheckoutSession(config, {
+		...checkout.session,
+		plan: checkout.plan,
+		successUrl: `${checkout.origin}${ACCOUNT}/buy/done?${done}`,
+		// Stripe の画面で戻ったら、申し込み直せる最終確認の画面へ戻す。
+		cancelUrl: `${checkout.origin}${ACCOUNT}/buy?plan=${checkout.plan}&lang=${checkout.lang}`,
+		submitMessage: checkout.session.managedPayments
+			? undefined
+			: messages[checkout.lang].proCheckoutNote,
+		trial: !(await hadSubscription(c.env, checkout.session.accountId)),
+		idempotencyKey: `mawok-pro-checkout-${checkout.id}`
+	});
 }
 
 /**
- * 支払いから戻った先。webhook が届いて残高が付く (Pro なら有効になる) のを待ち、付いたら予約を外して `next` へ進む。
- * 予約を外すのは、次の買い足しで、払い終えた支払いの画面へ送らないため。
+ * 支払いから戻った先。webhook が届いて Pro が有効になるのを待ち、有効になったら予約を外して `next` へ進む。
+ * 予約を外すのは、次の申し込みで、払い終えた支払いの画面へ送らないため。
  */
 accountApp.get('/buy/done', async (c) => {
 	const lang = resolveLang(c);
 	const next = safeNext(c.req.query('next'));
 	const account = await currentAccount(c);
 	if (!account) return c.html(signIn(c, lang, next));
-	const pro = c.req.query('pro') === '1';
-	const forward = async (url: string) => {
+	if ((await proOf(c.env, account.id)).active) {
 		await c.env.DB.prepare('DELETE FROM checkouts WHERE account_id = ?').bind(account.id).run();
-		return c.redirect(url, 303);
-	};
-	if (pro) {
-		if ((await proOf(c.env, account.id)).active) return forward(next);
-	} else {
-		const bought = await c.env.DB.prepare(
-			`SELECT 1 FROM grants JOIN purchases ON purchases.id = grants.purchase_id
-			 WHERE purchases.stripe_checkout_session_id = ? AND grants.account_id = ?`
-		)
-			.bind(c.req.query('session_id') ?? '', account.id)
-			.first();
-		if (bought) {
-			const url = new URL(next, c.req.url);
-			url.searchParams.set('bought', '1');
-			return forward(`${url.pathname}${url.search}`);
-		}
+		return c.redirect(next, 303);
 	}
 	const tries = Number(c.req.query('tries') ?? '0') || 0;
 	const retry = new URL(c.req.url);
 	retry.searchParams.set('tries', String(tries + 1));
 	return c.html(
-		checkingPurchasePage(lang, pro, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
+		checkingPurchasePage(lang, `${retry.pathname}${retry.search}`, tries < PURCHASE_CHECKS)
 	);
 });
 
@@ -965,42 +845,6 @@ async function hadSubscription(env: Env, accountId: string) {
 		(await env.DB.prepare('SELECT 1 FROM subscriptions WHERE account_id = ?')
 			.bind(accountId)
 			.first()) !== null
-	);
-}
-
-/** Pro の Checkout を予約して作る。プランを替えて押し直すと、古い支払い画面は閉じる。 */
-async function startProCheckout(
-	c: Context<App>,
-	account: { id: string; email: string },
-	config: StripeConfig,
-	plan: ProPlan,
-	lang: Lang,
-	next: string
-) {
-	if (!proForSale(config)) return c.html(proUnavailablePage(lang), 404);
-	if ((await proOf(c.env, account.id)).active) return c.redirect(next, 303);
-	return openCheckout(
-		c,
-		account,
-		config,
-		lang,
-		next,
-		plan,
-		messages[lang].proTitle,
-		async (checkout) => {
-			const done = new URLSearchParams({ next: checkout.next, lang: checkout.lang, pro: '1' });
-			return createProCheckoutSession(config, {
-				...checkout.session,
-				plan: checkout.price,
-				successUrl: `${checkout.origin}${ACCOUNT}/buy/done?${done}`,
-				cancelUrl: `${checkout.origin}${ACCOUNT}/buy?plan=${checkout.price}&lang=${checkout.lang}`,
-				submitMessage: checkout.session.managedPayments
-					? undefined
-					: messages[checkout.lang].proCheckoutNote,
-				trial: !(await hadSubscription(c.env, account.id)),
-				idempotencyKey: `mawok-pro-checkout-${checkout.id}`
-			});
-		}
 	);
 }
 

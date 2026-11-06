@@ -31,7 +31,7 @@ function toSnakeCase(name) {
 
 /**
  * 項目名を付け替える。キー操作の表の操作名 (`history_older` ↔ `historyOlder`) も付け替え、
- * 行 (置き換え辞書・定型文) とモデルの表の中は付け替えない (行の項目名は1語で、モデルの表は AI サービスの名前のため)
+ * 行 (置き換え辞書・定型文) の中は付け替えない (行の項目名は1語のため)
  */
 function renameEntry(name, value, rename) {
 	const renamed = rename(name);
