@@ -23,7 +23,7 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 # 設定の置き場（store.rs）。設定と同期の oplog を同じトランザクションで書くため。
 # SQLite は同梱してビルドする（Windows には OS の SQLite の開発用の入口が無いため）
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 tauri-plugin-global-shortcut = "2.4.1"
 # 文字列しか書かないので、画像を扱う既定の feature は要らない
 arboard = { version = "3.6.1", default-features = false }
