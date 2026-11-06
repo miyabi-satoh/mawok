@@ -2123,8 +2123,11 @@ async fn start_mawok_sign_in(app: AppHandle) -> Result<MawokSignIn, String> {
         // ブラウザが開かなくても、画面の「ページを開き直す」から開ける
         warn!("couldn't open the sign-in page: {error}");
     }
-    let action_state = app.state::<AccountState>();
-    let id = action_state.mawok_sign_in_id.fetch_add(1, Ordering::SeqCst) + 1;
+    let account_state = app.state::<AccountState>();
+    let id = account_state
+        .mawok_sign_in_id
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
     let shown = MawokSignIn { id };
     let task_app = app.clone();
     let task = tauri::async_runtime::spawn(async move {
@@ -2137,8 +2140,8 @@ async fn start_mawok_sign_in(app: AppHandle) -> Result<MawokSignIn, String> {
         info!("signing in to the Mawok account ended (signed in: {signed_in})");
         // 終わった申し込みを片付ける。やり直した後の新しい申し込みは残す
         {
-            let action_state = task_app.state::<AccountState>();
-            let mut pending = action_state.mawok_sign_in.lock().unwrap();
+            let account_state = task_app.state::<AccountState>();
+            let mut pending = account_state.mawok_sign_in.lock().unwrap();
             if pending
                 .as_ref()
                 .is_some_and(|pending| pending.shown.id == id)
@@ -2151,7 +2154,7 @@ async fn start_mawok_sign_in(app: AppHandle) -> Result<MawokSignIn, String> {
             MawokSignInEnded { id, signed_in },
         );
     });
-    let previous = action_state
+    let previous = account_state
         .mawok_sign_in
         .lock()
         .unwrap()
