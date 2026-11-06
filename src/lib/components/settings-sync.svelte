@@ -11,7 +11,7 @@
 	import { modifiedName } from '$lib/modified-settings';
 	import { m } from '$lib/paraglide/messages';
 	import type { SettingsView } from '$lib/settings.svelte';
-	import { syncPanel, syncStateChanged } from '$lib/sync-password';
+	import { SYNC_JOIN_TEXT, syncPanel, syncStateChanged } from '$lib/sync-password';
 	import { invoke } from '@tauri-apps/api/core';
 
 	/**
@@ -43,16 +43,8 @@
 	});
 	/** 作る・入れる欄を閉じているときの行の文言 */
 	const closedRow = {
-		create: {
-			title: m.settings_sync_start_title,
-			description: m.settings_sync_start_description,
-			open: m.settings_sync_password_create
-		},
-		enter: {
-			title: m.settings_sync_join_title,
-			description: m.settings_sync_join_description,
-			open: m.settings_sync_password_enter
-		}
+		create: { ...SYNC_JOIN_TEXT.create, open: m.settings_sync_password_create },
+		enter: { ...SYNC_JOIN_TEXT.enter, open: m.settings_sync_password_enter }
 	};
 
 	function closeForm() {

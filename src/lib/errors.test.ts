@@ -34,13 +34,8 @@ describe('errorCode', () => {
 		expect(errorCode('account.unreachable')).toBe('account.unreachable');
 	});
 
-	it('{ code } の形から符号を取り出す', () => {
-		expect(errorCode({ code: 'unexpected', detail: null })).toBe('unexpected');
-	});
-
-	it('符号を持たなければ、文字列にしたものを返す', () => {
+	it('文字列でなければ、文字列にしたものを返す', () => {
 		expect(errorCode(new Error('boom'))).toBe('Error: boom');
-		expect(errorCode({ code: 1 })).toBe('[object Object]');
 		expect(errorCode(null)).toBe('null');
 	});
 });

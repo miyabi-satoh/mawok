@@ -8,6 +8,7 @@
 		MIN_SYNC_PASSWORD_CHARS,
 		newPasswordErrors,
 		syncPasswordFailure,
+		SYNC_JOIN_TEXT,
 		syncStateChanged,
 		type SyncPasswordErrors
 	} from '$lib/sync-password';
@@ -37,20 +38,10 @@
 	let busy = $state(false);
 
 	const title = $derived(
-		mode === 'create'
-			? m.settings_sync_start_title()
-			: mode === 'enter'
-				? m.settings_sync_join_title()
-				: m.settings_sync_password_change_title()
+		mode === 'change' ? m.settings_sync_password_change_title() : SYNC_JOIN_TEXT[mode].title()
 	);
 	/** 同じパスワードをどのデバイスでも入れることを、決める側と入れる側の両方で伝える。変えるときは分かっているので出さない */
-	const description = $derived(
-		mode === 'create'
-			? m.settings_sync_start_description()
-			: mode === 'enter'
-				? m.settings_sync_join_description()
-				: undefined
-	);
+	const description = $derived(mode === 'change' ? undefined : SYNC_JOIN_TEXT[mode].description());
 	const filled = $derived(
 		values.password !== '' &&
 			(mode === 'enter' || values.confirm !== '') &&

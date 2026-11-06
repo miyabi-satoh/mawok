@@ -57,20 +57,6 @@ function mirrorOf(element: HTMLTextAreaElement): HTMLDivElement {
 	return mirror;
 }
 
-/** 1行目（最初の改行まで）の見た目の高さ（px）。折り返していれば、折り返した行も含む */
-export function firstLineHeight(element: HTMLTextAreaElement): number {
-	const mirror = mirrorOf(element);
-	const end = element.value.indexOf('\n');
-	// 幅のない文字を足して、空の1行目も1行の高さにする
-	mirror.append((end < 0 ? element.value : element.value.slice(0, end)) + ZERO_WIDTH_SPACE);
-	document.body.append(mirror);
-	try {
-		return mirror.offsetHeight;
-	} finally {
-		mirror.remove();
-	}
-}
-
 /**
  * カーソルが見た目の1行目・最終行にあるか。範囲を選んでいるときは null。
  * カーソルが折り返しの位置にあると、上の行の末尾と下の行の先頭のどちらに出ているかは位置からは分からない
