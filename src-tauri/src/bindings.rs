@@ -37,7 +37,6 @@ export const EVENTS = {{\n\
 \tCONFIG_REPLACED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?},\n\
-\tDRAFT_HIDDEN: {:?},\n\
 \tMAWOK_SIGN_IN_ENDED: {:?},\n\
 \tUPDATE_CHANGED: {:?}\n\
 }} as const;\n\n\
@@ -73,7 +72,6 @@ export const ERROR_CODES = {{\n\
         events::CONFIG_REPLACED,
         events::SHOWN,
         events::HIDE_REQUESTED,
-        events::DRAFT_HIDDEN,
         events::MAWOK_SIGN_IN_ENDED,
         events::UPDATE_CHANGED,
         error_codes::ACCOUNT_UNREACHABLE,

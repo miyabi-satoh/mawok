@@ -21,7 +21,6 @@ export const EVENTS = {
 	CONFIG_REPLACED: "config-replaced",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested",
-	DRAFT_HIDDEN: "draft-hidden",
 	MAWOK_SIGN_IN_ENDED: "mawok-sign-in-ended",
 	UPDATE_CHANGED: "update-changed"
 } as const;

@@ -434,14 +434,7 @@ fn hide_draft_for_settings(app: &AppHandle) {
         app.state::<DraftState>()
             .hidden_for_settings
             .store(true, Ordering::Relaxed);
-        notify_draft_hidden(app);
     }
-}
-
-/// 下書きウィンドウを隠したことを画面に知らせる。
-/// フォーカスが外れたときと閉じるボタンは画面を通らずに隠すので、隠すところで知らせる
-fn notify_draft_hidden(app: &AppHandle) {
-    let _ = app.emit(events::DRAFT_HIDDEN, ());
 }
 
 fn show(app: &AppHandle) {
@@ -838,11 +831,10 @@ fn hide_on_blur(app: &AppHandle) {
     }
 }
 
-/// 下書きウィンドウを、戻り先へフォーカスを戻さずに隠す。隠せたら画面に知らせる
+/// 下書きウィンドウを、戻り先へフォーカスを戻さずに隠す
 fn hide_draft_in_place(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
     let _ = app.save_window_state(window_state_flags());
     window.hide()?;
-    notify_draft_hidden(app);
     Ok(())
 }
 
@@ -853,9 +845,7 @@ fn hide_draft_and_return(app: &AppHandle, state: &DraftState) -> Result<(), Stri
     state.hidden_for_settings.store(false, Ordering::Relaxed);
     let window = main_window(app).ok_or("main window not found")?;
     let target = *state.return_target.lock().unwrap();
-    focus::hide_and_return(app, &window, target).map_err(|error| error.to_string())?;
-    notify_draft_hidden(app);
-    Ok(())
+    focus::hide_and_return(app, &window, target).map_err(|error| error.to_string())
 }
 
 /// クリップボードへ文字列を書く。`conceal` のときは、クリップボードの履歴・同期・管理アプリに残さないよう印を付ける。
