@@ -1,13 +1,10 @@
 //! Mawok のアカウントの窓口（mawok.amiiby.com。docs/account-server.md「窓口（mawok.amiiby.com）」）とのやり取り。
-//! AI サービスの「Mawok」で使う。アカウントと結んで受け取ったトークンは、API キーと同じく OS の資格情報管理に置く。
+//! アカウントと結んで受け取ったトークンは、OS の資格情報管理に置く。
 //! トークンはログにも URL にも載せない
 
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-
-use crate::actions::{ActionError, Failure};
-use crate::ai::Prompt;
 
 /// 窓口の URL。開発版は手元で動かす窓口（`just dev-account-server`）を使う。
 /// 開発版は、ビルドのときの環境変数 `MAWOK_ACCOUNT_URL` で向き先を替えられる。
@@ -82,8 +79,6 @@ pub fn code_from(state: &str, request_line: &str) -> Option<String> {
 #[serde(rename_all = "camelCase")]
 pub struct AccountStatus {
     pub email: String,
-    /// 残りの割合（切り上げ。使い切ったときだけ 0）
-    pub remaining_percent: u32,
     /// サインインし直したときに、アカウントが替わったかを見分けるための、窓口のランダムなアカウントID
     pub account_id: String,
     pub pro: ProStatus,
@@ -188,9 +183,9 @@ async fn send_signed(
     Ok(response)
 }
 
-/// アカウントのメールアドレス、残り、Pro を問い合わせる
+/// アカウントのメールアドレスと Pro を問い合わせる
 pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStatus, AccountError> {
-    let response = send_signed(client.get(format!("{ACCOUNT_URL}/v1/balance")), token).await?;
+    let response = send_signed(client.get(format!("{ACCOUNT_URL}/v1/account")), token).await?;
     let body: Value = response.json().await.map_err(other)?;
     let pro = body
         .get("pro")
@@ -234,10 +229,6 @@ pub async fn status(client: &reqwest::Client, token: &str) -> Result<AccountStat
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
-        remaining_percent: body
-            .get("remaining_percent")
-            .and_then(Value::as_u64)
-            .map_or(0, |percent| percent.min(100) as u32),
         account_id,
         pro: ProStatus {
             active,
@@ -409,66 +400,9 @@ pub async fn sign_out(client: &reqwest::Client, token: &str) -> Result<(), Accou
     }
 }
 
-/// 残高を買い足す入口。紹介サイトの料金ページは日本語だけなので、日本語でないときは
-/// 窓口の最終確認の画面を、表示言語を付けて直に開く（条件と料金ページへの戻り道は、そこに揃っている）
-pub fn buy_page_url(lang: &str) -> String {
-    if lang == "ja" {
-        format!("{ACCOUNT_URL}/pricing/")
-    } else {
-        format!("{ACCOUNT_URL}/account/buy?lang={lang}")
-    }
-}
-
 /// Pro の料金は紹介サイトにまとめ、表示言語によらず同じ入口を開く。
 pub fn pro_page_url() -> String {
     format!("{ACCOUNT_URL}/pricing/")
-}
-
-/// 窓口を通して AI に送る。窓口は Gemini の返事をそのまま返すので、読み方は Gemini と同じ
-pub async fn send_ai(
-    client: &reqwest::Client,
-    token: &str,
-    prompt: &Prompt,
-) -> Result<String, ActionError> {
-    let header =
-        bearer(token).map_err(|detail| ActionError::new(Failure::SignInRequired, detail))?;
-    let response = client
-        .post(format!("{ACCOUNT_URL}/v1/ai"))
-        .header(reqwest::header::AUTHORIZATION, header)
-        .json(&prompt.to_json())
-        .send()
-        .await
-        .map_err(crate::ai::request_error)?;
-    let status = response.status().as_u16();
-    let body = response.text().await.map_err(crate::ai::request_error)?;
-    if (200..300).contains(&status) {
-        return crate::ai::read_gemini_response(&body);
-    }
-    Err(classify_error(status, &body))
-}
-
-/// 窓口の失敗の返事を分類する（account-server/src/index.ts の `/v1/ai`）
-fn classify_error(status: u16, body: &str) -> ActionError {
-    let value: Value = serde_json::from_str(body).unwrap_or(Value::Null);
-    let code = value.get("error").and_then(Value::as_str).unwrap_or("");
-    let failure = match (status, code) {
-        (401, _) => Failure::SignInRequired,
-        (402, _) => Failure::NoCredit,
-        // 同じアカウントの前の中継が終わっていない（取り消した直後など）
-        (409, _) => Failure::PreviousRunning,
-        (413, _) => Failure::TextTooLong,
-        // Gemini の失敗。状態だけが返る
-        (502, "upstream") => match value.get("upstream_status").and_then(Value::as_u64) {
-            Some(429) => Failure::RateLimited,
-            _ => Failure::ServiceError,
-        },
-        (500..=599, _) => Failure::ServiceError,
-        _ => Failure::Unexpected,
-    };
-    ActionError::new(
-        failure,
-        format!("account server: HTTP {status}, error {code:?}"),
-    )
 }
 
 #[cfg(test)]
@@ -535,37 +469,6 @@ mod tests {
     }
 
     #[test]
-    fn classifies_failures_from_the_account_server() {
-        let failure = |status, body: &str| classify_error(status, body).failure;
-        assert_eq!(
-            failure(401, r#"{"error":"unauthorized"}"#),
-            Failure::SignInRequired
-        );
-        assert_eq!(failure(402, r#"{"error":"no_credit"}"#), Failure::NoCredit);
-        assert_eq!(
-            failure(409, r#"{"error":"busy"}"#),
-            Failure::PreviousRunning
-        );
-        assert_eq!(
-            failure(413, r#"{"error":"too_long"}"#),
-            Failure::TextTooLong
-        );
-        assert_eq!(
-            failure(502, r#"{"error":"upstream","upstream_status":429}"#),
-            Failure::RateLimited
-        );
-        assert_eq!(
-            failure(502, r#"{"error":"upstream","upstream_status":500}"#),
-            Failure::ServiceError
-        );
-        assert_eq!(failure(500, "Internal Server Error"), Failure::ServiceError);
-        assert_eq!(
-            failure(400, r#"{"error":"bad_request"}"#),
-            Failure::Unexpected
-        );
-    }
-
-    #[test]
     fn puts_a_device_id_into_a_single_path_segment() {
         assert_eq!(
             device_url("0123abcd").unwrap().as_str(),
@@ -574,15 +477,6 @@ mod tests {
         assert_eq!(
             device_url("../token").unwrap().as_str(),
             format!("{ACCOUNT_URL}/v1/devices/..%2Ftoken")
-        );
-    }
-
-    #[test]
-    fn opens_the_pricing_page_only_in_japanese() {
-        assert_eq!(buy_page_url("ja"), format!("{ACCOUNT_URL}/pricing/"));
-        assert_eq!(
-            buy_page_url("en"),
-            format!("{ACCOUNT_URL}/account/buy?lang=en")
         );
     }
 }

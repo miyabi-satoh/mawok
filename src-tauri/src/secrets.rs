@@ -1,6 +1,6 @@
-//! AI のアクションで使う AI サービスのキーを、OS の資格情報管理に置く。
+//! Mawok のアカウントのトークンと同期の鍵（account_credentials.rs）を、OS の資格情報管理に置く。
 //! macOS はログインのキーチェーン、Windows は資格情報マネージャー、Linux は Secret Service（GNOME Keyring・KWallet など）。
-//! 設定の置き場とバックアップは人に見せることがあるので、キーは書かない。
+//! 設定の置き場とバックアップは人に見せることがあるので、そちらには書かない。
 //!
 //! キーチェーンは、読むときに OS が許可を求めることがあり（ad-hoc 署名の版を入れ直した後など）、答えるまで呼んだスレッドが止まる。
 //! Secret Service も、キーリングが閉じていれば開くためのパスワードを求め、答えるまで止まる。
@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use keyring_core::{api::CredentialStore, Entry, Error};
 
-/// 資格情報の service。user に AI サービスごとの名前（`gemini-api-key` など）を入れて、サービスごとに分けて置く
+/// 資格情報の service。user に置くものごとの名前を入れて分ける
 const SERVICE: &str = "com.amiiby.mawok";
 
 /// プロファイルを分けた起動は、常用のアカウントのトークンと同期の鍵を読まない

@@ -1,8 +1,7 @@
 import { html } from 'hono/html';
 import type { HtmlEscapedString } from 'hono/utils/html';
 import { messages, type Lang } from './i18n';
-import type { AccountPro, Balance } from './credits';
-import type { ProPlan } from './pricing';
+import type { AccountPro, ProPlan } from './pro';
 import { PRO_TRIAL_DAYS } from './stripe';
 import { ACCOUNT, ACCOUNT_HOME, PRICING_PATH, PURCHASE_CONDITIONS } from './util';
 
@@ -396,38 +395,7 @@ export function approvePage(lang: Lang, email: string, link: LinkRequest, here: 
 /** 国内 (Stripe で直接売る) と海外 (Managed Payments で、Link が代わりに売る)。売り方で説明が変わる。 */
 export type SaleRegion = 'domestic' | 'overseas';
 
-/** 支払いの直前の最終確認画面。条件はボタンより上に、畳まずに出す。 */
-export function confirmPage(lang: Lang, email: string, region: SaleRegion) {
-	const t = messages[lang];
-	const rows: [string, string][] = [
-		[t.confirmItemLabel, t.confirmItem],
-		[t.confirmPriceLabel, t.confirmPrice],
-		[t.confirmPaymentLabel, t.confirmPayment[region]],
-		[t.confirmDeliveryLabel, t.confirmDelivery],
-		[t.confirmRefundLabel, t.confirmRefund[region](LEGAL_PAGES.tokushoho)]
-	];
-	return page(
-		lang,
-		t.confirmTitle,
-		html`<h1>${t.confirmTitle}</h1>
-			<dl class="order">
-				${rows.map(
-					([label, value]) =>
-						html`<dt>${label}</dt>
-							<dd>${withLinks(value)}</dd>`
-				)}
-			</dl>
-			<form method="post" action="${ACCOUNT}/buy">
-				<p class="muted">${withLegalLinks(lang, t.buyConsent)}</p>
-				<input type="hidden" name="next" value="${ACCOUNT_HOME}" />
-				<button>${t.confirmButton}</button>
-			</form>
-			<p><a href="${PRICING_PATH}">${t.backToPricing}</a></p>
-			${signedInAs(lang, email, `${ACCOUNT}/buy`)}`
-	);
-}
-
-/** Pro の支払いの直前の最終確認画面。 */
+/** Pro の支払いの直前の最終確認画面。条件はボタンより上に、畳まずに出す。 */
 export function proConfirmPage(
 	lang: Lang,
 	email: string,
@@ -483,14 +451,9 @@ export type LinkedApp = { id: string; name: string; createdAt: number };
 export function homePage(
 	lang: Lang,
 	email: string,
-	balance: Balance,
 	apps: LinkedApp[],
 	region: SaleRegion | undefined,
-	{
-		bought = false,
-		pro,
-		billing = false
-	}: { bought?: boolean; pro?: AccountPro; billing?: boolean } = {}
+	{ pro, billing = false }: { pro?: AccountPro; billing?: boolean } = {}
 ) {
 	const t = messages[lang];
 	const proDate = (seconds: number) => billingDate(lang, region, date(lang, seconds));
@@ -498,9 +461,6 @@ export function homePage(
 		lang,
 		t.accountTitle,
 		html`<h1>${t.accountTitle}</h1>
-			${bought ? html`<p role="status">${t.bought}</p>` : ''}
-			<p>${balance.remaining > 0 ? t.balance(balance.percent) : t.noBalance}</p>
-			${region ? html`<p><a class="action" href="${PRICING_PATH}">${t.buyTitle}</a></p>` : ''}
 			<h2>${t.proTitle}</h2>
 			${
 				pro?.active
@@ -542,26 +502,18 @@ export function homePage(
 }
 
 /**
- * 支払いから戻った先で、残高が付く (Pro なら有効になる) のを待つ画面。`autoRetry` の間は数秒おきに開き直す。
- * 待っても付かなければ、確かめ直す手段を出す (買えたか分からないまま買い直さないように)。
+ * 支払いから戻った先で、Pro が有効になるのを待つ画面。`autoRetry` の間は数秒おきに開き直す。
+ * 待っても有効にならなければ、確かめ直す手段を出す (申し込めたか分からないまま申し込み直さないように)。
+ * 試用で始まると支払いも領収のメールも無いので、支払いでなく申し込みを確かめると言う。
  */
-export function checkingPurchasePage(
-	lang: Lang,
-	pro: boolean,
-	retryUrl: string,
-	autoRetry: boolean
-) {
+export function checkingPurchasePage(lang: Lang, retryUrl: string, autoRetry: boolean) {
 	const t = messages[lang];
-	const title = pro ? t.proTitle : t.buyTitle;
-	// Pro は試用で始まると支払いも領収のメールも無いので、支払いでなく申し込みを確かめると言う。
-	const checking = pro ? t.checkingPro : t.checkingPurchase;
-	const notYet = pro ? t.proNotYet : t.purchaseNotYet;
 	return page(
 		lang,
-		title,
+		t.proTitle,
 		html`${autoRetry ? html`<meta http-equiv="refresh" content="3;url=${retryUrl}" />` : ''}
-			<h1>${title}</h1>
-			<p>${autoRetry ? checking : notYet}</p>
+			<h1>${t.proTitle}</h1>
+			<p>${autoRetry ? t.checkingPro : t.proNotYet}</p>
 			${autoRetry ? '' : html`<p><a href="${retryUrl}">${t.checkAgain}</a></p>`}`
 	);
 }

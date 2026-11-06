@@ -10,14 +10,13 @@ updates:
     directory: '/src-tauri'
     schedule:
       interval: 'monthly'
-    # Tauri（wry・tao・tray-icon・notify-rust・tauri-plugin-single-instance）が使うのと同じ版に揃えている crate。
+    # Tauri（wry・tao・tray-icon・tauri-plugin-single-instance）が使うのと同じ版に揃えている crate。
     # Tauri より先に上げると型が合わなくなるか、2版入るので、Tauri が上がって scripts/check-pinned-deps.mjs が落ちたときに手で上げる。
     # scripts/check-pinned-deps.mjs の PINNED にある crate がここに無いと、その検査が落ちる。
     # 0.x の 0.38 → 0.39 は minor として扱われ、semver-major の指定では止まらないので、版を問わず外す
     ignore:
       - dependency-name: 'webview2-com'
       - dependency-name: 'windows-core'
-      - dependency-name: 'tauri-winrt-notification'
       - dependency-name: 'webkit2gtk'
       - dependency-name: 'gtk'
       - dependency-name: 'zbus'

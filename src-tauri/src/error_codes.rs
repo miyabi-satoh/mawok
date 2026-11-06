@@ -1,10 +1,13 @@
 //! 画面に返すエラーの符号。画面は `cargo test` が書き出す `ERROR_CODES`（src/lib/bindings/constants.ts）から引く。
-//! アクションの失敗の符号は `actions::Failure::code` が持つ
 
 /// Mawok のアカウントの窓口につながらない
 pub const ACCOUNT_UNREACHABLE: &str = "account.unreachable";
-/// アクションを打ち切った
-pub const ACTION_CANCELLED: &str = "action.cancelled";
+/// Mawok のアカウントにサインインしていないか、トークンが外された
+pub const ACCOUNT_SIGN_IN_REQUIRED: &str = "account.sign_in_required";
+/// Mawok のアカウントのトークンを資格情報管理から読めない（キーチェーンの許可を拒んだなど）
+pub const ACCOUNT_TOKEN_UNREADABLE: &str = "account.token_unreadable";
+/// ほかのどれにも当たらない（窓口の答えが読めない、包んだ鍵が見分けと合わない など）。詳しい中身はログに残す
+pub const UNEXPECTED: &str = "unexpected";
 /// 一部の設定をバックアップから戻せなかった（OS がホットキーを登録できない など）
 pub const BACKUP_RESTORE_PARTIAL: &str = "backup.restore_partial";
 /// 同期のパスワードで、窓口の包んだ鍵を開けなかった

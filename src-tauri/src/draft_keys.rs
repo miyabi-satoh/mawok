@@ -17,17 +17,15 @@ pub enum DraftAction {
     Snippets,
     HistoryOlder,
     HistoryNewer,
-    ChangeFolder,
 }
 
 impl DraftAction {
-    pub const ALL: [DraftAction; 6] = [
+    pub const ALL: [DraftAction; 5] = [
         DraftAction::Copy,
         DraftAction::Settings,
         DraftAction::Snippets,
         DraftAction::HistoryOlder,
         DraftAction::HistoryNewer,
-        DraftAction::ChangeFolder,
     ];
 
     /// 設定の置き場と同期での項目名
@@ -38,7 +36,6 @@ impl DraftAction {
             DraftAction::Snippets => "snippets",
             DraftAction::HistoryOlder => "history_older",
             DraftAction::HistoryNewer => "history_newer",
-            DraftAction::ChangeFolder => "change_folder",
         }
     }
 
@@ -51,8 +48,6 @@ impl DraftAction {
             DraftAction::Snippets => "CommandOrControl+KeyK",
             DraftAction::HistoryOlder => "CommandOrControl+Alt+ArrowUp",
             DraftAction::HistoryNewer => "CommandOrControl+Alt+ArrowDown",
-            // D は Directory。どの OS の入力欄でも、編集の操作に使われていない
-            DraftAction::ChangeFolder => "CommandOrControl+KeyD",
         }
     }
 }
@@ -68,7 +63,6 @@ pub struct DraftKeys {
     pub snippets: String,
     pub history_older: String,
     pub history_newer: String,
-    pub change_folder: String,
 }
 
 impl Default for DraftKeys {
@@ -80,7 +74,6 @@ impl Default for DraftKeys {
             snippets: key(DraftAction::Snippets),
             history_older: key(DraftAction::HistoryOlder),
             history_newer: key(DraftAction::HistoryNewer),
-            change_folder: key(DraftAction::ChangeFolder),
         }
     }
 }
@@ -93,7 +86,6 @@ impl DraftKeys {
             DraftAction::Snippets => &self.snippets,
             DraftAction::HistoryOlder => &self.history_older,
             DraftAction::HistoryNewer => &self.history_newer,
-            DraftAction::ChangeFolder => &self.change_folder,
         }
     }
 
@@ -104,7 +96,6 @@ impl DraftKeys {
             DraftAction::Snippets => &mut self.snippets,
             DraftAction::HistoryOlder => &mut self.history_older,
             DraftAction::HistoryNewer => &mut self.history_newer,
-            DraftAction::ChangeFolder => &mut self.change_folder,
         }
     }
 
@@ -718,8 +709,8 @@ mod tests {
             Ok("")
         );
         assert_eq!(
-            check_hotkey(&keys, "CommandOrControl+KeyD", MAC),
-            Err(Rejection::Action(DraftAction::ChangeFolder))
+            check_hotkey(&keys, "CommandOrControl+Alt+ArrowDown", MAC),
+            Err(Rejection::Action(DraftAction::HistoryNewer))
         );
         assert_eq!(
             check_hotkey(&keys, "CommandOrControl+Shift+Space", MAC),
@@ -826,8 +817,8 @@ mod tests {
     #[test]
     fn resolves_conflicts_in_action_order() {
         let mut keys = DraftKeys {
-            // フォルダーを移るがコピーと同じキー、定型文がホットキーと同じキー、設定が編集キー
-            change_folder: "CommandOrControl+Enter".to_string(),
+            // 次の履歴がコピーと同じキー、定型文がホットキーと同じキー、設定が編集キー
+            history_newer: "CommandOrControl+Enter".to_string(),
             snippets: "CommandOrControl+Shift+Space".to_string(),
             settings: "CommandOrControl+KeyC".to_string(),
             ..DraftKeys::default()
@@ -843,13 +834,13 @@ mod tests {
             [
                 "text_window_keys.settings",
                 "text_window_keys.snippets",
-                "text_window_keys.change_folder"
+                "text_window_keys.history_newer"
             ]
         );
         assert_eq!(keys.copy, "CommandOrControl+Enter");
         assert_eq!(keys.settings, "");
         assert_eq!(keys.snippets, "");
-        assert_eq!(keys.change_folder, "");
+        assert_eq!(keys.history_newer, "");
     }
 
     #[test]
@@ -857,13 +848,13 @@ mod tests {
         // ホットキーが、新しい版で足された操作の既定のキーと同じ人には、外すだけで知らせない
         let mut keys = DraftKeys::default();
         assert_eq!(
-            resolve_conflicts(&mut keys, "CommandOrControl+KeyD", MAC, &[]),
+            resolve_conflicts(&mut keys, "CommandOrControl+Alt+ArrowDown", MAC, &[]),
             Resolved {
                 removed: Vec::new(),
-                yielded: vec![DraftAction::ChangeFolder],
+                yielded: vec![DraftAction::HistoryNewer],
             }
         );
-        assert_eq!(keys.change_folder, "");
+        assert_eq!(keys.history_newer, "");
         assert_eq!(keys.snippets, DraftAction::Snippets.default_key());
     }
 

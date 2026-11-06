@@ -6,10 +6,6 @@ import type { ProStatus } from "./ProStatus";
  */
 export type AccountStatus = { email: string, 
 /**
- * 残りの割合（切り上げ。使い切ったときだけ 0）
- */
-remainingPercent: number, 
-/**
  * サインインし直したときに、アカウントが替わったかを見分けるための、窓口のランダムなアカウントID
  */
 accountId: string, pro: ProStatus, };

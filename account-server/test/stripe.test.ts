@@ -1,10 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import {
-	confirmPurchase,
 	confirmProInvoice,
 	createProCheckoutSession,
-	createCheckoutSession,
 	expireCheckoutSession,
 	PRO_TRIAL_DAYS,
 	ProInvoiceError,
@@ -13,7 +11,7 @@ import {
 	usesManagedPayments,
 	verifyWebhook
 } from '../src/stripe';
-import { stripeSessions, stripeSignature } from './helpers';
+import { stripeSignature } from './helpers';
 
 const config = stripeConfig(env)!;
 
@@ -26,19 +24,21 @@ describe('usesManagedPayments', () => {
 	});
 });
 
-describe('createCheckoutSession', () => {
-	function checkout(overrides: Partial<Parameters<typeof createCheckoutSession>[1]> = {}) {
-		return createCheckoutSession(config, {
+describe('createProCheckoutSession', () => {
+	function checkout(overrides: Partial<Parameters<typeof createProCheckoutSession>[1]> = {}) {
+		return createProCheckoutSession(config, {
 			accountId: 'acc',
 			email: 'buyer@example.com',
+			plan: 'monthly',
 			lang: 'ja',
 			successUrl: 'https://account.test/done',
-			cancelUrl: 'https://account.test/',
+			cancelUrl: 'https://account.test/cancel',
 			expiresAt: 2_000_000_000,
-			submitMessage: '特定商取引法に基づく表記',
+			submitMessage: '解約するまで自動で更新します。',
 			managedPayments: false,
 			buyerCountry: 'JP',
-			idempotencyKey: 'key-1',
+			trial: true,
+			idempotencyKey: 'pro-key',
 			...overrides
 		});
 	}
@@ -47,49 +47,59 @@ describe('createCheckoutSession', () => {
 		return vi
 			.spyOn(globalThis, 'fetch')
 			.mockImplementation(async () =>
-				Response.json({ id: 'cs_1', url: 'https://checkout.stripe.test/c/pay/cs_1' })
+				Response.json({ id: 'cs_pro', url: 'https://checkout.stripe.test/c/pay/cs_pro' })
 			);
 	}
 
 	const DOMESTIC_ONLY = {
 		'payment_method_types[0]': 'card',
 		'line_items[0][tax_rates][0]': env.STRIPE_TAX_RATE_ID,
-		'payment_intent_data[statement_descriptor_suffix]': 'MAWOK',
-		'payment_method_options[card][statement_descriptor_suffix_kanji]': 'Mawok',
-		'payment_method_options[card][statement_descriptor_suffix_kana]': 'マオック',
-		'custom_text[submit][message]': '特定商取引法に基づく表記'
+		'custom_text[submit][message]': '解約するまで自動で更新します。'
 	};
 
-	it('sells in Japan by card, with the tax rate and the statement descriptor', async () => {
+	it('creates a subscription with the first 14-day trial and its account metadata', async () => {
 		const stripe = stripeAnswers();
-		expect(await checkout()).toMatchObject({ url: 'https://checkout.stripe.test/c/pay/cs_1' });
+		expect(await checkout()).toMatchObject({ url: 'https://checkout.stripe.test/c/pay/cs_pro' });
 		const [url, init] = stripe.mock.calls[0];
 		expect(url).toBe('https://api.stripe.com/v1/checkout/sessions');
-		expect(new Headers(init!.headers).get('idempotency-key')).toBe('key-1');
+		expect(new Headers(init!.headers).get('idempotency-key')).toBe('pro-key');
 		const sent = Object.fromEntries(new URLSearchParams(String(init!.body)));
 		expect(sent).toEqual({
-			mode: 'payment',
-			'line_items[0][price]': 'price_credits',
+			mode: 'subscription',
+			'line_items[0][price]': 'price_pro_monthly',
 			'line_items[0][quantity]': '1',
 			client_reference_id: 'acc',
 			customer_email: 'buyer@example.com',
-			'metadata[product]': 'mawok-ai',
-			'metadata[buyer_country]': 'JP',
+			'metadata[product]': 'mawok-pro',
+			'subscription_data[metadata][product]': 'mawok-pro',
+			'subscription_data[metadata][account_id]': 'acc',
+			'subscription_data[metadata][managed_payments]': '0',
+			'subscription_data[metadata][buyer_country]': 'JP',
+			'subscription_data[trial_period_days]': String(PRO_TRIAL_DAYS),
 			locale: 'ja',
 			success_url: 'https://account.test/done',
-			cancel_url: 'https://account.test/',
+			cancel_url: 'https://account.test/cancel',
 			expires_at: '2000000000',
 			'managed_payments[enabled]': 'false',
 			...DOMESTIC_ONLY
 		});
 	});
 
-	it('leaves payment methods, tax and the descriptor to Managed Payments', async () => {
+	it('gives no trial to an account that has had one, and uses the yearly price', async () => {
+		const stripe = stripeAnswers();
+		await checkout({ plan: 'yearly', trial: false });
+		const sent = new URLSearchParams(String(stripe.mock.calls[0][1]!.body));
+		expect(sent.get('line_items[0][price]')).toBe('price_pro_yearly');
+		expect(sent.has('subscription_data[trial_period_days]')).toBe(false);
+	});
+
+	it('leaves payment methods, tax and the checkout note to Managed Payments', async () => {
 		const stripe = stripeAnswers();
 		await checkout({ managedPayments: true, submitMessage: undefined, buyerCountry: 'US' });
 		const sent = new URLSearchParams(String(stripe.mock.calls[0][1]!.body));
 		expect(sent.get('managed_payments[enabled]')).toBe('true');
-		expect(sent.get('metadata[buyer_country]')).toBe('US');
+		expect(sent.get('subscription_data[metadata][managed_payments]')).toBe('1');
+		expect(sent.get('subscription_data[metadata][buyer_country]')).toBe('US');
 		// 送ると Stripe に断られる。
 		for (const key of Object.keys(DOMESTIC_ONLY)) expect(sent.has(key), key).toBe(false);
 	});
@@ -109,39 +119,6 @@ describe('createCheckoutSession', () => {
 			async () => new Response('{"error":{"type":"idempotency_error"}}', { status: 409 })
 		);
 		await expect(checkout()).rejects.toSatisfy((e) => e instanceof StripeError && e.status === 409);
-	});
-});
-
-describe('createProCheckoutSession', () => {
-	it('creates a subscription with the first 14-day trial and its account metadata', async () => {
-		const stripe = vi
-			.spyOn(globalThis, 'fetch')
-			.mockImplementation(async () =>
-				Response.json({ id: 'cs_pro', url: 'https://checkout.stripe.test/c/pay/cs_pro' })
-			);
-		await createProCheckoutSession(
-			{ ...config, proPrices: { monthly: 'price_pro_monthly', yearly: 'price_pro_yearly' } },
-			{
-				accountId: 'acc',
-				email: 'buyer@example.com',
-				plan: 'monthly',
-				lang: 'ja',
-				successUrl: 'https://account.test/done',
-				cancelUrl: 'https://account.test/cancel',
-				expiresAt: 2_000_000_000,
-				managedPayments: false,
-				buyerCountry: 'JP',
-				trial: true,
-				idempotencyKey: 'pro-key'
-			}
-		);
-		const sent = new URLSearchParams(String(stripe.mock.calls[0][1]!.body));
-		expect(sent.get('mode')).toBe('subscription');
-		expect(sent.get('line_items[0][price]')).toBe('price_pro_monthly');
-		expect(sent.get('subscription_data[trial_period_days]')).toBe(String(PRO_TRIAL_DAYS));
-		expect(sent.get('subscription_data[metadata][product]')).toBe('mawok-pro');
-		expect(sent.get('subscription_data[metadata][account_id]')).toBe('acc');
-		expect(sent.get('subscription_data[metadata][buyer_country]')).toBe('JP');
 	});
 });
 
@@ -166,11 +143,6 @@ describe('expireCheckoutSession', () => {
 });
 
 describe('confirmProInvoice', () => {
-	const proConfig = {
-		...config,
-		proPrices: { monthly: 'price_pro_monthly', yearly: 'price_pro_yearly' }
-	};
-
 	function proInvoice(overrides: Record<string, unknown> = {}) {
 		const invoice = {
 			id: 'in_pro',
@@ -234,7 +206,7 @@ describe('confirmProInvoice', () => {
 
 	it('confirms every invoice field before recording a Pro payment', async () => {
 		proInvoice();
-		expect(await confirmProInvoice(proConfig, 'in_pro')).toMatchObject({
+		expect(await confirmProInvoice(config, 'in_pro')).toMatchObject({
 			plan: 'monthly',
 			amount: 480,
 			currency: 'jpy',
@@ -245,7 +217,7 @@ describe('confirmProInvoice', () => {
 		});
 		vi.restoreAllMocks();
 		proInvoice({ customer_details: { address: null } });
-		expect((await confirmProInvoice(proConfig, 'in_pro'))?.domestic).toBe(false);
+		expect((await confirmProInvoice(config, 'in_pro'))?.domestic).toBe(false);
 		for (const overrides of [
 			{ amount_paid: 479 },
 			{ lines: { has_more: true, data: [] } },
@@ -259,7 +231,7 @@ describe('confirmProInvoice', () => {
 			vi.restoreAllMocks();
 			proInvoice(overrides);
 			await expect(
-				confirmProInvoice(proConfig, 'in_pro'),
+				confirmProInvoice(config, 'in_pro'),
 				JSON.stringify(overrides)
 			).rejects.toBeInstanceOf(ProInvoiceError);
 		}
@@ -284,103 +256,10 @@ describe('confirmProInvoice', () => {
 			},
 			payments: { has_more: false, data: [] }
 		});
-		expect(await confirmProInvoice(proConfig, 'in_pro')).toMatchObject({
+		expect(await confirmProInvoice(config, 'in_pro')).toMatchObject({
 			amount: 0,
 			paymentIntentId: null
 		});
-	});
-});
-
-describe('confirmPurchase', () => {
-	const charge = (country: string | null) => ({
-		id: `pi_${crypto.randomUUID()}`,
-		latest_charge: { payment_method_details: { card: { country } } }
-	});
-
-	it('returns what to record for a paid checkout of the credits price', async () => {
-		const stripe = stripeSessions('acc');
-		expect(await confirmPurchase(config, 'cs_paid')).toEqual({
-			sessionId: 'cs_paid',
-			accountId: 'acc',
-			paymentIntentId: 'pi_cs_paid',
-			amount: 300,
-			currency: 'jpy',
-			managedPayments: false,
-			cardCountry: 'JP',
-			buyerCountry: 'JP',
-			domestic: true
-		});
-		expect(String(stripe.mock.calls[0][0])).toContain('/v1/checkout/sessions/cs_paid?');
-	});
-
-	it('records a Managed Payments sale without a card', async () => {
-		stripeSessions('acc', {
-			managed_payments: { enabled: true },
-			metadata: { product: 'mawok-ai', buyer_country: 'US' },
-			payment_intent: { id: 'pi_mp', latest_charge: { payment_method_details: {} } }
-		});
-		expect(await confirmPurchase(config, 'cs_mp')).toMatchObject({
-			managedPayments: true,
-			cardCountry: null,
-			buyerCountry: 'US',
-			domestic: false
-		});
-	});
-
-	it('decides whether the sale is domestic by the address, then the card, then the access', async () => {
-		for (const [name, overrides, domestic] of [
-			// MP をすり抜けた日本の買い手 (住所が日本) は国内。
-			[
-				'address',
-				{
-					customer_details: { address: { country: 'JP' } },
-					payment_intent: charge('US'),
-					metadata: { product: 'mawok-ai', buyer_country: 'US' }
-				},
-				true
-			],
-			['card', { customer_details: { address: null }, payment_intent: charge('US') }, false],
-			['access', { customer_details: null, payment_intent: charge(null) }, true]
-		] as const) {
-			vi.restoreAllMocks();
-			stripeSessions('acc', overrides);
-			expect((await confirmPurchase(config, `cs_${name}`))?.domestic, name).toBe(domestic);
-		}
-	});
-
-	it('does not trust the notice: confirms only a paid checkout of one credits price', async () => {
-		for (const overrides of [
-			{ payment_status: 'unpaid' },
-			{ amount_total: 1 },
-			{ amount_total: null },
-			{ currency: 'usd' },
-			{ metadata: { product: 'bp-carnet' } },
-			{ client_reference_id: null },
-			{ payment_intent: null },
-			{
-				line_items: {
-					data: [{ quantity: 2, price: { id: 'price_credits', unit_amount: 300, currency: 'jpy' } }]
-				}
-			},
-			{
-				line_items: {
-					data: [{ quantity: 1, price: { id: 'price_other', unit_amount: 300, currency: 'jpy' } }]
-				}
-			}
-		]) {
-			vi.restoreAllMocks();
-			// 払われたのに付けられない支払いは、手で調べられるようログに残す。
-			vi.spyOn(console, 'error').mockImplementation(() => {});
-			stripeSessions('acc', overrides);
-			expect(await confirmPurchase(config, 'cs_forged'), JSON.stringify(overrides)).toBeUndefined();
-		}
-	});
-
-	it('throws when Stripe cannot answer, so the notice is sent again', async () => {
-		vi.spyOn(globalThis, 'fetch').mockImplementation(
-			async () => new Response('{"error":{"type":"api_error"}}', { status: 500 })
-		);
-		await expect(confirmPurchase(config, 'cs_retry')).rejects.toBeInstanceOf(StripeError);
 	});
 });
 

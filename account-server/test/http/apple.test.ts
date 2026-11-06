@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
-import { accountId, grantsOf, ORIGIN, postForm, request, sessionCookie, signIn } from '../helpers';
+import { accountId, ORIGIN, postForm, request, sessionCookie, signIn } from '../helpers';
 
 describe('Apple sign-in', () => {
 	const APPLE = 'https://appleid.apple.com';
@@ -64,7 +64,6 @@ describe('Apple sign-in', () => {
 		expect(res.headers.get('location')).toBe('/account/link?code=ABCDEF');
 		const home = await (await request('/account/', { cookie: sessionCookie(res) })).text();
 		expect(home).toContain('a-new@example.com');
-		expect(await grantsOf(await accountId('a-new@example.com'))).toHaveLength(1);
 
 		const [url, init] = token.mock.calls[0];
 		expect(url).toBe(`${APPLE}/auth/token`);

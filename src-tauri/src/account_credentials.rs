@@ -63,7 +63,7 @@ fn write_locked(credentials: &Credentials) -> Result<(), String> {
 }
 
 /// 項目の有無だけを確かめる。前のトークンだけがある間も、読む入口で移し替えられるように見つける。
-/// 鍵だけの項目（サインアウトと鍵の保存が重なったときに残りうる）でも true なので、サインインしているかは `has_token` で確かめる
+/// 鍵だけの項目（サインアウトと鍵の保存が重なったときに残りうる）でも true になる
 pub fn exists() -> Result<bool, String> {
     if secrets::exists(CREDENTIAL_USER)? {
         return Ok(true);
@@ -108,12 +108,6 @@ fn migrate_locked() -> Result<Credentials, ReadError> {
 pub fn read_token() -> Result<String, ReadError> {
     let _access = ACCESS.lock().unwrap();
     read_locked()?.token.ok_or(ReadError::NotFound)
-}
-
-/// サインインしているか（トークンがあるか）。
-pub fn has_token() -> Result<bool, String> {
-    let _access = ACCESS.lock().unwrap();
-    Ok(read_or_empty_locked()?.token.is_some())
 }
 
 pub fn read_key() -> Result<Option<String>, ReadError> {

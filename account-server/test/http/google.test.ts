@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
-import { accountId, grantsOf, ORIGIN, request, sessionCookie, signIn } from '../helpers';
+import { accountId, ORIGIN, request, sessionCookie, signIn } from '../helpers';
 
 describe('Google sign-in', () => {
 	/** Google の画面へ送り、戻ってきたときに要る Cookie と state・nonce を返す。 */
@@ -48,7 +48,7 @@ describe('Google sign-in', () => {
 		});
 	}
 
-	it('signs in a new account with free credit and comes back to the same account next time', async () => {
+	it('signs in a new account and comes back to the same account next time', async () => {
 		const first = await back(await startGoogle('/account/link?code=ABCDEF'), {
 			sub: 'g-new',
 			email: 'G-New@Example.com'
@@ -57,7 +57,6 @@ describe('Google sign-in', () => {
 		expect(first.headers.get('location')).toBe('/account/link?code=ABCDEF');
 		const home = await (await request('/account/', { cookie: sessionCookie(first) })).text();
 		expect(home).toContain('g-new@example.com');
-		expect(await grantsOf(await accountId('g-new@example.com'))).toHaveLength(1);
 		// Google でメールアドレスを変えても、識別子で同じアカウントに入る。
 		const again = await back(await startGoogle(), { sub: 'g-new', email: 'renamed@example.com' });
 		const page = await (await request('/account/', { cookie: sessionCookie(again) })).text();

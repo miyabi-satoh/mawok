@@ -9,7 +9,6 @@ import { readFileSync } from 'node:fs';
 const PINNED = [
 	{ name: 'webview2-com', partner: 'wry' },
 	{ name: 'windows-core', partner: 'wry' },
-	{ name: 'tauri-winrt-notification', partner: 'notify-rust' },
 	{ name: 'webkit2gtk', partner: 'wry' },
 	{ name: 'gtk', partner: 'tao' },
 	{ name: 'zbus', partner: 'tauri-plugin-single-instance' },

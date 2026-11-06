@@ -1,16 +1,13 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { DELETE_ACCOUNT_STATEMENTS } from '../../src/account-deletion';
 import {
 	accountId,
+	addProPurchase,
 	addSubscription,
 	app,
-	buy,
-	geminiAnswers,
-	grantsOf,
 	linkApp,
 	request,
-	sendAi,
 	webhook
 } from '../helpers';
 
@@ -19,16 +16,16 @@ describe('deleting an account', () => {
 		return env.DB.batch(DELETE_ACCOUNT_STATEMENTS.map((s) => env.DB.prepare(s).bind(email)));
 	}
 
-	it('removes credit, tokens and sessions, and keeps the purchase and its uses without the account', async () => {
+	it('removes tokens, sessions and sync data, and keeps the purchase without the account', async () => {
 		const email = 'leaving@example.com';
 		const { cookie, token } = await linkApp(email);
 		const account = await accountId(email);
-		await buy(account, 'cs_leaving');
 		await addSubscription(account, {
 			id: 'sub_leaving',
 			customer: 'cus_leaving',
 			status: 'active'
 		});
+		await addProPurchase(account, 'sub_leaving', { invoice: 'in_leaving' });
 		await env.DB.batch([
 			env.DB.prepare(
 				`INSERT INTO sync_accounts (account_id, key_id, seq, purged_seq, bytes)
@@ -39,21 +36,17 @@ describe('deleting an account', () => {
 					 VALUES (?, 'settings', 'one', 1, 0, x'01', 0)`
 			).bind(account)
 		]);
-		geminiAnswers();
-		await sendAi(token);
-		vi.restoreAllMocks();
 		await deleteAccount(email);
 		expect(
 			await env.DB.prepare('SELECT 1 FROM accounts WHERE id = ?').bind(account).first()
 		).toBeNull();
-		expect(await grantsOf(account)).toEqual([]);
 		expect(
 			await env.DB.prepare('SELECT 1 FROM sync_accounts WHERE account_id = ?').bind(account).first()
 		).toBeNull();
 		expect(
 			await env.DB.prepare('SELECT 1 FROM sync_items WHERE account_id = ?').bind(account).first()
 		).toBeNull();
-		expect((await app('/v1/balance', token)).status).toBe(401);
+		expect((await app('/v1/account', token)).status).toBe(401);
 		expect(await (await request('/account/', { cookie })).text()).toContain(
 			'action="/account/login/email"'
 		);
@@ -62,11 +55,11 @@ describe('deleting an account', () => {
 			`SELECT id, account_id, amount, managed_payments, domestic, card_country, buyer_country FROM purchases
 			 WHERE stripe_checkout_session_id = ?`
 		)
-			.bind('cs_leaving')
+			.bind('invoice:in_leaving')
 			.first<Record<string, unknown>>();
 		expect(row).toMatchObject({
 			account_id: null,
-			amount: 300,
+			amount: 480,
 			managed_payments: 0,
 			domestic: 1,
 			card_country: null,
@@ -77,25 +70,19 @@ describe('deleting an account', () => {
 				.bind('sub_leaving')
 				.first()
 		).toEqual({ account_id: null, stripe_customer_id: null });
-		// 消費税の申告のため、使った分の記録も残す。
-		expect(
-			await env.DB.prepare('SELECT 1 FROM consumptions WHERE purchase_id = ?').bind(row!.id).first()
-		).not.toBeNull();
 	});
 
-	it('forgets purchases and uses after the retention period', async () => {
+	it('forgets purchases after the retention period', async () => {
 		const email = 'old-buyer@example.com';
-		const { token } = await linkApp(email);
+		await linkApp(email);
 		const account = await accountId(email);
-		await buy(account, 'cs_old');
-		geminiAnswers();
-		await sendAi(token);
-		vi.restoreAllMocks();
+		await addSubscription(account, { id: 'sub_old', status: 'active' });
+		await addProPurchase(account, 'sub_old', { invoice: 'in_old' });
 		await deleteAccount(email);
 		const eightYearsAgo = Math.floor(Date.now() / 1000) - 8 * 366 * 24 * 60 * 60;
 		const exists = () =>
 			env.DB.prepare('SELECT id FROM purchases WHERE stripe_checkout_session_id = ?')
-				.bind('cs_old')
+				.bind('invoice:in_old')
 				.first<{ id: string }>();
 		const purchase = (await exists())!.id;
 		// 買ったのが昔でも、消してから7年は残す。
@@ -107,15 +94,7 @@ describe('deleting an account', () => {
 		await env.DB.prepare('UPDATE purchases SET detached_at = ? WHERE id = ?')
 			.bind(eightYearsAgo, purchase)
 			.run();
-		await env.DB.prepare('UPDATE consumptions SET created_at = ? WHERE purchase_id IS NULL')
-			.bind(eightYearsAgo)
-			.run();
 		await webhook({ id: 'evt_other2', type: 'customer.created', data: { object: {} } });
 		expect(await exists()).toBeNull();
-		expect(
-			await env.DB.prepare('SELECT 1 FROM consumptions WHERE purchase_id = ?')
-				.bind(purchase)
-				.first()
-		).toBeNull();
 	});
 });

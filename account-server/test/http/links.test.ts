@@ -36,8 +36,8 @@ describe('linking Mawok', () => {
 		expect(
 			await env.DB.prepare('SELECT 1 FROM app_tokens WHERE token_hash = ?').bind(token).first()
 		).toBeNull();
-		// 答えの形は test/http/balance.test.ts が見る。ここは、替えたトークンでこのアカウントに届くことだけを見る。
-		expect(await (await app('/v1/balance', token)).json()).toMatchObject({ email });
+		// 答えの形は test/http/account.test.ts が見る。ここは、替えたトークンでこのアカウントに届くことだけを見る。
+		expect(await (await app('/v1/account', token)).json()).toMatchObject({ email });
 		// 窓口の画面で、どのデバイスの Mawok かが分かる。
 		expect(await (await request('/account/', { cookie })).text()).toContain('Taro の MacBook (');
 	});
@@ -112,7 +112,7 @@ describe('app tokens', () => {
 	it('signs Mawok out, and the token stops working', async () => {
 		const { token } = await linkApp('signout@example.com');
 		expect((await app('/v1/token', token, { method: 'DELETE' })).status).toBe(204);
-		expect((await app('/v1/balance', token)).status).toBe(401);
+		expect((await app('/v1/account', token)).status).toBe(401);
 	});
 
 	it('lists linked Mawok on the account page and removes one from there', async () => {
@@ -123,9 +123,9 @@ describe('app tokens', () => {
 		// ほかのアカウントからは外せない。
 		const other = await signIn('not-mine@example.com');
 		await postForm('/account/apps/unlink', { id }, other.cookie);
-		expect((await app('/v1/balance', token)).status).toBe(200);
+		expect((await app('/v1/account', token)).status).toBe(200);
 		expect((await postForm('/account/apps/unlink', { id }, cookie)).status).toBe(303);
-		expect((await app('/v1/balance', token)).status).toBe(401);
+		expect((await app('/v1/account', token)).status).toBe(401);
 		expect(await (await request('/account/', { cookie })).text()).toContain(
 			'登録しているデバイスはありません'
 		);
@@ -158,11 +158,11 @@ describe('app tokens', () => {
 		const refused = await app(`/v1/devices/${self.id}`, first.token, { method: 'DELETE' });
 		expect(refused.status).toBe(400);
 		expect(await refused.json()).toEqual({ error: 'current_device' });
-		expect((await app('/v1/balance', second.token)).status).toBe(200);
+		expect((await app('/v1/account', second.token)).status).toBe(200);
 		expect((await app(`/v1/devices/${other.id}`, first.token, { method: 'DELETE' })).status).toBe(
 			204
 		);
-		expect((await app('/v1/balance', second.token)).status).toBe(401);
+		expect((await app('/v1/account', second.token)).status).toBe(401);
 		expect((await app(`/v1/devices/${other.id}`, first.token, { method: 'DELETE' })).status).toBe(
 			404
 		);

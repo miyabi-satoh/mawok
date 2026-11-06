@@ -38,20 +38,9 @@
 		// 設定と履歴の同期: アカウントごと。複数のデバイスからの連続した同期で D1 を使い切らないように。
 		{ "name": "SYNC_LIMITER", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } }
 	],
-	// 生成する型 (worker-configuration.d.ts) にも効く。手元の .dev.vars の中身で型が変わらないよう、ここで決める。
-	"secrets": {
-		"required": [
-			"GEMINI_API_KEY",
-			// 値付けの値 (→ src/pricing.ts)。原価の割合が分かるので vars に書かない。
-			"PURCHASE_GRANT_MILLI_YEN",
-			"FREE_GRANT_MILLI_YEN",
-			"PRO_MONTHLY_GRANT_MILLI_YEN",
-			"PRO_YEARLY_GRANT_MILLI_YEN",
-			"USD_JPY",
-			"INPUT_USD_PER_MTOK",
-			"OUTPUT_USD_PER_MTOK"
-		]
-	},
+	// 欠かせない秘密の値は無い (無くても動くものは src/env.d.ts)。空でも置くのは、生成する型 (worker-configuration.d.ts) が
+	// 手元の .dev.vars の中身で変わらないようにするため (置かないと wrangler types が .dev.vars から型を作る)。
+	"secrets": { "required": [] },
 	"vars": {
 		"MAIL_FROM": "Mawok <noreply@amiiby.com>",
 		// 国内の支払いに付ける手動の税率「消費税 10%・税込み」(→ src/stripe.ts)。秘密ではないので vars に置く。
@@ -78,18 +67,7 @@
 				{ "name": "CODE_LIMITER", "namespace_id": "2013", "simple": { "limit": 10, "period": 60 } },
 				{ "name": "SYNC_LIMITER", "namespace_id": "2014", "simple": { "limit": 60, "period": 60 } }
 			],
-			"secrets": {
-				"required": [
-					"GEMINI_API_KEY",
-					"PURCHASE_GRANT_MILLI_YEN",
-					"FREE_GRANT_MILLI_YEN",
-					"PRO_MONTHLY_GRANT_MILLI_YEN",
-					"PRO_YEARLY_GRANT_MILLI_YEN",
-					"USD_JPY",
-					"INPUT_USD_PER_MTOK",
-					"OUTPUT_USD_PER_MTOK"
-				]
-			},
+			"secrets": { "required": [] },
 			// メールは送らず、サインインのリンクをログに出す (`wrangler tail --env staging` で読む)。
 			"vars": {
 				"MAIL_FROM": "Mawok <noreply@amiiby.com>",

@@ -30,7 +30,6 @@ export default defineConfig({
 					// Stripe へはつながない (テストが fetch を差し替える)。webhook の署名はこの値で作る。
 					STRIPE_SECRET_KEY: 'sk_test_dummy',
 					STRIPE_WEBHOOK_SECRET: 'whsec_test',
-					STRIPE_AI_CREDITS_PRICE_ID: 'price_credits',
 					STRIPE_PRO_MONTHLY_PRICE_ID: 'price_pro_monthly',
 					STRIPE_PRO_YEARLY_PRICE_ID: 'price_pro_yearly',
 					GOOGLE_CLIENT_ID: 'google-client',

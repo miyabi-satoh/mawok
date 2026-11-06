@@ -17,7 +17,6 @@
 
 技術の説明:
 
-- [宛先へ出す（@ai・@sh）と定型文](docs/actions.md)
 - [設定の置き場](docs/config.md)
 - [設定と履歴の同期](docs/sync.md)
 - [OS ごとの作り](docs/platform.md)

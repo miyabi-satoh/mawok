@@ -1,15 +1,16 @@
 /**
- * Stripe での AI の残高と Pro の販売 (→ docs/account-server.md「購入」)。
+ * Stripe での Pro の販売 (→ docs/account-server.md「購入」)。
  * SDK は使わず、要る呼び出しだけを fetch と Web Crypto で書く。
  */
-import type { ProPlan } from './pricing';
+import type { ProPlan } from './pro';
 
 /** 送られてから受け付けるまでの猶予。古い webhook を送り直されても通さないように (Stripe の SDK の既定と同じ)。 */
 const WEBHOOK_TOLERANCE = 300;
 
-/** 同じ Stripe のアカウントで売るほかの製品の webhook と見分ける印。Checkout Session の metadata に付ける。 */
-export const PRODUCT = 'mawok-ai';
-/** Pro のサブスクの印。Checkout Session とサブスクの metadata に付け、台帳の `product` にも残す。 */
+/**
+ * Pro のサブスクの印。Checkout Session とサブスクの metadata に付け、台帳の `product` にも残す。
+ * 同じ Stripe のアカウントで売るほかの製品の webhook と見分けるのにも使う。
+ */
 export const PRO_PRODUCT = 'mawok-pro';
 
 /** Pro の無料試用の日数。最終確認と Stripe Checkout で同じ日数を出す。 */
@@ -31,44 +32,34 @@ export class ProInvoiceError extends Error {}
 export type StripeConfig = {
 	secretKey: string;
 	webhookSecret: string;
-	creditsPriceId: string;
 	taxRateId: string;
-	proPrices?: Record<ProPlan, string>;
+	proPrices: Record<ProPlan, string>;
 };
 
-/** 秘密の値が3つと税率がそろったときだけ売る。手元で動かすときは無くてよい。 */
+/** 秘密の値が2つと、税率・月額と年額の Price がそろったときだけ売る。手元で動かすときは無くてよい。 */
 export function stripeConfig(env: Env): StripeConfig | undefined {
 	const {
 		STRIPE_SECRET_KEY,
 		STRIPE_WEBHOOK_SECRET,
-		STRIPE_AI_CREDITS_PRICE_ID,
-		STRIPE_TAX_RATE_ID
+		STRIPE_TAX_RATE_ID,
+		STRIPE_PRO_MONTHLY_PRICE_ID,
+		STRIPE_PRO_YEARLY_PRICE_ID
 	} = env;
 	if (
 		!STRIPE_SECRET_KEY ||
 		!STRIPE_WEBHOOK_SECRET ||
-		!STRIPE_AI_CREDITS_PRICE_ID ||
-		!STRIPE_TAX_RATE_ID
+		!STRIPE_TAX_RATE_ID ||
+		!STRIPE_PRO_MONTHLY_PRICE_ID ||
+		!STRIPE_PRO_YEARLY_PRICE_ID
 	) {
 		return undefined;
 	}
 	return {
 		secretKey: STRIPE_SECRET_KEY,
 		webhookSecret: STRIPE_WEBHOOK_SECRET,
-		creditsPriceId: STRIPE_AI_CREDITS_PRICE_ID,
 		taxRateId: STRIPE_TAX_RATE_ID,
-		proPrices:
-			env.STRIPE_PRO_MONTHLY_PRICE_ID && env.STRIPE_PRO_YEARLY_PRICE_ID
-				? { monthly: env.STRIPE_PRO_MONTHLY_PRICE_ID, yearly: env.STRIPE_PRO_YEARLY_PRICE_ID }
-				: undefined
+		proPrices: { monthly: STRIPE_PRO_MONTHLY_PRICE_ID, yearly: STRIPE_PRO_YEARLY_PRICE_ID }
 	};
-}
-
-/** 月額と年額の Price が両方あるときだけ Pro を売る。 */
-export type ProStripeConfig = StripeConfig & { proPrices: Record<ProPlan, string> };
-
-export function proForSale(config: StripeConfig): config is ProStripeConfig {
-	return config.proPrices !== undefined;
 }
 
 /**
@@ -85,73 +76,7 @@ export function usesManagedPayments(country: string | undefined): boolean {
  */
 const APPLE_RELAY_DOMAINS = ['privaterelay.appleid.com', 'private.icloud.com'];
 
-/** 明細に出す、この製品の表記 (アカウントの接頭辞に続く)。英字とカナは10文字、漢字は9文字まで。 */
-const STATEMENT_SUFFIX = { latin: 'MAWOK', kanji: 'Mawok', kana: 'マオック' };
-
-/**
- * 残高を買う Checkout Session を作る。`expiresAt` (UNIX 秒) は Stripe の決まりで30分以上先。
- * 同じ `idempotencyKey` で頼み直すと、Stripe は最初に作った Session を返す (24時間まで)。
- */
-export async function createCheckoutSession(
-	config: StripeConfig,
-	{
-		accountId,
-		email,
-		lang,
-		successUrl,
-		cancelUrl,
-		expiresAt,
-		submitMessage,
-		managedPayments,
-		buyerCountry,
-		idempotencyKey
-	}: {
-		accountId: string;
-		email: string;
-		lang: string;
-		successUrl: string;
-		cancelUrl: string;
-		expiresAt: number;
-		/** 支払いのボタンの下に出す文言。MP の Session では送れないので、国内の分だけ渡す。 */
-		submitMessage?: string;
-		managedPayments: boolean;
-		/** 買ったときのアクセス元の国。台帳に残すだけで、振り分けのほかには使わない。 */
-		buyerCountry?: string;
-		idempotencyKey: string;
-	}
-): Promise<{ id: string; url: string }> {
-	const params = new URLSearchParams({
-		mode: 'payment',
-		'line_items[0][price]': config.creditsPriceId,
-		'line_items[0][quantity]': '1',
-		client_reference_id: accountId,
-		'metadata[product]': PRODUCT,
-		locale: lang,
-		success_url: successUrl,
-		cancel_url: cancelUrl,
-		expires_at: String(expiresAt),
-		// 指定しないとアカウントの既定 (MP が有効) になるので、国内の分も明示する。
-		'managed_payments[enabled]': String(managedPayments)
-	});
-	// MP の Session では、払い方・税・明細の表記・支払いの画面の文言を Stripe が決め、指定すると断られる。
-	if (!managedPayments) {
-		for (const [key, value] of Object.entries({
-			// カードだけにする。後から払う方法 (コンビニ払いなど) は入金まで日がかかり、戻り先の画面で待ち切れない。
-			'payment_method_types[0]': 'card',
-			// 領収書を適格簡易請求書にするための、税率と税額 (税込み 10%)。
-			'line_items[0][tax_rates][0]': config.taxRateId,
-			'payment_intent_data[statement_descriptor_suffix]': STATEMENT_SUFFIX.latin,
-			'payment_method_options[card][statement_descriptor_suffix_kanji]': STATEMENT_SUFFIX.kanji,
-			'payment_method_options[card][statement_descriptor_suffix_kana]': STATEMENT_SUFFIX.kana
-		})) {
-			params.set(key, value);
-		}
-	}
-	if (buyerCountry) params.set('metadata[buyer_country]', buyerCountry);
-	return postCheckoutSession(config, params, email, submitMessage, idempotencyKey);
-}
-
-/** 買い手のメールと支払いの画面の文言を足して、Checkout Session を作る。残高と Pro で同じ。 */
+/** 買い手のメールと支払いの画面の文言を足して、Checkout Session を作る。 */
 function postCheckoutSession(
 	config: StripeConfig,
 	params: URLSearchParams,
@@ -165,14 +90,17 @@ function postCheckoutSession(
 		params.set('customer_email', email);
 	}
 	// 特定商取引法 12条の6 の最終確認画面に要る、引き渡しと返金の扱い。Markdown のリンクを書ける。
-	// MP の分は、同じ事項を買う画面 (→ src/pages.ts の confirmPage) にだけ出す。
+	// MP の分は、同じ事項を買う画面 (→ src/pages.ts の proConfirmPage) にだけ出す。
 	if (submitMessage) params.set('custom_text[submit][message]', submitMessage);
 	return stripePost(config, 'checkout/sessions', params, idempotencyKey);
 }
 
-/** Pro の Checkout Session。試用を受けたことがあるアカウントには試用を渡さない。 */
+/**
+ * Pro の Checkout Session。試用を受けたことがあるアカウントには試用を渡さない。`expiresAt` (UNIX 秒) は Stripe の決まりで30分以上先。
+ * 同じ `idempotencyKey` で頼み直すと、Stripe は最初に作った Session を返す (24時間まで)。
+ */
 export async function createProCheckoutSession(
-	config: ProStripeConfig,
+	config: StripeConfig,
 	{
 		accountId,
 		email,
@@ -292,27 +220,12 @@ function isDomestic(
 	return (address || cardCountry || buyerCountry) === 'JP';
 }
 
-/** Pro の目印を持つ、払われた請求書かだけを調べる。Price が未設定でも知らせるために使う。 */
-export async function isPaidProInvoice(config: StripeConfig, invoiceId: string): Promise<boolean> {
-	const invoice = await stripeGet<{
-		status: string;
-		parent: { subscription_details?: { subscription: string } | null } | null;
-	}>(
-		config,
-		`invoices/${encodeURIComponent(invoiceId)}`,
-		new URLSearchParams([['expand[]', 'parent.subscription_details']])
-	);
-	const subscriptionId = invoice.parent?.subscription_details?.subscription;
-	if (invoice.status !== 'paid' || !subscriptionId) return false;
-	return (await getSubscription(config, subscriptionId)).metadata?.product === PRO_PRODUCT;
-}
-
 export function getSubscription(config: StripeConfig, id: string) {
 	return stripeGet<StripeSubscription>(config, `subscriptions/${encodeURIComponent(id)}`);
 }
 
 /** 0 円の試用開始請求書も含め、Pro の請求書を取り直して確かめる。 */
-export async function confirmProInvoice(config: ProStripeConfig, invoiceId: string) {
+export async function confirmProInvoice(config: StripeConfig, invoiceId: string) {
 	const invoice = await stripeGet<{
 		id: string;
 		status: string;
@@ -445,99 +358,6 @@ export async function billingPortalUrl(
 		new URLSearchParams({ customer, return_url: returnUrl, locale: lang })
 	);
 	return session.url;
-}
-
-/** 付けてよいと確かめた支払い。台帳に残す。 */
-type Purchase = {
-	sessionId: string;
-	accountId: string;
-	paymentIntentId: string;
-	/** 払われた額と通貨 (Price のもの。最小の単位で、円ならそのまま)。 */
-	amount: number;
-	currency: string;
-	managedPayments: boolean;
-	/** カードで払ったときの発行国。振り分けや返金には使わない。 */
-	cardCountry: string | null;
-	/** 買ったときのアクセス元の国。 */
-	buyerCountry: string | null;
-	/** 国内の取引か (`isDomestic`)。消費税の課税売上を数えるのに使い、アカウントを消しても残す。 */
-	domestic: boolean;
-};
-
-type CheckoutSession = {
-	id: string;
-	client_reference_id: string | null;
-	payment_status: string;
-	currency: string;
-	amount_total: number | null;
-	metadata: Record<string, string> | null;
-	managed_payments: { enabled: boolean } | null;
-	customer_details: { address: { country: string | null } | null } | null;
-	line_items: {
-		data: {
-			quantity: number | null;
-			price: { id: string; unit_amount: number | null; currency: string } | null;
-		}[];
-	};
-	payment_intent: {
-		id: string;
-		latest_charge: { payment_method_details: { card?: { country: string | null } } | null } | null;
-	} | null;
-};
-
-/**
- * 知らせの本文は信じず、Checkout Session を Stripe から取り直して、付けてよい支払いかを確かめる。
- * この製品のものでない・払われていない・中身が違うときは `undefined`。
- * 額は Price の額のまま (税込み) で、Adaptive Pricing で買い手の通貨で払っても Session の額と通貨は Price のまま。
- */
-export async function confirmPurchase(
-	config: StripeConfig,
-	sessionId: string
-): Promise<Purchase | undefined> {
-	const session = await stripeGet<CheckoutSession>(
-		config,
-		`checkout/sessions/${encodeURIComponent(sessionId)}`,
-		new URLSearchParams([
-			['expand[]', 'line_items'],
-			['expand[]', 'payment_intent.latest_charge']
-		])
-	);
-	if (session.metadata?.product !== PRODUCT || session.payment_status !== 'paid') return undefined;
-	const items = session.line_items.data;
-	const price = items[0]?.price;
-	if (
-		!session.client_reference_id ||
-		!session.payment_intent ||
-		items.length !== 1 ||
-		items[0].quantity !== 1 ||
-		price?.id !== config.creditsPriceId ||
-		session.currency !== price.currency ||
-		session.amount_total === null ||
-		session.amount_total !== price.unit_amount
-	) {
-		// 払われたのに付けられない。Price の設定の誤りなどで起きうるので、手で調べられるよう残す (`wrangler tail`)。
-		console.error('Paid checkout does not match the AI credits price', {
-			session: session.id,
-			currency: session.currency,
-			amountTotal: session.amount_total,
-			items: items.map((item) => ({ price: item.price, quantity: item.quantity }))
-		});
-		return undefined;
-	}
-	const cardCountry =
-		session.payment_intent.latest_charge?.payment_method_details?.card?.country ?? null;
-	const buyerCountry = session.metadata?.buyer_country ?? null;
-	return {
-		sessionId: session.id,
-		accountId: session.client_reference_id,
-		paymentIntentId: session.payment_intent.id,
-		amount: session.amount_total,
-		currency: session.currency,
-		managedPayments: session.managed_payments?.enabled === true,
-		cardCountry,
-		buyerCountry,
-		domestic: isDomestic(session.customer_details?.address?.country, cardCountry, buyerCountry)
-	};
 }
 
 /**

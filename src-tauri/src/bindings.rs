@@ -2,7 +2,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use crate::{actions, ai, config, draft_keys, error_codes, events, sync, sync_key};
+use crate::{config, draft_keys, error_codes, events, sync, sync_key};
 
 #[test]
 fn writes_constants() {
@@ -11,14 +11,6 @@ fn writes_constants() {
     let action_names: Vec<String> = draft_keys::DraftAction::ALL
         .into_iter()
         .map(|action| config::choice_name(&action))
-        .collect();
-    let ai_services: Vec<String> = ai::AiService::ALL
-        .into_iter()
-        .map(|service| service.name().to_string())
-        .collect();
-    let action_failures: Vec<&str> = actions::Failure::ALL
-        .iter()
-        .map(|failure| failure.code())
         .collect();
     let new_snippet =
         serde_json::to_string(&config::Snippet::default()).expect("could not serialize Snippet");
@@ -30,12 +22,8 @@ export const CONSTANTS = {{\n\
 \tMAX_DRAFT_FONT_SIZE: {},\n\
 \tDEFAULT_DRAFT_HISTORY_SIZE: {},\n\
 \tMAX_DRAFT_HISTORY_SIZE: {},\n\
-\tAI_SERVICES: {:?},\n\
-\tOPENAI_BASE_URL: {:?},\n\
 \tDRAFT_ACTIONS: {:?},\n\
 \tSUPPORTED_CODES: {:?},\n\
-\tAI_PREFIX: {:?},\n\
-\tSH_PREFIX: {:?},\n\
 \tNEW_SNIPPET: {},\n\
 \tSYNCABLE_SETTINGS: {:?},\n\
 \tMODIFIED_SETTINGS: {:?},\n\
@@ -47,7 +35,6 @@ export const EVENTS = {{\n\
 \tDRAFT_HISTORY_SYNCED: {:?},\n\
 \tSNIPPET_ADDED: {:?},\n\
 \tCONFIG_REPLACED: {:?},\n\
-\tAI_SETTINGS_REQUESTED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?},\n\
 \tDRAFT_HIDDEN: {:?},\n\
@@ -56,7 +43,9 @@ export const EVENTS = {{\n\
 }} as const;\n\n\
 export const ERROR_CODES = {{\n\
 \tACCOUNT_UNREACHABLE: {:?},\n\
-\tACTION_CANCELLED: {:?},\n\
+\tACCOUNT_SIGN_IN_REQUIRED: {:?},\n\
+\tACCOUNT_TOKEN_UNREADABLE: {:?},\n\
+\tUNEXPECTED: {:?},\n\
 \tBACKUP_RESTORE_PARTIAL: {:?},\n\
 \tSYNC_WRONG_PASSWORD: {:?},\n\
 \tSYNC_PASSWORD_TOO_SHORT: {:?},\n\
@@ -64,20 +53,15 @@ export const ERROR_CODES = {{\n\
 \tKEYS_INVALID: {:?},\n\
 \tKEYS_EDITING: {:?},\n\
 \tKEYS_HOTKEY: {:?},\n\
-\tKEYS_ACTION_PREFIX: {:?},\n\
-\tACTION_FAILURES: {:?}\n\
+\tKEYS_ACTION_PREFIX: {:?}\n\
 }} as const;\n",
         config::DEFAULT_DRAFT_FONT_SIZE,
         config::MIN_DRAFT_FONT_SIZE,
         config::MAX_DRAFT_FONT_SIZE,
         config::DEFAULT_DRAFT_HISTORY_SIZE,
         config::MAX_DRAFT_HISTORY_SIZE,
-        ai_services,
-        ai::OPENAI_BASE_URL,
         action_names,
         draft_keys::SUPPORTED_CODES,
-        actions::AI_PREFIX,
-        actions::SH_PREFIX,
         new_snippet,
         sync::SYNCABLE_SETTING_NAMES,
         config::modified_setting_names(),
@@ -87,14 +71,15 @@ export const ERROR_CODES = {{\n\
         events::DRAFT_HISTORY_SYNCED,
         events::SNIPPET_ADDED,
         events::CONFIG_REPLACED,
-        events::AI_SETTINGS_REQUESTED,
         events::SHOWN,
         events::HIDE_REQUESTED,
         events::DRAFT_HIDDEN,
         events::MAWOK_SIGN_IN_ENDED,
         events::UPDATE_CHANGED,
         error_codes::ACCOUNT_UNREACHABLE,
-        error_codes::ACTION_CANCELLED,
+        error_codes::ACCOUNT_SIGN_IN_REQUIRED,
+        error_codes::ACCOUNT_TOKEN_UNREADABLE,
+        error_codes::UNEXPECTED,
         error_codes::BACKUP_RESTORE_PARTIAL,
         error_codes::SYNC_WRONG_PASSWORD,
         error_codes::SYNC_PASSWORD_TOO_SHORT,
@@ -103,7 +88,6 @@ export const ERROR_CODES = {{\n\
         error_codes::KEYS_EDITING,
         error_codes::KEYS_HOTKEY,
         error_codes::KEYS_ACTION_PREFIX,
-        action_failures,
     );
     fs::write(export_dir.join("constants.ts"), contents).expect("could not write constants.ts");
 }

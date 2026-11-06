@@ -27,32 +27,25 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 tauri-plugin-global-shortcut = "2.4.1"
 # 文字列しか書かないので、画像を扱う既定の feature は要らない
 arboard = { version = "3.6.1", default-features = false }
-# 下書きが隠れている間に終わったアクションを知らせる（lib.rs の notify_action_finished）
-tauri-plugin-notification = "2.7.0"
 tauri-plugin-window-state = "2.5.0"
-# テキストウィンドウでコマンドを動かすフォルダーを、OS のフォルダーを選ぶ画面で選ぶ（lib.rs の pick_folder）。Rust 側からだけ使うので、画面へ口は開けない。
-tauri-plugin-dialog = "2.8.3"
 sys-locale = "0.3.2"
 log = "0.4.34"
 tauri-plugin-log = "2.10.1"
 getrandom = "0.4.3"
-# コマンドのアクションの文字コード（command.rs の encode_input・decode_output）。UTF-16 へ書き出す口は持たないので、そこだけ自前で書く
-encoding_rs = "0.8.41"
-# AI のアクション（ai.rs）で AI サービスとやり取りする JSON
+# 設定の置き場・同期・窓口とのやり取りの JSON
 serde_json = "1.0.151"
-# AI のアクションで使う AI サービスのキーを OS の資格情報管理に置く（secrets.rs）。
+# Mawok のアカウントのトークンと同期の鍵を OS の資格情報管理に置く（secrets.rs）。
 # keyring 4.x の既定（v1）は Linux のストアも抱えるので、keyring-core と OS ごとのストア（下の target の依存）を直接使う
 keyring-core = "1.0.0"
-# AI のアクション（ai.rs）で AI サービスを呼ぶ。TLS は rustls にし、暗号の実装は ring を選ぶ（rustls の既定の aws-lc-rs は、Windows のビルドに NASM などが要るため。
+# Mawok のアカウントの窓口（account.rs）を呼ぶ。TLS は rustls にし、暗号の実装は ring を選ぶ（rustls の既定の aws-lc-rs は、Windows のビルドに NASM などが要るため。
 # ring は Windows でもビルドできている）。証明書は OS の証明書ストアで確かめる（rustls-platform-verifier）。
-# プロキシは OS の設定に従う（system-proxy）。HTTP/2 は1回の問い合わせには要らないので入れない
+# プロキシは OS の設定に従う（system-proxy）。HTTP/2 は窓口との少ない問い合わせには要らないので入れない
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "system-proxy"] }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 # 置き換え辞書を、1つに見える文字（書記素）の途中で当てないため（text.rs）。Tauri の依存でもともと入っている
 unicode-segmentation = "1.13.3"
-# コマンドのアクション（command.rs）で、シェルを起動して標準入出力をやり取りする。Mawok のアカウントと結ぶとき、
-# 窓口から戻るブラウザを 127.0.0.1 で待ち受ける（lib.rs の start_mawok_sign_in）。Tauri の依存でもともと入っている
-tokio = { version = "1.53.1", features = ["process", "io-util", "time", "macros", "net", "rt", "sync"] }
+# Mawok のアカウントと結ぶとき、窓口から戻るブラウザを 127.0.0.1 で待ち受ける（lib.rs の start_mawok_sign_in）。Tauri の依存でもともと入っている
+tokio = { version = "1.53.1", features = ["io-util", "time", "macros", "net", "rt", "sync"] }
 # Mawok のアカウントと結ぶ申し込みの、検証用の値のハッシュ（account.rs の LinkRequest）
 sha2 = "0.10.9"
 # 同期の鍵から、使い道ごとの鍵を導く（sync_key.rs）
@@ -91,7 +84,7 @@ objc2-foundation = { version = "0.3.2", features = ["NSError", "NSNotification",
 # メニューバーのアイコンのボタンに、押されたときの action を付ける（tray_press.rs）。tray-icon と同じ版にして、NSStatusItem を受け渡す
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSButton", "NSControl", "NSMenu", "NSResponder", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow"] }
-# AI サービスのキーを、ログインのキーチェーンに置く（secrets.rs）
+# アカウントのトークンと同期の鍵を、ログインのキーチェーンに置く（secrets.rs）
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 # ログイン時の起動を、ログイン項目（SMAppService）に登録する（autostart.rs）
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
@@ -99,12 +92,8 @@ objc2-service-management = { version = "0.3.2", default-features = false, featur
 tauri-plugin-updater = "2.14.0"
 # テキストウィンドウを、アプリを前面にしないパネルにする（focus.rs）
 tauri-nspanel = "2.1.1"
-# ファイルの名前を、打った文字と同じ合成済みの形（NFC）に揃えて補う（folder.rs）。Finder などが付けた名前は分解した形（NFD）のことがある
-unicode-normalization = "0.1.26"
-
-# コマンドのアクションを、子プロセスごと止める（command.rs）
-[target.'cfg(unix)'.dependencies]
-libc = "0.2.189"
+# 新しい版を見つけたことを OS の通知で知らせる（updater.rs）
+tauri-plugin-notification = "2.7.0"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # 多重起動を防ぐ。macOS は開き直しを OS が既存のインスタンスへ知らせるので、lib.rs の lock_single_instance で2つ目を止めるだけにする
@@ -113,19 +102,18 @@ tauri-plugin-single-instance = "2.5.4"
 [target."cfg(windows)".dependencies]
 # ログイン時の起動（autostart.rs）。macOS はログイン項目（SMAppService）、Linux は XDG autostart を直接使う
 tauri-plugin-autostart = "2.7.0"
-# Win32_System_JobObjects・Win32_Security・Win32_System_Threading・Win32_Globalization は、コマンドのアクション（command.rs）で子プロセスごと止め、標準エラーを読むため
 # ApplicationModel・Win32_Storage_Packaging_Appx は、MSIX 版かを見分けて（package.rs）、ログイン時の起動を StartupTask で行うため（autostart.rs）
-windows = { version = "0.62.2", features = ["ApplicationModel", "Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Storage_Packaging_Appx", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62.2", features = ["ApplicationModel", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Storage_Packaging_Appx", "Win32_UI_WindowsAndMessaging"] }
 # WebView2 のイベントを受け取るため。Tauri（wry）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
 webview2-com = "0.39.1"
 windows-core = "0.62.2"
-# MSIX 版の通知を、パッケージの AUMID を差出人にして出す（lib.rs の notify_action_finished）。tauri-plugin-notification が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
-tauri-winrt-notification = "0.7.3"
-# AI サービスのキーを、資格情報マネージャーに置く（secrets.rs）。検索は使わないので、正規表現の依存を持ち込まない
+# アカウントのトークンと同期の鍵を、資格情報マネージャーに置く（secrets.rs）。検索は使わないので、正規表現の依存を持ち込まない
 windows-native-keyring-store = { version = "1.1.0", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# AI サービスのキーを、Secret Service（GNOME Keyring・KWallet など）に置く（secrets.rs）。zbus は Tauri の依存でもともと入っているので、
+# このデバイスの名前に、カーネルが持つホスト名を読む（account.rs の host_name）
+libc = "0.2.189"
+# アカウントのトークンと同期の鍵を、Secret Service（GNOME Keyring・KWallet など）に置く（secrets.rs）。zbus は Tauri の依存でもともと入っているので、
 # libdbus の C ライブラリを足さない zbus 版にする。spawn_blocking の中から呼ぶので同期の API で足り、暗号は C ライブラリの要らない Rust の実装にする
 zbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rust"] }
 # WebView の描画プロセスが落ちたのを知る（diagnostics.rs）。Tauri（wry）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）

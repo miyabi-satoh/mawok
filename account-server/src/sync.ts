@@ -1,5 +1,5 @@
 /** Pro の設定と履歴の同期。窓口は暗号文をそのまま置き、解釈しない。 */
-import { proOf, proUntilSql } from './credits';
+import { proOf, proUntilSql } from './pro';
 import { now } from './util';
 
 const SYNC_ITEM_LIMIT = 100;

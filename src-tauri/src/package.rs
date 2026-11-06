@@ -6,8 +6,7 @@ pub fn packaged() -> bool {
     app_user_model_id().is_some()
 }
 
-/// パッケージの中で動いているときの、このアプリの AUMID（`<パッケージ ファミリー名>!Mawok`）。EXE 版では None。
-/// MSIX 版の通知は、差出人をこれにしないと出ない
+/// パッケージの中で動いているときの、このアプリの AUMID（`<パッケージ ファミリー名>!Mawok`）。EXE 版では None
 #[cfg(windows)]
 pub fn app_user_model_id() -> Option<&'static str> {
     static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
