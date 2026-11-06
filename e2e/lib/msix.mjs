@@ -267,34 +267,6 @@ if ($settings.Count -gt 0) {
 	);
 }
 
-// 通知の履歴は、差出人の AUMID ごとに OS が持っている。パッケージの外からも AUMID を渡せば読めるので、
-// 集中モードでポップアップが出ない時間帯でも、差出人がパッケージとして受け付けられたかを見られる
-const TOAST_TYPE = `[void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]`;
-
-/** AUMID の差出人で届いている通知の、見出しの一覧 */
-export async function readToastTitles(aumid) {
-	const stdout = await runPowerShell(
-		`${TOAST_TYPE}
-$titles = @([Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory($args[0]) | ForEach-Object {
-    $_.Content.GetElementsByTagName('text') | Select-Object -First 1 | ForEach-Object { $_.InnerText }
-})
-ConvertTo-Json -Compress -InputObject $titles
-`,
-		[aumid]
-	);
-	return JSON.parse(stdout.trim() || '[]');
-}
-
-/** AUMID の差出人の通知を、通知センターから消す */
-export async function clearToasts(aumid) {
-	await runPowerShell(
-		`${TOAST_TYPE}
-[Windows.UI.Notifications.ToastNotificationManager]::History.Clear($args[0])
-`,
-		[aumid]
-	);
-}
-
 /** 開いているエクスプローラーの窓 (Shell.Application の Windows) の、ハンドル・場所・選ばれた項目 */
 async function listExplorerWindows() {
 	const stdout = await runPowerShell(`

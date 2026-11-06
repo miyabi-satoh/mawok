@@ -27,13 +27,11 @@ import {
 	PAGE,
 	STARTUP_TASK_STATE,
 	addPackage,
-	appUserModelId,
 	backupLocalCache,
 	builtMsixPath,
 	clearLocalCacheBackup,
 	clearOriginalRecord,
 	clearStartupTaskState,
-	clearToasts,
 	closeSystemSettings,
 	evaluate,
 	holdAppData,
@@ -47,7 +45,6 @@ import {
 	readOriginalRecord,
 	readPackage,
 	readStartupTaskState,
-	readToastTitles,
 	recoverHeldAppDataIfAny,
 	redirectedDataDirs,
 	removePackage,
@@ -310,24 +307,6 @@ describe('EXE 版のファイルがある環境', () => {
 		const log = await revealAndRead(CDP_PORT, 'reveal_log_file');
 		assert.equal(log.folder, path.join(APP_DATA_DIRS.local, 'logs'));
 		assert.deepEqual(log.selected, [path.join(APP_DATA_DIRS.local, 'logs', 'Mawok.log')]);
-	});
-
-	test('通知の差出人がパッケージになる', async () => {
-		const aumid = appUserModelId(pkg);
-		await clearToasts(aumid);
-		const title = `MSIX 版の確認 ${Date.now()}`;
-		try {
-			await invokeOrThrow(CDP_PORT, 'notify_action_finished', { message: title });
-			// 差出人がパッケージとして受け付けられた通知だけが、その AUMID の履歴に残る
-			// (ポップアップは集中モードなどで出ないことがあるので、履歴で見る)
-			await waitFor(
-				() => readToastTitles(aumid),
-				(titles) => titles.includes(title),
-				{ label: `AUMID (${aumid}) の通知の履歴` }
-			);
-		} finally {
-			await clearToasts(aumid);
-		}
 	});
 
 	test('タスクバーのアイコンが下地に載らない', async () => {

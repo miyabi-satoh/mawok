@@ -142,10 +142,9 @@
 
 ## Windows の MSIX 版
 
-- Microsoft Store 向け。`just msix` で、`pnpm tauri build --no-bundle` で作った `mawok.exe` とロゴを、`src-tauri/msix/AppxManifest.xml` と、makepri で作る `resources.pri` と一緒に makeappx で固める（`scripts/msix.mjs`）。中身は EXE 版と同じ1つのコードで、MSIX として動いているか（このアプリの AUMID が取れるか。`GetCurrentApplicationUserModelId`）で違うところだけを分ける。今分けているのはログイン時の起動と通知。
+- Microsoft Store 向け。`just msix` で、`pnpm tauri build --no-bundle` で作った `mawok.exe` とロゴを、`src-tauri/msix/AppxManifest.xml` と、makepri で作る `resources.pri` と一緒に makeappx で固める（`scripts/msix.mjs`）。中身は EXE 版と同じ1つのコードで、MSIX として動いているか（このアプリの AUMID が取れるか。`GetCurrentApplicationUserModelId`）で違うところだけを分ける。今分けているのはログイン時の起動。
 - 試しに入れるには、先に管理者の PowerShell で `src-tauri/msix/new-test-cert.ps1` を1回実行し、自己署名の証明書を作って信頼させておく。`just msix` はその証明書で署名する。識別子（Name・Publisher・PublisherDisplayName）は、Partner Center で予約した製品の「Product identity」の値を `scripts/msix.mjs` の `IDENTITY` に書いてある。試しに入れるための証明書も、Subject をこの Publisher と揃える。Store に上げる版は `just msix --unsigned` で署名せずに作る（Store が署名する。Store の Publisher の証明書は手元に無い）。
 - ログイン時の起動は、マニフェストの StartupTask（既定は無効）で行う。MSIX の中から HKCU の Run に書いても、パッケージごとの場所に回されて効かないため。アプリは EXE 版と同じ決まり（「常駐」）で、`RequestEnableAsync` で有効にし、`Disable` で外す。タスクマネージャーや Windows の設定の「スタートアップ アプリ」で切られていると（`DisabledByUser`）アプリからは戻せないので、設定でオンにしたときは Windows の設定の「スタートアップ アプリ」を開き、戻せなかったことを伝える（2026-09-27 に Windows 11 の実機で確認。利用者が切った状態は、レジストリの State を 1 にして再現した）。
-- 通知は、差出人をパッケージの AUMID（`GetCurrentApplicationUserModelId`）にして出す。tauri-plugin-notification は識別子の `com.amiiby.mawok` を差出人にするので、MSIX 版ではエラーにもならずに出ない（2026-09-27 に Windows 11 の実機で確認）。
 - 設定・履歴・ログの置き場所（2026-09-27・28、Windows 11 の実機）: Windows 10 1903 以降、AppData の下に新しく作るファイルはパッケージごとの場所に回される（Microsoft の文書「Understanding how packaged desktop apps run on Windows」）。
   - EXE 版のファイルが無い環境では、設定は `%LOCALAPPDATA%\Packages\<パッケージ ファミリー名>\LocalCache\Roaming\com.amiiby.mawok`、履歴・ログ・WebView2 のデータは同じ `LocalCache\Local\com.amiiby.mawok` にできる。実際の AppData には何もできず、アンインストールでまるごと消える。
   - EXE 版のファイルがすでにある環境では、EXE 版と同じ場所（設定は `%APPDATA%\com.amiiby.mawok`、履歴・ログ・WebView2 のデータは `%LOCALAPPDATA%\com.amiiby.mawok`）をそのまま読み書きし、EXE 版と設定・履歴を分け合う。
