@@ -54,7 +54,7 @@ describe('設定画面の同期', () => {
 	});
 
 	it('Pro で設定の同期がオンなら、設定の雲の印でその項目を外せる', async () => {
-		settings.current = settingsView({ proAvailable: true, aiService: 'openai' });
+		settings.current = settingsView({ proAvailable: true });
 		const screen = await render(Page);
 		const toggle = screen.getByRole('button', {
 			name: m.settings_sync_item({ name: m.settings_theme() })
@@ -128,7 +128,7 @@ describe('設定画面の同期', () => {
 	});
 
 	it('同期から外せる設定はすべて、その場所に雲の印を出す', async () => {
-		settings.current = settingsView({ proAvailable: true, aiService: 'openai' });
+		settings.current = settingsView({ proAvailable: true });
 		const screen = await render(Page);
 		const found = new Set<string>();
 		const collect = () => {
@@ -142,8 +142,7 @@ describe('設定画面の同期', () => {
 		for (const label of [
 			m.settings_category_draft(),
 			m.settings_category_copy(),
-			m.settings_category_snippets(),
-			m.settings_category_ai()
+			m.settings_category_snippets()
 		]) {
 			await screen.getByRole('tab', { name: label }).click();
 			collect();

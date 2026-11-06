@@ -4,17 +4,11 @@
 	import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
-	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
-	import PlayIcon from '@lucide/svelte/icons/play';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import TextQuoteIcon from '@lucide/svelte/icons/text-quote';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { onMount, tick } from 'svelte';
-	import AddressSuggestions from '$lib/components/address-suggestions.svelte';
-	import FolderButton from '$lib/components/folder-button.svelte';
-	import FolderPalette from '$lib/components/folder-palette.svelte';
-	import PathCandidates from '$lib/components/path-candidates.svelte';
 	import KeyCaps from '$lib/components/key-caps.svelte';
 	import TextPalette, { type PaletteAction } from '$lib/components/text-palette.svelte';
 	import * as Alert from '$lib/components/ui/alert';
@@ -30,50 +24,19 @@
 		historyDirection,
 		type HistoryDirection
 	} from '$lib/history.svelte';
-	import { caretLine, firstLineHeight } from '$lib/caret-line';
+	import { caretLine } from '$lib/caret-line';
 	import { clamp } from '$lib/clamp';
-	import {
-		draftActionFor,
-		formatKeys,
-		isDismissKey,
-		isImeKey,
-		keyHint,
-		type DraftAction
-	} from '$lib/keys';
+	import { draftActionFor, formatKeys, isDismissKey, keyHint, type DraftAction } from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
-	import { ERROR_CODES, EVENTS } from '$lib/bindings/constants';
-	import type { FolderCompletion } from '$lib/bindings/FolderCompletion';
-	import type { FolderMenu } from '$lib/bindings/FolderMenu';
+	import { EVENTS } from '$lib/bindings/constants';
 	import { coalescedSaver } from '$lib/saver';
-	import { folderErrorMessage } from '$lib/folder-errors';
-	import { stepSelection } from '$lib/folder-completion';
-	import { completedWord, pathWordAt, quotePath, type PathWord } from '$lib/shell-completion';
 	import {
 		previewSegments,
 		ReplacementPreview,
 		type ReplacementMatch
 	} from '$lib/replacement-preview.svelte';
-	import { actionErrorMessage, needsAiSettings } from '$lib/action-errors';
-	import { splitActionTarget } from '$lib/action-target';
-	import {
-		ADDRESS_CANDIDATES,
-		completedAddress,
-		isRunnable,
-		matchingAddresses,
-		rowAddressee,
-		shCommand,
-		splitFirstLine,
-		textAddressee,
-		typedAddress,
-		type AddressCandidate
-	} from '$lib/addressee';
-	import {
-		settings,
-		type ActionEncoding,
-		type ActionOutput,
-		type Snippet
-	} from '$lib/settings.svelte';
-	import { firstLine, newSnippet, snippetLabel } from '$lib/snippets';
+	import { settings, type Snippet } from '$lib/settings.svelte';
+	import { firstLine, newSnippet } from '$lib/snippets';
 
 	// 設定は画面が出る前に読み終わっている（src/hooks.client.ts）が、届く前に描かれても既定で表示できるようにする
 	const fontFamily = $derived(draftFontFamily(settings.current?.textFontFamily ?? ''));
@@ -210,17 +173,12 @@
 	let error = $state('');
 	// エラーの帯の見出し。何に失敗したかで分ける
 	let errorTitle = $state('');
-	// 設定の「AI」で直す失敗か。帯に、その分類を開く操作を添える
-	let errorNeedsAiSettings = $state(false);
-	function showError(title: string, message: string, { aiSettings = false } = {}) {
+	function showError(title: string, message: string) {
 		errorTitle = title;
 		error = message;
-		errorNeedsAiSettings = aiSettings;
 	}
-	// 残高が尽きたときだけ、料金ページを開く操作を帯に添える。帯の文から決めるので、ほかの失敗で文が変わればボタンも消える
-	const noCredit = $derived(error === m.action_error_no_credit());
 	let textarea = $state<HTMLTextAreaElement | null>(null);
-	/** 画面の描き直し（一覧が閉じる、入力欄が編集できる状態に戻る）を待ってから、入力欄にフォーカスを移す */
+	/** 画面の描き直し（一覧が閉じる）を待ってから、入力欄にフォーカスを移す */
 	async function focusDraft() {
 		await tick();
 		textarea?.focus();
@@ -346,11 +304,11 @@
 		return textarea;
 	}
 
-	/** 一覧を出したときに選んでいた範囲。選んでいなければ入力欄の中身全体（宛先で始まる定型文で出す文、定型文に登録する文） */
+	/** 一覧を出したときに選んでいた範囲。選んでいなければ入力欄の中身全体（定型文に登録する文） */
 	function listTarget() {
 		const { start, end } = selectionBeforeList;
-		const [from, to] = start === end ? [0, text.length] : [start, end];
-		return { start: from, end: to, text: text.slice(from, to), selected: start !== end };
+		const selected = start !== end;
+		return { text: selected ? text.slice(start, end) : text, selected };
 	}
 
 	// 定型文の一覧を出しているか
@@ -433,246 +391,14 @@
 		shownLocale = locale;
 	});
 
-	// 一覧に出す定型文。切った定型文は出さない。AI が使えるかどうかでは絞らない（使えないときに `@ai` の行を出したら、失敗の帯で知らせる）
+	// 一覧に出す定型文。切った定型文は出さない
 	const listedSnippets = $derived(
 		(settings.current?.snippets ?? []).filter((snippet) => snippet.enabled)
 	);
 
-	/**
-	 * 一覧で選んだ定型文。本文が1行だけで宛先から始まるものは、一覧を出したときのテキストを中身にして出す。
-	 * ほかは、カーソルの位置に挿入する（docs/actions.md「定型文」）
-	 */
-	async function pickSnippet(snippet: Snippet) {
-		const addressee = rowAddressee(snippet.body);
-		if (!addressee) return insertSnippet(snippet.body);
-		await closeSnippets();
-		const { start, end, text: target } = listTarget();
-		return runLine(
-			{ ...addressee, output: snippet.output, encoding: snippet.encoding },
-			snippetLabel(snippet),
-			{ target, start, end, caret: selectionBeforeList.end }
-		);
-	}
-
-	// 作業フォルダーへ移る欄を出しているか
-	let folderOpen = $state(false);
-	// 欄を開いたときの作業フォルダーの見せる形（Rust 側の current_folder）。欄はこのパスを入れた状態で出す
-	let folder = $state('');
-
-	/** アクションを実行している最中の1回 */
-	type RunningAction = {
-		/** 状態の行に出すアクションの名前 */
-		label: string;
-		/** Rust 側が振った番号。受け取る前は null */
-		request: number | null;
-		/** 実行を始めたときの入力欄の中身全体。差し替える前の文として履歴に積む */
-		original: string;
-		/** 結果の出し方 */
-		output: ActionOutput;
-		/** 実行する範囲。範囲を選んでいなければ全体 */
-		start: number;
-		end: number;
-		/** 差し込む位置。範囲を選んでいたらその後ろ、なければカーソルの位置 */
-		caret: number;
-	};
-	// アクションを実行している最中の1回。していなければ null。
-	// 取り消しや次の実行と、遅れて届いた結果を見分けるため、同じものかどうかをそのまま比べる（proxy にしない）
-	let running = $state.raw<RunningAction | null>(null);
-	// アクションを実行している間は、入力欄を書き換える操作を止める
-	const busy = $derived(running !== null);
-	// 下書きウィンドウが出ているか。画面の描き分けには使わないので、状態にしない。
-	// 実行は出ているときにしか始められないので、読み込んだときは出ているものとしてよい
-	let draftVisible = true;
-	/** 隠れている間に届いたアクションの結果を差し替える関数。出し直したときに呼ぶ */
-	let pendingResult: (() => Promise<void>) | null = null;
-
-	function openFolder(): boolean {
-		if (!rememberSelection()) return false;
-		// ホームフォルダーが取れないときは、欄を出さずに終える（Rust 側が理由をログに残す）
-		void invoke<string>('current_folder')
-			.then((current) => {
-				folder = current;
-				folderOpen = true;
-			})
-			.catch(() => {});
-		return true;
-	}
-
-	/** 打ちかけのパスを補う。補えなければ（ホームフォルダーが取れないなど）null で、欄はそのまま */
-	async function completeFolder(input: string): Promise<FolderCompletion | null> {
-		return invoke<FolderCompletion>('complete_folder', { input }).catch(() => null);
-	}
-
-	async function closeFolder() {
-		folderOpen = false;
-		await restoreSelection();
-	}
-
-	// 左下のフォルダーのボタンに出す、今のフォルダーと最近のフォルダー。移るたびに取り直す
-	let folderMenu = $state<FolderMenu | null>(null);
-
-	function refreshFolderMenu() {
-		void invoke<FolderMenu>('folder_menu')
-			.then((menu) => (folderMenu = menu))
-			.catch(() => {});
-	}
-
-	/** フォルダーのボタンのメニューで移る。移れなければ、理由を下書きの下に出す */
-	async function moveFolderFromMenu(move: () => Promise<unknown>) {
-		// 前に移れなかった理由は、移り直すときに消す。ほかの理由（アクションの失敗など）は残す
-		if (errorTitle === m.folder_change_failed()) error = '';
-		try {
-			await move();
-		} catch (failure) {
-			showError(m.folder_change_failed(), folderErrorMessage(failure));
-		}
-		refreshFolderMenu();
-		textarea?.focus();
-	}
-
-	/** 打ったパスへ作業フォルダーを移す。移れたら欄を閉じ、移れなければ欄の下に出す文言を返す */
-	async function changeFolder(input: string): Promise<string | null> {
-		try {
-			await invoke('change_folder', { input });
-		} catch (error) {
-			return folderErrorMessage(error);
-		}
-		refreshFolderMenu();
-		await closeFolder();
-		return null;
-	}
-
-	/** `@ai` か `@sh` の1行と、結果の出し方 */
-	type RunLine = {
-		line: string;
-		ai: boolean;
-		output: ActionOutput;
-		encoding: ActionEncoding;
-	};
-
-	/**
-	 * 宛先が `@ai`・`@sh` の行を実行する。`range` の `target` を中身として渡す（空でも実行する）。
-	 * 届いたら結果の出し方に従って `range` の位置に出し、差し替える前の中身全体を履歴に積む
-	 */
-	async function runLine(
-		run: RunLine,
-		label: string,
-		range: { target: string; start: number; end: number; caret: number; whole?: boolean }
-	) {
-		const { start, end, target } = range;
-		// 前の失敗の知らせは、次の実行を始めたら消す
-		error = '';
-		const session: RunningAction = {
-			label,
-			request: null,
-			original: text,
-			output: run.output,
-			start,
-			end,
-			caret: range.caret
-		};
-		running = session;
-		const split = splitActionTarget(target, run.ai);
-		// テキスト全体を結果で置き換えるときは、中身の前後の空行を結果の前後に戻さない。1行目の宛先ごと置き換わるので、戻す先が無い
-		const parts = range.whole ? { ...split, leading: '', trailing: '' } : split;
-		let result: string;
-		try {
-			const request = await invoke<number>('begin_action');
-			session.request = request;
-			// 番号を受け取る前に取り消されていたら、始めずに取り消しを伝える
-			if (running !== session) {
-				invoke('cancel_action', { request }).catch(() => {});
-				return;
-			}
-			result = await invoke<string>('run_action', {
-				request,
-				text: parts.body,
-				line: run.line,
-				output: run.output,
-				encoding: run.encoding
-			});
-		} catch (e) {
-			// 取り消した後や、次の実行が始まった後に届いた失敗は、知らせない
-			if (running !== session) return;
-			running = null;
-			if (errorCode(e) !== ERROR_CODES.ACTION_CANCELLED) {
-				showError(m.action_failed(), actionErrorMessage(e) ?? errorCode(e), {
-					aiSettings: needsAiSettings(e)
-				});
-				if (!draftVisible) notifyFinished(m.action_notify_failed({ action: label }));
-			}
-			await focusDraft();
-			return;
-		}
-		// 取り消した後に届いた結果は捨てる
-		if (running !== session) return;
-		// 下書きに出さないアクションは、終わったことだけを知らせる
-		if (session.output === 'none') {
-			running = null;
-			if (draftVisible) showNotice(m.draft_action_done({ action: label }));
-			else notifyFinished(m.action_notify_done({ action: label }));
-			await focusDraft();
-			return;
-		}
-		// 隠れている間に届いたら、出し直したときに差し替える（見えていない入力欄にはフォーカスを移せず、差し替えられないため）。
-		// それまでは実行中のままにして、入力欄を書き換えさせない
-		if (!draftVisible) {
-			pendingResult = () => applyResult(session, parts, result);
-			notifyFinished(m.action_notify_done({ action: label }));
-			return;
-		}
-		await applyResult(session, parts, result);
-	}
-
-	/** 隠れている間に終わったことを、OS の通知で知らせる。押しても何もしない */
-	function notifyFinished(message: string) {
-		invoke('notify_action_finished', { message }).catch(() => {});
-	}
-
-	/** アクションの結果を、出し方に従って入力欄に出す（置き換えるか、差し込む）。差し替える前の中身全体を履歴に積む */
-	async function applyResult(
-		session: RunningAction,
-		parts: ReturnType<typeof splitActionTarget>,
-		result: string
-	) {
-		if (running !== session) return;
-		running = null;
-		// 実行している間は入力欄を書き換えられないので、中身は始めたときのまま。万一変わっていたら、差し替える範囲がずれるので入れない
-		if (text !== session.original) return;
-		// 入力欄を編集できる状態に戻してから差し替える（readonly のままでは insertText が効かない）
-		await tick();
-		if (!textarea) return;
-		// 差し替える前の中身全体を積む。履歴から呼び出して書き換えていない文は、もう履歴にあるので積まない。
-		// 差し替えは書き換えなので、たどっている途中なら、そこでたどるのをやめる
-		if (draftHistory.isBrowsing) draftHistory.stopBrowsing();
-		else if (draftHistory.record(session.original)) saveDraftHistory();
-		textarea.focus();
-		if (session.output === 'insert') {
-			textarea.setSelectionRange(session.caret, session.caret);
-			insertAsTyped(textarea, result, session.caret, session.caret);
-			return;
-		}
-		textarea.setSelectionRange(session.start, session.end);
-		// 前後は渡していないので戻す（AI は Rust 側が結果の前後の空白を落とし、コマンドは末尾の改行を落とす）
-		insertAsTyped(textarea, parts.leading + result + parts.trailing, session.start, session.end);
-	}
-
-	/** アクションの実行を取り消す。入力欄は元の文のまま、編集できる状態に戻す。取り消したことは知らせない */
-	function cancelAction() {
-		const session = running;
-		if (!session) return;
-		running = null;
-		pendingResult = null;
-		// 番号を受け取る前なら、受け取ったところで runLine が取り消しを伝える
-		if (session.request !== null) {
-			invoke('cancel_action', { request: session.request }).catch(() => {});
-		}
-	}
-
-	/** ホットキーで隠すよう頼まれた。アクションを実行している最中なら、実行は続けたままコピーせずに隠す（元の文を取り違えてコピーしないため） */
-	function onHideRequested() {
-		if (running) return dismiss();
-		return commit();
+	/** 一覧で選んだ定型文を、カーソルの位置に挿入する */
+	function pickSnippet(snippet: Snippet) {
+		return insertSnippet(snippet.body);
 	}
 
 	/** コピーして隠す。隠すのは Rust 側で、渡したら true、空で何もしなかったら false が返る */
@@ -704,237 +430,10 @@
 		}
 	}
 
-	// 入力欄のカーソルの位置。範囲を選んでいる間は null（宛先の候補を出さない）
-	let caret = $state<number | null>(null);
-	// 宛先の候補を Esc で閉じたか。次に打つまで出さない
-	let addressDismissed = $state(false);
-	let activeAddress = $state(0);
-	const addressListId = $props.id();
-
-	function trackCaret() {
-		caret =
-			textarea && textarea.selectionStart === textarea.selectionEnd
-				? textarea.selectionStart
-				: null;
-	}
-
-	/**
-	 * 1行目で `@` を打っている間に出す宛先の候補（docs/actions.md「宛先」）。
-	 * 変換中の文字は確定するまで元にしない。実行の間と、一覧を出している間は出さない
-	 */
-	const addressMatches = $derived.by(() => {
-		if (composing || busy || addressDismissed || caret === null) return [];
-		if (snippetsOpen || folderOpen) return [];
-		const typed = typedAddress(text, caret);
-		return typed === null ? [] : matchingAddresses(ADDRESS_CANDIDATES, typed);
-	});
-	$effect(() => {
-		// 候補が変わったら、先頭から選び直す
-		void addressMatches.map((match) => match.address).join('\n');
-		activeAddress = 0;
-	});
-
-	/** 候補を1行目に入れる。1行目の打ちかけを置き換え、カーソルはその末尾に置く */
-	function pickAddress(candidate: AddressCandidate) {
-		if (!textarea) return;
-		const { line } = splitFirstLine(text);
-		textarea.focus();
-		textarea.setSelectionRange(0, line.length);
-		insertAsTyped(textarea, completedAddress(candidate), 0, line.length);
-		trackCaret();
-	}
-
-	/** 宛先の候補が出ている間のキー。受けたら true */
-	function onAddressKeydown(event: KeyboardEvent): boolean {
-		if (addressMatches.length === 0) return false;
-		// 変換を確定する Enter は、候補を選ぶキーにしない
-		if (isImeKey(event) || event.altKey || event.ctrlKey || event.metaKey) return false;
-		const last = addressMatches.length - 1;
-		if (event.key === 'ArrowDown') {
-			activeAddress = activeAddress >= last ? 0 : activeAddress + 1;
-		} else if (event.key === 'ArrowUp') {
-			activeAddress = activeAddress <= 0 ? last : activeAddress - 1;
-		} else if ((event.key === 'Tab' || event.key === 'Enter') && !event.shiftKey) {
-			pickAddress(addressMatches[activeAddress]);
-		} else if (event.key === 'Escape') {
-			addressDismissed = true;
-		} else {
-			return false;
-		}
-		event.preventDefault();
-		return true;
-	}
-
-	/**
-	 * `@sh` の行で Tab を押して並べたパスの候補（docs/actions.md「パスの補完」）。
-	 * `start`〜`end` は1行目の中で補った語の範囲、`before` は選ぶ前に入れた語（Esc で戻す）。
-	 * `text` は並べた後のテキストで、打ち直したりカーソルを動かしたりしたら一覧を閉じる。
-	 * `top` は一覧を出す位置で、1行目が折り返していればその下にする
-	 */
-	type PathList = {
-		top: number;
-		word: PathWord;
-		base: string;
-		candidates: string[];
-		total: number;
-		start: number;
-		end: number;
-		selected: number;
-		before: string;
-		text: string;
-	};
-	let pathList = $state<PathList | null>(null);
-	const pathListShown = $derived(
-		pathList !== null &&
-			pathList.text === text &&
-			caret === pathList.end &&
-			!busy &&
-			!composing &&
-			!snippetsOpen &&
-			!folderOpen
-	);
-	$effect(() => {
-		// 一度閉じた一覧は、テキストやカーソルが元に戻っても出し直さない（Tab で補い直す）
-		if (pathList && !pathListShown) pathList = null;
-	});
-	const pathListId = `${addressListId}-path`;
-	// Tab のたびに進める。補いを待つ間に次の Tab を押していたら、古い補いで上書きしない
-	let pathRequests = 0;
-
-	/** 待っている補いを捨て、一覧を閉じる。隠した後に、前の補いが入力欄に入らないようにする */
-	function cancelPathCompletion() {
-		pathRequests += 1;
-		pathList = null;
-	}
-
-	/** 1行目の start〜end を、打ったのと同じ扱い（取り消しで戻せる）で置き換える */
-	function replaceInLine(start: number, end: number, replacement: string) {
-		if (!textarea) return;
-		textarea.focus();
-		textarea.setSelectionRange(start, end);
-		insertAsTyped(textarea, replacement, start, end);
-		trackCaret();
-	}
-
-	/** カーソルの前のパスを、今の作業フォルダーから見て補う。2つ以上当てはまれば、共通する所まで補って候補を並べる */
-	async function completePath() {
-		if (!textarea || !platform || caret === null) return;
-		const { line } = splitFirstLine(text);
-		const at = caret;
-		const word = pathWordAt(line, at, platform);
-		if (!word) return;
-		const requested = ++pathRequests;
-		const typed = text;
-		const completion = await invoke<FolderCompletion>('complete_path', { input: word.path }).catch(
-			() => null
-		);
-		if (!completion || requested !== pathRequests || text !== typed || caret !== at) return;
-		// 待つ間に実行を始めた・変換を始めた・一覧や欄を開いたなら、入れない（入れるとフォーカスを入力欄に取り戻してしまう）
-		if (busy || composing || snippetsOpen || folderOpen) return;
-		if (completion.candidates.length === 0) {
-			if (completion.input === word.path) return;
-			const followed = /[ \t]/.test(line[at] ?? '');
-			replaceInLine(word.start, at, completedWord(completion.input, word, platform, followed));
-			return;
-		}
-		const common = quotePath(completion.input, word, platform, false);
-		if (line.slice(word.start, at) !== common) replaceInLine(word.start, at, common);
-		pathList = {
-			// 宛先の候補と同じく1行目の下端から 12px 下げ、入力欄をスクロールした分を引く
-			top: firstLineHeight(textarea) + 12 - textarea.scrollTop,
-			word,
-			base: completion.base,
-			candidates: completion.candidates,
-			total: completion.total,
-			start: word.start,
-			end: word.start + common.length,
-			selected: -1,
-			before: common,
-			text: textarea.value
-		};
-	}
-
-	/** 並べた候補を選んで、1行目の語を置き換える。-1 は選ぶ前の語に戻す */
-	function selectPath(selected: number) {
-		if (!pathList || !platform || !textarea) return;
-		// 1行目の終わりの改行は、後ろの空白に数えない
-		const followed = /[ \t]/.test(textarea.value[pathList.end] ?? '');
-		const word =
-			selected < 0
-				? pathList.before
-				: completedWord(
-						pathList.base + pathList.candidates[selected],
-						pathList.word,
-						platform,
-						followed
-					);
-		replaceInLine(pathList.start, pathList.end, word);
-		pathList = { ...pathList, selected, end: pathList.start + word.length, text: textarea.value };
-		// 候補が多くて一覧がスクロールするとき、選んだ候補を見える所へ出す
-		void tick().then(() =>
-			document.getElementById(`${pathListId}-${selected}`)?.scrollIntoView({ block: 'nearest' })
-		);
-	}
-
-	/**
-	 * パスの補完のキー。受けたら true。候補が並んでいる間は、フォルダーの欄と同じく Tab・Shift+Tab・↑・↓ で順に選び、
-	 * Enter で決め、Esc で選ぶ前に戻す（選んでいなければ一覧を閉じる）
-	 */
-	function onPathKeydown(event: KeyboardEvent): boolean {
-		if (isImeKey(event) || event.altKey || event.ctrlKey || event.metaKey) return false;
-		if (pathListShown && pathList) {
-			const count = pathList.candidates.length;
-			// ↑↓ は、Tab で選び始めてから一覧に取る。選ぶ前は、行の移動と履歴のキーのまま
-			const arrow =
-				(event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
-				!event.shiftKey &&
-				pathList.selected >= 0;
-			if (event.key === 'Tab' || arrow) {
-				const step = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey) ? -1 : 1;
-				selectPath(stepSelection(pathList.selected, count, step));
-			} else if (event.key === 'Escape') {
-				if (pathList.selected >= 0) selectPath(-1);
-				else pathList = null;
-			} else if (event.key === 'Enter' && !event.shiftKey && pathList.selected >= 0) {
-				pathList = null;
-			} else {
-				return false;
-			}
-			event.preventDefault();
-			return true;
-		}
-		if (event.key !== 'Tab' || event.shiftKey || composing || busy || !textarea) return false;
-		const { line } = splitFirstLine(text);
-		if (textarea.selectionStart > line.length || shCommand(line) === null) return false;
-		// `@sh` の行では、補えなくても、範囲を選んでいても、Tab で入力欄から抜けない（ターミナルと同じく、Tab は補うだけのキーにする）
-		event.preventDefault();
-		if (caret !== null) void completePath();
-		return true;
-	}
-
-	// 1行目の宛先が指す先。宛先でなければ null。宛先があれば、コピーのキーとボタンは、コピーせずに宛先へ出す
-	const addressee = $derived(textAddressee(text));
-
-	/** 1行目の宛先（`@ai`・`@sh`）へ出す。2行目から下を中身にして実行し、結果でテキスト全体を置き換える */
-	function runAddressed() {
-		if (!addressee) return;
-		const { line, rest } = splitFirstLine(text);
-		if (!isRunnable(line)) return showError(m.action_failed(), m.draft_address_empty());
-		// 出した時点のテキストを、呼び戻して直せるよう履歴に覚える。失敗したときや、結果を出さないときにも残すため、始める前に積む
-		if (!draftHistory.isBrowsing && draftHistory.record(text)) saveDraftHistory();
-		return runLine(
-			{ ...addressee, line: line.trim(), output: 'replace', encoding: 'utf-8' },
-			line.trim(),
-			{ target: rest, start: 0, end: text.length, caret: text.length, whole: true }
-		);
-	}
-
 	async function onShown() {
 		shownCount++;
-		draftVisible = true;
 		// 一覧を出したまま隠れていたら、出し直したときは入力欄から始める
 		snippetsOpen = false;
-		folderOpen = false;
 		// 前に出していたときの知らせは、出し直したら要らない
 		notice = '';
 		// 変換中に隠れて compositionend が届かなかった場合に備え、出し直すたびに変換中の扱いを解く
@@ -944,16 +443,12 @@
 			clearOnShow = false;
 		}
 		await focusDraft();
-		const apply = pendingResult;
-		pendingResult = null;
-		await apply?.();
 	}
 
 	// コピーせずに隠す。書きかけは入力欄に残し、次に出したときに続きを書けるようにする
 	async function dismiss() {
 		if (hiding) return;
 		hiding = true;
-		cancelPathCompletion();
 		try {
 			await invoke('dismiss');
 		} catch {
@@ -964,20 +459,8 @@
 	}
 
 	function onKeydown(event: KeyboardEvent) {
-		// 宛先の候補が出ている間は、選ぶ・入れる・閉じるキーを先に受ける。Esc は候補を閉じるだけで、ウィンドウは隠さない
-		if (event.target === textarea && (onAddressKeydown(event) || onPathKeydown(event))) return;
 		const view = settings.current;
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
-		// アクションを実行している間、Esc は取り消しだけで隠さない。ほかの下書きのキーと履歴のキーは効かない
-		if (running) {
-			if (isDismissKey(event)) {
-				event.preventDefault();
-				cancelAction();
-			} else if (action) {
-				event.preventDefault();
-			}
-			return;
-		}
 		if (isDismissKey(event)) {
 			event.preventDefault();
 			dismiss();
@@ -1014,7 +497,7 @@
 		if (handled || event.target === textarea) return;
 		const view = settings.current;
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
-		if (snippetsOpen || folderOpen) {
+		if (snippetsOpen) {
 			if (action) event.preventDefault();
 			return;
 		}
@@ -1023,16 +506,11 @@
 		onKeydown(event);
 	}
 
-	/** コピーのキーとボタン。1行目が宛先なら、コピーせずに宛先へ出す。そうでなければ、コピーして隠す */
-	function commitOrRun() {
-		return addressee ? runAddressed() : commit();
-	}
-
 	/** キーに割り当てた操作を呼ぶ。今は使えない操作なら何もせず false を返す */
 	function runAction(action: DraftAction): boolean {
 		switch (action) {
 			case 'copy':
-				commitOrRun();
+				commit();
 				return true;
 			case 'settings':
 				// 設定を開く間、下書きは Rust 側で隠れる。コピーはしないので書きかけは残り、設定を閉じると出し直される。
@@ -1041,8 +519,6 @@
 				return true;
 			case 'snippets':
 				return openSnippets();
-			case 'changeFolder':
-				return openFolder();
 			case 'historyOlder':
 			case 'historyNewer':
 				stepHistory(action === 'historyOlder' ? 'older' : 'newer');
@@ -1106,12 +582,7 @@
 	onMount(() => {
 		const unlisten = Promise.all([
 			listen(EVENTS.SHOWN, onShown),
-			listen(EVENTS.HIDE_REQUESTED, onHideRequested),
-			// 隠れても、実行は取り消さずに続ける
-			listen(EVENTS.DRAFT_HIDDEN, () => {
-				draftVisible = false;
-				cancelPathCompletion();
-			}),
+			listen(EVENTS.HIDE_REQUESTED, commit),
 			listen(EVENTS.DRAFT_HISTORY_CLEARED, () => {
 				historyClearedCount += 1;
 				draftHistory.clear();
@@ -1119,7 +590,6 @@
 			}),
 			listen(EVENTS.DRAFT_HISTORY_SYNCED, reloadDraftHistory)
 		]).then((fns) => {
-			refreshFolderMenu();
 			// 読み込みが終わる前に表示されると shown を取り逃がすので、表示中かを Rust 側に確かめる。
 			// 表示中なら Rust 側が WebView にキーボードのフォーカスを移すので、ここでは表示時の処理をする
 			invoke<boolean>('page_ready').then((active) => {
@@ -1148,7 +618,7 @@
 	<!--
 		上の並び。履歴の前・次を左にまとめ、道具を右に寄せる（ブラウザや Finder のツールバーと同じ並び）。設定は、ツールバーの慣れた位置の右端に置く。
 		前・次は、覚えている履歴がなければ使えないので出さない。
-		列が狭いとき（最小の幅の近く）は、定型文とアクションをアイコンだけにする
+		列が狭いとき（最小の幅の近く）は、定型文をアイコンだけにする
 	-->
 	{#if showButtons && keys && platform}
 		<div class="@container flex items-center gap-1">
@@ -1157,7 +627,7 @@
 					tabindex={-1}
 					variant="ghost"
 					size="sm"
-					disabled={!draftHistory.canGoOlder || busy}
+					disabled={!draftHistory.canGoOlder}
 					title={keys.historyOlder
 						? m.draft_history_older_hint_key({ keys: formatKeys(keys.historyOlder, platform) })
 						: m.draft_history_older_hint()}
@@ -1170,7 +640,7 @@
 					tabindex={-1}
 					variant="ghost"
 					size="sm"
-					disabled={!draftHistory.canGoNewer || busy}
+					disabled={!draftHistory.canGoNewer}
 					title={keys.historyNewer
 						? m.draft_history_newer_hint_key({ keys: formatKeys(keys.historyNewer, platform) })
 						: m.draft_history_newer_hint()}
@@ -1186,7 +656,6 @@
 					variant="ghost"
 					size="sm"
 					title={keyHint(m.draft_snippets_hint(), keys.snippets, platform)}
-					disabled={busy}
 					onclick={openSnippets}
 				>
 					<TextQuoteIcon data-icon="inline-start" />
@@ -1198,7 +667,6 @@
 					size="icon-sm"
 					aria-label={m.draft_settings()}
 					title={keyHint(m.draft_settings_hint(), keys.settings, platform)}
-					disabled={running !== null}
 					onclick={() => invoke('open_settings_window')}
 				>
 					<SettingsIcon />
@@ -1233,80 +701,22 @@
 						>{:else}{segment.text}{/if}{/each}
 			</div>
 		</div>
-		<!-- アクションを実行している間は、書き換えと届いた結果がぶつからないよう、編集できなくして薄くする -->
 		<Textarea
 			bind:ref={textarea}
 			bind:value={text}
-			class={[
-				'relative z-10 field-sizing-fixed h-full min-h-0 resize-none bg-transparent dark:bg-transparent',
-				running && 'opacity-60'
-			]}
+			class="relative z-10 field-sizing-fixed h-full min-h-0 resize-none bg-transparent dark:bg-transparent"
 			style="font-family: {fontFamily}; font-size: {fontSize}px; line-height: 1.5"
 			spellcheck="false"
-			readonly={busy}
 			placeholder={guidance || undefined}
 			aria-label={m.draft_label()}
-			role={addressMatches.length > 0 || pathListShown ? 'combobox' : undefined}
-			aria-autocomplete="list"
-			aria-expanded={addressMatches.length > 0 || pathListShown ? true : undefined}
-			aria-controls={addressMatches.length > 0
-				? addressListId
-				: pathListShown
-					? pathListId
-					: undefined}
-			aria-activedescendant={addressMatches.length > 0
-				? `${addressListId}-${activeAddress}`
-				: pathListShown && pathList && pathList.selected >= 0
-					? `${pathListId}-${pathList.selected}`
-					: undefined}
 			onkeydown={onKeydown}
-			oninput={() => {
-				draftHistory.stopBrowsing();
-				addressDismissed = false;
-				trackCaret();
-			}}
-			onkeyup={trackCaret}
-			onclick={trackCaret}
-			onselect={trackCaret}
-			onfocus={trackCaret}
+			oninput={() => draftHistory.stopBrowsing()}
 			onscroll={syncPreviewScroll}
 			onmousemove={onDraftMouseMove}
 			onmouseleave={() => (hoveredMatch = null)}
 			oncompositionstart={() => (composing = true)}
-			oncompositionend={() => {
-				composing = false;
-				trackCaret();
-			}}
+			oncompositionend={() => (composing = false)}
 		/>
-		{#if addressMatches.length > 0}
-			<AddressSuggestions
-				id={addressListId}
-				top={fontSize * 1.5 + 12}
-				candidates={addressMatches}
-				active={activeAddress}
-				onpick={pickAddress}
-			/>
-		{/if}
-		{#if pathListShown && pathList}
-			<PathCandidates
-				id={pathListId}
-				top={pathList.top}
-				candidates={pathList.candidates}
-				total={pathList.total}
-				selected={pathList.selected}
-				onpick={(index) => {
-					selectPath(index);
-					pathList = null;
-				}}
-			/>
-		{/if}
-		<!--
-			Tab を押してもフォーカスは入力欄から動かないので、候補が出たことを読み上げで知らせる。一覧ごと読むと長いので、件数だけを読む。
-			読み上げは、前からある領域の中身が変わったときに働くので、領域はいつも置く
-		-->
-		<p aria-live="polite" class="sr-only">
-			{pathListShown && pathList ? m.draft_path_candidates_count({ count: pathList.total }) : ''}
-		</p>
 		{#if hoveredMatch}
 			<!-- ハイライトの上（余地がなければ下）に置き換え後の文字列を出す。マウスの動きを邪魔しないよう、こちらも pointer-events-none -->
 			<div
@@ -1318,26 +728,7 @@
 			</div>
 		{/if}
 	</div>
-	{#if running}
-		<div class="flex items-center gap-2 px-1">
-			<p role="status" class="flex min-w-0 flex-1 items-center gap-2 text-sm text-muted-foreground">
-				<LoaderCircleIcon class="size-4 shrink-0 animate-spin" aria-hidden="true" />
-				<span class="truncate">{m.draft_running_action({ action: running.label })}</span>
-			</p>
-			<Button
-				variant="outline"
-				size="sm"
-				class="shrink-0"
-				onclick={async () => {
-					cancelAction();
-					// 押したボタンは消えるので、入力欄に戻す
-					await focusDraft();
-				}}
-			>
-				{m.draft_cancel_action()}
-			</Button>
-		</div>
-	{:else if notice}
+	{#if notice}
 		<p role="status" class="flex items-center gap-2 px-1 text-sm text-muted-foreground">
 			<CircleCheckIcon class="size-4 shrink-0" aria-hidden="true" />
 			<span class="truncate">{notice}</span>
@@ -1345,38 +736,13 @@
 	{/if}
 	{#if showButtons && keys && platform}
 		<!--
-			下の並び。左に今のフォルダー、右にコピー（1行目が宛先のときは実行）。キーを添えるのはこのボタンだけで、
+			下の並び。右にコピー。キーを添えるのはこのボタンだけで、
 			ほかは狭い窓に文字を詰め込まないよう、マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
 		-->
 		<div class="@container flex items-center gap-1">
-			{#if folderMenu}
-				<FolderButton
-					menu={folderMenu}
-					disabled={busy}
-					onopen={refreshFolderMenu}
-					onchange={(path) => moveFolderFromMenu(() => invoke('change_folder', { input: path }))}
-					onpick={() => moveFolderFromMenu(() => invoke('pick_folder'))}
-					onclose={() => textarea?.focus()}
-				/>
-			{/if}
-			<!--
-				1行目が `@ai`・`@sh` のときは、同じボタンとキーが実行になる。押す前に気づけるよう、名前を変えてアイコンを添える。
-				変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピー（実行）する
-			-->
-			<Button
-				tabindex={-1}
-				size="sm"
-				class="ml-auto"
-				title={addressee ? m.draft_run_hint() : undefined}
-				disabled={busy}
-				onclick={commitOrRun}
-			>
-				{#if addressee}
-					<PlayIcon data-icon="inline-start" />
-					{m.draft_run()}
-				{:else}
-					{m.draft_copy()}
-				{/if}
+			<!-- 変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピーする -->
+			<Button tabindex={-1} size="sm" class="ml-auto" onclick={commit}>
+				{m.draft_copy()}
 				{#if keys.copy}
 					<KeyCaps key={keys.copy} {platform} />
 				{/if}
@@ -1388,29 +754,6 @@
 			<CircleAlertIcon />
 			<Alert.Title>{errorTitle}</Alert.Title>
 			<Alert.Description class="whitespace-pre-line">{error}</Alert.Description>
-			{#if noCredit}
-				<div class="col-start-2 pt-1">
-					<Button
-						tabindex={-1}
-						variant="outline"
-						size="sm"
-						onclick={() => invoke('open_mawok_buy_page')}
-					>
-						{m.settings_mawok_buy()}
-					</Button>
-				</div>
-			{:else if errorNeedsAiSettings}
-				<div class="col-start-2 pt-1">
-					<Button
-						tabindex={-1}
-						variant="outline"
-						size="sm"
-						onclick={() => invoke('open_ai_settings')}
-					>
-						{m.action_open_ai_settings()}
-					</Button>
-				</div>
-			{/if}
 		</Alert.Root>
 	{/if}
 	{#if snippetsOpen && settings.current}
@@ -1433,16 +776,6 @@
 			action={registerSnippetAction}
 			onpick={pickSnippet}
 			onclose={closeSnippets}
-		/>
-	{/if}
-	{#if folderOpen && settings.current}
-		<FolderPalette
-			current={folder}
-			platform={settings.current.platform}
-			toggleKey={settings.current.textWindowKeys.changeFolder}
-			onsubmit={changeFolder}
-			oncomplete={completeFolder}
-			onclose={closeFolder}
 		/>
 	{/if}
 </main>

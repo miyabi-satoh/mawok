@@ -2,7 +2,7 @@ import { CONSTANTS } from '$lib/bindings/constants';
 import { matchesFilter } from '$lib/list-filter';
 import type { Snippet } from '$lib/settings.svelte';
 
-/** 新しく足す定型文の1件。結果の出し方・文字コード・有効かは、Rust 側の既定と同じにする */
+/** 新しく足す定型文の1件。有効か・同期するかは、Rust 側の既定と同じにする */
 export function newSnippet(name: string, body: string): Snippet {
 	return { ...CONSTANTS.NEW_SNIPPET, name, body };
 }

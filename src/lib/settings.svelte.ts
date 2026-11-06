@@ -5,9 +5,6 @@ import type { SettingsView as GeneratedSettingsView } from '$lib/bindings/Settin
 import { EVENTS } from '$lib/bindings/constants';
 import { baseLocale, overwriteGetLocale, type Locale } from '$lib/paraglide/runtime';
 
-export type { ActionOutput } from '$lib/bindings/ActionOutput';
-export type { ActionEncoding } from '$lib/bindings/ActionEncoding';
-export type { AiService } from '$lib/bindings/AiService';
 export type { CharWidths } from '$lib/bindings/CharWidths';
 export type { PunctuationStyle } from '$lib/bindings/PunctuationStyle';
 export type { Replacement } from '$lib/bindings/Replacement';

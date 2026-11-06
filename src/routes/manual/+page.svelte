@@ -224,7 +224,7 @@
 	.manual :global(td) {
 		border-top: 1px solid var(--border);
 	}
-	/* 表の中の `@sh コマンド` などを、狭い列で途中から折り返さない */
+	/* 表の中のコードを、狭い列で途中から折り返さない */
 	.manual :global(td code) {
 		white-space: nowrap;
 	}

@@ -37,8 +37,8 @@ const SNIPPETS = [
 	{ name: 'かくにん', body: BODY },
 	{ name: '', body: 'git status' }
 ];
-// 設定へ書いた行にアプリが足す、結果の出し方・文字コード・スイッチの既定値
-const ROW_DEFAULTS = { enabled: true, encoding: 'utf-8', output: 'replace' };
+// 設定へ書いた行にアプリが足す、スイッチの既定値
+const ROW_DEFAULTS = { enabled: true };
 const withDefaults = (row) => ({ ...ROW_DEFAULTS, ...row });
 
 /** 下書きを出して「あいう」と書き、「い」と「う」の間にカーソルを置く */

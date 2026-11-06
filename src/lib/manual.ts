@@ -19,7 +19,7 @@ export interface Manual {
  * 英語と日本語で id が揃わず、記号の扱いも決めることになるため。
  * 表は、横に送れる領域で包む。表そのものを `overflow` にすると、表の中に押せる要素が無いので
  * キーボードでは見切れた列に届かない。
- * 本文から節へのリンクは、原典に GitHub と同じ見出しの # で書き (`[AI を使う](#ai-を使う)`)、その節の id へ向け直す。
+ * 本文から節へのリンクは、原典に GitHub と同じ見出しの # で書き (`[定型文を使う](#定型文を使う)`)、その節の id へ向け直す。
  * 原典を GitHub で読んだときもリンクが効くようにするため。
  */
 class ManualRenderer extends Renderer {
@@ -74,7 +74,7 @@ class ManualRenderer extends Renderer {
 
 const KEY = '(?:Cmd|Ctrl|Shift|Option|Alt|Space|Enter|Esc|Tab|[↑↓←→A-Z0-9,])';
 const COMBO = `${KEY}(?:\\+${KEY})*`;
-/** 原典で `Cmd+Enter`・`Cmd+Option+↑ / Cmd+Option+↓` のようにキーだけを書いたコード。`@ai` やパスはコードのまま */
+/** 原典で `Cmd+Enter`・`Cmd+Option+↑ / Cmd+Option+↓` のようにキーだけを書いたコード。パスやコマンドはコードのまま */
 const KEYS = new RegExp(`^${COMBO}(?: / ${COMBO})*$`);
 
 /**

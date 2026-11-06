@@ -38,7 +38,7 @@ describe('日本語の文言', () => {
 
 describe('文言の書き方', () => {
 	// 文言を読む inlang の message-format の部品は、\ をエスケープの文字として扱い、\\ を1つの \ にする。
-	// 書いた \ が画面で減るので、要る所は引数で渡す（$lib/folder-errors）
+	// 書いた \ が画面で減るので、要る所は引数で渡す
 	it('文言に \\ を書かない', () => {
 		const withBackslash = [...Object.entries(ja), ...Object.entries(en)]
 			.filter(

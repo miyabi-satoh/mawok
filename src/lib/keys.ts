@@ -42,7 +42,6 @@ export const DRAFT_ACTIONS_IN_SETTINGS = [
 	'historyNewer',
 	'settings',
 	'snippets',
-	'changeFolder',
 	'copy'
 ] as const satisfies readonly GeneratedDraftAction[];
 
@@ -84,8 +83,7 @@ export function draftActionLabel(action: DraftAction): string {
 		settings: m.settings_key_settings,
 		snippets: m.settings_key_snippets,
 		historyOlder: m.settings_key_historyOlder,
-		historyNewer: m.settings_key_historyNewer,
-		changeFolder: m.settings_key_changeFolder
+		historyNewer: m.settings_key_historyNewer
 	}[action]();
 }
 

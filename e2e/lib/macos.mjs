@@ -396,28 +396,6 @@ export async function paletteOptions() {
 		.map(({ name }) => name);
 }
 
-/**
- * 下書きで Cmd+K で定型文の一覧を開き、絞り込みに `filter` を打って、`option` で始まる行 (宛先で始まる定型文) を選んで実行する。
- * 絞り込みは英数で打つ (日本語入力のままだと変換される)
- */
-export async function runAction(filter, option = `${filter} `) {
-	await keyCode(KEY.k, ['command down']);
-	await waitFor(paletteOptions, (options) => options !== null, { label: '定型文の一覧' });
-	await keystroke(filter);
-	// 打った文字を含まない行が、末尾の「…定型文に登録」だけになれば、絞り込み終えている。終える前の一覧で数えると、行の位置がずれる
-	const options = await waitFor(
-		paletteOptions,
-		(current) =>
-			current !== null &&
-			current.some((name) => name.startsWith(option)) &&
-			current.every((name) => name.includes(filter) || name.includes('定型文に登録')),
-		{ label: `一覧の「${option.trim()}」の行` }
-	);
-	const index = options.findIndex((name) => name.startsWith(option));
-	for (let i = 0; i < index; i++) await keyCode(KEY.down);
-	await keyCode(KEY.return);
-}
-
 /** Mawok の中で前面にあるウィンドウの名前 (無ければ null) */
 export function focusedWindowName() {
 	return jxa(`
@@ -970,11 +948,6 @@ function processPids(name) {
 	return pgrep(['-x', name]);
 }
 
-/** コマンドの行に `pattern` を含むプロセスの ID */
-export function processesMatching(pattern) {
-	return pgrep(['-f', pattern]);
-}
-
 /** pgrep で見つかったプロセスの ID。pgrep は、見つからないと終了コード 1 で終わる */
 async function pgrep(args) {
 	try {
@@ -1113,7 +1086,7 @@ export async function assertPermissions({ screenCapture: needScreenCapture = tru
 
 /**
  * キーチェーンの許可のダイアログ (SecurityAgent) が出ていないことを見る。
- * 手元のビルドは ad-hoc 署名なので、入れ直すと常用の Mawok がキーを読むときに OS が許可を求める (docs/platform.md「AI サービスのキーとキーチェーン」)。
+ * 手元のビルドは ad-hoc 署名なので、入れ直すと常用の Mawok がキーを読むときに OS が許可を求める (docs/platform.md「アカウントのトークンとキーチェーン」)。
  * 確認はファイルごとに常用の Mawok を起動し直すので、許可しないまま回すと起動のたびにダイアログが積み重なり、フォーカスも奪われてテストが落ちる。
  * 「常に許可」を押せば同じビルドでは出ないので、回す前に常用の Mawok を動かして確かめる
  */

@@ -84,8 +84,7 @@ const DEFAULT_CONFIG = {
 	textFontFamily: '',
 	textFontSize: 16,
 	textColorLight: '',
-	textColorDark: '',
-	aiService: 'none'
+	textColorDark: ''
 };
 
 // draft_keys.rs の既定のキーの写し
@@ -94,8 +93,7 @@ const DEFAULT_DRAFT_KEYS = {
 	settings: 'CommandOrControl+Comma',
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
-	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	changeFolder: 'CommandOrControl+KeyD'
+	historyNewer: 'CommandOrControl+Alt+ArrowDown'
 };
 
 /**

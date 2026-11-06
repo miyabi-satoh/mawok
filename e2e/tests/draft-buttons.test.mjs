@@ -80,7 +80,7 @@ test.describe('下書きのボタン', () => {
 		await clickElement(client, await getDraftWindowHandle(), await client.$(selector));
 	}
 
-	test('履歴がないうちは、入力欄の上に定型文・設定、下に今のフォルダー・コピーがあり、前・次はない', async () => {
+	test('履歴がないうちは、入力欄の上に定型文・設定、下にコピーがあり、前・次はない', async () => {
 		await showDraftAndWaitVisible();
 		const buttons = await listDraftButtons(client);
 		const above = buttons.filter((button) => button.position === 'above');
@@ -91,8 +91,6 @@ test.describe('下書きのボタン', () => {
 			above.some((button) => button.label === '設定'),
 			JSON.stringify(buttons)
 		);
-		// 今のフォルダーのボタンは、フォルダーの名前を出す (起動したてはホーム)
-		assert.ok(byText(below, 'ホーム'), JSON.stringify(buttons));
 		assert.ok(byText(below, 'コピー'), JSON.stringify(buttons));
 		assert.equal(byText(buttons, '前'), undefined, JSON.stringify(buttons));
 		assert.equal(byText(buttons, '次'), undefined, JSON.stringify(buttons));

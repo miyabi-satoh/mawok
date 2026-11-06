@@ -25,7 +25,7 @@ describe('renderManual', () => {
 
 	it('キーだけを書いたコードをキーキャップにし、+ は読み上げにだけ残す。それ以外のコードはそのまま', () => {
 		const { html } = renderManual(
-			'`Cmd+,` と `Esc`、`Ctrl+Alt+↑ / Ctrl+Alt+↓`。`@ai` と `@sh sort`\n',
+			'`Cmd+,` と `Esc`、`Ctrl+Alt+↑ / Ctrl+Alt+↓`。`~/notes` と `git status`\n',
 			'表',
 			'windows'
 		);
@@ -35,17 +35,17 @@ describe('renderManual', () => {
 		expect(html).toContain(
 			`<kbd class="keys"><kbd>Ctrl</kbd>${sep}<kbd>Alt</kbd>${sep}<kbd>↑</kbd></kbd> / <kbd class="keys">`
 		);
-		expect(html).toContain('<code>@ai</code>');
-		expect(html).toContain('<code>@sh sort</code>');
+		expect(html).toContain('<code>~/notes</code>');
+		expect(html).toContain('<code>git status</code>');
 	});
 
 	it('GitHub と同じ見出しの # で書いた節へのリンクを、後ろの節でもその節の id へ向け直す', () => {
 		const { html } = renderManual(
-			'# 題\n\n## 一つ目\n\n「[AI を使う](#ai-を使う)」を参照\n\n## AI を使う\n',
+			'# 題\n\n## 一つ目\n\n「[Mac で使う](#mac-で使う)」を参照\n\n## Mac で使う\n',
 			'表',
 			'macos'
 		);
-		expect(html).toContain('<a href="#section-2">AI を使う</a>');
+		expect(html).toContain('<a href="#section-2">Mac で使う</a>');
 	});
 
 	it('節へのリンクの先の見出しが無ければ、描かずに知らせる', () => {
@@ -55,9 +55,9 @@ describe('renderManual', () => {
 	});
 
 	it.each([
-		['AI を使う', 'ai-を使う'],
+		['Mac で使う', 'mac-で使う'],
 		['What is sent and privacy', 'what-is-sent-and-privacy'],
-		['Write an addressee, and run', 'write-an-addressee-and-run']
+		['Insert a snippet, then copy', 'insert-a-snippet-then-copy']
 	])('GitHub と同じ見出しの # にする: %s', (text, slug) => {
 		expect(githubSlug(text)).toBe(slug);
 	});

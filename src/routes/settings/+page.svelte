@@ -14,7 +14,6 @@
 	import { errorCode } from '$lib/errors';
 	import SyncToggle from '$lib/components/sync-toggle.svelte';
 	import BackupDialog from '$lib/components/backup-dialog.svelte';
-	import SettingsAi from '$lib/components/settings-ai.svelte';
 	import SettingsSnippets from '$lib/components/settings-snippets.svelte';
 	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
 	import SettingsMawokDevices from '$lib/components/settings-mawok-devices.svelte';
@@ -40,12 +39,11 @@
 	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '$lib/history.svelte';
 	import { modifiedName } from '$lib/modified-settings';
 	import { onEvent } from '$lib/on-event';
-	import { AiModelEditor } from '$lib/ai-model-editor.svelte';
 	import { SnippetsEditor } from '$lib/snippets-editor.svelte';
 	import KeyCaps from '$lib/components/key-caps.svelte';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { matchedKeys, showsFilter, shownRows } from '$lib/list-filter';
-	import { actionErrorMessage } from '$lib/action-errors';
+	import { accountErrorMessage } from '$lib/account-errors';
 	import { RowList } from '$lib/row-list.svelte';
 	import { coalescedSaver } from '$lib/saver';
 	import { CHAR_WIDTH_KINDS, LANGUAGES, PUNCTUATION_STYLES, THEMES } from '$lib/setting-options';
@@ -86,10 +84,10 @@
 	const showError = (message: string) => (error = message);
 	const settingsFailed = (e: unknown) => m.settings_failed({ error: errorCode(e) });
 	const callSettings = commandCaller(settingsFailed, showError);
-	/** アクションのコマンドを呼ぶ。失敗したら、アクションの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
-	const callActions = commandCaller((e) => actionErrorMessage(e) ?? settingsFailed(e), showError);
-	/** 欄の下に出さない失敗を、アクションの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
-	const showActionError = (e: unknown) => showError(actionErrorMessage(e) ?? settingsFailed(e));
+	/** アカウントの窓口を使うコマンドを呼ぶ。失敗したら、アカウントの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
+	const callAccount = commandCaller((e) => accountErrorMessage(e) ?? settingsFailed(e), showError);
+	/** 欄の下に出さない失敗を、アカウントの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
+	const showAccountError = (e: unknown) => showError(accountErrorMessage(e) ?? settingsFailed(e));
 	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
 	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
 	let refreshingMawokAccountStatus = false;
@@ -102,7 +100,7 @@
 		else if (refreshingMawokAccountStatus) return;
 		const refresh = ++mawokAccountRefresh;
 		refreshingMawokAccountStatus = true;
-		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。確かめられなかったことは「AI」の残りの欄が出す。
+		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。
 		// 資格情報を読めなかったときは Rust 側がサインインしていない扱いにするので、「サインイン」からやり直せる。
 		let status: AccountStatus | null;
 		try {
@@ -118,25 +116,11 @@
 		mawokAccountStatus = status;
 	}
 
-	// 窓口で買い足したり Pro を申し込んだりして戻ったとき、設定を開き直さず表示を更新する。
+	// 窓口で Pro を申し込んで戻ったとき、設定を開き直さず表示を更新する。
 	$effect(() => {
 		const onFocus = () => void refreshMawokAccountStatus();
 		window.addEventListener('focus', onFocus);
 		return () => window.removeEventListener('focus', onFocus);
-	});
-
-	function openAccount() {
-		category = 'account';
-	}
-
-	// テキストウィンドウのエラーの帯から頼まれたら、「AI」に移る。設定ウィンドウを作る前の頼みは、
-	// イベントでは届かないので、載せたときに Rust 側に尋ねる
-	$effect(() => {
-		const show = async () => {
-			if (await invoke<boolean>('take_ai_settings_request').catch(() => false)) category = 'ai';
-		};
-		void show();
-		return onEvent(EVENTS.AI_SETTINGS_REQUESTED, show);
 	});
 
 	/** バックアップから戻す窓を出しているか */
@@ -272,12 +256,8 @@
 		isBlankReplacement
 	);
 
-	/** 定型文と AI のモデル。どちらの分類も開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
-	const snippetsEditor = new SnippetsEditor(settings.current, callActions);
-	const aiModel = new AiModelEditor(settings.current, callActions);
-	$effect(() => {
-		if (settings.current) snippetsEditor.followLocale(settings.current);
-	});
+	/** 定型文。分類を開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
+	const snippetsEditor = new SnippetsEditor(settings.current, callSettings);
 
 	let replacementFilter = $state('');
 	/** 絞り込みに当たった置き換え辞書の行の画面用 key。語を変えたときにだけ求め直す。null なら絞り込んでいない */
@@ -433,7 +413,6 @@
 		onEvent<SettingsView>(EVENTS.CONFIG_REPLACED, (view) => {
 			replacements.recopy(view.replacements, true);
 			snippetsEditor.recopy(view);
-			aiModel.switchService(view.aiModels, view.aiService);
 			fontFamily = view.textFontFamily;
 			fontSize = view.textFontSize;
 			// 保存の前の、打っている途中の値（離れるまで保存しない件数、読めない色）は消さない
@@ -458,7 +437,7 @@
 	/** キーの記録中でないときのキー。記録中の Esc は記録の中止なので、そちらが受け取る */
 	function onKeydown(event: KeyboardEvent) {
 		const platform = settings.current?.platform;
-		// 確かめや選ぶ画面のダイアログ（AI の了解・同期データの削除・バックアップから戻す）を出している間は、Esc で設定画面を閉じない
+		// 確かめや選ぶ画面のダイアログ（同期データの削除・バックアップから戻す）を出している間は、Esc で設定画面を閉じない
 		if (document.querySelector('[role="alertdialog"]')) return;
 		// 行の「…」メニューなど、開いている部品が受け持った Esc（bits-ui が preventDefault する）では、設定画面は閉じない。
 		// フォーカスの位置では、開いた直後のまだメニューに移っていない間を見分けられず、
@@ -1171,25 +1150,13 @@
 						<SettingsSnippets {view} editor={snippetsEditor} />
 					{/if}
 				</Tabs.Content>
-				<Tabs.Content value="ai">
-					<!-- 開いたときだけ描く。キーがあるかの確認でキーチェーンの許可を求められうるため -->
-					{#if category === 'ai'}
-						<SettingsAi
-							{view}
-							call={callActions}
-							model={aiModel}
-							{mawokAccountStatus}
-							onopenaccount={openAccount}
-						/>
-					{/if}
-				</Tabs.Content>
 				<Tabs.Content value="account">
 					{#if category === 'account'}
 						<div class="flex flex-col gap-5">
 							<SettingsSection>
 								<SettingsRow>
 									<SettingsMawokAccount
-										call={callActions}
+										call={callAccount}
 										signedIn={view.mawokAccountSignedIn}
 										status={mawokAccountStatus}
 										proAvailable={view.proAvailable}
@@ -1199,10 +1166,10 @@
 							</SettingsSection>
 							<!-- サインインしてデバイスを登録してから同期を始めるので、その順に並べる -->
 							{#if view.mawokAccountSignedIn}
-								<SettingsMawokDevices call={callActions} />
+								<SettingsMawokDevices call={callAccount} />
 							{/if}
 							{#if view.proAvailable}
-								<SettingsSync {view} call={callSettings} onfailure={showActionError} />
+								<SettingsSync {view} call={callSettings} onfailure={showAccountError} />
 							{/if}
 						</div>
 					{/if}

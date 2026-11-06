@@ -12,7 +12,7 @@ If your desktop asks to add a shortcut the first time Mawok starts, add it. On d
 2. Type. `Enter` adds a line break.
 3. Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`}. The text is copied, the text window closes, and you return to the app you came from. Paste it there.
 
-You can also insert snippets and rewrite the text with AI or commands.
+You can also insert snippets and bring back text you copied earlier.
 Mawok stays in the {macos:menu bar}{windows:system tray}{linux:tray} and starts automatically when you log in (you can turn this off under “General” in Settings).
 
 ::: linux
@@ -45,7 +45,7 @@ On other desktops, also assign a key to `mawok --toggle` in the keyboard setting
 ## Write and copy
 
 - Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} or click “Copy” to copy the text and return to the app you came from.
-- Pressing the hotkey while the text window is in front also copies and returns. It copies even when the first line is `@ai` or `@sh`, without running it.
+- Pressing the hotkey while the text window is in front also copies and returns.
 - To return without copying, press `Esc`. Your unfinished text is still there the next time you bring up the text window.
 - Clicking another app also hides the window without copying, and your unfinished text remains (you can turn this off under “General” in Settings).
 
@@ -59,61 +59,12 @@ Copied text is kept in history.
 
 ## Use snippets
 
-Save text you use often, and instructions that rewrite the text with AI or a command, then pick them from a list.
+Save text you use often, then pick it from a list to insert it.
 
 1. Press {macos:`Cmd+K`}{windows:`Ctrl+K`}{linux:`Ctrl+K`} to open the snippet list.
-2. Type to filter, then press `Enter` to pick one.
-
-- An ordinary snippet is inserted at the cursor.
-- A one-line snippet that starts with `@ai` or `@sh` runs the text with that addressee (see the next section, “[Write an addressee and run](#write-an-addressee-and-run)”). A selection is used if you have one; otherwise, all of the text is used. The result replaces the text. Press {macos:`Cmd+Z`}{windows:`Ctrl+Z`}{linux:`Ctrl+Z`} to undo it. Under “Snippets” in Settings, set each snippet's “Output” to “Replace”, “Insert”, or “Don't show”.
-
-At first, “Proofread” (`@ai`) and “Sort lines” (`@sh sort`) are included. “Proofread” fixes spelling and grammar mistakes. It requires AI service setup (see “[Use AI](#use-ai)”).
+2. Type to filter, then press `Enter` to pick one. It is inserted at the cursor. If you have a selection, the snippet replaces it.
 
 Add snippets under “Snippets” in Settings. You can also save the text you are writing right away by choosing “Save the text as a snippet” at the end of the list. If you have a selection, the selection is saved. If you typed in the filter, what you typed becomes the name.
-
-## Write an addressee and run
-
-Write an addressee on the first line of the text, then press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} or select the “Run” button to run it instead of copying. The lines below the first are what the addressee receives.
-
-| First line | What it does |
-| --- | --- |
-| `@ai instruction` | Asks AI (an AI action) and replaces the text with the result. For example: `@ai Rewrite this politely` |
-| `@sh command` | Runs the command and replaces the text with the result. For example: {macos:`@sh sort`}{windows:`@sh dir`}{linux:`@sh sort`} |
-
-- Type `@` at the start of the first line to see addressee suggestions. Press `Tab` or `Enter` to choose one.
-- On an `@sh` line, type the start of a file or folder name and press `Tab` to complete it. If several match, they appear below the first line. Press `Tab` again to go through them.
-- The text from before the run stays in the history, so you can bring it back and try again.
-- How AI replies depends on the AI service and model. If you get a preamble or explanation you don’t want, describe the form you want in the instruction too, such as `@ai Translate into Japanese. Only the translation`.
-- The command receives the lines below the first, and its output becomes the result.{macos:}{windows: Commands run in cmd.}{linux:}
-::: macos
-- If a command is not found, write its full path.
-:::
-::: linux
-- If a command is not found, write its full path.
-:::
-::: windows
-- Commands that come with Windows (such as `sort` and `findstr`) garble Japanese text when you run them from the first line. Save the command as a snippet, and set that snippet's “Text encoding” to “Shift_JIS” under “Snippets” in Settings. The built-in “Sort lines” snippet is already set up this way.
-:::
-
-Commands run in your home folder. The folder button at the bottom left shows the current folder. To run commands in another folder, select the button and choose a folder. Folders you have used appear in the button menu so you can choose them again. To go back to your home folder, choose “Back to home folder” in the menu.
-
-To move from the keyboard, press {macos:`Cmd+D`}{windows:`Ctrl+D`}{linux:`Ctrl+D`}, type the path, and press `Enter`.
-
-- A relative path starts from the current folder.
-- Type the start of a folder name and press `Tab` to complete it. If several folders match, they appear below the box. Press `Tab` again to go through them. Press `Enter` to choose the selected folder, then press `Enter` again to move there.
-- While you type, the rest of the path appears dimmed when only one folder matches. Press `→` or `Tab` to accept it.
-- The title bar shows the folder you moved to.
-- Clear the box and press `Enter` to go back to your home folder. Quitting Mawok also goes back to it.
-
-## Use AI
-
-1. Under “AI” in Settings, choose a service under “AI service”.
-2. If you chose Mawok, select “Sign in” under “Account” in Settings, sign in on the page that opens, then click “Link this device”. For another service, enter that service's API key.
-3. Read the explanation of what is sent that appears under “AI” in Settings, then select “Agree”.
-
-When you choose Mawok, you do not need an API key. What you use is deducted from your account credit. Select “Buy credits” under “AI” in Settings to open the purchase page in your browser.
-
-To use a service compatible with OpenAI (such as DeepSeek, OpenRouter, or Ollama), choose “OpenAI” under “AI service”, then change “Base URL” to that service's API URL and enter that service's API key and “Model”. For a service that needs no key (such as Ollama on your computer), still enter something as the API key.
 
 ## Sync settings and history
 
@@ -130,7 +81,7 @@ If you forget your password, it cannot be recovered. In Settings, under “Accou
 To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. Right after copying, it may not have arrived yet. Wait a moment and show the text window again.
 
 - Synced: settings, keyboard shortcuts, replacements, snippets, and history. Turn each kind on or off under “Account” in Settings.
-- Kept per device: launch at login and API keys for AI services. The hotkey and keyboard shortcuts sync only between {macos:Macs}{windows:Windows devices}{linux:Linux devices}.
+- Kept per device: launch at login. The hotkey and keyboard shortcuts sync only between {macos:Macs}{windows:Windows devices}{linux:Linux devices}.
 - For settings, replacements, and snippets, turn off the cloud mark to stop syncing just that item or row.
 
 If you change the same setting on different devices, the one changed last is used. To go back to earlier settings, restore them from a backup (see “[Settings](#settings)”).
@@ -140,13 +91,11 @@ If you change the same setting on different devices, the one changed last is use
 | Action | Key |
 | --- | --- |
 | Bring up the text window (copy and close if it is in front) | {macos:`Cmd+Shift+Space`}{windows:`Ctrl+Shift+Space`}{linux:`Ctrl+Shift+Space`} |
-| Copy and close (run when the first line is `@ai` or `@sh`) | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} |
+| Copy and close | {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} |
 | Close without copying | `Esc` |
 | Go back / forward in history (at the start / end of the text box) | `↑` / `↓` |
 | Go back / forward in history (wherever the cursor is) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`}{linux:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
 | Open the snippet list | {macos:`Cmd+K`}{windows:`Ctrl+K`}{linux:`Ctrl+K`} |
-| Go to folder | {macos:`Cmd+D`}{windows:`Ctrl+D`}{linux:`Ctrl+D`} |
-| Cancel a run (while it is running) | `Esc` |
 | Open Settings | {macos:`Cmd+,`}{windows:`Ctrl+,`}{linux:`Ctrl+,`} |
 
 You can change the keys under “Keyboard shortcuts” in Settings.
@@ -168,35 +117,25 @@ Settings are backed up automatically every day. To go back to earlier settings, 
 - **Mawok's icon does not appear in the tray**: On GNOME, run `gnome-extensions enable ubuntu-appindicators@ubuntu.com` to turn on the extension that shows the tray. On Hyprland, add the tray to your bar's configuration (such as waybar).
 :::
 ::: macos
-- **“Couldn't read the API key” appears**: After you reinstall the app, you will be asked to allow access to the Keychain. Allow it. If that doesn't help, enter the key again under “AI” in Settings.
+- **“Couldn't read your Mawok account sign-in information” appears**: After you reinstall the app, you will be asked to allow access to the Keychain. Allow it. If that doesn't help, sign in again under “Account” in Settings.
 :::
 ::: windows
-- **“Couldn't read the API key” appears**: Enter the key again under “AI” in Settings.
+- **“Couldn't read your Mawok account sign-in information” appears**: Sign in again under “Account” in Settings.
 :::
 ::: linux
-- **“Couldn't read the API key” appears**: Check that a service that stores passwords, such as GNOME Keyring, is running. If it is, enter the key again under “AI” in Settings.
+- **“Couldn't read your Mawok account sign-in information” appears**: Check that a service that stores passwords, such as GNOME Keyring, is running. If it is, sign in again under “Account” in Settings.
 :::
 - **“Couldn't read the settings, so started with the defaults” appears**: Select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
 - **“Couldn't save the settings” appears**: Settings you change go back when you quit. Check that there is free disk space, then restart Mawok.
-- **“Couldn't connect...”, “Couldn't reach...”, or “...didn't respond in time” appears and trying again doesn't help**: Check that you are connected to the network. If you are, the Mawok server or the AI service is having problems. Try again after a while.
-- **“Your Mawok account has no credit left” appears**: Select “Buy credits” under “AI” in Settings to add more.
-- **“The AI service's spending or credit limit was reached” appears**: Trying again won't help. Check the balance and limits in your AI service account.
-- **“Couldn't find the current folder” appears**: The folder was moved or deleted. Use “Go to folder” to choose a folder again.
-::: macos
-- **“The command wasn't found” appears**: Write the command with its full path.
-:::
-::: linux
-- **“The command wasn't found” appears**: Write the command with its full path.
-:::
+- **“Couldn't reach...” appears and trying again doesn't help**: Check that you are connected to the network. If you are, the Mawok server is having problems. Try again after a while.
 
 When reporting a problem, attach the log. It does not contain your text. Open its location from “About” in Settings.
 
 ## What is sent and privacy
 
 - Mawok does not send usage statistics or error reports.
-- It sends your text outside the app only when you run an AI action with `@ai` (to the AI service you chose) or sync with Pro.
+- It sends your text outside the app only when you sync with Pro.
 - While you sync with Pro, what you sync is encrypted and stored on Mawok's server. Mawok's server cannot read it.
-- Before you choose an AI service and select “Agree”, the screen explains how the service handles what you send, including whether it uses it for training and how long it retains it.
 
 ::: linux
 ## Installing and updating
@@ -208,18 +147,18 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 ## Uninstalling
 
 ::: macos
-1. If you entered API keys, under “AI” in Settings, choose each service you entered a key for under “AI service” and select “Remove”. If you signed in to Mawok, select “Sign out” under “Account”.
+1. If you signed in to Mawok, select “Sign out” under “Account”.
 2. Choose “Quit” in the menu bar menu, then move `/Applications/Mawok.app` to the Trash.
 3. To also remove settings and history, delete `~/Library/Application Support/com.amiiby.mawok/` and `~/Library/Logs/com.amiiby.mawok/`.
 :::
 
 ::: windows
-1. If you entered API keys, under “AI” in Settings, choose each service you entered a key for under “AI service” and select “Remove”. If you signed in to Mawok, select “Sign out” under “Account”.
+1. If you signed in to Mawok, select “Sign out” under “Account”.
 2. Uninstall Mawok from “Apps” in Windows “Settings”. Settings and history are removed too.
 :::
 
 ::: linux
-1. If you entered API keys, under “AI” in Settings, choose each service you entered a key for under “AI service” and select “Remove”. If you signed in to Mawok, select “Sign out” under “Account”. Turn off “Launch at login” under “General”.
+1. If you signed in to Mawok, select “Sign out” under “Account”. Turn off “Launch at login” under “General”.
 2. Choose “Quit” in the tray menu, then run `sudo apt remove mawok` on Ubuntu or `sudo pacman -R mawok-bin` on Arch Linux. To also remove the apt repository, follow the steps on mawok.amiiby.com.
 3. To also remove settings and history, delete `~/.config/com.amiiby.mawok/` and `~/.local/share/com.amiiby.mawok/`.
 :::
