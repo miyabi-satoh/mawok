@@ -6,6 +6,7 @@
 	"type": "module",
 	"packageManager": "pnpm@12.10.1",
 	"devDependencies": {
+		"smol-toml": "^1.9.1",
 		"webdriverio": "^10.1.0"
 	}
 }

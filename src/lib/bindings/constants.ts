@@ -7,33 +7,25 @@ export const CONSTANTS = {
 	MAX_DRAFT_HISTORY_SIZE: 100,
 	DRAFT_ACTIONS: ["copy", "settings", "snippets", "historyOlder", "historyNewer"],
 	SUPPORTED_CODES: ["Digit0", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "KeyA", "KeyB", "KeyC", "KeyD", "KeyE", "KeyF", "KeyG", "KeyH", "KeyI", "KeyJ", "KeyK", "KeyL", "KeyM", "KeyN", "KeyO", "KeyP", "KeyQ", "KeyR", "KeyS", "KeyT", "KeyU", "KeyV", "KeyW", "KeyX", "KeyY", "KeyZ", "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "Backquote", "Backslash", "BracketLeft", "BracketRight", "Comma", "Equal", "Minus", "Period", "Quote", "Semicolon", "Slash", "Backspace", "CapsLock", "Enter", "Space", "Tab", "Delete", "End", "Home", "Insert", "PageDown", "PageUp", "Pause", "PrintScreen", "ScrollLock", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "NumLock", "NumpadAdd", "NumpadDecimal", "NumpadDivide", "NumpadEnter", "NumpadEqual", "NumpadMultiply", "NumpadSubtract", "Escape", "AudioVolumeDown", "AudioVolumeUp", "AudioVolumeMute", "MediaPlay", "MediaPause", "MediaPlayPause", "MediaStop", "MediaTrackNext", "MediaTrackPrevious"],
-	NEW_SNIPPET: {"id":"","name":"","body":"","enabled":true,"sync":true},
-	SYNCABLE_SETTINGS: ["language", "theme", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "trim_trailing_whitespace", "punctuation_style", "alphabet_width", "digit_width", "space_width", "symbol_width", "katakana_width", "exclude_from_clipboard_history", "text_font_family", "text_font_size", "text_color_light", "text_color_dark", "input_guidance"],
-	MODIFIED_SETTINGS: ["hotkey", "text_window_keys.copy", "text_window_keys.settings", "text_window_keys.snippets", "text_window_keys.historyOlder", "text_window_keys.historyNewer", "autostart", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "language", "theme", "text_font", "text_color", "input_guidance", "trim_trailing_whitespace", "exclude_from_clipboard_history", "char_width", "sync_settings", "sync_keys", "sync_replacements", "sync_snippets", "sync_history"],
-	MIN_SYNC_PASSWORD_CHARS: 8
+	NEW_SNIPPET: {"name":"","body":"","enabled":true},
+	MODIFIED_SETTINGS: ["hotkey", "text_window_keys.copy", "text_window_keys.settings", "text_window_keys.snippets", "text_window_keys.historyOlder", "text_window_keys.historyNewer", "autostart", "text_window_always_on_top", "hide_text_window_on_blur", "show_text_window_buttons", "text_history_size", "language", "theme", "text_font", "text_color", "input_guidance", "trim_trailing_whitespace", "exclude_from_clipboard_history", "char_width"]
 } as const;
 
 export const EVENTS = {
 	SETTINGS_CHANGED: "settings-changed",
 	DRAFT_HISTORY_CLEARED: "draft-history-cleared",
-	DRAFT_HISTORY_SYNCED: "draft-history-synced",
+	DRAFT_HISTORY_MERGED: "draft-history-merged",
 	SNIPPET_ADDED: "snippet-added",
 	CONFIG_REPLACED: "config-replaced",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested",
-	MAWOK_SIGN_IN_ENDED: "mawok-sign-in-ended",
 	UPDATE_CHANGED: "update-changed"
 } as const;
 
 export const ERROR_CODES = {
-	ACCOUNT_UNREACHABLE: "account.unreachable",
-	ACCOUNT_SIGN_IN_REQUIRED: "account.sign_in_required",
-	ACCOUNT_TOKEN_UNREADABLE: "account.token_unreadable",
-	UNEXPECTED: "unexpected",
 	BACKUP_RESTORE_PARTIAL: "backup.restore_partial",
-	SYNC_WRONG_PASSWORD: "sync.wrong_password",
-	SYNC_PASSWORD_TOO_SHORT: "sync.password_too_short",
-	SYNC_STATE_CHANGED: "sync.state_changed",
+	SETTINGS_FILE_UNREADABLE: "settings.file_unreadable",
+	SETTINGS_FOLDER_UNAVAILABLE: "settings.folder_unavailable",
 	KEYS_INVALID: "keys.invalid",
 	KEYS_EDITING: "keys.editing",
 	KEYS_HOTKEY: "keys.hotkey",

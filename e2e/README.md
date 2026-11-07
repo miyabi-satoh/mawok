@@ -73,13 +73,12 @@ just msix-check msix        # msix/msix.test.mjs だけ
 
 ## 注意点
 
-- **設定の置き場の名前の書き方**: 設定の置き場は SQLite の `settings.db` で（docs/config.md）、項目名は snake_case、既定と違う値だけが書かれる。テストは画面とのやり取りと同じ camelCase の名前（`textWindowKeys`・`hideTextWindowOnBlur` など）で読み書きし、`lib/settings-db.mjs` が名前を付け替える。Windows の `lib/config.mjs` は、書いていない項目を既定値で埋める（既定値は `src-tauri/src/config.rs`・`draft_keys.rs` の写しなので、既定値を変えたら揃える）。SQLite の読み書きには Node の `node:sqlite` を使う。
-- **設定・履歴・資格情報は常用のものと分ける**: テストが起動するアプリは、プロファイル `e2e` で動く (`tauri-driver` を起動するときに環境変数 `MAWOK_PROFILE=e2e` を渡す。→ docs/platform.md「プロファイル」)。設定は `%APPDATA%\com.amiiby.mawok.e2e`、履歴・ログは `%LOCALAPPDATA%\com.amiiby.mawok.e2e` に置かれ、資格情報の service も別になる。サインインしていない状態で動くので、同期は走らない。プロファイルを見ない前の版を起動したら、プロファイルのログが書かれないので、起動したところで止まる (`lib/setup.mjs`)。
-- **設定の置き場の後始末**: `%APPDATA%\com.amiiby.mawok.e2e\settings.db` を書き換えるテストは、
+- **設定の置き場の名前の書き方**: 設定は置き場の TOML のファイル（`settings.toml`・`snippets.toml`・`replacements.toml`。docs/config.md）に、ログイン時の起動はアプリ設定フォルダーの `device.json` にあり、項目名は snake_case、既定と違う値だけが書かれる。ホットキーとキー操作は OS の名前（`macos`・`windows`・`linux`）の表に分かれる。テストは画面とのやり取りと同じ camelCase の名前（`textWindowKeys`・`hideTextWindowOnBlur` など）で読み書きし、`lib/settings-files.mjs` が名前を付け替える。Windows の `lib/config.mjs` は、書いていない項目を既定値で埋める（既定値は `src-tauri/src/config.rs`・`draft_keys.rs` の写しなので、既定値を変えたら揃える）。TOML の読み書きは、依存を増やさないよう `lib/settings-files.mjs` に、アプリが書く形に足りる分だけを持つ。テストは置き場を選ばずに回す（書き換えるときに `device.json` の置き場を既定に戻す）。
+- **設定・履歴は常用のものと分ける**: テストが起動するアプリは、プロファイル `e2e` で動く (`tauri-driver` を起動するときに環境変数 `MAWOK_PROFILE=e2e` を渡す。→ docs/platform.md「プロファイル」)。設定と履歴は `%APPDATA%\com.amiiby.mawok.e2e`、ログは `%LOCALAPPDATA%\com.amiiby.mawok.e2e` に置かれる。プロファイルを見ない前の版を起動したら、プロファイルのログが書かれないので、起動したところで止まる (`lib/setup.mjs`)。
+- **設定の置き場の後始末**: `%APPDATA%\com.amiiby.mawok.e2e` の設定のファイル・`device.json`・`history` フォルダーを書き換えるテストは、
   前後でバックアップ・復元する (`lib/config.mjs`)。落ちても壊れた設定が残らないよう、必ず
   `test.after` (ファイル単位の後処理) で復元すること。
   同じフォルダーの `.window-state.json` (テキストウィンドウと設定ウィンドウの位置と大きさの記録) も、同じ控えに入れて一緒に戻す。
-  置き場を壊すテストがアプリに作らせた `settings.broken-….db` は、テストの前からあったものを残して消す (`tests/settings-store.test.mjs`)。
 - **ウィンドウの大きさは、下限を見るときだけドラッグで変える**: `SetWindowPos` は最小の大きさを通り抜けて小さくなるので、最小の大きさは右下の角を本物のドラッグで縮めて見る (`lib/input.mjs` の `dragBottomRightCorner`)。位置と大きさの記憶を見るときは、`SetWindowPos` で動かす (`lib/window.mjs`)。
 - **中断したときに残るファイルは、次の実行が片付ける**: 実行中は `e2e/.e2e.lock` (同時に2つ
   回さないための排他ロック) と `e2e/.config-backup.json` (設定の置き場の控え) を置く
@@ -186,12 +185,12 @@ just macos-check --restore  # 中断して残った控えから戻すだけ
 ```
 
 - **ビルドしない**。常用の `/Applications/Mawok.app` を動かす（ほかのものは環境変数 `MAWOK_APP` で指す）。変更を見るときは、先に `just bundle` して入れ直しておく。
-- **設定・履歴・資格情報は常用のものと分ける**。プロファイル `e2e` で起動する（→ docs/platform.md「プロファイル」）。サインインしていない状態で動くので、同期は走らない。プロファイルを見ない前の版を指すと、起動したところで止まる。
+- **設定・履歴は常用のものと分ける**。プロファイル `e2e` で起動する（→ docs/platform.md「プロファイル」）。プロファイルを見ない前の版を指すと、起動したところで止まる。
 - **依存は要らない**（`pnpm install` しなくても回る）。
 - **許可**: 回す端末に、アクセシビリティと画面収録の許可が要る（システム設定の「プライバシーとセキュリティ」）。画面収録は、テキストウィンドウの重なりの層を読むのに使う（無いとウィンドウの名前が読めず、最前面のテストが落ちる）。どちらかの許可が無ければ、始める前に止まる。許可は流した大元のアプリに付き、Claude Code は版の番号の名前で出るので、更新のたびにオンにし直す。
 - **キーボードとフォーカスを使う**。回している間（全部で十数分）は、キーボードとマウスに触らない。貼り付け先に TextEdit を使うので、TextEdit が動いていると始めずに落ちる。ログイン時の起動の確認（`autostart`）はシステム設定のログイン項目の画面を開いて読み、読んだら終了するので、システム設定が開いていても始めずに落ちる。
-- **後始末**: 動いている Mawok を終了し、プロファイル `e2e` の設定・履歴・ウィンドウの位置の記録（`~/Library/Application Support/com.amiiby.mawok.e2e/` の `settings.db`・`history.json`・`.window-state.json`）とクリップボードを `e2e/.macos-backup/` に控えてから始める。終わったら Mawok を終了して戻し、動いていたなら起動し直す。テストが作らせた置き場の写し（`settings.broken-….db`）も、戻すときに消す。
-  - **ログイン時の起動**: 初めての起動を試すと、ログイン項目が登録される。控えるときに常用の Mawok として（プロファイルを付けず、利用者の設定のまま）一度起動し、ログイン時の起動が効いているかを読んでおく（登録の状態はほかのアプリから読めないので、ログイン項目が有効でない（システム設定で切った、登録が無い）ときに Mawok がログに書く一行で見分ける。設定の置き場が無ければ、起動すると登録してしまうので、起動せずに効いていないとみなす）。戻すときは、効いていなければオフの設定で一度起動して登録を外し、効いていれば置き場の無い初めての起動で登録し直す（ログイン時の起動の確認は登録を外すが、オンの設定で登録が無いまま起動すると、Mawok は設定をオフにそろえるため）。
+- **後始末**: 動いている Mawok を終了し、プロファイル `e2e` の設定・履歴・ウィンドウの位置の記録（`~/Library/Application Support/com.amiiby.mawok.e2e/` の設定のファイル・`device.json`・`history` フォルダー・`.window-state.json`）とクリップボードを `e2e/.macos-backup/` に控えてから始める。終わったら Mawok を終了して戻し、動いていたなら起動し直す。
+  - **ログイン時の起動**: 初めての起動を試すと、ログイン項目が登録される。控えるときに常用の Mawok として（プロファイルを付けず、利用者の設定のまま）一度起動し、ログイン時の起動が効いているかを読んでおく（登録の状態はほかのアプリから読めないので、ログイン項目が有効でない（システム設定で切った、登録が無い）ときに Mawok がログに書く一行で見分ける。設定（`device.json`）が無ければ、起動すると登録してしまうので、起動せずに効いていないとみなす）。戻すときは、効いていなければオフの設定で一度起動して登録を外し、効いていれば設定の無い初めての起動で登録し直す（ログイン時の起動の確認は登録を外すが、オンの設定で登録が無いまま起動すると、Mawok は設定をオフにそろえるため）。
   - **中断したとき**: Ctrl+C では後始末が走らず、控えが残る（Mawok はテストの設定のまま）。`just macos-check --restore` で、テストを回さずに戻す。戻さずに次に回したときも、先に戻してから始める。
 - **前面のアプリの読み方**: キー入力が Mawok に入るなら、Mawok を前面とみなす。テキストウィンドウはアプリを前面にしないパネルで出すので、`NSWorkspace` でも System Events の `frontmost` でも前のアプリのままになるが、Mawok のプロセスのアクセシビリティの `AXFrontmost` は true になる（2026-10 に macOS 26 で確かめた）。設定を開いたときのようにアプリごと前面になったときは、`NSWorkspace` の `frontmostApplication` で読む（こちらはアプリを終了した後などに古い値を返すことがあるので、ほかのアプリは System Events で読む）。`lib/macos.mjs` の `front()`。
 

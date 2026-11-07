@@ -18,7 +18,7 @@ const backups: Backup[] = [
 		createdAt: Date.UTC(2026, 9, 17, 12, 34, 56),
 		changes: [
 			{
-				id: 's_theme',
+				id: 'theme',
 				current: { type: 'theme', value: 'dark' },
 				restored: { type: 'theme', value: 'light' }
 			}

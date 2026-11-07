@@ -1,5 +1,5 @@
-//! 常用の Mawok と、設定・履歴・ログ・資格情報の置き場を分けて起動するためのプロファイル。
-//! 自動の確認と開発版が、その機でサインインしているアカウントで同期しないようにする（docs/platform.md「プロファイル」）。
+//! 常用の Mawok と、設定・履歴・ログの置き場を分けて起動するためのプロファイル。
+//! 自動の確認と開発版が、常用の設定の置き場を書き換えないようにする（docs/platform.md「プロファイル」）。
 
 use std::env::VarError;
 use std::sync::OnceLock;
@@ -12,7 +12,7 @@ const DEV: &str = "dev";
 
 const INVALID: &str = "must be 1-32 characters of a-z, 0-9 and '-'";
 
-/// フォルダー名と資格情報の service に入るので、どの OS でもそのまま使える文字に限る
+/// フォルダー名に入るので、どの OS でもそのまま使える文字に限る
 fn valid(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 32
@@ -32,7 +32,7 @@ fn with_profile(base: &str, profile: Option<&str>) -> String {
 fn resolve(value: Result<String, VarError>, debug: bool) -> Result<Option<String>, String> {
     let name = match value {
         Ok(name) => name,
-        // 開発版は、何も付けなくても常用の設定と資格情報に触れない
+        // 開発版は、何も付けなくても常用の設定に触れない
         Err(VarError::NotPresent) if debug => DEV.to_string(),
         Err(VarError::NotPresent) => return Ok(None),
         Err(VarError::NotUnicode(_)) => return Err(INVALID.to_string()),
@@ -60,7 +60,7 @@ fn current() -> Option<&'static str> {
         .as_deref()
 }
 
-/// アプリの識別子か資格情報の service に、プロファイルの名前を添える。プロファイルが無ければ、そのまま返す
+/// アプリの識別子に、プロファイルの名前を添える。プロファイルが無ければ、そのまま返す
 pub fn scoped(base: &str) -> String {
     with_profile(base, current())
 }

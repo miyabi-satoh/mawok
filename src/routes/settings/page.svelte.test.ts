@@ -45,27 +45,14 @@ function view(
 	});
 }
 
-function replacement(
-	id: string,
-	from: string,
-	to: string,
-	enabled = true,
-	sync = true
-): Replacement {
-	return { id, from, to, enabled, sync };
+function replacement(from: string, to: string, enabled = true): Replacement {
+	return { from, to, enabled };
 }
 
-/** set_replacements が呼ばれたときに渡された辞書（ID と同期の値を含む）。 */
-function savedReplacementPayloads(): Replacement[][] {
+/** set_replacements が呼ばれたときに渡された辞書 */
+function savedReplacements(): Replacement[][] {
 	return callsOf(invoked, 'set_replacements').map(
 		([, args]) => (args as { replacements: Replacement[] }).replacements
-	);
-}
-
-/** 既存の置き換え辞書の振る舞いのテスト用に、今回追加した同期用の値を除く。 */
-function savedReplacements() {
-	return savedReplacementPayloads().map((rows) =>
-		rows.map((row) => ({ from: row.from, to: row.to, enabled: row.enabled }))
 	);
 }
 
@@ -104,7 +91,7 @@ async function chooseFromRowMenu(
 	await screen.getByRole('menuitem', { name: item }).click();
 }
 
-/** 保存コマンドは、Rust が空の ID を補った行を返す。 */
+/** 行の保存コマンドは、保存した行をそのまま返す */
 function savedRows(command: string, args: unknown) {
 	const key =
 		command === 'set_replacements'
@@ -112,9 +99,23 @@ function savedRows(command: string, args: unknown) {
 			: command === 'set_snippets'
 				? 'snippets'
 				: null;
-	if (!key) return undefined;
-	const rows = (args as Record<string, Array<{ id: string }>>)[key];
-	return rows.map((row, index) => ({ ...row, id: row.id || `${key}-${index}` }));
+	return key ? (args as Record<string, unknown[]>)[key] : undefined;
+}
+
+/**
+ * 設定のファイルがほかで変わったか、バックアップから戻したことにする。知らせは中身を持たず、画面は get_settings で読み直す
+ */
+async function replaceConfig(next: SettingsView) {
+	const saved = invoked.getMockImplementation();
+	invoked.mockImplementation((command, args) =>
+		command === 'get_settings'
+			? Promise.resolve(next)
+			: (saved?.(command, args) ?? Promise.resolve())
+	);
+	emit(listened, EVENTS.CONFIG_REPLACED);
+	// 読み直した設定を写し終えるまで待つ
+	await new Promise((resolve) => setTimeout(resolve));
+	await tick();
 }
 
 beforeEach(() => {
@@ -149,9 +150,7 @@ describe('既定の値から変えた設定の印', () => {
 
 	it('すべての印の名前に対応する行を出す', async () => {
 		settings.current = settingsView({
-			modifiedSettings: [...CONSTANTS.MODIFIED_SETTINGS],
-			mawokAccountSignedIn: true,
-			proAvailable: true
+			modifiedSettings: [...CONSTANTS.MODIFIED_SETTINGS]
 		});
 		const screen = await render(Page);
 		const found = new Set<string>();
@@ -166,8 +165,7 @@ describe('既定の値から変えた設定の印', () => {
 			m.settings_category_keys,
 			m.settings_category_draft,
 			m.settings_category_copy,
-			m.settings_category_snippets,
-			m.settings_category_account
+			m.settings_category_snippets
 		]) {
 			await screen.getByRole('tab', { name: category() }).click();
 			collect();
@@ -179,37 +177,8 @@ describe('既定の値から変えた設定の印', () => {
 });
 
 describe('設定画面の置き換え辞書', () => {
-	it('Pro では同期の印を出し、押すとその行の値を保存する', async () => {
-		settings.current = {
-			...view([{ from: '濃度', to: 'Node.js', enabled: true, id: 'replacement-id', sync: true }]),
-			proAvailable: true
-		};
-		const screen = await renderAt(m.settings_category_copy);
-		const syncButton = screen.getByRole('button', {
-			name: m.settings_sync_item({ name: '濃度' })
-		});
-
-		expect(syncButton.element().getAttribute('aria-pressed')).toBe('true');
-		await syncButton.click();
-		expect(syncButton.element().getAttribute('aria-pressed')).toBe('false');
-
-		expect(savedReplacementPayloads().at(-1)).toEqual([
-			{ id: 'replacement-id', from: '濃度', to: 'Node.js', enabled: true, sync: false }
-		]);
-	});
-
-	it('Pro でなければ同期の印を出さない', async () => {
-		settings.current = view([replacement('replacement-0', '濃度', 'Node.js')]);
-		const screen = await renderAt(m.settings_category_copy);
-
-		await expect.element(screen.getByRole('textbox').first()).toBeVisible();
-		expect(
-			screen.getByRole('button', { name: m.settings_sync_item({ name: '濃度' }) }).elements()
-		).toHaveLength(0);
-	});
-
 	it('保存されている辞書を表に出す', async () => {
-		settings.current = view([replacement('replacement-0', '濃度', 'Node.js')]);
+		settings.current = view([replacement('濃度', 'Node.js')]);
 		const screen = await renderAt(m.settings_category_copy);
 
 		await expect.element(screen.getByLabelText(m.settings_replacements_from())).toHaveValue('濃度');
@@ -219,9 +188,7 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	const sixReplacements = () =>
-		['a', 'b', 'c', 'd', 'e', '濃度'].map((from) =>
-			replacement(`replacement-${from}`, from, from.toUpperCase())
-		);
+		['a', 'b', 'c', 'd', 'e', '濃度'].map((from) => replacement(from, from.toUpperCase()));
 
 	it('絞り込んだ行の前の文字列を書き換えて当たらなくなっても、語を変えるまで出したままにする', async () => {
 		settings.current = view(sixReplacements());
@@ -262,7 +229,7 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	it('打った内容をそのつど保存する', async () => {
-		settings.current = view([replacement('replacement-0', '滑ると', 'svelte')]);
+		settings.current = view([replacement('滑ると', 'svelte')]);
 		const screen = await renderAt(m.settings_category_copy);
 		await screen.getByRole('button', { name: m.settings_replacements_add() }).click();
 
@@ -277,10 +244,7 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	it('スイッチを切ると、その行だけを無効にして保存する', async () => {
-		settings.current = view([
-			replacement('replacement-0', '濃度', 'Node.js'),
-			replacement('replacement-1', '滑ると', 'svelte')
-		]);
+		settings.current = view([replacement('濃度', 'Node.js'), replacement('滑ると', 'svelte')]);
 		const screen = await renderAt(m.settings_category_copy);
 
 		// 2行目を切る。1行目を切ってしまう取り違えを見つけるため
@@ -293,10 +257,7 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	it('削除すると、その行を除いて保存する', async () => {
-		settings.current = view([
-			replacement('replacement-0', '濃度', 'Node.js'),
-			replacement('replacement-1', '滑ると', 'svelte')
-		]);
+		settings.current = view([replacement('濃度', 'Node.js'), replacement('滑ると', 'svelte')]);
 		const screen = await renderAt(m.settings_category_copy);
 
 		// 2行目を消す。1行目を消してしまう取り違えを見つけるため
@@ -307,7 +268,7 @@ describe('設定画面の置き換え辞書', () => {
 	});
 
 	it('保存が終わる前に打ち足しても、保存を重ねず、終わってから最後の内容で保存し直す', async () => {
-		settings.current = view([replacement('replacement-0', '仮', '')]);
+		settings.current = view([replacement('仮', '')]);
 		// 最初の保存だけ、わざと終わらせずに待たせる。
 		// mockImplementationOnce だと、設定ウィンドウを表示する show_settings_window に先に使われてしまう
 		let finishFirst: (() => void) | undefined;
@@ -363,7 +324,7 @@ describe('設定画面の下書きの履歴', () => {
 describe('設定画面の定型文', () => {
 	type SnippetContent = Pick<Snippet, 'name' | 'body'>;
 	const snippetRows = (rows: SnippetContent[]): Snippet[] =>
-		rows.map((row, index) => ({ ...newSnippet(row.name, row.body), id: `snippet-${index}` }));
+		rows.map((row) => newSnippet(row.name, row.body));
 
 	/** set_snippets に最後に渡された定型文。呼ばれていなければ null */
 	function lastSavedSnippets(): SnippetContent[] | null {
@@ -377,25 +338,6 @@ describe('設定画面の定型文', () => {
 	}
 
 	const confirm = { name: '確認', body: '一つずつ質問してください。\n以上です。' };
-
-	it('Pro では同期の印を出し、押すと定型文の値を保存する', async () => {
-		settings.current = {
-			...view(),
-			proAvailable: true,
-			snippets: snippetRows([confirm])
-		};
-		const screen = await renderAt(m.settings_category_snippets);
-		const syncButton = screen.getByRole('button', {
-			name: m.settings_sync_item({ name: confirm.name })
-		});
-
-		expect(syncButton.element().getAttribute('aria-pressed')).toBe('true');
-		await syncButton.click();
-		expect(syncButton.element().getAttribute('aria-pressed')).toBe('false');
-		expect(callsOf(invoked, 'set_snippets').at(-1)?.[1]).toEqual({
-			snippets: [{ ...newSnippet(confirm.name, confirm.body), id: 'snippet-0', sync: false }]
-		});
-	});
 
 	it('保存されている定型文を、名前と本文の欄に出す', async () => {
 		settings.current = { ...view(), snippets: snippetRows([confirm]) };
@@ -462,13 +404,12 @@ describe('設定画面の定型文', () => {
 		expect(lastSavedSnippets()).toEqual([confirm, added]);
 	});
 
-	it('同期の知らせで届いた定型文が一覧に出て、その後の編集の保存に含まれる', async () => {
+	it('設定のファイルがほかで変わって届いた定型文が一覧に出て、その後の編集の保存に含まれる', async () => {
 		settings.current = { ...view(), snippets: snippetRows([confirm]) };
 		const screen = await renderAt(m.settings_category_snippets);
 
-		const received = { name: '同期した行', body: '同期した本文' };
-		const synced = { ...view(), snippets: snippetRows([received, confirm]) };
-		emit(listened, EVENTS.CONFIG_REPLACED, synced);
+		const received = { name: '届いた行', body: '届いた本文' };
+		await replaceConfig({ ...view(), snippets: snippetRows([received, confirm]) });
 		await openRows(screen);
 		await expect
 			.element(screen.getByLabelText(m.settings_snippets_name()).nth(0))
@@ -706,12 +647,11 @@ describe('設定画面の下書きのフォント', () => {
 		);
 	});
 
-	it('同期の知らせで届いたフォント名を、その後の大きさの保存に使う', async () => {
+	it('設定のファイルがほかで変わって届いたフォント名を、その後の大きさの保存に使う', async () => {
 		settings.current = view([], 'keep', { family: 'Menlo', size: 16 });
 		const screen = await renderAt(m.settings_category_draft);
 
-		const synced = view([], 'keep', { family: 'HackGen', size: 16 });
-		emit(listened, EVENTS.CONFIG_REPLACED, synced);
+		await replaceConfig(view([], 'keep', { family: 'HackGen', size: 16 }));
 		await expect.element(screen.getByLabelText(m.settings_draft_font())).toHaveValue('HackGen');
 		await screen.getByLabelText(m.settings_draft_font_size()).fill('22');
 
@@ -1480,7 +1420,7 @@ describe('設定画面のサイドバー', () => {
 	});
 
 	it('分類を切り替えても、打ちかけの内容は残る', async () => {
-		settings.current = view([replacement('replacement-0', '仮', '')]);
+		settings.current = view([replacement('仮', '')]);
 		const screen = await renderAt(m.settings_category_copy);
 		await screen.getByLabelText(m.settings_replacements_from()).fill('濃度');
 
@@ -1615,10 +1555,7 @@ describe('設定画面の定型文の編集・絞り込み', () => {
 		await screen.getByLabelText(m.settings_snippets_body()).fill('要約してください。');
 
 		const saved = savedSnippets();
-		// 最初の保存で Rust（のモック）が振った ID を、続きの保存でも渡す
-		expect(saved.at(-1)).toEqual([
-			{ ...newSnippet('要約', '要約してください。'), id: 'snippets-0' }
-		]);
+		expect(saved.at(-1)).toEqual([newSnippet('要約', '要約してください。')]);
 		expect(saved.every((snippets) => snippets.length === 1)).toBe(true);
 	});
 

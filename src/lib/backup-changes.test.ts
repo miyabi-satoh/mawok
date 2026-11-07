@@ -5,38 +5,29 @@ import type { Replacement, Snippet } from '$lib/settings.svelte';
 import { newSnippet } from '$lib/snippets';
 import { restoreChangeText } from './backup-changes';
 
-const replacement: Replacement = {
-	id: 'a',
-	from: '濃度',
-	to: 'Node.js',
-	enabled: true,
-	sync: true
-};
-const snippet: Snippet = {
-	...newSnippet('挨拶', 'お世話になっております。\n佐藤です。'),
-	id: 'b'
-};
+const replacement: Replacement = { from: '濃度', to: 'Node.js', enabled: true };
+const snippet: Snippet = newSnippet('挨拶', 'お世話になっております。\n佐藤です。');
 
 describe('restoreChangeText', () => {
 	it('変わるものは先頭3件と残りを日本語の区切りで出す', () => {
 		const changes: BackupDifference[] = [
 			{
-				id: 's_theme',
+				id: 'theme',
 				current: { type: 'theme', value: 'dark' },
 				restored: { type: 'theme', value: 'light' }
 			},
 			{
-				id: 'r_a',
+				id: 'replacements:濃度',
 				current: { type: 'replacement', value: replacement },
 				restored: { type: 'replacement', value: { ...replacement, to: '戻した値' } }
 			},
 			{
-				id: 'o_replacements',
+				id: 'replacements:order',
 				current: { type: 'order', value: 'replacements' },
 				restored: { type: 'order', value: 'replacements' }
 			},
 			{
-				id: 'n_b',
+				id: 'snippets:挨拶\nお世話になっております。\n佐藤です。',
 				current: { type: 'snippet', value: snippet },
 				restored: { type: 'snippet', value: { ...snippet, body: '戻した本文' } }
 			}
@@ -58,17 +49,17 @@ describe('restoreChangeText', () => {
 	it('行が消える・戻る一覧の並びは、変わるものに挙げない', () => {
 		const changes: BackupDifference[] = [
 			{
-				id: 'n_b',
+				id: 'snippets:挨拶\nお世話になっております。\n佐藤です。',
 				current: { type: 'snippet', value: snippet },
 				restored: { type: 'deleted' }
 			},
 			{
-				id: 'o_snippets',
+				id: 'snippets:order',
 				current: { type: 'order', value: 'snippets' },
 				restored: { type: 'order', value: 'snippets' }
 			},
 			{
-				id: 'o_replacements',
+				id: 'replacements:order',
 				current: { type: 'order', value: 'replacements' },
 				restored: { type: 'order', value: 'replacements' }
 			}
@@ -81,12 +72,12 @@ describe('restoreChangeText', () => {
 	it('消えるものは今の行の名前で示す', () => {
 		const changes: BackupDifference[] = [
 			{
-				id: 'r_a',
+				id: 'replacements:濃度',
 				current: { type: 'replacement', value: replacement },
 				restored: { type: 'deleted' }
 			},
 			{
-				id: 'n_b',
+				id: 'snippets:挨拶\nお世話になっております。\n佐藤です。',
 				current: { type: 'snippet', value: snippet },
 				restored: { type: 'deleted' }
 			}
@@ -106,12 +97,12 @@ describe('restoreChangeText', () => {
 	it('戻るものは戻した行の名前で示す', () => {
 		const changes: BackupDifference[] = [
 			{
-				id: 'r_a',
+				id: 'replacements:濃度',
 				current: { type: 'deleted' },
 				restored: { type: 'replacement', value: replacement }
 			},
 			{
-				id: 'n_b',
+				id: 'snippets:挨拶\nお世話になっております。\n佐藤です。',
 				current: { type: 'deleted' },
 				restored: { type: 'snippet', value: snippet }
 			}

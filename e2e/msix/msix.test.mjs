@@ -19,6 +19,7 @@ import {
 	registerCrashRecovery,
 	releaseLock
 } from '../lib/config.mjs';
+import { SETTINGS_FILE } from '../lib/settings-files.mjs';
 import { markLog, readLogSince } from '../lib/files.mjs';
 import { describeForegroundWindow, getMawokProcessId, stopPowerShell } from '../lib/os.mjs';
 import { closeLeftoverTrayMenu, closeTrayMenu, openTrayMenu, readTrayMenu } from '../lib/tray.mjs';
@@ -350,9 +351,9 @@ describe('EXE 版のファイルが無い環境', () => {
 	test('設定・ログは、パッケージごとの場所に回され、EXE 版の場所には何もできない', async () => {
 		const redirected = redirectedDataDirs(pkg);
 		await waitFor(
-			() => fs.existsSync(path.join(redirected.roaming, 'settings.db')),
+			() => fs.existsSync(path.join(redirected.roaming, SETTINGS_FILE)),
 			(exists) => exists,
-			{ label: '回された先の settings.db' }
+			{ label: `回された先の ${SETTINGS_FILE}` }
 		);
 		assert.ok(fs.existsSync(path.join(redirected.local, 'logs', 'Mawok.log')));
 		assert.equal(fs.existsSync(APP_DATA_DIRS.roaming), false);

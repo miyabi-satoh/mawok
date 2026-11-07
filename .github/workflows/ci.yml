@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # ルートの prettier は .md を見ないので、just ci が読む .md (使い方の窓のマニュアル・紹介サイトの文章・.md も整形を見る窓口) のほかは、変わっても just ci の結果が変わらない。
+      # ルートの prettier は .md を見ないので、just ci が読む .md (使い方の窓のマニュアル・紹介サイトの文章) のほかは、変わっても just ci の結果が変わらない。
       - uses: dorny/paths-filter@v4
         id: changes
         if: github.event_name == 'pull_request'
@@ -105,7 +105,7 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: pnpm exec playwright install chromium
 
-      # 窓口と紹介のサイトは OS によらない中身 (Cloudflare の Worker と Astro) なので、macOS でだけ見る
+      # 紹介のサイトとその置き場は OS によらない中身 (Astro と Cloudflare の Worker の設定) なので、macOS でだけ見る
       - name: Run CI checks
         if: steps.scope.outputs.run == 'true'
         run: just ${{ runner.os == 'macOS' && 'ci' || 'ci-app' }}

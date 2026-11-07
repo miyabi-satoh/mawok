@@ -64,7 +64,7 @@ export async function startTauriDriver({ port = 4444, nativePort = 9515, msedged
 				msedgedriverPath
 			],
 			// アプリは tauri-driver → msedgedriver の順に環境変数を引き継ぐので、ここで渡せばアプリまで届く。
-			// プロファイルを分けて、常用のアカウントで同期しない・常用の設定と履歴に触れないようにする (src-tauri/src/profile.rs)
+			// プロファイルを分けて、常用の設定と履歴 (同期しているかもしれない置き場) に触れないようにする (src-tauri/src/profile.rs)
 			{ stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, [PROFILE_ENV]: PROFILE } }
 		);
 

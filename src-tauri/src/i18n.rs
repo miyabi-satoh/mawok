@@ -85,19 +85,32 @@ impl Lang {
         }
     }
 
-    /// 設定の置き場を読めず、元のファイルを写してから既定の設定で作り直した
-    pub fn settings_reset(self, file_name: &str) -> String {
+    /// 設定のファイルを読めない（手で書きかけ・形が合わない）。直して保存すれば読み直すので、消えるまで出す
+    pub fn settings_unreadable(self, files: &str) -> String {
         match self {
-            Lang::En => format!("Couldn't read the settings, so started with the defaults. The original file was copied to {file_name}"),
-            Lang::Ja => format!("設定を読めなかったため、元のファイルを {file_name} に写して、既定の設定で始めました"),
+            Lang::En => format!("Couldn't read the settings file {files}. Changes aren't saved to it until it's fixed"),
+            Lang::Ja => format!("設定のファイル {files} を読めません。直すまで、変えた設定はこのファイルに保存されません"),
         }
     }
 
-    /// 設定の置き場を開けず、作り直せもしなかった。変えた設定は保存されない
-    pub fn settings_unsaved(self, error: &str) -> String {
+    /// 設定の置き場にするフォルダーを選ぶ、OS のフォルダーの窓の題
+    pub fn pick_settings_folder(self) -> &'static str {
         match self {
-            Lang::En => format!("Couldn't save the settings: {error}"),
-            Lang::Ja => format!("設定を保存できません: {error}"),
+            Lang::En => "Choose the Settings Folder",
+            Lang::Ja => "設定の保存先を選ぶ",
+        }
+    }
+
+    /// 選んだ置き場のフォルダーか、設定のファイルの symlink の先が無い（クラウドストレージのドライブがつながっていない・
+    /// フォルダーを消した・dotfiles でファイルの無いブランチに切り替えた など）。現れたら消す
+    pub fn settings_folder_missing(self, dir: &str) -> String {
+        match self {
+            Lang::En => format!(
+                "The settings folder {dir} isn't available. Changes aren't saved until it is"
+            ),
+            Lang::Ja => format!(
+                "設定の保存先 {dir} が見つかりません。見つかるまで、変えた設定は保存されません"
+            ),
         }
     }
 
@@ -145,28 +158,6 @@ impl Lang {
             }
             Lang::Ja => format!(
                 "Mawok {version} があります。設定の「このアプリについて」から更新できます。"
-            ),
-        }
-    }
-
-    /// Mawok のアカウントと結んだあと、窓口から戻ったブラウザーに Mawok の待ち受けが返すページの見出しと本文
-    pub fn mawok_sign_in_page(self, signed_in: bool) -> (&'static str, &'static str) {
-        match (self, signed_in) {
-            (Lang::En, true) => (
-                "Signed in to Mawok",
-                "You can close this tab and go back to Mawok.",
-            ),
-            (Lang::En, false) => (
-                "Couldn't sign in",
-                "Go back to Mawok and sign in again from the settings.",
-            ),
-            (Lang::Ja, true) => (
-                "Mawok にサインインしました",
-                "このタブを閉じて、Mawok に戻ってください。",
-            ),
-            (Lang::Ja, false) => (
-                "サインインできませんでした",
-                "Mawok に戻り、設定からサインインし直してください。",
             ),
         }
     }

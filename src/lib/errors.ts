@@ -1,3 +1,6 @@
+import { ERROR_CODES } from '$lib/bindings/constants';
+import { m } from '$lib/paraglide/messages';
+
 /** ログに残すために、エラーを1つの文字列にする。スタックトレースがあれば含める。 */
 export function describeError(error: unknown): string {
 	if (!(error instanceof Error)) {
@@ -23,4 +26,20 @@ export function errorCode(error: unknown): string {
  */
 export function codeMessage(messages: Record<string, () => string>, code: string): string {
 	return Object.hasOwn(messages, code) ? messages[code]() : code;
+}
+
+/**
+ * 設定を保存するコマンドが、置き場の都合で保存しなかったときの文。ほかの失敗なら undefined。
+ * 読めない設定のファイルは、手で書きかけのものを画面からの変更で消さないよう書き換えない。選んだ置き場のフォルダーが
+ * 無い間は、つながった後のファイルを既定の設定で上書きしないよう何も書かない
+ */
+export function settingsSaveProblem(error: unknown): string | undefined {
+	switch (errorCode(error)) {
+		case ERROR_CODES.SETTINGS_FILE_UNREADABLE:
+			return m.settings_file_unreadable();
+		case ERROR_CODES.SETTINGS_FOLDER_UNAVAILABLE:
+			return m.settings_folder_unavailable();
+		default:
+			return undefined;
+	}
 }

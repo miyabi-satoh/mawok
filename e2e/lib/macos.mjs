@@ -21,7 +21,16 @@ import {
 	TRAY_MENU_JA
 } from './app-conf.mjs';
 import { fileExists, markLog, readLogSince, recordPath, writeJsonAtomic } from './files.mjs';
-import { BROKEN_PREFIX, readSettings, SETTINGS_FILE, writeSettings } from './settings-db.mjs';
+import {
+	DEVICE_FILE,
+	HISTORY_DIR,
+	readSettings,
+	removeConfigFiles,
+	restoreConfigDir,
+	SETTINGS_FILE,
+	snapshotConfigDir,
+	writeSettings
+} from './settings-files.mjs';
 import { expectStays, waitFor } from './wait.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -33,19 +42,10 @@ const PROCESS_NAME = 'mawok';
 const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', PROFILE_IDENTIFIER);
 // `open` は自分の環境変数を渡さないので、起動のたびに渡す
 const OPEN_APP = ['--env', `${PROFILE_ENV}=${PROFILE}`, APP_BUNDLE];
-const CONFIG_PATH = path.join(DATA_DIR, SETTINGS_FILE);
-const HISTORY_PATH = path.join(DATA_DIR, 'history.json');
-const REGULAR_CONFIG_PATH = path.join(
-	os.homedir(),
-	'Library',
-	'Application Support',
-	APP_IDENTIFIER,
-	SETTINGS_FILE
-);
+// テストは置き場を選ばずに回すので、設定のファイルと履歴 (history フォルダー) も DATA_DIR に置かれる (settings-files.mjs)
+const REGULAR_DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', APP_IDENTIFIER);
 const REGULAR_LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', APP_IDENTIFIER, 'Mawok.log');
 const LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', PROFILE_IDENTIFIER, 'Mawok.log');
-// 設定・履歴・位置の記録。テストが書き換えるので、まとめて控えて戻す
-const HELD_FILES = [SETTINGS_FILE, 'history.json', '.window-state.json'];
 
 // 控えのフォルダー。次に回したときに残っていれば、先に戻す
 const BACKUP_DIR = recordPath('.macos-backup');
@@ -883,7 +883,7 @@ export async function launchMawok({ regular = false } = {}) {
 		Boolean,
 		{ timeout: 20_000, interval: 300, label: 'Mawok の起動 (メニューバーのアイコン)' }
 	);
-	// プロファイルを知らない前の版は、常用の置き場で動いてアカウントと同期する。動かす前に止める
+	// プロファイルを知らない前の版は、常用の置き場で動いて利用者の設定を書き換える。動かす前に止める
 	if (regular) return;
 	const sawProfile = await waitFor(() => readLogSince(LOG_PATH, mark) !== '', Boolean, {
 		timeout: 5_000,
@@ -899,43 +899,29 @@ export async function launchMawok({ regular = false } = {}) {
 }
 
 /**
- * 設定の置き場を書き換えて起動し直す。`settings` は camelCase の名前で書いた設定 (settings-db.mjs) で、置き場をそっくり置き換える。
- * null なら置き場を消して起動する。省くと、置き場はそのままで起動し直す。`clearHistory` なら、下書きの履歴を消して起動する
+ * 設定の置き場を書き換えて起動し直す。`settings` は camelCase の名前で書いた設定 (settings-files.mjs) で、置き場をそっくり置き換える。
+ * null なら設定のファイルと device.json を消して (初めての起動として) 起動する。省くと、置き場はそのままで起動し直す。`clearHistory` なら、下書きの履歴を消して起動する
  */
 export async function relaunchWithConfig(settings, { clearHistory = false } = {}) {
 	await quitMawok();
 	if (settings === null) {
-		await fs.rm(CONFIG_PATH, { force: true });
-		await fs.rm(`${CONFIG_PATH}-journal`, { force: true });
+		await removeConfigFiles(DATA_DIR);
 	} else if (settings !== undefined) {
-		await fs.mkdir(DATA_DIR, { recursive: true });
-		writeSettings(CONFIG_PATH, settings);
+		await writeSettings(DATA_DIR, settings);
 	}
-	if (clearHistory) await fs.rm(HISTORY_PATH, { force: true });
+	// 置き場は writeSettings が既定に戻すので、消すのは既定の置き場の履歴だけ
+	if (clearHistory) await fs.rm(path.join(DATA_DIR, HISTORY_DIR), { recursive: true, force: true });
 	await launchMawok();
 }
 
-/** 置き場をそのままの中身で書き換える (SQLite として読めない置き場を試すとき用)。Mawok を止めてから呼ぶ */
+/** 設定のファイル (settings.toml) をそのままの中身で書き換える (TOML として読めないファイルを試すとき用)。Mawok を止めてから呼ぶ */
 export async function writeConfigBytes(bytes) {
-	await fs.writeFile(CONFIG_PATH, bytes);
+	await fs.writeFile(path.join(DATA_DIR, SETTINGS_FILE), bytes);
 }
 
-/** 今の置き場の項目 (camelCase の名前。既定と違う値だけ。無ければ null) */
+/** 今の置き場の項目 (camelCase の名前。ファイルに書いてある値だけ。どのファイルも無ければ null) */
 export function readConfig() {
-	return readSettings(CONFIG_PATH);
-}
-
-/** 設定フォルダーにある `settings.broken-….db` (読めない置き場を作り直す前に写したもの) の名前の一覧 */
-export async function brokenConfigCopies() {
-	const names = await fs.readdir(DATA_DIR);
-	return names.filter((name) => name.startsWith(BROKEN_PREFIX)).sort();
-}
-
-/** 設定フォルダーの `settings.broken-….db` を消す (テストが作らせたものの後始末) */
-async function removeBrokenConfigCopy(name) {
-	if (!name.startsWith(BROKEN_PREFIX))
-		throw new Error(`消せるのは ${BROKEN_PREFIX}….db だけです: ${name}`);
-	await fs.rm(path.join(DATA_DIR, name), { force: true });
+	return readSettings(DATA_DIR);
 }
 
 /** 動いている Mawok のプロセス ID */
@@ -1024,8 +1010,8 @@ export function draftWindowLayer() {
  */
 async function readAutostartOn() {
 	// ログイン項目は OS の上で1つで、プロファイルでは分かれない。利用者の状態は、常用の設定と常用の起動で読む
-	const config = await readSettings(REGULAR_CONFIG_PATH);
-	// 置き場が無いと初めての起動になり、起動すると登録してしまうので、起動せずに効いていないとみなす
+	const config = await readSettings(REGULAR_DATA_DIR);
+	// 設定が無いと初めての起動になり、起動すると登録してしまうので、起動せずに効いていないとみなす
 	// (戻すときに登録を外す。利用者が次に起動したときは初めての起動になり、そこで登録される)
 	if (config === null) return false;
 	if (config.autostart === false) return false;
@@ -1085,35 +1071,7 @@ export async function assertPermissions({ screenCapture: needScreenCapture = tru
 }
 
 /**
- * キーチェーンの許可のダイアログ (SecurityAgent) が出ていないことを見る。
- * 手元のビルドは ad-hoc 署名なので、入れ直すと常用の Mawok がキーを読むときに OS が許可を求める (docs/platform.md「アカウントのトークンとキーチェーン」)。
- * 確認はファイルごとに常用の Mawok を起動し直すので、許可しないまま回すと起動のたびにダイアログが積み重なり、フォーカスも奪われてテストが落ちる。
- * 「常に許可」を押せば同じビルドでは出ないので、回す前に常用の Mawok を動かして確かめる
- */
-export async function assertNoKeychainPrompt() {
-	// 確かめるために起動したときは終了して戻す (動いていたかは、この後の holdUserState が控える)。
-	// ダイアログが出ていれば、利用者が「常に許可」を押せるよう動かしたままにする
-	const launched = !(await isMawokRunning());
-	if (launched) await launchMawok({ regular: true });
-	const shown = await waitFor(
-		() =>
-			jxa(
-				`const p = se.processes.byName('SecurityAgent'); return p.exists() && p.windows.length > 0;`
-			),
-		Boolean,
-		// キーを読むのは起動の後なので、ダイアログが出るまで少し待つ
-		{ timeout: 5_000, interval: 500, label: 'キーチェーンの許可のダイアログ' }
-	).catch(() => false);
-	if (launched && !shown) await quitMawok();
-	if (shown) {
-		throw new Error(
-			'キーチェーンの許可のダイアログが出ています。パスワードを入れて「常に許可」を押してから回してください (同じビルドでは次から出ません)'
-		);
-	}
-}
-
-/**
- * 常用の Mawok を終了し、設定・履歴・位置の記録・クリップボード・設定の写しの一覧と、ログイン時の起動が効いているかを控える。
+ * 常用の Mawok を終了し、設定・履歴・位置の記録・クリップボードと、ログイン時の起動が効いているかを控える。
  * 前に中断されて控えが残っていれば、先にそれを戻す
  */
 export async function holdUserState() {
@@ -1122,30 +1080,18 @@ export async function holdUserState() {
 			(await restoreUserState({ relaunch: false })) === true)
 		: false;
 	const wasRunning = recoveredRunning || (await isMawokRunning());
-	await fs.mkdir(path.join(BACKUP_DIR, 'files'), { recursive: true });
 	await fs.mkdir(path.join(BACKUP_DIR, 'clipboard'), { recursive: true });
 	// 控えを取り終える前に止まっても、動いていた Mawok を起動し直せるよう、先に書いておく
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'running.json'), { wasRunning });
 	await quitMawok();
 	await fs.mkdir(DATA_DIR, { recursive: true });
-	const present = [];
-	for (const name of HELD_FILES) {
-		const source = path.join(DATA_DIR, name);
-		if (await fileExists(source)) {
-			await fs.copyFile(source, path.join(BACKUP_DIR, 'files', name));
-			present.push(name);
-		}
-	}
+	await writeJsonAtomic(path.join(BACKUP_DIR, 'files.json'), await snapshotConfigDir(DATA_DIR));
 	const clipboard = await readPasteboard(path.join(BACKUP_DIR, 'clipboard'));
-	// 戻すときに、テストが作らせた写し (置き場を作り直す前の settings.broken-….db) だけを消せるよう、前からある分を控える
-	const brokenCopies = await brokenConfigCopies();
 	const autostartOn = await readAutostartOn();
 	// 記録は最後に書く。これがあることを、控えが揃った印にする
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'state.json'), {
 		wasRunning,
-		present,
 		clipboard,
-		brokenCopies,
 		autostartOn
 	});
 }
@@ -1173,30 +1119,25 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	// オフならオフの設定で一度起動して外し、オンなら置き場の無い初めての起動で登録する
 	// (設定がオンで登録が無いと、起動しても登録せず、設定をオフにそろえるため。src-tauri/src/lib.rs の autostart_at_launch)
 	await fs.mkdir(DATA_DIR, { recursive: true });
-	if (state.autostartOn) await fs.rm(CONFIG_PATH, { force: true });
-	else writeSettings(CONFIG_PATH, { autostart: false });
+	if (state.autostartOn) await removeConfigFiles(DATA_DIR);
+	else await writeSettings(DATA_DIR, { autostart: false });
 	// 起動できなくても (プロファイルを見ない版を指していたなど)、控えたファイルとクリップボードは戻す
 	await launchMawok().catch((error) =>
 		console.warn(`ログイン項目を戻せませんでした: ${error.message}`)
 	);
 	await quitMawok();
-	for (const name of HELD_FILES) {
-		const target = path.join(DATA_DIR, name);
-		if (state.present.includes(name)) {
-			await fs.copyFile(path.join(BACKUP_DIR, 'files', name), target);
-		} else {
-			await fs.rm(target, { force: true });
-		}
-	}
-	// 前の版の控えには写しの一覧が無い。どれがテストのものか分からないので、そのときは消さない
-	for (const name of state.brokenCopies ? await brokenConfigCopies() : []) {
-		if (!state.brokenCopies.includes(name)) await removeBrokenConfigCopy(name);
-	}
+	// 前の版 (settings.db を写していた版) の控えには files.json が無い。今の版のファイルと形が違うので戻さない
+	const held = await fs
+		.readFile(path.join(BACKUP_DIR, 'files.json'), 'utf8')
+		.then(JSON.parse, () => null);
+	if (held) await restoreConfigDir(DATA_DIR, held);
+	else console.warn('前の版の控えなので、設定と履歴のファイルは戻しません');
 	await writePasteboard(state.clipboard);
 	// 戻し終えたら、控えを「起動し直すだけ」に縮めてから起動する。起動の途中で止まっても、次の回は起動し直すだけで、
 	// その間に利用者が変えた設定や履歴を古い控えで上書きしないように
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'running.json'), { wasRunning: state.wasRunning });
 	await fs.rm(stateFile, { force: true });
+	await fs.rm(path.join(BACKUP_DIR, 'files.json'), { force: true });
 	await fs.rm(path.join(BACKUP_DIR, 'files'), { recursive: true, force: true });
 	await fs.rm(path.join(BACKUP_DIR, 'clipboard'), { recursive: true, force: true });
 	if (relaunch && state.wasRunning) await launchMawok({ regular: true });
@@ -1206,10 +1147,12 @@ export async function restoreUserState({ relaunch = true } = {}) {
 
 /** 控えた設定から、テストで使う設定を作る。ログイン時の起動だけは、利用者の値を引き継ぐ */
 async function testConfig(extra = {}) {
-	const held = path.join(BACKUP_DIR, 'files', SETTINGS_FILE);
-	const config = (await readSettings(held).catch(() => null)) ?? {};
+	const held = await fs
+		.readFile(path.join(BACKUP_DIR, 'files.json'), 'utf8')
+		.then(JSON.parse, () => ({}));
+	const device = held[DEVICE_FILE] ? JSON.parse(held[DEVICE_FILE]) : {};
 	// ログイン項目の登録を書き換えないよう、利用者の値のまま起動する (既定はオン)
-	return { autostart: config.autostart, ...extra };
+	return { autostart: device.autostart ?? undefined, ...extra };
 }
 
 /** `testConfig(extra)` の設定で起動し直す。`extra` は camelCase の名前で書く。`opts` は `relaunchWithConfig` と同じ */

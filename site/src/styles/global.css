@@ -78,8 +78,6 @@ body {
 .site-header {
   display: flex;
   flex-wrap: wrap;
-  /* サイト名はアイコンを抱えたフレックスなので、baseline 揃えだと箱の下端が
-     ベースラインとみなされ、ナビが 10px ほど下へずれる */
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem 1.5rem;
@@ -105,7 +103,6 @@ body {
   height: 1.4em;
 }
 
-.site-nav ul,
 .site-footer ul {
   display: flex;
   flex-wrap: wrap;
@@ -115,7 +112,6 @@ body {
   list-style: none;
 }
 
-.site-nav li,
 .site-footer li {
   margin: 0;
 }

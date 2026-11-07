@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PROFILE_IDENTIFIER } from '../lib/app-conf.mjs';
 import {
-	brokenConfigCopies,
 	closeFinderWindow,
 	finderSelection,
 	finderWindowNames,
@@ -19,8 +18,8 @@ import {
 } from '../lib/macos.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
-// 設定の置き場を読めないときにメニューバーのメニューに出る警告と、ログを Finder で表示することを
-// macOS で見る。既定値で動くこと・写しの中身は、両 OS に共通の作りなので Windows の E2E
+// 設定のファイルを読めないときにメニューバーのメニューに出る警告と、ログを Finder で表示することを
+// macOS で見る。既定値で動くこと・読めないファイルを書き換えないことは、両 OS に共通の作りなので Windows の E2E
 // (tests/settings-store.test.mjs) に任せ、ここではメニューバーのメニューと Finder の側だけを見る
 
 /** メニューバーのメニューの、選べない「⚠ …」の項目の文言 */
@@ -31,7 +30,6 @@ async function readWarnings() {
 }
 
 test.describe('macOS: 設定の置き場', () => {
-	// テストが作らせた settings.broken-….db は、restoreUserState が消す
 	test.before(async () => {
 		await holdUserState();
 	});
@@ -40,17 +38,13 @@ test.describe('macOS: 設定の置き場', () => {
 		await restoreUserState();
 	});
 
-	test('SQLite として読めない置き場では、メニューに写した先のファイル名の警告が出る', async () => {
-		const copiesBefore = await brokenConfigCopies();
+	test('TOML として読めない設定のファイルでは、メニューに読めないファイルの警告が出る', async () => {
 		await quitMawok();
-		await writeConfigBytes(Buffer.from('not a database'));
+		await writeConfigBytes(Buffer.from('theme = \n'));
 		await launchMawok();
-		const copies = await brokenConfigCopies();
-		const created = copies.find((name) => !copiesBefore.includes(name));
-		assert.ok(created, 'settings.broken-….db ができる');
 		// 読めないと language も読めないので、文言の言語は OS の言語に従う。ここは日本語の macOS が前提
 		assert.deepEqual(await readWarnings(), [
-			`設定を読めなかったため、元のファイルを ${created} に写して、既定の設定で始めました`
+			'設定のファイル settings.toml を読めません。直すまで、変えた設定はこのファイルに保存されません'
 		]);
 	});
 

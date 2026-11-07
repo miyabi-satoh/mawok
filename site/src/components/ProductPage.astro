@@ -2,7 +2,6 @@
 import { getCollection, getEntry, render } from 'astro:content';
 import ComingSoon from './ComingSoon.astro';
 import ProductShots from './ProductShots.astro';
-import { TOKUSHOHO_URL } from '../lib/links';
 
 const product = (await getEntry('product', 'index'))!;
 const { Content } = await render(product);
@@ -41,9 +40,6 @@ const legal = (await getCollection('legal')).sort((a, b) => legalOrder.indexOf(a
             </li>
           ))
         }
-        <li>
-          <a href={TOKUSHOHO_URL}>特定商取引法に基づく表記</a>
-        </li>
       </ul>
     </div>
   </div>

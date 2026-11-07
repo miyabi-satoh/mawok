@@ -39,9 +39,9 @@ describe('使い方のウィンドウ', () => {
 
 	it('本文の中の節へのリンクでも、その節の見出しへ移ってフォーカスを置く', async () => {
 		const screen = await render(Page, { props: { data: { platform: 'macos' } } as never });
-		const link = screen.getByRole('article').getByRole('link', { name: '設定と履歴を同期する' });
+		const link = screen.getByRole('article').getByRole('link', { name: '設定の保存先を変える' });
 		await link.click();
-		await expect.poll(() => document.activeElement?.textContent).toBe('設定と履歴を同期する');
+		await expect.poll(() => document.activeElement?.textContent).toBe('設定の保存先を変える');
 		expect(document.activeElement?.tagName).toBe('H2');
 	});
 

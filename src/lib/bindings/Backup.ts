@@ -2,7 +2,7 @@
 import type { BackupDifference } from "./BackupDifference";
 
 /**
- * 戻す画面に並べるバックアップ。名前は UTC の作成日時で、画面は今との違いを選ぶ手がかりとして出す。
+ * 戻す画面に並べるバックアップ。名前は UTC の作成日時で、画面は今との違いを選ぶ手がかりとして出す
  */
 export type Backup = { name: string, 
 /**

@@ -1,11 +1,11 @@
 import type { BackupDifference } from '$lib/bindings/BackupDifference';
-import type { SyncValue } from '$lib/bindings/SyncValue';
+import type { BackupValue } from '$lib/bindings/BackupValue';
 import { m } from '$lib/paraglide/messages';
 import type { Locale } from '$lib/paraglide/runtime';
 import { CHAR_WIDTH_KINDS } from '$lib/setting-options';
 import { snippetLabel } from '$lib/snippets';
 
-type Row = Extract<SyncValue, { type: 'replacement' | 'snippet' }>;
+type Row = Extract<BackupValue, { type: 'replacement' | 'snippet' }>;
 
 const orEmpty = (text: string) => (text === '' ? m.settings_row_empty() : text);
 
@@ -23,7 +23,7 @@ const draftWindowLabel = (item: string) =>
 	m.backup_label_sub({ group: m.settings_section_draft_window(), item });
 
 /** 項目の名前。設定の画面でのその項目のラベルと同じ言い方にし、行は種類と行の名前にする */
-function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefined {
+function label(value: Exclude<BackupValue, { type: 'deleted' }>): string | undefined {
 	switch (value.type) {
 		case 'language':
 			return m.settings_language();
@@ -96,7 +96,7 @@ function label(value: Exclude<SyncValue, { type: 'deleted' }>): string | undefin
 export function restoreChangeText(changes: BackupDifference[], locale: Locale) {
 	const summarize = (
 		items: BackupDifference[],
-		value: (change: BackupDifference) => SyncValue,
+		value: (change: BackupDifference) => BackupValue,
 		message: (args: { names: string }) => string
 	) => {
 		const names = items
@@ -112,7 +112,7 @@ export function restoreChangeText(changes: BackupDifference[], locale: Locale) {
 		return message({ names: shown.join(locale === 'ja' ? '、' : ', ') });
 	};
 	// 行が消える・戻るなら並びも必ず変わる。その一覧の並びまで挙げると、同じことを2回言うことになる
-	const ROW_OF_ORDER: Record<string, SyncValue['type']> = {
+	const ROW_OF_ORDER: Record<string, BackupValue['type']> = {
 		replacements: 'replacement',
 		snippets: 'snippet'
 	};

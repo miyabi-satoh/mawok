@@ -2,7 +2,7 @@ import { untrack } from 'svelte';
 import { reorder } from '$lib/reorder';
 import { coalescedSaver } from '$lib/saver';
 
-/** 一覧の1行。key は画面の要素を保つためだけに使い、設定の id は Rust 側へ渡す。 */
+/** 一覧の1行。key は画面の要素（開いた状態・フォーカス・ドラッグ）を保つためだけに使い、Rust 側へは渡さない。 */
 export type Row<T> = T & { key: string };
 
 function withKey<T extends object>(item: T): Row<T> {
@@ -15,76 +15,69 @@ function withoutKey<T extends object>(row: Row<T>): T {
 	return item as T;
 }
 
+/** 行の欄がすべて同じか。欄はどれも文字列か真偽値なので、そのまま比べる */
+function sameFields<T extends object>(row: Row<T>, item: T): boolean {
+	return (Object.keys(item) as (keyof T)[]).every((field) => row[field] === item[field]);
+}
+
 /**
  * 設定画面で編集する一覧（置き換え辞書・定型文）。
  * 打っている途中に Rust 側からの反映で打ち消されないよう、最初の1回だけ写して以降は画面側が持ち主になる。
  * 変えるたびに save で行を丸ごと保存する。
  * 欄がすべて空の行（isBlank）は、足した直後の書きかけとして保存はするが、溜めない。
- * 「追加」は空の行が残っていればそれを使い、写すときと dropBlanks で捨てる
+ * 「追加」は空の行が残っていればそれを使い、写すときと dropBlanks で捨てる。
+ * 設定の行は識別子を持たないので、写し直すときは中身で前の行と結ぶ（recopy）
  */
-export class RowList<T extends { id: string }> {
+export class RowList<T extends object> {
 	rows = $state<Row<T>[]>([]);
 	/** 行を変えたら呼ぶ。保存が重なっても古い内容で上書きしない（coalescedSaver） */
 	readonly save: () => Promise<void>;
 	readonly #isBlank: (item: T) => boolean;
-	/** 写してから画面で変えたか。変えていなければ、写し直しても打った内容を消さない */
-	#edited = false;
+	readonly #name: (item: T) => string;
 	/** 保存を Rust 側へ送って、答えを待っているか */
 	#saving = false;
-	readonly #save: () => Promise<void>;
 
+	/** name は行の名前（置き換える前の文字列・定型文の名前）。写し直すときに、中身の変わった行を前の行と結ぶのに使う */
 	constructor(
 		items: T[],
-		save: (items: T[]) => Promise<T[] | undefined>,
-		isBlank: (item: T) => boolean
+		save: (items: T[]) => Promise<unknown>,
+		isBlank: (item: T) => boolean,
+		name: (item: T) => string
 	) {
 		this.#isBlank = isBlank;
+		this.#name = name;
 		// 前に開いたときに足したまま閉じた空の行は、写さない。次に保存したときに設定からも消える
 		this.rows = items.filter((item) => !isBlank(item)).map(withKey);
-		const saver = coalescedSaver(async () => {
-			const submitted = this.rows.map((row) => ({ ...row }));
+		this.save = coalescedSaver(async () => {
 			this.#saving = true;
-			const saved = await save(submitted.map(withoutKey)).finally(() => (this.#saving = false));
-			if (!saved) return;
-			for (const [index, item] of saved.entries()) {
-				const row = this.rows.find((current) => current.key === submitted[index]?.key);
-				if (row) row.id = item.id;
-			}
+			await save(this.rows.map(withoutKey)).finally(() => (this.#saving = false));
 		});
-		this.#save = saver;
-		this.save = () => {
-			this.#edited = true;
-			return saver();
-		};
 	}
 
 	/**
-	 * まだ画面で変えていなければ、Rust 側の今の中身を写し直す。保存はしない。
-	 * 同じ設定 ID の行は key を引き継ぐ。開いている行は key で覚えているので、作り直すと閉じてしまう。
-	 * force は、画面で変えていても写し直す（同期で届いた行を入れるとき。入れないと、次の保存が届いた行を画面の古い並びで消す）
+	 * Rust 側の今の中身を写し直す（ほかで設定のファイルが変わったときや、バックアップから戻したとき）。保存はしない。
+	 * 画面で変えていても写す。写さないと、次の保存が届いた行を画面の古い並びで消す。
+	 * 前と同じ行は key を引き継ぐ。開いている行は key で覚えているので、作り直すと閉じてしまう。
+	 * 同じ行かは、まず欄がすべて同じ行、残りは名前が同じ行で見る（ほかで本文や有効かだけを変えた行も引き継ぐため）
 	 */
-	recopy(items: T[], force = false) {
-		if (this.#edited && !force) return;
+	recopy(items: T[]) {
 		// 呼び出し元の effect が、行の並びの変化で走り直さないよう、今の行は追わずに読む
-		const previous = untrack(() => this.rows);
-		const keyOf = (item: T) => previous.find((row) => row.id !== '' && row.id === item.id)?.key;
-		// 設定 ID で引き継ぐ key を先に押さえる。途中に行が差し込まれると、位置で引き継ぐ行が同じ key を取ろうとする
-		const used = items.map(keyOf).filter((key) => key !== undefined);
+		const unused = [...untrack(() => this.rows)];
+		const take = (matches: (row: Row<T>) => boolean) => {
+			const index = unused.findIndex(matches);
+			return index === -1 ? undefined : unused.splice(index, 1)[0].key;
+		};
+		const keys = items.map((item) => take((row) => sameFields(row, item)));
+		for (const [index, item] of items.entries()) {
+			keys[index] ??= take((row) => this.#name(row) === this.#name(item));
+		}
 		this.rows = items
+			.map((item, index) => ({ item, key: keys[index] }))
 			// 画面に出ている書きかけの空の行は、足した直後に写し直しても残す
-			.filter((item) => !this.#isBlank(item) || (force && keyOf(item) !== undefined))
-			.map((item, index) => {
-				// 届いた行を入れるときは、足した直後でまだ設定 ID の無い行の key を別の行に渡さない
-				// （開いた状態やフォーカスが、届いた行へ移る）
-				const byPosition = force && previous[index]?.id === '' ? undefined : previous[index]?.key;
-				const key =
-					keyOf(item) ?? (byPosition && !used.includes(byPosition) ? byPosition : undefined);
-				if (!key) return withKey(item);
-				used.push(key);
-				return { ...item, key };
-			});
+			.filter(({ item, key }) => !this.#isBlank(item) || key !== undefined)
+			.map(({ item, key }) => (key ? { ...item, key } : withKey(item)));
 		// 答えを待っている保存は、写し直す前の並びを送っている。それが後から届いて届いた行を消さないよう、写した並びを保存し直す
-		if (force && this.#saving) void this.#save();
+		if (this.#saving) void this.save();
 	}
 
 	/** 行を末尾に足し、足した行を返す */

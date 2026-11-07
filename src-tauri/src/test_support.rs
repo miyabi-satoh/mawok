@@ -17,6 +17,10 @@ impl TempDir {
         Self(dir)
     }
 
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
     pub fn join(&self, name: impl AsRef<Path>) -> PathBuf {
         self.0.join(name)
     }

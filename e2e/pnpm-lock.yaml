@@ -166,6 +166,9 @@ importers:
 
   .:
     devDependencies:
+      smol-toml:
+        specifier: ^1.9.1
+        version: 1.9.1
       webdriverio:
         specifier: ^10.1.0
         version: 10.1.0(supports-color@7.2.0)(yauzl@2.10.0)
@@ -672,6 +675,10 @@ packages:
 
   setimmediate@1.0.5:
     resolution: {integrity: sha512-MATJdZp8sLqDl/68LfQmbP8zKPLQNV6BIZoIgrscFDQ+RsvK/BxeDQOgyxKKoh0y/8h3BqVFnCqQ/gd+reiIXA==}
+
+  smol-toml@1.9.1:
+    resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
+    engines: {node: '>= 18'}
 
   spacetrim@0.11.59:
     resolution: {integrity: sha512-lLYsktklSRKprreOm7NXReW8YiX2VBjbgmXYEziOoGf/qsJqAEACaDvoTtUOycwjpaSh+bT8eu0KrJn7UNxiCg==}
@@ -1309,6 +1316,8 @@ snapshots:
       type-fest: 5.10.0
 
   setimmediate@1.0.5: {}
+
+  smol-toml@1.9.1: {}
 
   spacetrim@0.11.59: {}
 

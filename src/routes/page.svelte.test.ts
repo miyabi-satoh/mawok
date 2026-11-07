@@ -6,7 +6,7 @@ import { userEvent } from 'vitest/browser';
 import { draftGuidance } from '$lib/guidance';
 import { m } from '$lib/paraglide/messages';
 import { type Platform } from '$lib/keys';
-import { settings, type SettingsView, type Snippet } from '$lib/settings.svelte';
+import { settings, type SettingsView } from '$lib/settings.svelte';
 import { EVENTS } from '$lib/bindings/constants';
 import { callsOf } from '$lib/test-support/calls';
 import { newSnippet } from '$lib/snippets';
@@ -32,13 +32,9 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 const invoked = vi.mocked(invoke);
 
-function snippet(id: string, name: string, body: string): Snippet {
-	return { ...newSnippet(name, body), id };
-}
-
 /** Rust 側から届くイベントを起こす */
 function emit(
-	name: typeof EVENTS.SHOWN | typeof EVENTS.HIDE_REQUESTED | typeof EVENTS.DRAFT_HISTORY_SYNCED,
+	name: typeof EVENTS.SHOWN | typeof EVENTS.HIDE_REQUESTED | typeof EVENTS.DRAFT_HISTORY_MERGED,
 	payload?: unknown
 ) {
 	for (const handler of listeners.get(name) ?? []) handler({ payload });
@@ -361,7 +357,7 @@ describe('下書きの履歴', () => {
 		await vi.waitFor(() => expect(loads).toBe(1));
 		await tick();
 
-		emit(EVENTS.DRAFT_HISTORY_SYNCED);
+		emit(EVENTS.DRAFT_HISTORY_MERGED);
 		await vi.waitFor(() => expect(loads).toBe(2));
 		invoked.mockClear();
 		await copy(textarea, 'git push');
@@ -592,8 +588,8 @@ describe('下書きの履歴', () => {
 });
 
 describe('定型文', () => {
-	const confirm = snippet('confirm', '確認', '一つずつ質問してください。\n以上です。');
-	const status = snippet('status', '', 'git status');
+	const confirm = newSnippet('確認', '一つずつ質問してください。\n以上です。');
+	const status = newSnippet('', 'git status');
 
 	beforeEach(() => {
 		invoked.mockImplementation((command) =>
@@ -687,7 +683,7 @@ describe('定型文', () => {
 	it('絞り込みを変えたら、先頭を選んだ状態に戻す', async () => {
 		settings.current = {
 			...view(),
-			snippets: [confirm, status, snippet('diff', 'git diff', 'git diff')]
+			snippets: [confirm, status, newSnippet('git diff', 'git diff')]
 		};
 		const screen = await render(Page);
 		const textarea = await openAt(screen, '', 0);
@@ -962,7 +958,7 @@ describe('定型文', () => {
 	});
 
 	it('差し込むと、履歴をたどっている途中ならそこでやめる', async () => {
-		settings.current = { ...view(), snippets: [snippet('sudo', '管理者で', 'sudo ')] };
+		settings.current = { ...view(), snippets: [newSnippet('管理者で', 'sudo ')] };
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('git status');
@@ -991,7 +987,7 @@ describe('下書きのボタン', () => {
 		invoked.mockImplementation((command) =>
 			Promise.resolve(command === 'commit' ? true : undefined)
 		);
-		settings.current = { ...view(), snippets: [snippet('confirm', '確認', '以上です。')] };
+		settings.current = { ...view(), snippets: [newSnippet('確認', '以上です。')] };
 	});
 
 	const copyButton = (screen: Screen) =>

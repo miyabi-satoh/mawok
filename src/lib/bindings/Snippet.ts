@@ -5,10 +5,6 @@
  */
 export type Snippet = { 
 /**
- * 同期でこの1件を見分けるランダムな値
- */
-id: string, 
-/**
  * 一覧で選ぶときの見出し。空なら、画面側で本文の最初の空でない行を代わりに出す
  */
 name: string, 
@@ -19,8 +15,4 @@ body: string,
 /**
  * 消さずに一覧から外せるようにするため、1件ずつ切れる（置き換え辞書と同じ）
  */
-enabled: boolean, 
-/**
- * ほかのデバイスと同期するか
- */
-sync: boolean, };
+enabled: boolean, };

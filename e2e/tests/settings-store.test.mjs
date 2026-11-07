@@ -19,12 +19,8 @@ import {
 import { sendKeySequence, VK } from '../lib/input.mjs';
 import {
 	beginTestConfig,
-	configExists,
-	listBrokenConfigCopies,
-	readBrokenConfigCopy,
-	removeBrokenConfigCopy,
 	tryReadConfig,
-	withoutSyncFields,
+	readConfigBytes,
 	writeConfigBytes,
 	writeTestSettings
 } from '../lib/config.mjs';
@@ -42,30 +38,18 @@ test.describe('再起動と設定の置き場', () => {
 	let client;
 	/** トレイのメニューを出したアプリのプロセス ID (後始末で、残ったメニューを閉じるために持つ) */
 	let trayPid;
-	/** テストの前からあった settings.broken-….db (テストが作らせたものだけを消すため) */
-	let brokenCopiesBefore;
 
 	test.before(async () => {
 		await suite.before();
 		// 警告の文言は Rust 側が表示言語から作る (`i18n.rs`) ので、日本語に固定する
 		testConfig = await beginTestConfig({ language: 'ja' });
-		brokenCopiesBefore = await listBrokenConfigCopies();
 	});
 	test.after(async () => {
+		// ログイン時の起動の登録は、直接回すときは suite.after が書き戻す (`just e2e` では run.mjs が書き戻す)
 		try {
-			// 前からあった一覧を取れていなければ、ユーザーの写しを消してしまわないよう何も消さない
-			if (brokenCopiesBefore !== undefined) {
-				for (const name of await listBrokenConfigCopies()) {
-					if (!brokenCopiesBefore.includes(name)) await removeBrokenConfigCopy(name);
-				}
-			}
+			await testConfig?.restore();
 		} finally {
-			// ログイン時の起動の登録は、直接回すときは suite.after が書き戻す (`just e2e` では run.mjs が書き戻す)
-			try {
-				await testConfig?.restore();
-			} finally {
-				await suite.after();
-			}
+			await suite.after();
 		}
 	});
 
@@ -121,40 +105,42 @@ test.describe('再起動と設定の置き場', () => {
 		const settings = await launch();
 		assert.equal(settings.hotkey, OTHER_HOTKEY);
 		assert.equal(settings.theme, 'dark');
-		assert.deepEqual(withoutSyncFields(settings.replacements), REPLACEMENTS);
+		assert.deepEqual(settings.replacements, REPLACEMENTS);
 		// 残ったホットキーが、起動したときに登録されている
 		await sendKeySequence([[VK.CONTROL, VK.SHIFT, VK.J]]);
 		await waitDraftVisible('残ったホットキーで下書きが出る');
 	});
 
-	test('SQLite として読めない置き場は、写してから既定の設定で作り直し、写した先をトレイに出す', async () => {
-		const broken = Buffer.from('not a database');
+	test('TOML として読めない設定のファイルは、書き換えずに既定の設定で始め、読めないファイルをトレイに出す', async () => {
+		const broken = Buffer.from('theme = \n');
 		await writeConfigBytes(broken);
-		const copiesBefore = await listBrokenConfigCopies();
 
 		const settings = await launch();
 		assert.equal(settings.hotkey, DEFAULT_HOTKEY, 'ホットキーは既定のはず');
 		assert.equal(settings.theme, 'system', 'テーマは既定のはず');
 		await sendHotkeyAsKeyInput();
 		await waitDraftVisible('既定のホットキーで下書きが出る');
-		assert.equal(await configExists(), true, '置き場を作り直すはず');
 
-		const copies = await listBrokenConfigCopies();
-		const created = copies.find((name) => !copiesBefore.includes(name));
-		assert.ok(created, 'settings.broken-….db ができるはず');
-		assert.deepEqual(await readBrokenConfigCopy(created), broken, '写しは元の中身のはず');
+		// 設定を変えても、読めないファイルは書き換えない (手で書きかけのものを消さないため)
+		await assert.rejects(
+			invokeApp(client, 'set_theme', { theme: 'dark' }),
+			/settings\.file_unreadable/
+		);
+		assert.deepEqual(await readConfigBytes(), broken, '読めないファイルはそのままのはず');
 
-		// 置き場を読めないと language も読めないので、文言の言語は OS の地域と言語に従う。
+		// 読めないと language も読めないので、文言の言語は OS の地域と言語に従う。
 		// ここは日本語環境が前提 (e2e/README.md の前提を参照)
 		assert.deepEqual(
 			await readTrayWarnings(),
-			[`設定を読めなかったため、元のファイルを ${created} に写して、既定の設定で始めました`],
-			'写した先がトレイの警告に出るはず'
+			[
+				'設定のファイル settings.toml を読めません。直すまで、変えた設定はこのファイルに保存されません'
+			],
+			'読めないファイルがトレイの警告に出るはず'
 		);
 	});
 
 	test('読めない値の項目だけが既定に戻り、ほかの項目はそのまま使う', async () => {
-		writeTestSettings({
+		await writeTestSettings({
 			// ログイン時の起動の登録に触れないよう、オフで起動する (beginTestConfig と同じ)
 			autostart: false,
 			hotkey: OTHER_HOTKEY,
@@ -166,11 +152,7 @@ test.describe('再起動と設定の置き場', () => {
 		const settings = await launch();
 		assert.equal(settings.theme, 'system', '読めない値のテーマは既定に戻るはず');
 		assert.equal(settings.hotkey, OTHER_HOTKEY, 'ほかの項目はそのままのはず');
-		assert.deepEqual(
-			withoutSyncFields(settings.replacements),
-			REPLACEMENTS,
-			'ほかの項目はそのままのはず'
-		);
+		assert.deepEqual(settings.replacements, REPLACEMENTS, 'ほかの項目はそのままのはず');
 		await sendKeySequence([[VK.CONTROL, VK.SHIFT, VK.J]]);
 		await waitDraftVisible('読めたホットキーで下書きが出る');
 		assert.deepEqual(await readTrayWarnings(), [], 'トレイには警告を出さないはず');

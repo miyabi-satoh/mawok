@@ -1,6 +1,6 @@
 // @ts-check
-// mawok.amiiby.com の紹介・料金・規約・プライバシーポリシー (→ docs/account-server.md「作り」)。特商法の表記は amiiby.com に置く。
-// 見た目は amiiby.com の紹介ページ (amiiby-site) から写した。窓口 (account-server/) の Worker が静的なファイルとして出す。
+// mawok.amiiby.com の紹介・規約・プライバシーポリシー。
+// 見た目は amiiby.com の紹介ページ (amiiby-site) から写した。account-server/ の Worker が静的なファイルとして出す。
 import { defineConfig } from 'astro/config';
 import { satteri } from '@astrojs/markdown-satteri';
 import sitemap from '@astrojs/sitemap';
