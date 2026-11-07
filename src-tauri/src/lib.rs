@@ -41,7 +41,7 @@ mod update_status;
 mod updater;
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex, OnceLock,
@@ -191,7 +191,7 @@ struct Problems {
 enum ConfigProblem {
     /// 読めなかった設定のファイルの名前。読めたファイルの設定と、読めないファイルは前に読めた設定（起動のときは既定）で動かす
     Unreadable(Vec<String>),
-    /// 選んだ置き場のフォルダーが無い。現れるまで既定の設定で動かし、何も書かない
+    /// 選んだ置き場のフォルダーか、設定のファイルの symlink の先が無い（`missing_settings_place`）。現れるまで何も書かない
     FolderMissing(String),
 }
 
@@ -1217,18 +1217,26 @@ fn settings_dir_ready(app: &AppHandle) -> bool {
         return false;
     }
     let chosen = state.device.lock().unwrap().settings_dir.is_some();
-    let dir = state.settings_dir();
-    if !chosen || dir.is_dir() {
+    let Some(missing) = missing_settings_place(&state.settings_dir(), chosen) else {
         return true;
-    }
-    warn!("the settings folder went away; waiting for it");
+    };
+    warn!("{} went away; waiting for it", missing.display());
     state.settings_dir_available.store(false, Ordering::SeqCst);
     state.problems.lock().unwrap().config =
-        Some(ConfigProblem::FolderMissing(dir.display().to_string()));
+        Some(ConfigProblem::FolderMissing(missing.display().to_string()));
     *state.watch.lock().unwrap() = None;
     refresh_tray(app);
     wait_for_settings_dir(app.clone());
     false
+}
+
+/// 置き場のうち無いもの（docs/config.md「置き場」）。選んだフォルダーが無いか、設定のファイルの symlink の先が無い。
+/// 既定の置き場は、無ければ作ってよい
+fn missing_settings_place(dir: &Path, chosen: bool) -> Option<PathBuf> {
+    if chosen && !dir.is_dir() {
+        return Some(dir.to_path_buf());
+    }
+    settings_files::dangling_link_target(dir)
 }
 
 /// 置き場のフォルダーが無い間に、画面から届いた履歴の消去と保存。現れたら、この順で書く（消去の後に届いた一覧を保存する）
@@ -1666,7 +1674,8 @@ fn wait_for_settings_dir(app: AppHandle) {
             if state.settings_dir_available.load(Ordering::SeqCst) {
                 return;
             }
-            if !state.settings_dir().is_dir() {
+            let chosen = state.device.lock().unwrap().settings_dir.is_some();
+            if missing_settings_place(&state.settings_dir(), chosen).is_some() {
                 continue;
             }
             info!("the settings folder appeared");
@@ -3022,18 +3031,18 @@ pub fn run() {
             info!("settings folder: {}", settings_dir.display());
             // 既定の置き場は作ってよいが、選んだ置き場は作らない。つながっていないドライブの場所に作ると、
             // つながった後のフォルダーと別物になるため
-            let settings_dir_available = device.settings_dir.is_none() || settings_dir.is_dir();
-            let (mut config, config_problem) = if settings_dir_available {
-                load_config(&settings_dir, &device, &Config::default())
-            } else {
-                warn!("the settings folder is missing; waiting for it");
-                let (config, _) = load_config(&settings_dir, &device, &Config::default());
-                (
-                    config,
-                    Some(ConfigProblem::FolderMissing(
-                        settings_dir.display().to_string(),
-                    )),
-                )
+            let missing = missing_settings_place(&settings_dir, device.settings_dir.is_some());
+            let settings_dir_available = missing.is_none();
+            let (mut config, config_problem) = match missing {
+                None => load_config(&settings_dir, &device, &Config::default()),
+                Some(missing) => {
+                    warn!("{} is missing; waiting for it", missing.display());
+                    let (config, _) = load_config(&settings_dir, &device, &Config::default());
+                    (
+                        config,
+                        Some(ConfigProblem::FolderMissing(missing.display().to_string())),
+                    )
+                }
             };
             let first_launch = is_first_launch(device_missing, device_saved);
             let mut problems = Problems {

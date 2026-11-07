@@ -145,6 +145,20 @@ pub fn write(
     }
 }
 
+/// 先のファイルが無い symlink の、先のパス（dotfiles でそのファイルの無いブランチに切り替えた間など）。
+/// 置き場が無いときと同じく扱う（docs/config.md「置き場」）。既定の値で読み直したり、symlink を普通のファイルに置き換えて
+/// 書いたりしないため
+pub fn dangling_link_target(dir: &Path) -> Option<PathBuf> {
+    FILE_NAMES.iter().find_map(|name| {
+        let path = dir.join(name);
+        let is_link = fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink());
+        if !is_link || path.exists() {
+            return None;
+        }
+        Some(dir.join(fs::read_link(&path).ok()?))
+    })
+}
+
 /// 書く先。symlink なら、その先のファイルに書く。stow などで張った dotfiles の symlink を、
 /// 一時ファイルからの差し替えで普通のファイルに置き換えて壊さないため
 fn target(path: &Path) -> PathBuf {
@@ -389,6 +403,21 @@ fn to_value(value: &Value) -> Option<toml_edit::Value> {
 mod tests {
     use super::*;
     use crate::test_support::TempDir;
+
+    // Windows は symlink を張るのに権限が要るので、Unix だけで確かめる
+    #[cfg(unix)]
+    #[test]
+    fn finds_a_link_whose_target_is_missing() {
+        let dir = TempDir::new("settings-files-dangling");
+        fs::write(dir.join("mawok.toml"), "").unwrap();
+        std::os::unix::fs::symlink("mawok.toml", dir.join(SETTINGS)).unwrap();
+        assert_eq!(dangling_link_target(dir.path()), None);
+        fs::remove_file(dir.join("mawok.toml")).unwrap();
+        assert_eq!(
+            dangling_link_target(dir.path()),
+            Some(dir.join("mawok.toml"))
+        );
+    }
     use serde_json::json;
 
     const MANAGED: &[&str] = &[
