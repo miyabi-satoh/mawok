@@ -19,9 +19,11 @@ const allowed = {
 	settings_exclude_history_description: '結果が見えにくい設定'
 };
 
-// 説明文として出る所: 部品の Description の中、description に渡す値、`_description` で終わる名前の文言
+// 説明文として出る所: 部品の Description の中、description に渡す値、設定の行の部品 (switchRow) の6つ目の引数、
+// `_description` で終わる名前の文言
 const block = /<(\w+\.)?Description\b[^>]*>([\s\S]*?)<\/(\w+\.)?Description>/g;
 const prop = /description[=:]\s*\{?\s*m\.(\w+)\(/g;
+const switchRow = /switchRow\((?:[^,()]|\([^()]*\))*(?:,(?:[^,()]|\([^()]*\))*){4},\s*m\.(\w+)\(/g;
 const named = /m\.(\w+_description)\(/g;
 const call = /m\.(\w+)\(/g;
 
@@ -36,7 +38,7 @@ for (const file of files) {
 	for (const [, , inner] of text.matchAll(block)) {
 		for (const [, key] of inner.matchAll(call)) keys.add(key);
 	}
-	for (const pattern of [prop, named]) {
+	for (const pattern of [prop, switchRow, named]) {
 		for (const [, key] of text.matchAll(pattern)) keys.add(key);
 	}
 	for (const key of keys) {

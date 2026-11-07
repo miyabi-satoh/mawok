@@ -255,6 +255,21 @@ fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
             return;
         }
     }
+    // 表（`[text_window_keys.macos]` など）は、項目ごとに入れ替える。表ごと入れ替えると、変えていない項目のコメントまで消える
+    if let (Some(Item::Table(existing)), Value::Object(object)) = (table.get_mut(name), value) {
+        let gone: Vec<String> = existing
+            .iter()
+            .map(|(key, _)| key.to_string())
+            .filter(|key| !object.contains_key(key))
+            .collect();
+        for key in gone {
+            existing.remove(&key);
+        }
+        for (key, value) in object {
+            set_or_remove(existing, key, Some(value));
+        }
+        return;
+    }
     let Some(item) = to_item(value) else {
         return;
     };
@@ -543,6 +558,22 @@ mod tests {
             "{snippets}"
         );
         assert_eq!(read(dir.path(), "macos").entries, next);
+    }
+
+    #[test]
+    fn keeps_the_comments_of_unchanged_keys_in_a_table() {
+        let dir = TempDir::new("settings-files-changed-table");
+        let before = "# よく使う\n[text_window_keys.macos]\ncopy = \"Mod+Enter\" # 手で決めた\npaste = \"Mod+KeyV\"\n";
+        fs::write(dir.join(SETTINGS), before).unwrap();
+        let next = entries(&[(
+            "text_window_keys",
+            json!({ "copy": "Mod+Enter", "paste": "Mod+KeyB" }),
+        )]);
+        write(dir.path(), "macos", MANAGED, &next).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join(SETTINGS)).unwrap(),
+            before.replace("Mod+KeyV", "Mod+KeyB")
+        );
     }
 
     #[test]
