@@ -40,24 +40,27 @@ pub fn start(
     let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let history = real(history_dir);
     let history_watched = history.clone();
-    // symlink にした設定のファイル（stow など）は、先のファイルを直すと先のフォルダーにだけ知らせが来るので、そこも見張る
-    let mut settings_dirs = vec![real(dir)];
+    // symlink にした設定のファイル（stow など）は、先のファイルを直すと先のフォルダーにだけ知らせが来るので、そこも見張る。
+    // 先のファイルは名前が違うこと（`ln -s ~/dotfiles/mawok.toml settings.toml`）があるので、先のパスでも選ぶ
+    let settings_dir = real(dir);
+    let mut targets = Vec::new();
+    let mut watched = vec![settings_dir.clone()];
     for name in settings_files::FILE_NAMES {
-        if let Some(parent) = std::fs::canonicalize(dir.join(name))
-            .ok()
-            .and_then(|target| target.parent().map(Path::to_path_buf))
-        {
-            if !settings_dirs.contains(&parent) {
-                settings_dirs.push(parent);
+        let Ok(target) = std::fs::canonicalize(dir.join(name)) else {
+            continue;
+        };
+        if let Some(parent) = target.parent().map(Path::to_path_buf) {
+            if !watched.contains(&parent) {
+                watched.push(parent);
             }
         }
+        targets.push(target);
     }
-    let watched = settings_dirs.clone();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         let Ok(event) = event else {
             return;
         };
-        let changed = classify(&settings_dirs, &history, &event.paths);
+        let changed = classify(&settings_dir, &targets, &history, &event.paths);
         if changed != Changed::default() {
             let _ = sender.send(changed);
         }
@@ -81,7 +84,12 @@ pub fn start(
     Ok(Watch { _watcher: watcher })
 }
 
-fn classify(settings_dirs: &[PathBuf], history_dir: &Path, paths: &[PathBuf]) -> Changed {
+fn classify(
+    settings_dir: &Path,
+    targets: &[PathBuf],
+    history_dir: &Path,
+    paths: &[PathBuf],
+) -> Changed {
     let mut changed = Changed::default();
     for path in paths {
         let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
@@ -90,8 +98,8 @@ fn classify(settings_dirs: &[PathBuf], history_dir: &Path, paths: &[PathBuf]) ->
         let name = name.to_string_lossy();
         if parent == history_dir && history_store::is_device_file(path) {
             changed.history = true;
-        } else if settings_dirs.iter().any(|dir| dir == parent)
-            && settings_files::FILE_NAMES.contains(&name.as_ref())
+        } else if (parent == settings_dir && settings_files::FILE_NAMES.contains(&name.as_ref()))
+            || targets.contains(path)
         {
             changed.settings = true;
         }
@@ -105,14 +113,14 @@ mod tests {
 
     #[test]
     fn picks_only_the_settings_files_and_history_files() {
-        let dirs = [
-            PathBuf::from("/sync/Mawok"),
-            PathBuf::from("/dotfiles/mawok"),
-        ];
-        let history = dirs[0].join("history");
-        let changed = |path: &str| classify(&dirs, &history, &[PathBuf::from(path)]);
+        let dir = PathBuf::from("/sync/Mawok");
+        let targets = [PathBuf::from("/dotfiles/mawok/snippets-mac.toml")];
+        let history = dir.join("history");
+        let changed = |path: &str| classify(&dir, &targets, &history, &[PathBuf::from(path)]);
         assert!(changed("/sync/Mawok/settings.toml").settings);
-        assert!(changed("/dotfiles/mawok/snippets.toml").settings);
+        // symlink の先は、名前が違っても選び、先のフォルダーのほかのファイルは選ばない
+        assert!(changed("/dotfiles/mawok/snippets-mac.toml").settings);
+        assert_eq!(changed("/dotfiles/mawok/settings.toml"), Changed::default());
         assert!(changed("/sync/Mawok/history/a1b2.json").history);
         assert_eq!(changed("/sync/Mawok/settings.toml.tmp"), Changed::default());
         assert_eq!(changed("/sync/Mawok/notes.txt"), Changed::default());
