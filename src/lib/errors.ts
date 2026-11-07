@@ -1,3 +1,6 @@
+import { ERROR_CODES } from '$lib/bindings/constants';
+import { m } from '$lib/paraglide/messages';
+
 /** ログに残すために、エラーを1つの文字列にする。スタックトレースがあれば含める。 */
 export function describeError(error: unknown): string {
 	if (!(error instanceof Error)) {
@@ -23,4 +26,14 @@ export function errorCode(error: unknown): string {
  */
 export function codeMessage(messages: Record<string, () => string>, code: string): string {
 	return Object.hasOwn(messages, code) ? messages[code]() : code;
+}
+
+/**
+ * 設定を保存するコマンドが、置き場の設定のファイルを読めずに保存しなかったときの文。ほかの失敗なら undefined。
+ * 手で書きかけのファイルを画面からの変更で消さないよう、Rust 側は読めないファイルを書き換えない
+ */
+export function settingsFileUnreadable(error: unknown): string | undefined {
+	return errorCode(error) === ERROR_CODES.SETTINGS_FILE_UNREADABLE
+		? m.settings_file_unreadable()
+		: undefined;
 }

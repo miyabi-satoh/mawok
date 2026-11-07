@@ -1,4 +1,5 @@
-//! 下書きの履歴を app_local_data_dir/history.json に保存する処理と、ほかのデバイスの履歴との混ぜ方。
+//! テキストウィンドウの履歴を、設定の置き場の `history/<デバイス>.json` に保存する処理と、ほかのデバイスの履歴との混ぜ方
+//! （docs/config.md「履歴」）。各デバイスは自分のファイルだけを書き、読むときにすべてのファイルを混ぜる
 
 use std::{
     collections::HashMap,
@@ -11,14 +12,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::atomic_file;
 
-pub const FILE_NAME: &str = "history.json";
-/// 本文だけを置いていた版。時刻は、読むときに付ける（docs/sync.md「履歴の同期」）。
+/// 設定の置き場の中で、履歴のファイルを置くフォルダー
+pub const DIR_NAME: &str = "history";
+/// 本文だけを置いていた版。時刻は、読むときに付ける（docs/config.md「履歴」）。
 const TEXT_ONLY_VERSION: u8 = 1;
 const VERSION: u8 = 2;
-/// 窓口に置く履歴の件数の上限（docs/sync.md「履歴の同期」）。
-pub const MAX_SYNCED_ENTRIES: usize = 100;
+/// 混ぜた履歴の件数の上限。どのデバイスの件数の設定も、これより多くはできない（config::MAX_DRAFT_HISTORY_SIZE）
+pub const MAX_MERGED_ENTRIES: usize = 100;
 
-/// 履歴の1件。項目名は、窓口に置く値と同じにする（docs/sync.md「履歴の同期」）。
+/// 履歴の1件（docs/config.md「履歴」）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub text: String,
@@ -26,7 +28,7 @@ pub struct Entry {
     pub at: u64,
 }
 
-/// 履歴の全体。窓口に置く値と同じ形（docs/sync.md「履歴の同期」）。`entries` は古い順。
+/// 履歴の全体。1つのデバイスのファイルの中身で、`entries` は古い順
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct History {
     pub entries: Vec<Entry>,
@@ -81,7 +83,7 @@ impl History {
     }
 
     /// 時刻の無い（0 の）本文に、次に新しい本文の 1 ms 前の時刻を付ける。いちばん新しい本文なら `newest` を付ける
-    /// （docs/sync.md「履歴の同期」）。時刻が 0 のままだと、消していなくても、消した時刻（0）以下として混ぜるときに落ちる。
+    /// （docs/config.md「履歴」）。時刻が 0 のままだと、消していなくても、消した時刻（0）以下として混ぜるときに落ちる。
     /// 付けた時刻があれば true
     fn dated(&mut self, newest: u64) -> bool {
         let mut changed = false;
@@ -107,9 +109,9 @@ impl History {
     }
 }
 
-/// 手元の履歴と窓口の履歴を混ぜる（docs/sync.md「混ぜ方」）。件数は `MAX_SYNCED_ENTRIES` までで、
-/// デバイスの件数には切り詰めない。結果は、どちらが手元でどちらが窓口かに依らない。依ると、同じ時刻の履歴の順や
-/// 切り詰めで落とす履歴がデバイスごとに違い、書き戻し合う
+/// 2つのデバイスの履歴を混ぜる（docs/config.md「履歴」）。件数は `MAX_MERGED_ENTRIES` までで、
+/// デバイスの件数には切り詰めない。結果は、どちらを先に渡したかに依らない。依ると、同じ時刻の履歴の順や
+/// 切り詰めで落とす履歴がデバイスごとに違う
 pub fn merge(local: &History, remote: &History) -> History {
     let cleared_at = local.cleared_at.max(remote.cleared_at);
     let mut newest: HashMap<&str, u64> = HashMap::new();
@@ -130,32 +132,12 @@ pub fn merge(local: &History, remote: &History) -> History {
         entries,
         cleared_at,
     }
-    .truncated(MAX_SYNCED_ENTRIES)
+    .truncated(MAX_MERGED_ENTRIES)
 }
 
-/// 同期で混ぜた履歴（`next`）を手元に入れる形にする。`snapshot` は同期を始めたときの手元の履歴で、`current` は今の
-/// 手元の履歴。通信の間に手元の履歴が変わっていたら、古い手元で混ぜた結果で上書きせず、今の手元ともう一度混ぜる。
-pub fn applied_from_sync(
-    current: &History,
-    snapshot: &History,
-    next: &History,
-    max_entries: usize,
-) -> History {
-    if current == snapshot {
-        return next.clone().truncated(max_entries);
-    }
-    let mut current = current.clone();
-    // 同期を始めたときからある消した時刻は、`next` が扱いを決めている（初めての同期では使わない。
-    // docs/sync.md「混ぜ方」）。通信の間に消したときの時刻だけを足す
-    if current.cleared_at == snapshot.cleared_at {
-        current.cleared_at = 0;
-    }
-    merge(&current, next).truncated(max_entries)
-}
-
-/// 画面が持つ履歴の写し。同期が履歴ファイルを入れ替えてから画面が読み直すまでの間だけ、ファイルと違う。
+/// 画面が持つ履歴の写し。ほかのデバイスの履歴を混ぜてファイルを入れ替えてから、画面が読み直すまでの間だけ、ファイルと違う。
 /// その間に画面から届く保存は、入れ替える前の一覧を元にしている。今のファイルと照らして時刻を付けると、
-/// 届いた履歴を画面の古い一覧で上書きするので、この写しと照らす。
+/// ほかのデバイスの履歴を混ぜた一覧を、画面の古い一覧で上書きするので、この写しと照らす。
 #[derive(Debug, Default)]
 pub struct ScreenCopy {
     /// 画面がまだ読み直していない入れ替えがあるときの、画面が持つ履歴
@@ -172,9 +154,9 @@ impl ScreenCopy {
         self.stale = None;
     }
 
-    /// 同期がファイルを入れ替えた。`before` は入れ替える前のファイル。先の入れ替えを画面がまだ読み直して
+    /// ほかのデバイスの履歴を混ぜて、ファイルを入れ替えた。`before` は入れ替える前のファイル。先の入れ替えを画面がまだ読み直して
     /// いなければ、画面が持つのはそのときの履歴のまま
-    pub fn replaced_by_sync(&mut self, before: History) {
+    pub fn replaced_by_other_devices(&mut self, before: History) {
         self.stale.get_or_insert(before);
     }
 
@@ -189,7 +171,7 @@ impl ScreenCopy {
         let Some(mut seen) = self.stale.take() else {
             return file.restamped(texts, now);
         };
-        // 消した時刻は今のファイルに合わせる。画面が持つ履歴の消した時刻は、同期が替える前のもの。
+        // 消した時刻は今のファイルに合わせる。画面が持つ履歴の消した時刻は、混ぜて替える前のもの。
         // 新しく覚えた本文は、届いた履歴と消した時刻より後にする。ほかのデバイスの時計が進んでいても、
         // 今覚えた本文が、消したはずの履歴として落ちたり、届いた履歴より古い方へ入ったりしないため
         seen.cleared_at = file.cleared_at;
@@ -324,6 +306,60 @@ impl std::fmt::Display for LoadError {
     }
 }
 
+/// このデバイスのファイル（`own`）と、同じフォルダーのほかのデバイスのファイルを混ぜた履歴。
+/// このデバイスのファイルが読めなければ、その理由を返す（呼ぶ側が写して退ける）。ほかのデバイスのファイルは、
+/// 読めなければログに出して飛ばす。書きかけを読んだだけのことがあり、ほかのデバイスのファイルには手を付けないため
+pub fn load_merged(own: &Path) -> Result<History, LoadError> {
+    let mut merged = load(own)?;
+    let Some(dir) = own.parent() else {
+        return Ok(merged);
+    };
+    let others = match fs::read_dir(dir) {
+        Ok(others) => others,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(merged),
+        Err(error) => {
+            log::warn!("couldn't list the draft history of the other devices: {error}");
+            return Ok(merged);
+        }
+    };
+    for other in others.flatten() {
+        let path = other.path();
+        if path == own || !is_device_file(&path) {
+            continue;
+        }
+        match load_other(&path) {
+            Ok(history) => merged = merge(&merged, &history),
+            Err(error) => log::info!(
+                "skipped the draft history {}: {error}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            ),
+        }
+    }
+    Ok(merged)
+}
+
+/// デバイスの履歴のファイルか。読めなかった履歴の写し（`<名前>.broken-….json`。set_aside）は、混ぜずに残す
+pub fn is_device_file(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension == "json")
+        && path
+            .file_stem()
+            .is_some_and(|stem| !stem.to_string_lossy().contains(".broken-"))
+}
+
+/// ほかのデバイスのファイルを読む。時刻の無い本文に時刻を付けても、書き戻さない
+fn load_other(path: &Path) -> Result<History, LoadError> {
+    let text = fs::read_to_string(path).map_err(|error| LoadError::Io(error.kind()))?;
+    let modified = fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(unix_millis)
+        .unwrap_or(1);
+    parse(&text, modified)
+        .map(|(history, _)| history)
+        .map_err(LoadError::Invalid)
+}
+
 /// 一時ファイルへ書いてから差し替える。unix では履歴本文を所有者だけが
 /// 読めるようにする。履歴も消した時刻も無ければ、空のファイルを作らず、無い状態にする。
 pub fn save(path: &Path, history: &History) -> io::Result<()> {
@@ -333,7 +369,7 @@ pub fn save(path: &Path, history: &History) -> io::Result<()> {
     atomic_file::write_private(path, format(history).as_bytes())
 }
 
-/// 読めなかった履歴を同じフォルダーの `history.broken-YYYYMMDD-HHMMSS.json` へ写してから消す。
+/// 読めなかった履歴を同じフォルダーの `<名前>.broken-YYYYMMDD-HHMMSS.json` へ写してから消す。
 /// 空で始めると次のコピーで上書きするので、先に写す。元を残すと、コピーせずに起動し直すたびに
 /// 同じ中身の写しが増える。写した先を返す。元がなければ何もせず None
 pub fn set_aside(path: &Path, now: SystemTime) -> io::Result<Option<PathBuf>> {
@@ -424,9 +460,28 @@ mod tests {
     }
 
     #[test]
+    fn mixes_the_files_of_the_other_devices_without_writing_them() {
+        let dir = TempDir::new("history-merged");
+        let own = dir.join("own.json");
+        save(&own, &history(&[("a", 10), ("b", 30)], 0)).unwrap();
+        let other = dir.join("other.json");
+        let other_text = r#"{"version": 2, "entries": [{"text": "c", "at": 20}, {"text": "b", "at": 40}], "cleared_at": 5}"#;
+        fs::write(&other, other_text).unwrap();
+        // 書きかけなどで読めないファイルは飛ばす
+        fs::write(dir.join("broken.json"), "{").unwrap();
+        fs::write(dir.join("notes.txt"), "not a history").unwrap();
+        let merged = load_merged(&own).unwrap();
+        assert_eq!(merged, history(&[("a", 10), ("c", 20), ("b", 40)], 5));
+        assert_eq!(fs::read_to_string(&other).unwrap(), other_text);
+        // ほかのデバイスで消した時刻より前の履歴は、どのデバイスの分も落とす
+        fs::write(&other, r#"{"version": 2, "entries": [], "cleared_at": 25}"#).unwrap();
+        assert_eq!(load_merged(&own).unwrap(), history(&[("b", 30)], 25));
+    }
+
+    #[test]
     fn loading_the_text_only_version_saves_it_with_times() {
         let dir = TempDir::new("history-text-only");
-        let path = dir.join(FILE_NAME);
+        let path = dir.join("a1b2c3d4.json");
         fs::write(&path, r#"{"version": 1, "entries": ["old", "new"]}"#).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.texts(), texts(&["old", "new"]));
@@ -477,14 +532,14 @@ mod tests {
     #[test]
     fn missing_file_is_empty() {
         let dir = TempDir::new("history-missing");
-        let path = dir.join(FILE_NAME);
+        let path = dir.join("a1b2c3d4.json");
         assert_eq!(load(&path), Ok(History::default()));
     }
 
     #[test]
     fn saves_atomically_and_with_private_permissions() {
         let dir = TempDir::new("history-save");
-        let path = dir.join(FILE_NAME);
+        let path = dir.join("a1b2c3d4.json");
         let saved = history(&[("draft", 1)], 0);
         save(&path, &saved).unwrap();
         assert_eq!(load(&path), Ok(saved));
@@ -498,7 +553,7 @@ mod tests {
     #[test]
     fn an_empty_history_leaves_no_file_unless_it_was_cleared() {
         let dir = TempDir::new("history-empty");
-        let path = dir.join(FILE_NAME);
+        let path = dir.join("a1b2c3d4.json");
         save(&path, &history(&[("draft", 1)], 0)).unwrap();
         save(&path, &History::default()).unwrap();
         assert!(!path.exists());
@@ -606,7 +661,7 @@ mod tests {
 
     #[test]
     fn merging_takes_the_later_clear_and_drops_entries_up_to_it() {
-        // 窓口の側で消した。消した時刻ちょうどの履歴も落とす
+        // ほかのデバイスで消した。消した時刻ちょうどの履歴も落とす
         assert_eq!(
             merge(
                 &history(&[("a", 10), ("b", 20), ("c", 30)], 5),
@@ -659,7 +714,7 @@ mod tests {
             cleared_at: 0,
         };
         let merged = merge(&side(1), &side(2));
-        assert_eq!(merged.entries.len(), MAX_SYNCED_ENTRIES);
+        assert_eq!(merged.entries.len(), MAX_MERGED_ENTRIES);
         // 160 件のうち、古い 60 件を落とす
         assert_eq!(merged.entries[0].at, 61);
         assert_eq!(merged.entries[99].at, 160);
@@ -683,7 +738,7 @@ mod tests {
         };
         let merged = merge(&side("a"), &side("b"));
         assert_eq!(merged, merge(&side("b"), &side("a")));
-        assert_eq!(merged.entries.len(), MAX_SYNCED_ENTRIES);
+        assert_eq!(merged.entries.len(), MAX_MERGED_ENTRIES);
         assert_eq!(merged.entries[0].text, "a11");
         assert_eq!(merged.entries[1].text, "b11");
         // 混ぜた結果は、どのデバイスの手元と混ぜ直しても変わらない
@@ -693,55 +748,16 @@ mod tests {
 
     #[test]
     fn merging_drops_entries_without_a_time() {
-        // 手元のファイルは読むときに時刻を付けるので、時刻が 0 の履歴は窓口の値にしか無い
+        // 読むときに時刻を付けるので、時刻が 0 の履歴は、ほかの版や手で書いたファイルにしか無い
         assert_eq!(
             merge(&history(&[("a", 10)], 0), &history(&[("b", 0)], 0)),
             history(&[("a", 10)], 0)
         );
     }
 
-    #[test]
-    fn a_synced_history_replaces_the_local_one_cut_to_the_device_size() {
-        let snapshot = history(&[("a", 10)], 0);
-        let next = history(&[("a", 10), ("b", 20), ("c", 30)], 0);
-        assert_eq!(applied_from_sync(&snapshot, &snapshot, &next, 50), next);
-        // 通信の間に件数を減らした
-        assert_eq!(
-            applied_from_sync(&snapshot, &snapshot, &next, 2),
-            history(&[("b", 20), ("c", 30)], 0)
-        );
-    }
-
-    #[test]
-    fn a_synced_history_is_mixed_again_with_a_history_changed_meanwhile() {
-        let snapshot = history(&[("a", 10)], 0);
-        let next = history(&[("a", 10), ("b", 20)], 0);
-        // 通信の間に覚えた
-        assert_eq!(
-            applied_from_sync(&history(&[("a", 10), ("c", 30)], 0), &snapshot, &next, 50),
-            history(&[("a", 10), ("b", 20), ("c", 30)], 0)
-        );
-        // 通信の間に消した。届いた履歴で戻さない
-        assert_eq!(
-            applied_from_sync(&history(&[], 40), &snapshot, &next, 50),
-            history(&[], 40)
-        );
-    }
-
-    #[test]
-    fn a_clear_the_sync_set_aside_does_not_come_back_with_an_entry_recorded_meanwhile() {
-        // 初めての同期が、手元の消した時刻（40）を使わずに窓口の履歴を残した
-        let snapshot = history(&[("c", 50)], 40);
-        let next = history(&[("a", 10), ("c", 50)], 0);
-        assert_eq!(
-            applied_from_sync(&history(&[("c", 50), ("d", 60)], 40), &snapshot, &next, 50),
-            history(&[("a", 10), ("c", 50), ("d", 60)], 0)
-        );
-    }
-
     fn stale_screen(seen: History) -> ScreenCopy {
         let mut screen = ScreenCopy::new();
-        screen.replaced_by_sync(seen);
+        screen.replaced_by_other_devices(seen);
         screen
     }
 
@@ -763,7 +779,7 @@ mod tests {
     }
 
     #[test]
-    fn a_save_from_a_screen_that_has_not_reread_keeps_the_synced_entries() {
+    fn a_save_from_a_screen_that_has_not_reread_keeps_the_merged_entries() {
         let mut screen = stale_screen(history(&[("a", 10), ("c", 30)], 0));
         let file = history(&[("a", 10), ("b", 20), ("c", 30), ("d", 40)], 0);
         let next = screen.saved(&file, texts(&["a", "c", "e"]), 50, 500);
@@ -774,7 +790,7 @@ mod tests {
         // 画面が持つのは、届いた履歴を除いた一覧のまま。続けて保存しても、同じ本文に新しい時刻を付け直さない
         assert_eq!(screen.saved(&next, texts(&["a", "c", "e"]), 50, 900), next);
         // 次の入れ替えがあっても、画面が持つ履歴は先のまま
-        screen.replaced_by_sync(next.clone());
+        screen.replaced_by_other_devices(next.clone());
         assert_eq!(screen.saved(&next, texts(&["a", "c", "e"]), 50, 900), next);
     }
 
@@ -786,17 +802,6 @@ mod tests {
         assert_eq!(
             screen.saved(&file, texts(&["a", "c"]), 50, 500),
             history(&[("b", 800), ("c", 801)], 700)
-        );
-    }
-
-    #[test]
-    fn a_save_from_a_screen_that_has_not_reread_follows_the_clear_time_of_the_file() {
-        // 初めての同期が、手元の消した時刻（40）を使わなかった。画面の古い一覧の保存で戻さない
-        let mut screen = stale_screen(history(&[("c", 50)], 40));
-        let file = history(&[("a", 10), ("c", 50)], 0);
-        assert_eq!(
-            screen.saved(&file, texts(&["c", "d"]), 50, 500),
-            history(&[("a", 10), ("c", 50), ("d", 500)], 0)
         );
     }
 
@@ -813,13 +818,13 @@ mod tests {
     #[test]
     fn sets_aside_unreadable_history() {
         let dir = TempDir::new("history-set-aside");
-        let path = dir.join(FILE_NAME);
+        let path = dir.join("a1b2c3d4.json");
         let now = UNIX_EPOCH + Duration::from_secs(1_789_281_005);
         assert_eq!(set_aside(&path, now).unwrap(), None);
 
         fs::write(&path, r#"{"version": 3, "entries": ["draft"]}"#).unwrap();
         let backup = set_aside(&path, now).unwrap().unwrap();
-        assert_eq!(backup, dir.join("history.broken-20260913-063005.json"));
+        assert_eq!(backup, dir.join("a1b2c3d4.broken-20260913-063005.json"));
         assert_eq!(
             fs::read_to_string(&backup).unwrap(),
             r#"{"version": 3, "entries": ["draft"]}"#

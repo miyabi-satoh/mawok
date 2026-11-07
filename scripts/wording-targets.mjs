@@ -6,13 +6,12 @@ import path from 'node:path';
 
 const root = path.join(import.meta.dirname, '..');
 
-// 窓口の画面とメールは account-server/src/i18n.ts、トレイとエラーは src-tauri/src/i18n.rs。
+// トレイとエラーは src-tauri/src/i18n.rs。
 // 紹介のサイト (site/) は、文章の書き方を amiiby-site の決まりに揃えるので、長音だけを見る。
 export const targets = [
 	{ path: 'messages/ja.json', parentheses: true },
 	{ path: 'docs/manual/ja.md', parentheses: true },
 	{ path: 'src-tauri/src/i18n.rs', parentheses: true },
-	{ path: 'account-server/src/i18n.ts', parentheses: true },
 	{ path: 'site/src/content', parentheses: false },
 	{ path: 'site/src/pages', parentheses: false }
 ];
@@ -44,7 +43,7 @@ export function* wordingLines(filter = () => true) {
 				} else if (file.endsWith('.md')) {
 					text = line.replace(/`[^`]*`/g, '');
 				}
-				// 窓口の文言も、リンクを Markdown で書く
+				// リンクの URL は文言でないので除く
 				yield { file, line: index + 1, text: text.replace(/\]\([^)]*\)/g, ']') };
 			}
 		}

@@ -1,0 +1,431 @@
+//! 設定のファイル（docs/config.md「ファイル」）。設定・定型文・置き換え辞書を、置き場の TOML のファイルに読み書きする。
+//! 画面から書くときは、手で書いたコメント・並び・知らない項目を残し、変えた項目だけを書き換える
+
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
+
+use serde_json::{Map, Number, Value};
+use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
+
+use crate::{atomic_file, config::key};
+
+pub const SETTINGS: &str = "settings.toml";
+pub const SNIPPETS: &str = "snippets.toml";
+pub const REPLACEMENTS: &str = "replacements.toml";
+/// 置き場に置くファイル。見張るときも、この名前のファイルの変化だけを拾う
+pub const FILE_NAMES: [&str; 3] = [SETTINGS, SNIPPETS, REPLACEMENTS];
+
+/// 行の並びを1つのファイルに置く項目と、そのファイル
+const ROW_FILES: [(&str, &str); 2] = [(key::SNIPPETS, SNIPPETS), (key::REPLACEMENTS, REPLACEMENTS)];
+
+/// OS ごとに欄を分ける項目（docs/config.md「ファイル」）。キーの名前が OS で違い、クラウドストレージには
+/// マシンごとに書き分ける仕組みが無いため
+const PER_OS: [&str; 2] = [key::HOTKEY, key::TEXT_WINDOW_KEYS];
+
+/// 読んだ結果
+#[derive(Debug, Default)]
+pub struct Read {
+    /// 項目名と値。設定の型への入れ方は config::from_entries
+    pub entries: BTreeMap<String, Value>,
+    /// 読めなかったファイルの名前と理由。読めないファイルの項目は entries に入らない
+    pub unreadable: Vec<(&'static str, String)>,
+}
+
+/// 置き場のファイルを読む。無いファイルは、書いていない（既定のまま）として扱う
+pub fn read(dir: &Path, os: &str) -> Read {
+    let mut read = Read::default();
+    for name in FILE_NAMES {
+        let document = match load(&dir.join(name)) {
+            Ok(Some(document)) => document,
+            Ok(None) => continue,
+            Err(error) => {
+                read.unreadable.push((name, error));
+                continue;
+            }
+        };
+        match name {
+            SETTINGS => {
+                for (item_name, item) in document.iter() {
+                    let Some(value) = to_json(item) else {
+                        continue;
+                    };
+                    if PER_OS.contains(&item_name) {
+                        if let Some(value) = value.get(os) {
+                            read.entries.insert(item_name.to_string(), value.clone());
+                        }
+                    } else if !is_row_item(item_name) {
+                        read.entries.insert(item_name.to_string(), value);
+                    }
+                }
+            }
+            _ => {
+                let (item_name, _) = ROW_FILES
+                    .into_iter()
+                    .find(|(_, file)| *file == name)
+                    .expect("a row file");
+                if let Some(value) = document.get(item_name).and_then(to_json) {
+                    read.entries.insert(item_name.to_string(), value);
+                }
+            }
+        }
+    }
+    read
+}
+
+/// 項目を書くファイルの名前
+pub fn file_of(item_name: &str) -> &'static str {
+    ROW_FILES
+        .into_iter()
+        .find(|(name, _)| *name == item_name)
+        .map_or(SETTINGS, |(_, file)| file)
+}
+
+/// 置き場に、設定のどれかのファイルがあるか。置き場を替えるときに、そちらの設定を使うかを聞くのに使う
+pub fn exists_in(dir: &Path) -> bool {
+    FILE_NAMES.iter().any(|name| dir.join(name).exists())
+}
+
+/// 項目を置き場のファイルに書く。`managed` は、このアプリが書く項目名（ほかの名前は、新しい版が書いた項目や
+/// 手で書いたものとして残す）。中身が変わらないファイルは書かない。ほかのデバイスで同期しているときに、
+/// 変えていないファイルまで書き換えて衝突のもとにしないため。
+/// 読めないファイルは書き換えない（手で書きかけのものを、画面からの変更で消さないため）。そのときは
+/// `SETTINGS_FILE_UNREADABLE` の符号を返す（読めるファイルの分は書く）
+pub fn write(
+    dir: &Path,
+    os: &str,
+    managed: &[&str],
+    entries: &BTreeMap<String, Value>,
+) -> Result<(), String> {
+    let mut unreadable = Vec::new();
+    for name in FILE_NAMES {
+        let path = dir.join(name);
+        let before = match fs::read_to_string(target(&path)) {
+            Ok(text) => Some(text),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("{name}: {error}")),
+        };
+        let mut document = match before.as_deref().map(str::parse::<DocumentMut>) {
+            Some(Ok(document)) => document,
+            Some(Err(_)) => {
+                unreadable.push(name);
+                continue;
+            }
+            None => DocumentMut::new(),
+        };
+        match name {
+            SETTINGS => update_settings(&mut document, os, managed, entries),
+            _ => {
+                let (item_name, _) = ROW_FILES
+                    .into_iter()
+                    .find(|(_, file)| *file == name)
+                    .expect("a row file");
+                set_or_remove(document.as_table_mut(), item_name, entries.get(item_name));
+            }
+        }
+        let after = document.to_string();
+        if before.as_deref() == Some(after.as_str())
+            || (before.is_none() && after.trim().is_empty())
+        {
+            continue;
+        }
+        atomic_file::write(&target(&path), after.as_bytes())
+            .map_err(|error| format!("{name}: {error}"))?;
+    }
+    if unreadable.is_empty() {
+        Ok(())
+    } else {
+        log::warn!(
+            "didn't write the unreadable settings files: {}",
+            unreadable.join(", ")
+        );
+        Err(crate::error_codes::SETTINGS_FILE_UNREADABLE.to_string())
+    }
+}
+
+/// 書く先。symlink なら、その先のファイルに書く。stow などで張った dotfiles の symlink を、
+/// 一時ファイルからの差し替えで普通のファイルに置き換えて壊さないため
+fn target(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn load(path: &Path) -> Result<Option<DocumentMut>, String> {
+    match fs::read_to_string(path) {
+        Ok(text) => text
+            .parse::<DocumentMut>()
+            .map(Some)
+            .map_err(|error| error.to_string()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn is_row_item(name: &str) -> bool {
+    ROW_FILES.iter().any(|(item_name, _)| *item_name == name)
+}
+
+fn update_settings(
+    document: &mut DocumentMut,
+    os: &str,
+    managed: &[&str],
+    entries: &BTreeMap<String, Value>,
+) {
+    let table = document.as_table_mut();
+    for &name in managed {
+        if is_row_item(name) {
+            continue;
+        }
+        if PER_OS.contains(&name) {
+            let mut per_os = match table.remove(name) {
+                Some(Item::Table(per_os)) => per_os,
+                // OS の欄でない形で書いてあれば、読むときも読み飛ばしているので、書くときに今の形に直す
+                _ => Table::new(),
+            };
+            set_or_remove(&mut per_os, os, entries.get(name));
+            if !per_os.is_empty() {
+                table.insert(name, Item::Table(per_os));
+            }
+        } else {
+            set_or_remove(table, name, entries.get(name));
+        }
+    }
+}
+
+/// 値を入れる。同じ値が書いてあれば、書き方（コメント・引用符の種類など）を残すため触らない。値が無ければ消す
+fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
+    let Some(value) = value else {
+        table.remove(name);
+        return;
+    };
+    if table.get(name).and_then(to_json).as_ref() == Some(value) {
+        return;
+    }
+    if let Some(item) = to_item(value) {
+        table.insert(name, item);
+    }
+}
+
+fn to_json(item: &Item) -> Option<Value> {
+    match item {
+        Item::None => None,
+        Item::Value(value) => value_to_json(value),
+        Item::Table(table) => Some(table_to_json(table.iter())),
+        Item::ArrayOfTables(tables) => Some(Value::Array(
+            tables
+                .iter()
+                .map(|table| table_to_json(table.iter()))
+                .collect(),
+        )),
+    }
+}
+
+fn table_to_json<'a>(items: impl Iterator<Item = (&'a str, &'a Item)>) -> Value {
+    Value::Object(
+        items
+            .filter_map(|(name, item)| to_json(item).map(|value| (name.to_string(), value)))
+            .collect(),
+    )
+}
+
+fn value_to_json(value: &toml_edit::Value) -> Option<Value> {
+    use toml_edit::Value as V;
+    Some(match value {
+        V::String(text) => Value::String(text.value().clone()),
+        V::Integer(number) => Value::Number(Number::from(*number.value())),
+        V::Float(number) => Value::Number(Number::from_f64(*number.value())?),
+        V::Boolean(flag) => Value::Bool(*flag.value()),
+        // 日時を書く設定は無い。文字列として読み、設定の型に入れるときに断る
+        V::Datetime(time) => Value::String(time.value().to_string()),
+        V::Array(array) => Value::Array(array.iter().filter_map(value_to_json).collect()),
+        V::InlineTable(table) => Value::Object(
+            table
+                .iter()
+                .filter_map(|(name, value)| value_to_json(value).map(|v| (name.to_string(), v)))
+                .collect::<Map<_, _>>(),
+        ),
+    })
+}
+
+/// JSON の値を TOML に。表の並び（定型文など）は `[[…]]` の表の並びに、表は `[…]` の表にする。
+/// 手で読み書きしやすい形にするため。null は TOML に無いので書かない（設定に null の値は無い）
+fn to_item(value: &Value) -> Option<Item> {
+    match value {
+        Value::Array(rows) if !rows.is_empty() && rows.iter().all(Value::is_object) => {
+            let mut tables = ArrayOfTables::new();
+            for row in rows {
+                tables.push(to_table(row.as_object()?));
+            }
+            Some(Item::ArrayOfTables(tables))
+        }
+        Value::Object(object) => Some(Item::Table(to_table(object))),
+        _ => to_value(value).map(Item::Value),
+    }
+}
+
+fn to_table(object: &Map<String, Value>) -> Table {
+    let mut table = Table::new();
+    for (name, value) in object {
+        if let Some(item) = to_item(value) {
+            table.insert(name, item);
+        }
+    }
+    table
+}
+
+fn to_value(value: &Value) -> Option<toml_edit::Value> {
+    Some(match value {
+        Value::Null => return None,
+        Value::Bool(flag) => (*flag).into(),
+        Value::Number(number) => match number.as_i64() {
+            Some(integer) => integer.into(),
+            None => number.as_f64()?.into(),
+        },
+        Value::String(text) => text.as_str().into(),
+        Value::Array(items) => toml_edit::Value::Array(items.iter().filter_map(to_value).collect()),
+        Value::Object(object) => toml_edit::Value::InlineTable(
+            object
+                .iter()
+                .filter_map(|(name, value)| to_value(value).map(|v| (name.as_str(), v)))
+                .collect(),
+        ),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TempDir;
+    use serde_json::json;
+
+    const MANAGED: &[&str] = &[
+        key::HOTKEY,
+        key::TEXT_WINDOW_KEYS,
+        key::THEME,
+        key::TEXT_FONT_SIZE,
+        key::SNIPPETS,
+        key::REPLACEMENTS,
+    ];
+
+    fn entries(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
+        pairs
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn round_trips_settings_rows_and_the_keys_of_this_os() {
+        let dir = TempDir::new("settings-files-round-trip");
+        let written = entries(&[
+            ("hotkey", json!("CommandOrControl+Shift+KeyM")),
+            (
+                "text_window_keys",
+                json!({ "copy": "CommandOrControl+KeyJ" }),
+            ),
+            ("theme", json!("dark")),
+            ("text_font_size", json!(20)),
+            (
+                "snippets",
+                json!([{ "name": "挨拶", "body": "お世話に\nなっております。", "enabled": true }]),
+            ),
+        ]);
+        write(dir.path(), "macos", MANAGED, &written).unwrap();
+        let read = read(dir.path(), "macos");
+        assert!(read.unreadable.is_empty());
+        assert_eq!(read.entries, written);
+        // 定型文は別のファイルに、表の並びで書く。置き換え辞書は空なので作らない
+        let snippets = fs::read_to_string(dir.path().join(SNIPPETS)).unwrap();
+        assert!(snippets.contains("[[snippets]]"), "{snippets}");
+        assert!(!dir.path().join(REPLACEMENTS).exists());
+        // ほかの OS では、その OS の欄が無いので既定のまま
+        let other = super::read(dir.path(), "windows");
+        assert!(!other.entries.contains_key("hotkey"));
+        assert!(!other.entries.contains_key("text_window_keys"));
+    }
+
+    #[test]
+    fn keeps_comments_unknown_items_and_the_other_os_when_writing() {
+        let dir = TempDir::new("settings-files-keeps");
+        let text = "# 自分で書いたメモ\ntheme = \"dark\" # 夜に使う\nfrom_a_newer_version = true\n\n[hotkey]\nwindows = \"Control+Shift+Space\"\n";
+        fs::write(dir.path().join(SETTINGS), text).unwrap();
+        let next = entries(&[
+            ("theme", json!("dark")),
+            ("text_font_size", json!(20)),
+            ("hotkey", json!("CommandOrControl+Shift+KeyM")),
+        ]);
+        write(dir.path(), "macos", MANAGED, &next).unwrap();
+        let after = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
+        assert!(after.contains("# 自分で書いたメモ"), "{after}");
+        assert!(after.contains("theme = \"dark\" # 夜に使う"), "{after}");
+        assert!(after.contains("from_a_newer_version = true"), "{after}");
+        assert!(
+            after.contains("windows = \"Control+Shift+Space\""),
+            "{after}"
+        );
+        assert!(
+            after.contains("macos = \"CommandOrControl+Shift+KeyM\""),
+            "{after}"
+        );
+        // 既定に戻した項目は消す
+        write(dir.path(), "macos", MANAGED, &entries(&[])).unwrap();
+        let reset = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
+        assert!(!reset.contains("theme"), "{reset}");
+        assert!(!reset.contains("macos"), "{reset}");
+        assert!(
+            reset.contains("windows = \"Control+Shift+Space\""),
+            "{reset}"
+        );
+    }
+
+    #[test]
+    fn does_not_rewrite_unchanged_or_unreadable_files() {
+        let dir = TempDir::new("settings-files-unreadable");
+        let broken = "theme = \n";
+        fs::write(dir.path().join(SETTINGS), broken).unwrap();
+        let read = read(dir.path(), "macos");
+        assert_eq!(read.unreadable.len(), 1);
+        assert_eq!(read.unreadable[0].0, SETTINGS);
+        let next = entries(&[
+            ("theme", json!("dark")),
+            (
+                "snippets",
+                json!([{ "name": "a", "body": "b", "enabled": true }]),
+            ),
+        ]);
+        assert!(write(dir.path(), "macos", MANAGED, &next).is_err());
+        assert_eq!(
+            fs::read_to_string(dir.path().join(SETTINGS)).unwrap(),
+            broken
+        );
+        // 読めるファイルは書く
+        assert!(dir.path().join(SNIPPETS).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_through_a_symlink() {
+        let dir = TempDir::new("settings-files-symlink");
+        let dotfiles = dir.path().join("dotfiles");
+        let config = dir.path().join("config");
+        fs::create_dir_all(&dotfiles).unwrap();
+        fs::create_dir_all(&config).unwrap();
+        fs::write(dotfiles.join(SETTINGS), "").unwrap();
+        std::os::unix::fs::symlink(dotfiles.join(SETTINGS), config.join(SETTINGS)).unwrap();
+        write(
+            &config,
+            "macos",
+            MANAGED,
+            &entries(&[("theme", json!("dark"))]),
+        )
+        .unwrap();
+        assert!(fs::symlink_metadata(config.join(SETTINGS))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(fs::read_to_string(dotfiles.join(SETTINGS))
+            .unwrap()
+            .contains("theme = \"dark\""));
+    }
+}

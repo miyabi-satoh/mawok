@@ -2,7 +2,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use crate::{config, draft_keys, error_codes, events, sync, sync_key};
+use crate::{config, draft_keys, error_codes, events};
 
 #[test]
 fn writes_constants() {
@@ -25,30 +25,21 @@ export const CONSTANTS = {{\n\
 \tDRAFT_ACTIONS: {:?},\n\
 \tSUPPORTED_CODES: {:?},\n\
 \tNEW_SNIPPET: {},\n\
-\tSYNCABLE_SETTINGS: {:?},\n\
-\tMODIFIED_SETTINGS: {:?},\n\
-\tMIN_SYNC_PASSWORD_CHARS: {}\n\
+\tMODIFIED_SETTINGS: {:?}\n\
 }} as const;\n\n\
 export const EVENTS = {{\n\
 \tSETTINGS_CHANGED: {:?},\n\
 \tDRAFT_HISTORY_CLEARED: {:?},\n\
-\tDRAFT_HISTORY_SYNCED: {:?},\n\
+\tDRAFT_HISTORY_MERGED: {:?},\n\
 \tSNIPPET_ADDED: {:?},\n\
 \tCONFIG_REPLACED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?},\n\
-\tMAWOK_SIGN_IN_ENDED: {:?},\n\
 \tUPDATE_CHANGED: {:?}\n\
 }} as const;\n\n\
 export const ERROR_CODES = {{\n\
-\tACCOUNT_UNREACHABLE: {:?},\n\
-\tACCOUNT_SIGN_IN_REQUIRED: {:?},\n\
-\tACCOUNT_TOKEN_UNREADABLE: {:?},\n\
-\tUNEXPECTED: {:?},\n\
 \tBACKUP_RESTORE_PARTIAL: {:?},\n\
-\tSYNC_WRONG_PASSWORD: {:?},\n\
-\tSYNC_PASSWORD_TOO_SHORT: {:?},\n\
-\tSYNC_STATE_CHANGED: {:?},\n\
+\tSETTINGS_FILE_UNREADABLE: {:?},\n\
 \tKEYS_INVALID: {:?},\n\
 \tKEYS_EDITING: {:?},\n\
 \tKEYS_HOTKEY: {:?},\n\
@@ -62,26 +53,17 @@ export const ERROR_CODES = {{\n\
         action_names,
         draft_keys::SUPPORTED_CODES,
         new_snippet,
-        sync::SYNCABLE_SETTING_NAMES,
         config::modified_setting_names(),
-        sync_key::MIN_PASSWORD_CHARS,
         events::SETTINGS_CHANGED,
         events::DRAFT_HISTORY_CLEARED,
-        events::DRAFT_HISTORY_SYNCED,
+        events::DRAFT_HISTORY_MERGED,
         events::SNIPPET_ADDED,
         events::CONFIG_REPLACED,
         events::SHOWN,
         events::HIDE_REQUESTED,
-        events::MAWOK_SIGN_IN_ENDED,
         events::UPDATE_CHANGED,
-        error_codes::ACCOUNT_UNREACHABLE,
-        error_codes::ACCOUNT_SIGN_IN_REQUIRED,
-        error_codes::ACCOUNT_TOKEN_UNREADABLE,
-        error_codes::UNEXPECTED,
         error_codes::BACKUP_RESTORE_PARTIAL,
-        error_codes::SYNC_WRONG_PASSWORD,
-        error_codes::SYNC_PASSWORD_TOO_SHORT,
-        error_codes::SYNC_STATE_CHANGED,
+        error_codes::SETTINGS_FILE_UNREADABLE,
         error_codes::KEYS_INVALID,
         error_codes::KEYS_EDITING,
         error_codes::KEYS_HOTKEY,

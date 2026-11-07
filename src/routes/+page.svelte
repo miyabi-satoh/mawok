@@ -16,7 +16,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '$lib/font';
 	import { draftGuidance } from '$lib/guidance';
-	import { errorCode } from '$lib/errors';
+	import { errorCode, settingsFileUnreadable } from '$lib/errors';
 	import { insertAsTyped } from '$lib/insert-text';
 	import {
 		DEFAULT_DRAFT_HISTORY_SIZE,
@@ -196,7 +196,7 @@
 	let historySavePending = false;
 	// 「履歴を削除する」の回数。読み込みの最中に消されたら、その読み込みの結果は捨てる
 	let historyClearedCount = 0;
-	// 読み込み・読み直しの最中に、同期で履歴が替わった知らせが届いた。終わってから読み直す
+	// 読み込み・読み直しの最中に、ほかのデバイスの履歴を混ぜて履歴が替わった知らせが届いた。終わってから読み直す
 	let historyReloadPending = false;
 
 	// 保存を待つ間に履歴が変わる（消される）ことがあるので、送る直前の中身を読む
@@ -224,7 +224,7 @@
 	}
 
 	/**
-	 * 同期で履歴が替わったので、読み直す。読み直す前の一覧を保存すると、届いた履歴を古い一覧で上書きするので、
+	 * ほかのデバイスの履歴を混ぜて履歴が替わったので、読み直す。読み直す前の一覧を保存すると、届いた履歴を古い一覧で上書きするので、
 	 * 読み直している間は保存を待たせ、その間に覚えた履歴を、読み直した履歴の後ろに足してから保存する
 	 */
 	function reloadDraftHistory() {
@@ -364,7 +364,7 @@
 			});
 			showNotice(added ? m.draft_snippet_registered() : m.draft_snippet_already_registered());
 		} catch (e) {
-			showError(m.draft_snippet_register_failed(), errorCode(e));
+			showError(m.draft_snippet_register_failed(), settingsFileUnreadable(e) ?? errorCode(e));
 		}
 	}
 
@@ -588,7 +588,7 @@
 				draftHistory.clear();
 				historySavePending = false;
 			}),
-			listen(EVENTS.DRAFT_HISTORY_SYNCED, reloadDraftHistory)
+			listen(EVENTS.DRAFT_HISTORY_MERGED, reloadDraftHistory)
 		]).then((fns) => {
 			// 読み込みが終わる前に表示されると shown を取り逃がすので、表示中かを Rust 側に確かめる。
 			// 表示中なら Rust 側が WebView にキーボードのフォーカスを移すので、ここでは表示時の処理をする

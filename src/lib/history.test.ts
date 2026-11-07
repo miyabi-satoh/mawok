@@ -218,7 +218,7 @@ describe('DraftHistory の移れるかどうか', () => {
 		expect(history.canGoOlder).toBe(false);
 	});
 
-	describe('同期で替わった履歴の読み直し', () => {
+	describe('ほかのデバイスの履歴を混ぜて替わった履歴の読み直し', () => {
 		function recorded(...texts: string[]): DraftHistory {
 			const history = new DraftHistory(5);
 			for (const text of texts) history.record(text);

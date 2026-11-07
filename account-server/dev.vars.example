@@ -1,8 +1,0 @@
-# 手元で動かすときの秘密の値。.dev.vars に写して使う。テストもこの値を使う。
-# Stripe で買う流れを手元で試すときだけ、サンドボックスの値を .dev.vars に書く。
-# webhook は `stripe listen --forward-to 127.0.0.1:8787/v1/stripe/webhook` で手元へ回し、出た whsec_ を使う。
-# STRIPE_SECRET_KEY=
-# STRIPE_WEBHOOK_SECRET=
-# STRIPE_PRO_MONTHLY_PRICE_ID=
-# STRIPE_PRO_YEARLY_PRICE_ID=
-# OPERATOR_EMAIL=

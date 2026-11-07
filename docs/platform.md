@@ -41,11 +41,10 @@
 
 環境変数 `MAWOK_PROFILE` に名前（英小文字・数字・`-` の 32 文字まで）を入れて起動すると、アプリの識別子の後ろに `.<名前>` を付けて動く（`src-tauri/src/profile.rs`）。常用の Mawok と分かれるのは、識別子で決まるもの。
 
-- 設定・履歴・ログのフォルダー（`<identifier>.<名前>`）。
-- OS の資格情報管理の service。アカウントのトークンと同期の鍵を、常用のものと別に持つ。プロファイルでサインインしなければ、同期も Pro の確かめも動かない。
+- 設定・履歴・ログのフォルダー（`<identifier>.<名前>`）。設定の置き場を選んでいれば、その置き場はプロファイルごとのデバイスの設定（docs/config.md「デバイスの手元に置くもの」）で決まる。
 - 単一起動の見分け。
 
-自動の確認（`e2e/`）は `e2e`、開発版（デバッグビルド）は何も付けなければ `dev` で動く。常用の設定とアカウントのまま動かすと、テストの設定や履歴が、同期で窓口とほかのデバイスへ書かれるため。開発版を常用の置き場で動かすときは、`MAWOK_PROFILE=` と空にする。
+自動の確認（`e2e/`）は `e2e`、開発版（デバッグビルド）は何も付けなければ `dev` で動く。常用の設定のまま動かすと、テストの設定や履歴が常用の置き場に書かれ、置き場を同期していればほかのデバイスへも届くため。開発版を常用の置き場で動かすときは、`MAWOK_PROFILE=` と空にする。
 
 グローバルホットキー・ログイン項目は OS の上で1つなので、分かれない。常用の Mawok と同時には動かさない。
 
@@ -92,7 +91,6 @@
 - 窓の位置と大きさは記録から戻さない（window-state プラグインに渡す印を空にする）。プラグインは物理ピクセルで記録して戻すが、GTK の倍率（端数の倍率のモニターでは 2 になる）がモニターや窓を作った時点で変わるため、開くたびに大きさがずれる（2026-10 に Hyprland の 1.125 倍と 1 倍のモニターで、720×567 の窓が 1544×1240 と記録され、次は 772×667 で開いた。小さい側にずれると最小の大きさに張り付く）。Wayland ではアプリが窓の位置を決められないので、位置を戻す意味も無い。
 - 入力欄の案内は、placeholder でなく、入力欄の裏の置き換えのハイライトの層に描く。WebKitGTK は placeholder を入力欄より1文字ほど広い幅で折り返し、右端が見切れるため。
 - ログイン時の起動は、XDG autostart の `~/.config/autostart/Mawok.desktop` を自分で読み書きする。デスクトップの設定で切ると `Hidden=true` や `X-GNOME-Autostart-enabled=false` が書かれ、tauri-plugin-autostart はそれを読まずに有効に戻してしまうため（上の「常駐」の決まり）。
-- アカウントのトークンと同期の鍵は、Secret Service（GNOME キーリング・KWallet など）に置く。Secret Service が動いていない環境では読み書きできず、使えない旨を出す。
 - トレイは StatusNotifierItem で出し、`libayatana-appindicator3` を実行時に読み込む（無いと起動できない）。押すとメニューが出るだけで、押したことは受け取れない。メニューの項目にホットキーは添わない（muda はウィンドウに付かないメニューにキーを付けない）。GNOME は AppIndicator の拡張が要る（Ubuntu には最初から入っている）。
 
 ## macOS の手元のビルドの署名
@@ -109,7 +107,6 @@
 - 見つけたら、OS の通知で知らせる。同じ版を知らせるのは1回だけで、知らせた版を `app_local_data_dir` の `update-notified.txt` に覚える。設定の画面で見つけた版は、知らせたものとして覚えるだけにする。確かめられなかったときはログに残し、設定の「このアプリについて」の更新の行に「確認できませんでした」と出すだけにする。ただし前に見つけた版があれば、その版を入れられる表示のまま残す（つながらない間に確かめ直しが当たっても、入れる手段を消さないため）。確かめられなかった回は確かめた時刻に数えず、次の見回り（1時間後）で確かめ直す。
 - 当てるのは利用者が「更新して再起動する」を押したとき。ダウンロードして署名を確かめ、`.app` を入れ替えて再起動する。テキストの書きかけは再起動で消えるので、書きかけがあるときだけ、ボタンの近くにその旨を出す。書きかけがあるかは、テキストウィンドウが空かどうかが変わったときに Rust へ知らせる（中身は渡さない）。
   - 再起動で立ち上がる次のプロセスが、終わりかけの前のプロセスを多重起動と取り違えて終わらないよう、再起動の前にロックファイル（`mawok.lock`）を放す。
-  - 配る版は Developer ID で署名するので、入れ替えた後もキーチェーンの項目を読むときの条件は変わらない（「アカウントのトークンとキーチェーン」）。
 - 設定（`pubkey`・`endpoints`・`requireSignedVersion`）は `src-tauri/tauri.macos.conf.json` に置く。`requireSignedVersion` で、JSON の `version` と署名した版が食い違う更新を断る（JSON 自体は署名されないので、古い版の成果物に新しい版の番号を付けて当てさせられるのを防ぐ）。`createUpdaterArtifacts` は設定ファイルに入れず、配る版を作るときに `--config` で足す（入れると、署名の鍵の無い手元のビルドが落ちる）。
 - 署名の秘密鍵とパスワードをなくすと、入っている Mac 版へ更新を届けられなくなる（公開鍵はアプリに埋め込まれているので、鍵を替えた版は手で入れ直してもらうしかない）。
 - 確認先の JSON の形（`platforms` のキーは `darwin-aarch64`・`darwin-x86_64`。`darwin-aarch64-app` のように末尾に `-app` を付けたキーがあれば先に使う）:
@@ -132,9 +129,9 @@
 
 - Intel と Apple Silicon の両方で動くユニバーサル版（`universal-apple-darwin`）を、Developer ID で署名・公証して、GitHub Releases で配る。手元の Mac で `just release-mac build` → `just release-mac publish` の順に流す（`scripts/release-mac.mjs`）。
 - `build`: ビルドし、`.app` が両方の CPU 向けを含み、公証の結果が綴じてあり Gatekeeper が通すことを確かめて、`src-tauri/target/release-mac/<版>/` に DMG・更新用の `.app.tar.gz`・`.sig`・確認先の JSON を並べる。JSON の `platforms` の `darwin-aarch64` と `darwin-x86_64` には、同じユニバーサル版のファイルを書く。
-- `publish`: 版の番号の変更を main に入れた後で、main で流す。Releases に上げてから、JSON を `site/public/updates/latest.json` に置いて窓口ごと置き直す（「デプロイ」は DEVELOPMENT.md）。
-  - JSON を Releases に上げる前に `site/` に置かない。その間に誰かが窓口を置き直すと、上がる前の版を見つけた Mac がダウンロードに失敗する。
-  - 出した後、JSON を main に入れる。入れないと、次に誰かが窓口を置き直したときに前の JSON に戻る。
+- `publish`: 版の番号の変更を main に入れた後で、main で流す。Releases に上げてから、JSON を `site/public/updates/latest.json` に置いてサイトごと置き直す（「デプロイ」は DEVELOPMENT.md）。
+  - JSON を Releases に上げる前に `site/` に置かない。その間に誰かがサイトを置き直すと、上がる前の版を見つけた Mac がダウンロードに失敗する。
+  - 出した後、JSON を main に入れる。入れないと、次に誰かがサイトを置き直したときに前の JSON に戻る。
 - 要るもの:
   - キーチェーンの Developer ID Application の証明書。作れるのは Apple Developer の Account Holder だけで、作り方は Apple の「Create Developer ID certificates」（https://developer.apple.com/help/account/certificates/create-developer-id-certificates/ ）。中間の認証局は G2 Sub-CA を選ぶ。
   - `TAURI_SIGNING_PRIVATE_KEY`: 更新の鍵のファイルの場所か中身。`TAURI_SIGNING_PRIVATE_KEY_PATH` は読まれない。パスワードは流すときに聞く。
@@ -152,10 +149,3 @@
   - EXE 版が動いている間に MSIX 版を起動すると、多重起動の防止で MSIX 版は終わり、EXE 版のテキストウィンドウが出る。
 - タスクバーに出すアイコンは、下地なし（`Square44x44Logo.targetsize-<大きさ>` の既定・`altform-unplated`・`altform-lightunplated` の3つ）で入れ、makepri で作る `resources.pri` に載せる。無いと、Windows はアクセントカラーの四角い下地に載せて出す（2026-09-27 に Windows 11 の実機で、設定のウィンドウのタスクバーのボタンを比べて確認。Alt+Tab とスタートメニューの検索は、どちらでも下地なしだった）。Windows の設定の「スタートアップ アプリ」は、これを入れても下地に載る。この画面は、下地なしの画像を持つほかのパッケージのアプリ（Claude・Microsoft Defender）も下地に載せていた。アイコンは自前の暗い下地を持つので、3つとも同じ画像にしている。大きさは Microsoft の文書（「Construct your Windows App's Icon」の App icon の節）が Required とする 16〜256 の14通りで、`just icons` が `src-tauri/icons/msix` に作る。
 - WebView2 は入っている前提にする（Windows 11 には OS に含まれる。MSIX には入れる処理が無い）。
-
-## アカウントのトークンとキーチェーン
-
-- アカウントのトークンと同期の鍵は OS の資格情報管理（macOS はキーチェーン、Windows は資格情報マネージャー、Linux は Secret Service）に置く。macOS のキーチェーンは保存したアプリを署名の条件で見分け、手元のビルドの ad-hoc 署名ではその条件がビルドごとに変わる（Apple の TN3127）ので、入れ直すたびに前の版で保存した項目を読むときに OS が許可を求める。Developer ID で署名した配る版は、条件が版をまたいで同じになる（同 TN3127）。
-- ビルドし直した版が前の版で保存した項目を読むと、許可のダイアログが出て、フォーカスがダイアログへ移る。「許可」を押すとダイアログは2回続けて出る（中身を読む呼び出しは1回）。「常に許可」なら、その版では次から出ない。
-- Mawok のアカウントのトークンと同期の鍵は、`mawok-account` の1つの項目にまとめて置く。許可は項目ごとに求められるので、別々の項目にすると、同期している人が「常に許可」を2回押すことになるため。同期を始めていなければトークンだけになる。
-- トークンを読んでいる間はフォーカスが外れてもテキストウィンドウを隠さない。許可のダイアログに応じている間に、テキストウィンドウが消えないようにするため。ダイアログを閉じてもテキストウィンドウにフォーカスは戻らず、フォーカスが外れた知らせも二度は来ないので、読み終えたらテキストウィンドウにフォーカスを戻す。

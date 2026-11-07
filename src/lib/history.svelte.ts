@@ -69,12 +69,12 @@ export class DraftHistory {
 		return true;
 	}
 
-	/** 同期で替わった履歴を読み直している途中か。途中の一覧は古いので、保存しない */
+	/** ほかのデバイスの履歴を混ぜて替わった履歴を読み直している途中か。途中の一覧は古いので、保存しない */
 	get isReloading(): boolean {
 		return this.#recordedWhileReloading !== null;
 	}
 
-	/** 同期で替わった履歴の読み直しを始める */
+	/** ほかのデバイスの履歴を混ぜて替わった履歴の読み直しを始める */
 	beginReload() {
 		this.#recordedWhileReloading ??= [];
 	}
@@ -130,7 +130,7 @@ export class DraftHistory {
 
 	/**
 	 * 保存する履歴。古いものから順に返す。たどり終えるのを待っている読み直した履歴があれば、そちらを返す。
-	 * たどっている間の一覧は読み直す前のもので、保存すると、同期で届いた履歴を古い一覧で上書きする
+	 * たどっている間の一覧は読み直す前のもので、保存すると、ほかのデバイスから届いた履歴を古い一覧で上書きする
 	 */
 	get entries(): string[] {
 		return this.#fit(this.#reloaded ?? this.#entries);

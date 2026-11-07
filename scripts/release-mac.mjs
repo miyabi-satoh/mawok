@@ -2,9 +2,9 @@
 //
 //   build:   ユニバーサル版を Developer ID で署名・公証し、更新用のファイルに更新の鍵で署名して、
 //            確認先の JSON と一緒に src-tauri/target/release-mac/<版>/ に並べる
-//   publish: GitHub Releases に上げてから、JSON を site/public/updates/latest.json に置き、窓口ごと置き直す
+//   publish: GitHub Releases に上げてから、JSON を site/public/updates/latest.json に置き、サイトごと置き直す
 //
-// JSON を site/ に置くのは Releases に上げた後にする。先に main に入れると、その間に誰かが窓口を置き直したとき、
+// JSON を site/ に置くのは Releases に上げた後にする。先に main に入れると、その間に誰かがサイトを置き直したとき、
 // まだ上がっていない版を Mac が見つけてダウンロードに失敗する。
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -232,11 +232,11 @@ function publish() {
 	});
 	if (deployed.status !== 0) {
 		fail(
-			'窓口を置き直せませんでした。Releases には上がっているので、account-server で pnpm run deploy を流し直してください'
+			'サイトを置き直せませんでした。Releases には上がっているので、account-server で pnpm run deploy を流し直してください'
 		);
 	}
 	console.log(
-		`\nMawok ${version} を出しました。次に窓口を置き直したときに古い JSON に戻らないよう、${SITE_LATEST_JSON} を main に入れてください。`
+		`\nMawok ${version} を出しました。次にサイトを置き直したときに古い JSON に戻らないよう、${SITE_LATEST_JSON} を main に入れてください。`
 	);
 }
 

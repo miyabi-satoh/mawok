@@ -1,12 +1,12 @@
 <script module lang="ts">
 	import { overrideItemIdKeyNameBeforeInitialisingDndZones } from 'svelte-dnd-action';
 
-	// 設定の ID は保存前に空になりうるので、ドラッグの識別子には画面だけの key を使う。
+	// 行は設定の側に識別子を持たないので、ドラッグの識別子には画面だけの key を使う。
 	// 一覧が1つでも描かれた後に呼ぶと例外になるので、部品を作るたびでなく、読み込んだときに一度だけ呼ぶ
 	overrideItemIdKeyNameBeforeInitialisingDndZones('key');
 </script>
 
-<script lang="ts" generics="T extends { id: string; name: string }">
+<script lang="ts" generics="T extends { name: string }">
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
 	import { dragHandle, dragHandleZone, type DndEvent } from 'svelte-dnd-action';

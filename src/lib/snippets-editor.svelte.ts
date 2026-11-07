@@ -24,13 +24,14 @@ export class SnippetsEditor {
 		this.snippets = new RowList(
 			view?.snippets ?? [],
 			async (snippets) => okValue(await this.call<Snippet[]>('set_snippets', { snippets })),
-			isBlankSnippet
+			isBlankSnippet,
+			(snippet) => snippet.name
 		);
 	}
 
-	/** 同期やバックアップから戻すことで設定が替わったら、定型文を写し直す。画面で変えていても写す（RowList.recopy の force） */
+	/** 設定のファイルがほかで変わったか、バックアップから戻したことで設定が替わったら、定型文を写し直す（RowList.recopy） */
 	recopy(view: SettingsView) {
-		this.snippets.recopy(view.snippets, true);
+		this.snippets.recopy(view.snippets);
 	}
 
 	/**

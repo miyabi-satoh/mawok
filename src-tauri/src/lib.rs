@@ -1,12 +1,12 @@
-mod account;
-mod account_credentials;
 mod atomic_file;
 mod autostart;
 mod backup;
+mod backup_restore;
 #[cfg(test)]
 mod bindings;
 mod config;
 mod debounce;
+mod device;
 mod diagnostics;
 mod draft_keys;
 mod error_codes;
@@ -23,12 +23,9 @@ mod package;
 mod placement;
 #[cfg(target_os = "linux")]
 mod portal_hotkey;
-mod pro;
 mod profile;
-mod secrets;
-mod store;
-mod sync;
-mod sync_key;
+mod settings_files;
+mod settings_watch;
 #[cfg(test)]
 mod test_support;
 mod text;
@@ -44,10 +41,9 @@ mod update_status;
 mod updater;
 
 use std::{
-    collections::BTreeMap,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex, OnceLock,
     },
     time::{Duration, Instant, SystemTime},
@@ -74,7 +70,6 @@ use crate::{
     draft_keys::{DraftAction, DraftKeys, Platform},
     hotkey::Registrar as _,
     i18n::Lang,
-    sync_key::SyncKeyStatus,
     text::{CharWidths, PunctuationStyle, Replacement, ReplacementMatch},
 };
 
@@ -122,31 +117,19 @@ struct DraftState {
     focused_since_shown: AtomicBool,
 }
 
-/// Mawok のアカウントの窓口とのやり取り（account.rs）
-#[derive(Default)]
-struct AccountState {
-    /// 使い回す HTTP クライアント。最初に窓口とやり取りするときに作る
-    client: OnceLock<reqwest::Client>,
-    /// Mawok のアカウントのトークンを資格情報管理から読んでいる数。読んでいる間は、フォーカスが外れても下書きを隠さない
-    reading_credential: AtomicUsize,
-    /// トークンを読んでいる間に、フォーカスが外れても隠さずに見送ったか。読み終えたら、下書きにフォーカスを戻すかどうかに使う
-    blur_kept_for_credential: AtomicBool,
-    /// Mawok のアカウントと結ぶため、127.0.0.1 で戻りを待ち受けているタスク（start_mawok_sign_in）
-    mawok_sign_in: Mutex<Option<PendingMawokSignIn>>,
-    /// Mawok のアカウントと結ぶ申し込みに振った番号の最大
-    mawok_sign_in_id: AtomicU64,
-    /// トークンを置く処理と消す処理を1つずつ流す。サインインの終わりとサインアウトが重なっても、Pro の状態とトークンが食い違わないようにする。
-    /// サインアウトは、この排他の中で同期の記録を消すので、同期の記録の排他（`AppState.sync_commit`）より先に取る
-    token: tauri::async_runtime::Mutex<()>,
-}
-
-/// 設定と、トレイに出す問題。設定画面から変えると、ここと設定の置き場の両方を更新する
+/// 設定と、トレイに出す問題。設定画面から変えると、ここと設定のファイルの両方を更新する
 struct AppState {
-    /// 設定・同期の oplog・同期の記録の置き場（store.rs）
-    store: Mutex<store::Store>,
-    /// 設定のバックアップの置き場（backup.rs）
+    /// このデバイスだけの設定のファイル（device.rs）。OS 標準のアプリ設定フォルダーにある
+    device_path: PathBuf,
+    device: Mutex<device::Device>,
+    /// 設定の置き場（docs/config.md「置き場」）。利用者が選んだフォルダーか、OS 標準のアプリ設定フォルダー
+    settings_dir: Mutex<PathBuf>,
+    /// 置き場を選んでいないときの置き場。OS 標準のアプリ設定フォルダー
+    default_settings_dir: PathBuf,
+    /// 設定の置き場の見張り。置き場を替えたら張り直す
+    watch: Mutex<Option<settings_watch::Watch>>,
+    /// 設定のバックアップの置き場（backup.rs）。置き場に置くと、同期したほかのデバイスのバックアップと混ざるので、デバイスの手元に置く
     backups_dir: PathBuf,
-    pro_state_path: PathBuf,
     /// アプリのバージョン。ログの先頭に出しているものと同じ出どころにして、突き合わせられるようにする
     version: String,
     /// OS の言語設定から決めた言語。表示言語が「システム」のときに使う
@@ -155,32 +138,6 @@ struct AppState {
     problems: Mutex<Problems>,
     /// 設定ウィンドウを作っている最中か。作成は非同期なので、連打で2つ作ろうとするのを止める
     settings_opening: AtomicBool,
-    /// 最後に窓口が答えた Pro の状態。通信できない間は、期限の7日後までだけ使う。
-    pro_state: Mutex<Option<pro::State>>,
-    /// 資格情報管理で Mawok のアカウントトークンを読めたか。Pro の案内をサインイン前と区別する。
-    mawok_account_signed_in: AtomicBool,
-    /// Pro の状態を消すたびに進める。問い合わせている間にサインアウトやアカウントの替わりがあったら、その答えを捨てる。
-    pro_generation: AtomicUsize,
-    /// 資格情報管理にある同期の鍵（docs/sync.md「同期のパスワード」）。設定の置き場には置かない。
-    sync_key: Mutex<Option<[u8; 32]>>,
-    /// 同期に使う鍵の見分け。Pro で窓口と照らした後だけある。
-    sync_key_id: Mutex<Option<String>>,
-    /// Pro の同期で、窓口が覚えている鍵と手元の鍵が揃っているか。Pro でなければ None。
-    sync_key_status: Mutex<SyncKeyStatus>,
-    /// 鍵の確かめ・作成・窓口への登録・資格情報管理への保存を、一続きにする。
-    sync_key_refresh: tokio::sync::Mutex<()>,
-    /// 窓口と鍵を照らせた回数。読み直しを頼んだ側が、照らせたかを見分けるのに使う（recheck_sync_key）
-    sync_key_checks: AtomicUsize,
-    /// 設定を保存するたびに進める。同期の通信の間に利用者が変えた設定を、通信の前の設定から作った結果で戻さない。
-    sync_generation: AtomicUsize,
-    /// 同期の記録を消すたびに進める。サインアウトや鍵の替わりの後に、通信中だった同期が古い記録を書き戻さない。
-    sync_record_generation: AtomicUsize,
-    /// 同期の記録を保存する処理と消す処理を直列にする。消した直後に通信中の古い記録が戻らないようにする。
-    sync_commit: tokio::sync::Mutex<()>,
-    sync_schedule: Mutex<SyncSchedule>,
-    sync_debounce: debounce::Debounce,
-    /// テキストウィンドウを出したことをきっかけに、最後に同期を頼んだ時刻
-    synced_on_show: Mutex<Option<Instant>>,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -192,31 +149,24 @@ struct AppState {
     menu_depth: std::sync::atomic::AtomicUsize,
 }
 
-#[derive(Default)]
-struct SyncSchedule {
-    running: bool,
-    pending: bool,
-}
-
 impl AppState {
     fn lang(&self) -> Lang {
         Lang::resolve(self.config.lock().unwrap().language, self.system_lang)
     }
 
-    /// Pro の同期で、窓口が覚えている鍵と手元の鍵が揃っているか。Pro を使えない間は None
-    fn shown_sync_key_status(&self) -> SyncKeyStatus {
-        if !self.pro_available() {
-            return SyncKeyStatus::None;
-        }
-        *self.sync_key_status.lock().unwrap()
+    fn settings_dir(&self) -> PathBuf {
+        self.settings_dir.lock().unwrap().clone()
     }
 
-    fn pro_available(&self) -> bool {
-        self.pro_state
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|pro| pro.available_at(pro::now()))
+    /// 履歴のファイルを置くフォルダー（docs/config.md「履歴」）
+    fn history_dir(&self) -> PathBuf {
+        self.settings_dir().join(history_store::DIR_NAME)
+    }
+
+    /// このデバイスの履歴のファイル。ほかのデバイスのファイルは読むだけで書かない
+    fn history_path(&self) -> PathBuf {
+        let id = self.device.lock().unwrap().id.clone();
+        self.history_dir().join(format!("{id}.json"))
     }
 }
 
@@ -228,12 +178,10 @@ struct Problems {
     autostart_failed: Option<autostart::SetError>,
 }
 
-/// 設定の置き場についてトレイに出すこと。次に起動し直すまで出す
+/// 設定の置き場についてトレイに出すこと。直して読めたら消す
 enum ConfigProblem {
-    /// 置き場を読めなかったので、元のファイルを写してから既定の設定で作り直した。写した先のファイル名
-    Reset(String),
-    /// 置き場を開けず、作り直せもしなかった。設定は保存されない
-    Unsaved(String),
+    /// 読めなかった設定のファイルの名前。読めたファイルの設定と、読めないファイルは前に読めた設定（起動のときは既定）で動かす
+    Unreadable(Vec<String>),
 }
 
 impl Problems {
@@ -286,16 +234,10 @@ struct SettingsView {
     replacements: Vec<Replacement>,
     /// 定型文。登録した順
     snippets: Vec<Snippet>,
-    /// 同期を使える Pro か
-    pro_available: bool,
-    /// 同期で、窓口が覚えている鍵とこのデバイスの鍵が揃っているか。Pro でなければ None
-    sync_key_status: SyncKeyStatus,
-    /// Mawok のアカウントトークンを資格情報管理から読めたか
-    mawok_account_signed_in: bool,
-    /// デバイスごとに選ぶ同期する種類
-    sync_kinds: sync::Kinds,
-    /// 種類「設定」から外した設定の項目名
-    sync_excluded_settings: Vec<String>,
+    /// 設定の置き場のフォルダー
+    settings_dir: String,
+    /// 置き場が OS 標準のアプリ設定フォルダーか。そうでなければ画面は「既定に戻す」を出す
+    settings_dir_is_default: bool,
     punctuation_style: PunctuationStyle,
     char_widths: CharWidths,
     /// コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
@@ -328,7 +270,8 @@ fn settings_view(state: &AppState) -> SettingsView {
         )
     };
     let lang = Lang::resolve(config.language, state.system_lang);
-    let pro_available = state.pro_available();
+    let settings_dir = state.settings_dir();
+    let settings_dir_is_default = state.device.lock().unwrap().settings_dir.is_none();
     let modified_settings = config::modified_settings(&config);
     #[cfg(target_os = "linux")]
     let desktop_hotkey = state.portal_hotkey.trigger.lock().unwrap().clone();
@@ -336,8 +279,8 @@ fn settings_view(state: &AppState) -> SettingsView {
     let desktop_hotkey: Option<String> = None;
     SettingsView {
         revision,
-        sync_kinds: sync::kinds(&config),
-        sync_excluded_settings: config.sync_excluded_settings.clone(),
+        settings_dir: settings_dir.display().to_string(),
+        settings_dir_is_default,
         locale: lang.code(),
         platform: Platform::current(),
         hotkey: config.hotkey,
@@ -367,9 +310,6 @@ fn settings_view(state: &AppState) -> SettingsView {
         trim_trailing_whitespace: config.trim_trailing_whitespace,
         replacements: config.replacements,
         snippets: config.snippets,
-        pro_available,
-        sync_key_status: state.shown_sync_key_status(),
-        mawok_account_signed_in: state.mawok_account_signed_in.load(Ordering::Relaxed),
         punctuation_style: config.punctuation_style,
         char_widths: config.char_widths,
         exclude_from_clipboard_history: config.exclude_from_clipboard_history,
@@ -497,7 +437,6 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
         // 出せていないのに記録を寝かせると、隠れたまま戻せなくなる
         return false;
     }
-    request_sync_on_show(app);
     if capture_return_target {
         // 自分で出したものは、設定を閉じたときに出し直す対象ではない
         app.state::<DraftState>()
@@ -752,9 +691,6 @@ struct BlurCheck {
     settings_focused: bool,
     /// 設定ウィンドウを作っている最中か
     settings_opening: bool,
-    /// Mawok のアカウントのトークンを読んでいる最中か。macOS はキーチェーンの許可のダイアログを前面に出すので、
-    /// フォーカスが外れても、ユーザーがほかへ移ったわけではない（許可に応じている間に下書きが消えないようにする）
-    reading_credential: bool,
 }
 
 /// 隠すのは、出ていて、一度フォーカスが入った後に外れたままで、それが設定ウィンドウのためではないときだけ
@@ -765,13 +701,13 @@ fn should_hide_on_blur(check: BlurCheck) -> bool {
         && !check.focused
         && !check.settings_focused
         && !check.settings_opening
-        && !check.reading_credential
 }
 
-/// 初めての起動として下書きを出すか。設定の置き場がなかったうえで、作れたときだけ。
-/// 作れなかったら、次の起動でも置き場がなく、起動のたびに出てしまうため
-fn is_first_launch(store_missing: bool, problem: Option<&ConfigProblem>) -> bool {
-    store_missing && !matches!(problem, Some(ConfigProblem::Unsaved(_)))
+/// 初めての起動として下書きを出すか。このデバイスの設定のファイルがなかったうえで、作れたときだけ。
+/// 作れなかったら、次の起動でもファイルがなく、起動のたびに出てしまうため。設定の置き場は見ない。
+/// ほかのデバイスと同期した置き場を選んでいても、このデバイスで初めて起動したなら、使い方を伝えるため
+fn is_first_launch(device_missing: bool, device_saved: bool) -> bool {
+    device_missing && device_saved
 }
 
 /// 下書きウィンドウからフォーカスが外れたときに呼ぶ。知らせが落ち着いてから、まだ外れたままなら隠す
@@ -806,23 +742,8 @@ fn hide_on_blur(app: &AppHandle) {
         focused: window.is_focused().unwrap_or(true),
         settings_focused: is_settings_focused(app),
         settings_opening: state.settings_opening.load(Ordering::Relaxed),
-        reading_credential: app
-            .state::<AccountState>()
-            .reading_credential
-            .load(Ordering::Relaxed)
-            > 0,
     };
     if !should_hide_on_blur(check) {
-        if check.reading_credential
-            && should_hide_on_blur(BlurCheck {
-                reading_credential: false,
-                ..check
-            })
-        {
-            app.state::<AccountState>()
-                .blur_kept_for_credential
-                .store(true, Ordering::Relaxed);
-        }
         return;
     }
     info!("hide on blur");
@@ -936,47 +857,44 @@ fn get_settings(state: tauri::State<'_, AppState>) -> SettingsView {
     settings_view(&state)
 }
 
-/// 設定を変えて保存する。保存できなければ何も変えない。画面とトレイへの反映は `apply_config` で行う。
-/// 変えた同期の項目は、手元で変えたものとして oplog に積む
+/// 設定を変えて保存する。保存できなければ何も変えない。画面とトレイへの反映は `apply_config` で行う
 fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
-    save_config_if_current(app, None, true, change).map(|saved| saved.expect("unconditional save"))
-}
-
-/// `expected_generation` を指定した同期だけ、利用者の保存と競合していない設定を保存する。
-/// `record_changes` は、変えた同期の項目を oplog に積むか。同期で届いた値は手元で変えたものではないので積まない。
-/// 設定と oplog は、置き場の同じトランザクションで書く
-fn save_config_if_current(
-    app: &AppHandle,
-    expected_generation: Option<usize>,
-    record_changes: bool,
-    change: impl FnOnce(&mut Config),
-) -> Result<Option<()>, String> {
     let state = app.state::<AppState>();
     let mut config = state.config.lock().unwrap();
-    if expected_generation
-        .is_some_and(|generation| state.sync_generation.load(Ordering::SeqCst) != generation)
-    {
-        return Ok(None);
-    }
     let mut next = config.clone();
     change(&mut next);
-    let changed = if record_changes {
-        let at = now_millis();
-        sync::changed_items(&config, &next)
-            .into_iter()
-            .map(|name| (name, at))
-            .collect()
-    } else {
-        Vec::new()
-    };
-    state.store.lock().unwrap().commit(&store::Commit {
-        entries: Some(&config::stored_entries(&next)),
-        changed,
-        ..store::Commit::default()
-    })?;
+    write_config(&state, &next)?;
     *config = next;
-    state.sync_generation.fetch_add(1, Ordering::SeqCst);
-    Ok(Some(()))
+    Ok(())
+}
+
+/// 設定をファイルに書く。ログイン時の起動はデバイスの設定に、ほかは置き場の設定のファイルに書く
+fn write_config(state: &AppState, next: &Config) -> Result<(), String> {
+    let autostart = (next.autostart != Config::default().autostart).then_some(next.autostart);
+    {
+        let mut device = state.device.lock().unwrap();
+        if device.autostart != autostart {
+            let updated = device::Device {
+                autostart,
+                ..device.clone()
+            };
+            device::save(&state.device_path, &updated).map_err(|error| error.to_string())?;
+            *device = updated;
+        }
+    }
+    let mut entries = config::stored_entries(next);
+    entries.remove(config::key::AUTOSTART);
+    settings_files::write(
+        &state.settings_dir(),
+        &os_name(),
+        config::key::IN_FILES,
+        &entries,
+    )
+}
+
+/// 設定のファイルで、OS ごとの欄に付ける名前（`macos`・`windows`・`linux`）
+fn os_name() -> String {
+    config::choice_name(&Platform::current())
 }
 
 /// 今の設定と問題を、開いているウィンドウとトレイに反映する
@@ -995,61 +913,59 @@ fn emit_settings(app: &AppHandle) {
 
 /// 打つたびに呼ばれる設定を保存する。トレイは作り直さない
 fn save_as_typed(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
-    save_config(app, change)?;
-    schedule_sync_after_change(app);
-    Ok(())
+    save_config(app, change)
 }
 
 /// 設定を変えて保存し、開いているウィンドウとトレイに反映する。保存できなければ何も変えない
 fn update_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
     save_config(app, change)?;
     apply_config(app);
-    schedule_sync_after_change(app);
     Ok(())
 }
 
-/// 同期で届いた設定・バックアップから戻す設定を保存し、画面から変えるコマンドと同じ反映を通す（docs/sync.md「1回の同期」）。
-/// OS に断られて反映できなかった項目は、手元の値のままにして返す。同期では、呼び出し元が読み捨ての記録に置く。
-/// `record_changes` は、変えた同期の項目を oplog に積むか（バックアップから戻すときは、ほかのデバイスにも届けるので積む）。
-/// 読んでいる間に設定が変わっていたら、何も変えずに None を返す
-fn save_received_config(
+/// ほかで変わった設定のファイルから読んだ設定・バックアップから戻す設定を入れ、画面から変えるコマンドと同じ反映を通す。
+/// OS に断られて反映できなかった項目（最前面・ホットキー）は今の値のままにして、その項目名を返す。
+/// `write` は、入れた設定をファイルに書くか（ファイルから読んだ設定は、断った項目を書き戻さずにファイルの値のまま残すので書かない）
+fn adopt_config(
     app: &AppHandle,
-    generation: usize,
-    record_changes: bool,
     mut next: Config,
-) -> Result<Option<Vec<sync::ItemKey>>, String> {
+    write: bool,
+) -> Result<Vec<&'static str>, String> {
     let state = app.state::<AppState>();
     let current = state.config.lock().unwrap().clone();
     let mut rejected = Vec::new();
-    // ウィンドウとホットキーは、コマンドと同じく保存の前に当てる。当てられない値を保存すると、設定と実際が食い違う
+    // ウィンドウとホットキーは、コマンドと同じく入れる前に当てる。当てられない値を入れると、設定と実際が食い違う
     if next.text_window_always_on_top != current.text_window_always_on_top
         && set_draft_window_always_on_top(app, next.text_window_always_on_top).is_err()
     {
         next.text_window_always_on_top = current.text_window_always_on_top;
-        rejected.push(sync::setting_item(config::key::TEXT_WINDOW_ALWAYS_ON_TOP));
+        rejected.push(config::key::TEXT_WINDOW_ALWAYS_ON_TOP);
     }
     if next.hotkey != current.hotkey {
         if let Err(error) =
             hotkey::replace(&mut PluginRegistrar(app), &current.hotkey, &next.hotkey)
         {
-            warn!("couldn't register the hotkey received by sync: {error}");
+            warn!("couldn't register the hotkey from the settings file: {error}");
             next.hotkey.clone_from(&current.hotkey);
-            rejected.push(sync::hotkey_item());
-            // 届いたキーは届いたホットキーと重ならないことしか確かめていない。元のホットキーと重なるなら、キーも入れない
+            rejected.push(config::key::HOTKEY);
+            // 読んだキーは読んだホットキーと重ならないことしか確かめていない。元のホットキーと重なるなら、キーも入れない
             if draft_keys::check_hotkey(&next.text_window_keys, &next.hotkey, Platform::current())
                 .is_err()
             {
                 next.text_window_keys = current.text_window_keys.clone();
                 next.yielded_draft_keys = current.yielded_draft_keys.clone();
-                rejected.push(sync::text_window_keys_item());
+                rejected.push(config::key::TEXT_WINDOW_KEYS);
             }
         }
     }
-    let saved = save_config_if_current(app, Some(generation), record_changes, |config| {
-        *config = next.clone()
-    });
-    if !matches!(saved, Ok(Some(_))) {
-        // 保存しなかったので、先に当てたものを設定に残る値へ戻す
+    let saved = if write {
+        save_config(app, |config| *config = next.clone())
+    } else {
+        *state.config.lock().unwrap() = next.clone();
+        Ok(())
+    };
+    if let Err(error) = saved {
+        // 入れなかったので、先に当てたものを設定に残る値へ戻す
         if next.hotkey != current.hotkey {
             if let Err(error) =
                 hotkey::replace(&mut PluginRegistrar(app), &next.hotkey, &current.hotkey)
@@ -1060,7 +976,7 @@ fn save_received_config(
         if next.text_window_always_on_top != current.text_window_always_on_top {
             let _ = set_draft_window_always_on_top(app, current.text_window_always_on_top);
         }
-        return saved.map(|_| None);
+        return Err(error);
     }
     if next.hotkey != current.hotkey {
         show_hotkey_registered(app, true);
@@ -1073,10 +989,11 @@ fn save_received_config(
     }
     if next.text_history_size == 0 && current.text_history_size != 0 {
         if let Err(error) = clear_draft_history_file(app, true) {
-            warn!("couldn't clear draft history after sync: {error}");
+            warn!("couldn't clear draft history: {error}");
         }
     }
-    Ok(Some(rejected))
+    apply_config(app);
+    Ok(rejected)
 }
 
 /// テキストウィンドウの最前面の表示を変える。ウィンドウがまだ無ければ、作るときに設定から当たる
@@ -1196,15 +1113,7 @@ fn set_draft_history_size(app: AppHandle, size: u16) -> Result<(), String> {
 static HISTORY_FILE_LOCK: Mutex<history_store::ScreenCopy> =
     Mutex::new(history_store::ScreenCopy::new());
 
-fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_local_data_dir()
-        .map_err(|error| error.to_string())?
-        .join(history_store::FILE_NAME))
-}
-
-/// 今の時刻。UNIX のミリ秒。履歴と同期の oplog に付ける
+/// 今の時刻。UNIX のミリ秒。履歴に付ける
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -1222,13 +1131,13 @@ fn draft_history_size(app: &AppHandle) -> usize {
 #[tauri::command]
 fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
     let size = draft_history_size(&app);
-    let path = history_path(&app)?;
+    let path = app.state::<AppState>().history_path();
     if size == 0 {
         clear_draft_history_file(&app, false)?;
         return Ok(Vec::new());
     }
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
-    match history_store::load(&path) {
+    match history_store::load_merged(&path) {
         Ok(history) => {
             screen.caught_up();
             let entries = history.truncated(size).texts();
@@ -1237,8 +1146,8 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
         }
         Err(error) => {
             warn!("couldn't read draft history: {error}");
-            // 読めなかっただけ・除けられなかっただけなら、画面は同期で届いた履歴をまだ持っていない。
-            // 持ったことにすると、次の保存が届いた履歴を画面の古い一覧で上書きする
+            // 読めなかっただけ・除けられなかっただけなら、画面はほかのデバイスの履歴をまだ持っていない。
+            // 持ったことにすると、次の保存が混ぜた履歴を画面の古い一覧で上書きする
             if let history_store::LoadError::Invalid(_) = error {
                 match history_store::set_aside(&path, SystemTime::now()) {
                     Ok(Some(backup)) => {
@@ -1259,78 +1168,83 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String> {
-    let path = history_path(&app)?;
+    let path = app.state::<AppState>().history_path();
     // 件数の設定は、ロックを取ってから読む。読んだ後に件数 0 へ変えられて消されると、
     // 消した後に古い履歴を書き戻してしまう
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     let size = draft_history_size(&app);
     let texts = history_store::truncate(entries, size);
-    let file = history_store::load(&path).unwrap_or_else(|error| {
-        warn!("couldn't read draft history before saving: {error}");
-        history_store::History::default()
-    });
-    let next = screen.saved(&file, texts, size, now_millis());
-    // 画面は、読み込んだ履歴をそのまま保存し直すことがある。変わっていなければ、書かず、同期もさせない
-    if next == file {
+    let merged = history_store::load_merged(&path)
+        .unwrap_or_else(|error| {
+            warn!("couldn't read draft history before saving: {error}");
+            history_store::History::default()
+        })
+        .truncated(size);
+    let next = screen.saved(&merged, texts, size, now_millis());
+    // 画面は、読み込んだ履歴をそのまま保存し直すことがある。変わっていなければ書かない。置き場を同期していると、
+    // 書くたびにほかのデバイスへ送られるため
+    if next == merged {
         return Ok(());
     }
     info!("saving draft history: {} entries", next.entries.len());
-    history_store::save(&path, &next).map_err(|error| error.to_string())?;
-    drop(screen);
-    schedule_sync_after_change(&app);
-    Ok(())
+    history_store::save(&path, &next).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn clear_draft_history(app: AppHandle) -> Result<(), String> {
-    // 件数が 0 のデバイスの画面は、起動のたびにこれを呼ぶ。そのたびに消した時刻を置くと、まだ件数が届いていない
-    // デバイスが覚えた履歴まで消す（docs/sync.md「混ぜ方」）
+    // 件数が 0 のデバイスの画面は、起動のたびにこれを呼ぶ。そのたびに消した時刻を置くと、ほかのデバイスが
+    // その後に覚えた履歴まで消す（docs/config.md「履歴」）
     let asked = draft_history_size(&app) != 0;
     clear_draft_history_file(&app, asked)?;
     app.emit(events::DRAFT_HISTORY_CLEARED, ())
         .map_err(|error| error.to_string())
 }
 
-/// 履歴を消し、消した時刻を置く（docs/sync.md「履歴の同期」）。`always` が false なら、消す履歴があるときだけ置く
+/// 履歴を消し、消した時刻を置く（docs/config.md「履歴」）。ほかのデバイスの、その時刻より前の履歴も見せなくなる。
+/// `always` が false なら、消す履歴があるときだけ置く
 fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String> {
-    let path = history_path(app)?;
+    let path = app.state::<AppState>().history_path();
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     screen.caught_up();
-    let file = history_store::load(&path);
-    if !always && matches!(&file, Ok(history) if history.entries.is_empty()) {
+    let merged = history_store::load_merged(&path);
+    if !always && matches!(&merged, Ok(history) if history.entries.is_empty()) {
         return Ok(());
     }
-    let cleared = file.unwrap_or_default().cleared(now_millis());
+    let cleared = merged.unwrap_or_default().cleared(now_millis());
     history_store::save(&path, &cleared).map_err(|error| error.to_string())?;
     info!("cleared draft history");
-    drop(screen);
-    schedule_sync_after_change(app);
     Ok(())
 }
 
-/// 同期で混ぜた履歴を保存し、テキストウィンドウに知らせる（docs/sync.md「履歴の同期」）。`snapshot` は、同期を
-/// 始めたときの手元の履歴。保存した履歴が `next` と違う（もう一度同期して窓口へ書く分がある）かを返す
-fn apply_synced_history(
-    app: &AppHandle,
-    snapshot: &history_store::History,
-    next: history_store::History,
-) -> Result<bool, String> {
-    let path = history_path(app)?;
+/// ほかのデバイスの履歴のファイルが変わった。混ぜた履歴を自分のファイルにも入れ、テキストウィンドウに読み直させる。
+/// 自分のファイルに入れておくと、次に画面から保存するときに、混ぜた履歴と照らして時刻を付けられる
+fn merge_history_from_other_devices(app: &AppHandle) {
+    let path = app.state::<AppState>().history_path();
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     let size = draft_history_size(app);
-    let current = history_store::load(&path).map_err(|error| error.to_string())?;
-    let merged = history_store::applied_from_sync(&current, snapshot, &next, size);
-    if merged != current {
-        history_store::save(&path, &merged).map_err(|error| error.to_string())?;
-        info!(
-            "applied synced draft history: {} entries",
-            merged.entries.len()
-        );
-        screen.replaced_by_sync(current);
-        let _ = app.emit(events::DRAFT_HISTORY_SYNCED, ());
+    let (own, merged) = match (
+        history_store::load(&path),
+        history_store::load_merged(&path),
+    ) {
+        (Ok(own), Ok(merged)) => (own, merged.truncated(size)),
+        (Err(error), _) | (_, Err(error)) => {
+            warn!("couldn't read draft history after a change: {error}");
+            return;
+        }
+    };
+    if merged == own {
+        return;
     }
-    // 届いた履歴を今の件数に切り詰めた分は、手元を変えたことにしない。もう一度同期しても同じ値が届く
-    Ok(merged != next.truncated(size))
+    if let Err(error) = history_store::save(&path, &merged) {
+        warn!("couldn't save the merged draft history: {error}");
+        return;
+    }
+    info!(
+        "merged draft history of the other devices: {} entries",
+        merged.entries.len()
+    );
+    screen.replaced_by_other_devices(own);
+    let _ = app.emit(events::DRAFT_HISTORY_MERGED, ());
 }
 
 #[tauri::command]
@@ -1435,8 +1349,6 @@ fn set_replacements(
     info!("set replacements: {} entries", replacements.len());
     // 打つたびに呼ばれる。辞書はトレイにも下書きウィンドウにも関わらず、設定画面は自分で表の行を持っているので、
     // 保存するだけにして、開いているウィンドウとトレイへの反映はしない
-    let mut replacements = replacements;
-    config::repair_item_ids(&mut replacements)?;
     save_as_typed(&app, |config| config.replacements = replacements.clone())?;
     Ok(replacements)
 }
@@ -1446,8 +1358,6 @@ fn set_snippets(app: AppHandle, snippets: Vec<Snippet>) -> Result<Vec<Snippet>, 
     info!("set snippets: {} entries", snippets.len());
     // 打つたびに呼ばれる。設定画面は自分で欄を持っているが、下書きウィンドウの一覧が使うので、辞書と違い画面へは反映する。
     // トレイには関わらないので、打つたびに作り直さない
-    let mut snippets = snippets;
-    config::repair_item_ids(&mut snippets)?;
     save_as_typed(&app, |config| config.snippets = snippets.clone())?;
     emit_settings(&app);
     Ok(snippets)
@@ -1472,8 +1382,6 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
         info!("add snippet: already registered");
         return Ok(false);
     }
-    let mut snippet = snippet;
-    config::repair_item_ids(std::slice::from_mut(&mut snippet))?;
     info!("add snippet");
     save_as_typed(&app, |config| config.snippets.push(snippet.clone()))?;
     emit_settings(&app);
@@ -1483,64 +1391,7 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     Ok(true)
 }
 
-/// トークンを読み終えたら、読んでいる間にフォーカスが外れたのを見送っていたときだけ、下書きウィンドウにフォーカスを戻す。
-/// macOS はキーチェーンの許可のダイアログにフォーカスを移し、閉じても下書きには戻さない。戻さないと、フォーカスが外れた知らせがもう来ず、
-/// ほかのアプリへ移っても下書きが隠れない。Windows の資格情報マネージャーは読むときにダイアログを出さないので、戻さない
-fn refocus_draft_after_credential_prompt(app: &AppHandle) {
-    let kept = app
-        .state::<AccountState>()
-        .blur_kept_for_credential
-        .swap(false, Ordering::Relaxed);
-    if !kept || !cfg!(target_os = "macos") {
-        return;
-    }
-    let handle = app.clone();
-    // macOS のパネルの操作（make_key_window）はメインスレッドでしか行えないので、async の処理から呼ばれてもメインスレッドに移して行う
-    let result = app.run_on_main_thread(move || {
-        let Some(window) = main_window(&handle) else {
-            return;
-        };
-        if window.is_visible().unwrap_or(false)
-            && !window.is_focused().unwrap_or(true)
-            && !is_settings_focused(&handle)
-        {
-            info!("refocus the draft after reading the account token");
-            focus::refocus_draft(&handle, &window);
-        }
-    });
-    if let Err(error) = result {
-        error!("refocus the draft: couldn't run on the main thread: {error}");
-    }
-}
-
-/// Mawok のアカウントのトークンを読んでいる間の印
-struct ReadingCredential(AppHandle);
-
-impl ReadingCredential {
-    fn start(app: &AppHandle) -> Self {
-        app.state::<AccountState>()
-            .reading_credential
-            .fetch_add(1, Ordering::Relaxed);
-        Self(app.clone())
-    }
-}
-
-impl Drop for ReadingCredential {
-    /// 重なって読んでいたときは、最後に読み終えたときだけフォーカスを戻す
-    /// （先に読み終えた方が、まだ出ているほかの許可のダイアログからフォーカスを奪わないように）
-    fn drop(&mut self) {
-        let before = self
-            .0
-            .state::<AccountState>()
-            .reading_credential
-            .fetch_sub(1, Ordering::Relaxed);
-        if before == 1 {
-            refocus_draft_after_credential_prompt(&self.0);
-        }
-    }
-}
-
-/// 待つことのある処理（資格情報管理、同期のパスワードからの鍵の導出、バックアップのファイルの読み書き）を、メインスレッドを止めずに別のスレッドで走らせる。
+/// 待つことのある処理（バックアップのファイルの読み書き）を、メインスレッドを止めずに別のスレッドで走らせる。
 /// 走らせたスレッドが落ちたら、その理由を返す
 async fn run_blocking<T: Send + 'static>(
     task: impl FnOnce() -> T + Send + 'static,
@@ -1550,427 +1401,9 @@ async fn run_blocking<T: Send + 'static>(
         .map_err(|error| error.to_string())
 }
 
-/// Mawok のアカウントと結ぶ申し込み。終わりの知らせと組にする番号
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(rename_all = "camelCase")]
-struct MawokSignIn {
-    /// 申し込みの番号。終わりの知らせ（MawokSignInEnded）に同じ番号が付く
-    #[cfg_attr(test, ts(type = "number"))]
-    id: u64,
-}
-
-/// Mawok のアカウントと結ぶ申し込みが終わった（MAWOK_SIGN_IN_ENDED の中身）。結べたら true、期限が切れたか失敗したら false。
-/// 画面は、出している申し込みと同じ番号の知らせだけを受ける（やり直す前の申し込みの終わりで、表示を戻さないため）
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(export))]
-#[serde(rename_all = "camelCase")]
-struct MawokSignInEnded {
-    #[cfg_attr(test, ts(type = "number"))]
-    id: u64,
-    signed_in: bool,
-}
-
-/// 続いている申し込み。待ち受けるタスクと、開き直すサインインのページの URL
-struct PendingMawokSignIn {
-    shown: MawokSignIn,
-    url: String,
-    task: tauri::async_runtime::JoinHandle<()>,
-}
-
-/// 窓口とのやり取りに使い回す HTTP クライアント
-fn http_client(app: &AppHandle) -> Result<reqwest::Client, String> {
-    let state = app.state::<AccountState>();
-    if let Some(client) = state.client.get() {
-        return Ok(client.clone());
-    }
-    let client = reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|error| error.to_string())?;
-    Ok(state.client.get_or_init(|| client).clone())
-}
-
-/// 窓口への問い合わせの時間の上限。つながらないときは早めにあきらめ、同期は履歴ごと送り受けするので、遅い回線でも待てる長さにする
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// 設定か履歴を続けて変えたときは最後から3秒だけ待ち、1回の同期へまとめる。
-fn schedule_sync_after_change(app: &AppHandle) {
-    let debounce = &app.state::<AppState>().sync_debounce;
-    let app = app.clone();
-    debounce.trigger(Duration::from_secs(3), move || request_sync(&app));
-}
-
-/// テキストウィンドウを出すたびに窓口へ問い合わせないための間隔。出して隠すのを続けて繰り返しても、窓口の回数の上限に届かない長さにする
-const SYNC_ON_SHOW_INTERVAL: Duration = Duration::from_secs(10);
-
-/// テキストウィンドウを出したときに同期する。ほかのデバイスで覚えた履歴を、出してすぐたどれるようにするため（docs/sync.md「いつ同期するか」）
-fn request_sync_on_show(app: &AppHandle) {
-    {
-        let state = app.state::<AppState>();
-        let mut last = state.synced_on_show.lock().unwrap();
-        if last.is_some_and(|at| at.elapsed() < SYNC_ON_SHOW_INTERVAL) {
-            return;
-        }
-        *last = Some(Instant::now());
-    }
-    request_sync(app);
-}
-
-/// 同期は1つだけ走らせ、実行中に届いたきっかけは終わった後の1回へまとめる。
-fn request_sync(app: &AppHandle) {
-    {
-        let state = app.state::<AppState>();
-        let mut schedule = state.sync_schedule.lock().unwrap();
-        if schedule.running {
-            schedule.pending = true;
-            return;
-        }
-        schedule.running = true;
-    }
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            run_sync(&app).await;
-            let again = {
-                let state = app.state::<AppState>();
-                let mut schedule = state.sync_schedule.lock().unwrap();
-                if schedule.pending {
-                    schedule.pending = false;
-                    true
-                } else {
-                    schedule.running = false;
-                    false
-                }
-            };
-            if !again {
-                break;
-            }
-        }
-    });
-}
-
-/// 窓口の同期の入口と話すのに要るもの。
-struct SyncAccess {
-    client: reqwest::Client,
-    token: String,
-    key: [u8; 32],
-    key_id: String,
-}
-
-impl SyncAccess {
-    fn transport(&self) -> sync::HttpTransport<'_> {
-        sync::HttpTransport {
-            client: &self.client,
-            token: &self.token,
-            key: &self.key,
-            key_id: &self.key_id,
-        }
-    }
-}
-
-/// 同期が動く条件（docs/sync.md 冒頭）を満たしていれば、窓口と話すのに要るものを返す。
-async fn sync_access(app: &AppHandle) -> Option<SyncAccess> {
-    let (key, key_id) = {
-        let state = app.state::<AppState>();
-        if !state.pro_available() || *state.sync_key_status.lock().unwrap() != SyncKeyStatus::Ready
-        {
-            return None;
-        }
-        let key = *state.sync_key.lock().unwrap();
-        let key_id = state.sync_key_id.lock().unwrap().clone();
-        (key?, key_id?)
-    };
-    let token = match run_blocking(account_credentials::read_token).await {
-        Ok(Ok(token)) => token,
-        Ok(Err(error)) => {
-            warn!("couldn't read the Mawok account token for sync: {error:?}");
-            return None;
-        }
-        Err(error) => {
-            warn!("couldn't read the Mawok account token for sync: {error}");
-            return None;
-        }
-    };
-    let client = match http_client(app) {
-        Ok(client) => client,
-        Err(error) => {
-            warn!("couldn't create a sync client: {error}");
-            return None;
-        }
-    };
-    Some(SyncAccess {
-        client,
-        token,
-        key,
-        key_id,
-    })
-}
-
-/// 設定と、それを読んだときの保存の世代。設定の保存は、設定の排他の中で世代を進めるので、同じ排他の中で読む。
-/// 別々に読むと、間に入った保存を見落として、古い設定で上書きしうる
-fn config_with_generation(state: &AppState) -> (Config, usize) {
-    let config = state.config.lock().unwrap();
-    (config.clone(), state.sync_generation.load(Ordering::SeqCst))
-}
-
-/// 置き場にある同期の記録。読めなければ、記録が無いものとして初めての同期からやり直す
-fn read_sync_record(state: &AppState) -> Option<sync::State> {
-    let text = match state.store.lock().unwrap().sync_state() {
-        Ok(text) => text?,
-        Err(error) => {
-            warn!("couldn't read the sync state: {error}");
-            return None;
-        }
-    };
-    sync::parse_state(&text)
-}
-
-/// 同期の記録を読む。別の鍵の記録は、無いものとして扱う
-fn load_sync_record(app: &AppHandle, key_id: &str) -> Option<sync::State> {
-    read_sync_record(&app.state::<AppState>()).filter(|state| state.key_id == key_id)
-}
-
-/// まだ窓口へ送っていない手元の変更（oplog）。読めなければ None。空として同期すると、送っていない手元の変更を
-/// 窓口の値で上書きする
-fn load_outbox(app: &AppHandle) -> Option<BTreeMap<String, u64>> {
-    app.state::<AppState>()
-        .store
-        .lock()
-        .unwrap()
-        .outbox()
-        .inspect_err(|error| warn!("couldn't read the sync outbox: {error}"))
-        .ok()
-}
-
-async fn run_sync(app: &AppHandle) {
-    let (config, generation, record_generation, outbox) = {
-        let state = app.state::<AppState>();
-        // oplog も設定と同じ排他の中で読む。後で読むと、間に入った保存の時刻を古い値に付けて書き、
-        // 書けた時刻で oplog から外すので、新しい値を送らないまま落とす
-        let config = state.config.lock().unwrap();
-        let outbox = load_outbox(app);
-        let generation = state.sync_generation.load(Ordering::SeqCst);
-        let record_generation = state.sync_record_generation.load(Ordering::SeqCst);
-        (config.clone(), generation, record_generation, outbox)
-    };
-    let kinds = sync::kinds(&config);
-    let Some(outbox) = outbox.filter(|_| kinds.any()) else {
-        return;
-    };
-    let Some(access) = sync_access(app).await else {
-        return;
-    };
-    let key_id = &access.key_id;
-    // 読めない履歴ファイルは、画面が読み込むときに除けるので、この回は履歴を同期しない
-    let local_history = match history_path(app) {
-        _ if !kinds.history => None,
-        Ok(path) => run_blocking(move || {
-            let _guard = HISTORY_FILE_LOCK.lock().unwrap();
-            history_store::load(&path).ok()
-        })
-        .await
-        .ok()
-        .flatten(),
-        _ => None,
-    };
-    let before = load_sync_record(app, key_id);
-    let synced = sync::sync_once(
-        access.transport(),
-        &config,
-        before.clone(),
-        &outbox,
-        local_history.as_ref(),
-    )
-    .await;
-    match synced {
-        Ok(mut result) => {
-            if result.reset {
-                info!("sync server reset the local record");
-            }
-            let app_state = app.state::<AppState>();
-            let _commit = app_state.sync_commit.lock().await;
-            if app_state.sync_record_generation.load(Ordering::SeqCst) != record_generation {
-                // サインアウトや鍵の替わりで記録を消した後。この結果は、前の鍵・前のアカウントのもの
-                return;
-            }
-            // 通信の間に設定が変わっていたら、読んだ値は手元に入れずに捨てて、もう一度同期する
-            let mut discard = app_state.sync_generation.load(Ordering::SeqCst) != generation;
-            let mut retry = discard;
-            if !discard && result.changed {
-                match save_received_config(app, generation, false, result.config.clone()) {
-                    Ok(Some(rejected)) => {
-                        let previous = before.as_ref().filter(|_| !result.reset);
-                        for item in &rejected {
-                            sync::ignore_applied(&mut result.state, previous, item);
-                        }
-                        apply_received_config(app);
-                    }
-                    Ok(None) => {
-                        discard = true;
-                        retry = true;
-                    }
-                    Err(error) => {
-                        warn!("couldn't save settings received by sync: {error}");
-                        discard = true;
-                    }
-                }
-            }
-            // 履歴は設定と別に手元へ入れる。設定の結果を捨てる回も、混ぜた履歴は捨てない
-            if let (Some(snapshot), Some(next)) = (&local_history, result.history.take()) {
-                match apply_synced_history(app, snapshot, next) {
-                    Ok(again) => retry |= again,
-                    Err(error) => warn!("couldn't save draft history received by sync: {error}"),
-                }
-            }
-            // 窓口の値を入れた項目は、入れたときだけ oplog から外す。書けた項目は、捨てる回も外す
-            let (record, settled) = if discard {
-                (
-                    sync::merge_written(before, &result.written, result.reset, key_id),
-                    result.sent,
-                )
-            } else {
-                let mut settled = result.accepted;
-                settled.append(&mut result.sent);
-                (result.state, settled)
-            };
-            let _ = save_sync_record(app, record, settled).await;
-            if retry {
-                request_sync(app);
-            }
-        }
-        Err(failure) => {
-            // 途中まで書けていたら、その項目の記録だけは置く。忘れると、次の回に自分の書き込みを他人の変更と取り違える
-            if !failure.written.items.is_empty() || !failure.written.retired.is_empty() {
-                let app_state = app.state::<AppState>();
-                let _commit = app_state.sync_commit.lock().await;
-                if app_state.sync_record_generation.load(Ordering::SeqCst) == record_generation {
-                    let record =
-                        sync::merge_written(before, &failure.written, failure.reset, key_id);
-                    let _ = save_sync_record(app, record, failure.sent).await;
-                }
-            }
-            match failure.error {
-                sync::Error::KeyMismatch => {
-                    info!("sync key mismatch; refreshing the sync key");
-                    let _ = refresh_mawok_account_status(app).await;
-                }
-                sync::Error::SignedOut => {
-                    info!("sync account token was rejected");
-                    if let Err(error) = forget_mawok_token(app).await {
-                        warn!("couldn't clear a rejected Mawok token: {error}");
-                    }
-                }
-                error => warn!("sync failed: {error}"),
-            }
-        }
-    }
-}
-
-/// 同期する種類を変える（docs/sync.md 冒頭）。オンにした種類は、すぐに同期する。
-/// オフにした種類の記録は消さないので、オンに戻すと続きから合わせる
-async fn change_sync_kind(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
-    save_config(app, change)?;
-    apply_config(app);
-    mark_paused_sync_kinds(app).await;
-    request_sync(app);
-    Ok(())
-}
-
-/// オフにした種類を、同期の記録に残す。オフにした後の同期の回に任せると、全部オフの間（通信しない）と
-/// つながらない間は残らず、オンに戻した回が、オフにしていたことを知らない（docs/sync.md 冒頭）。
-/// 一度も同期していなければ、記録が無いので何もしない。オンに戻した回は、初めての同期になる
-async fn mark_paused_sync_kinds(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let _commit = state.sync_commit.lock().await;
-    let config = state.config.lock().unwrap().clone();
-    let Some(mut record) = read_sync_record(&state) else {
-        return;
-    };
-    if record.pause(&config) {
-        let text = sync::state_text(&record);
-        if let Err(error) = state.store.lock().unwrap().commit(&store::Commit {
-            sync_state: Some(Some(&text)),
-            ..store::Commit::default()
-        }) {
-            warn_unsaved_sync_record(&error);
-        }
-    }
-}
-
-fn warn_unsaved_sync_record(error: &str) {
-    warn!("couldn't save sync state: {error}");
-}
-
-/// 同期の記録を保存し、窓口と揃った項目を oplog から外す。通信の間にスイッチがオフになった種類は、
-/// 前の記録から作った結果でオフの印を上書きしないよう、保存する前に置き直す。`sync_commit` の中で呼ぶ。
-/// 保存できなければ、警告を出してからその理由を返す
-async fn save_sync_record(
-    app: &AppHandle,
-    mut record: sync::State,
-    settled: Vec<(String, u64)>,
-) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let config = state.config.lock().unwrap().clone();
-    record.pause(&config);
-    let text = sync::state_text(&record);
-    let saved = state.store.lock().unwrap().commit(&store::Commit {
-        settled,
-        sync_state: Some(Some(&text)),
-        ..store::Commit::default()
-    });
-    if let Err(error) = &saved {
-        warn_unsaved_sync_record(error);
-    }
-    saved
-}
-
-/// 同期やバックアップから入れた設定を、開いている窓とトレイに反映する。
-fn apply_received_config(app: &AppHandle) {
-    apply_config(app);
-    // 設定の窓は、一覧と打っている欄を自分で持っていて settings-changed では写し直さない
-    let _ = app.emit(
-        events::CONFIG_REPLACED,
-        settings_view(&app.state::<AppState>()),
-    );
-}
-
-#[tauri::command]
-async fn set_sync_kind(app: AppHandle, kind: sync::SyncKind, enabled: bool) -> Result<(), String> {
-    info!("set sync kind {kind:?}: {enabled}");
-    change_sync_kind(&app, |config| match kind {
-        sync::SyncKind::Settings => config.sync_settings = enabled,
-        sync::SyncKind::Keys => config.sync_keys = enabled,
-        sync::SyncKind::Replacements => config.sync_replacements = enabled,
-        sync::SyncKind::Snippets => config.sync_snippets = enabled,
-        sync::SyncKind::History => config.sync_history = enabled,
-    })
-    .await
-}
-
-#[tauri::command]
-async fn set_sync_excluded_setting(app: AppHandle, name: String, sync: bool) -> Result<(), String> {
-    if !sync::known_syncable_setting(&name) {
-        return Err("unknown syncable setting".to_string());
-    }
-    change_sync_kind(&app, move |config| {
-        config
-            .sync_excluded_settings
-            .retain(|excluded| excluded != &name);
-        if !sync {
-            config.sync_excluded_settings.push(name);
-        }
-    })
-    .await
-}
-
 /// バックアップの一覧。新しい順に、戻すと今の設定から変わる所を添える（docs/config.md「バックアップ」）
 #[tauri::command]
-async fn settings_backups(app: AppHandle) -> Result<Vec<sync::Backup>, String> {
+async fn settings_backups(app: AppHandle) -> Result<Vec<backup_restore::Backup>, String> {
     let state = app.state::<AppState>();
     let current = state.config.lock().unwrap().clone();
     let dir = state.backups_dir.clone();
@@ -1984,9 +1417,9 @@ async fn settings_backups(app: AppHandle) -> Result<Vec<sync::Backup>, String> {
                     continue;
                 }
             };
-            let restored = sync::restore_backup(&current, &backed_up);
-            backups.push(sync::Backup {
-                changes: sync::backup_differences(&current, &restored),
+            let restored = backup_restore::restore(&current, &backed_up);
+            backups.push(backup_restore::Backup {
+                changes: backup_restore::differences(&current, &restored),
                 created_at: backup::created_ms(&name),
                 name,
             });
@@ -1999,9 +1432,7 @@ async fn settings_backups(app: AppHandle) -> Result<Vec<sync::Backup>, String> {
 
 fn read_backup(dir: &std::path::Path, name: &str) -> std::io::Result<Config> {
     let entries = backup::read(dir, name)?;
-    config::from_entries(&entries)
-        .map(|loaded| loaded.config)
-        .map_err(std::io::Error::other)
+    Ok(config::from_entries(&entries).config)
 }
 
 /// 今の設定をバックアップに書く。いちばん新しいバックアップと同じ中身なら書かずに false
@@ -2030,7 +1461,7 @@ async fn back_up_now(app: &AppHandle) -> Result<Option<String>, String> {
 }
 
 /// 選んだバックアップの設定に戻す。戻す前の設定もバックアップに書くので、戻したことを戻せる。
-/// 保存と反映は同期で届いた設定と同じ経路を通し、戻した値は手元で変えた値として、ほかのデバイスにも届ける
+/// 入れ方は、ほかで変わった設定のファイルを読んだときと同じ経路を通す
 #[tauri::command]
 async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), String> {
     if !backup::valid_name(&name) {
@@ -2041,34 +1472,178 @@ async fn restore_settings_backup(app: AppHandle, name: String) -> Result<(), Str
     let backed_up = run_blocking(move || read_backup(&dir, &name))
         .await?
         .map_err(|error| error.to_string())?;
-    let state = app.state::<AppState>();
-    // 排他を待つ間に同期の結果が入ると世代が進むので、今の設定から作り直して、もう一度保存する
-    for _ in 0..RESTORE_ATTEMPTS {
-        let _commit = state.sync_commit.lock().await;
-        // 同期の排他の中で、戻す直前の設定を残す。外で残すと、その後に入った同期の結果が戻す前の設定から漏れ、
-        // 戻したことを戻せない
-        back_up_now(&app).await?;
-        let (current, generation) = config_with_generation(&state);
-        let next = sync::restore_backup(&current, &backed_up);
-        if next == current {
-            return Ok(());
-        }
-        if let Some(rejected) = save_received_config(&app, generation, true, next)? {
-            // OS に断られた項目があっても、残りは保存してあるので、画面と同期には伝える
-            apply_received_config(&app);
-            request_sync(&app);
-            return if rejected.is_empty() {
-                Ok(())
-            } else {
-                Err(error_codes::BACKUP_RESTORE_PARTIAL.to_string())
-            };
-        }
+    back_up_now(&app).await?;
+    let current = app.state::<AppState>().config.lock().unwrap().clone();
+    let next = backup_restore::restore(&current, &backed_up);
+    if next == current {
+        return Ok(());
     }
-    Err("settings kept changing while restoring the backup".to_string())
+    let rejected = adopt_config(&app, next, true)?;
+    let _ = app.emit(events::CONFIG_REPLACED, ());
+    if rejected.is_empty() {
+        Ok(())
+    } else {
+        // OS に断られた項目があっても、残りは入れてあるので、画面には伝える
+        Err(error_codes::BACKUP_RESTORE_PARTIAL.to_string())
+    }
 }
 
-/// 戻す間に設定が変わったときに、作り直して保存し直す回数。続けて変わるのは同期の結果が重なったときだけで、数回で揃う
-const RESTORE_ATTEMPTS: usize = 3;
+/// 置き場のファイルを見張り始める。前の見張りは止める。見張れなくても設定は使えるので、ログにだけ出す
+fn watch_settings_dir(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let mut watch = state.watch.lock().unwrap();
+    *watch = None;
+    let handle = app.clone();
+    match settings_watch::start(
+        &state.settings_dir(),
+        &state.history_dir(),
+        move |changed| {
+            let app = handle.clone();
+            // 設定の反映はウィンドウとホットキーを触るので、メインスレッドで行う
+            let result = handle.run_on_main_thread(move || {
+                if changed.settings {
+                    reload_config_from_files(&app);
+                }
+                if changed.history {
+                    merge_history_from_other_devices(&app);
+                }
+            });
+            if let Err(error) = result {
+                error!("settings watch: couldn't run on the main thread: {error}");
+            }
+        },
+    ) {
+        Ok(started) => *watch = Some(started),
+        Err(error) => warn!("couldn't watch the settings folder: {error}"),
+    }
+}
+
+/// 選んだフォルダー。置き場を替える前に、画面がそちらの設定を使うかを聞くのに使う
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+struct PickedSettingsDir {
+    path: String,
+    /// そのフォルダーに設定のファイルがあるか
+    has_settings: bool,
+}
+
+/// 設定の置き場にするフォルダーを、OS のフォルダーの窓で選んでもらう。取り消したら None
+#[tauri::command]
+async fn pick_settings_dir(app: AppHandle) -> Result<Option<PickedSettingsDir>, String> {
+    use tauri_plugin_dialog::DialogExt as _;
+    let start = app.state::<AppState>().settings_dir();
+    let picker = app.dialog().file().set_directory(start);
+    let picked = run_blocking(move || picker.blocking_pick_folder()).await?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|error| error.to_string())?;
+    Ok(Some(PickedSettingsDir {
+        has_settings: settings_files::exists_in(&path),
+        path: path.display().to_string(),
+    }))
+}
+
+/// 既定の置き場（OS 標準のアプリ設定フォルダー）。戻す前に、画面がそちらの設定を使うかを聞くのに使う
+#[tauri::command]
+fn default_settings_dir(app: AppHandle) -> PickedSettingsDir {
+    let dir = app.state::<AppState>().default_settings_dir.clone();
+    PickedSettingsDir {
+        has_settings: settings_files::exists_in(&dir),
+        path: dir.display().to_string(),
+    }
+}
+
+/// 設定の置き場を替える（docs/config.md「置き場」）。`path` が None なら既定に戻す。
+/// `use_existing` なら、替えた先の設定を読んで使う。でなければ、今の設定を替えた先に書く（そちらの設定は上書きする）。
+/// このデバイスの履歴は、替えた先の履歴に混ぜて持っていく。前の置き場のファイルは消さない（ほかのデバイスが使っているかもしれないため）
+#[tauri::command]
+fn set_settings_dir(
+    app: AppHandle,
+    path: Option<String>,
+    use_existing: bool,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let chosen = path.map(PathBuf::from);
+    let next_dir = chosen
+        .clone()
+        .unwrap_or_else(|| state.default_settings_dir.clone());
+    if !next_dir.is_absolute() {
+        return Err("the settings folder must be an absolute path".to_string());
+    }
+    std::fs::create_dir_all(&next_dir).map_err(|error| error.to_string())?;
+    info!(
+        "change the settings folder to {} (use existing: {use_existing})",
+        next_dir.display()
+    );
+    let current = state.config.lock().unwrap().clone();
+    let device = state.device.lock().unwrap().clone();
+    let adopted = if use_existing {
+        let (next, problem) = load_config(&next_dir, &device, &current);
+        if problem.is_some() {
+            return Err(error_codes::SETTINGS_FILE_UNREADABLE.to_string());
+        }
+        Some(next)
+    } else {
+        let mut entries = config::stored_entries(&current);
+        entries.remove(config::key::AUTOSTART);
+        settings_files::write(&next_dir, &os_name(), config::key::IN_FILES, &entries)?;
+        None
+    };
+    // 履歴は、混ぜた今の履歴を、替えた先の自分のファイルに混ぜて書く
+    let old_history = state.history_path();
+    let next_history = next_dir
+        .join(history_store::DIR_NAME)
+        .join(old_history.file_name().unwrap_or_default());
+    {
+        let _screen = HISTORY_FILE_LOCK.lock().unwrap();
+        match (
+            history_store::load_merged(&old_history),
+            history_store::load(&next_history),
+        ) {
+            (Ok(old), Ok(there)) => {
+                let merged = history_store::merge(&old, &there)
+                    .truncated(current.text_history_size as usize);
+                if let Err(error) = history_store::save(&next_history, &merged) {
+                    warn!("couldn't move the draft history: {error}");
+                }
+            }
+            (Err(error), _) | (_, Err(error)) => warn!("couldn't move the draft history: {error}"),
+        }
+    }
+    let updated = device::Device {
+        settings_dir: chosen,
+        ..device
+    };
+    device::save(&state.device_path, &updated).map_err(|error| error.to_string())?;
+    *state.device.lock().unwrap() = updated;
+    *state.settings_dir.lock().unwrap() = next_dir;
+    state.problems.lock().unwrap().config = None;
+    watch_settings_dir(&app);
+    if let Some(next) = adopted {
+        let changed = next != current;
+        let rejected = adopt_config(&app, next, false)?;
+        if !rejected.is_empty() {
+            warn!("kept the current value of: {}", rejected.join(", "));
+        }
+        if changed {
+            let _ = app.emit(events::CONFIG_REPLACED, ());
+        }
+    }
+    apply_config(&app);
+    let _ = app.emit(events::DRAFT_HISTORY_MERGED, ());
+    Ok(())
+}
+
+/// 設定の置き場を、Finder・エクスプローラーなどで開く。設定のファイルがあれば、それを選んだ状態にする
+#[tauri::command]
+fn reveal_settings_dir(app: AppHandle) -> Result<(), String> {
+    let dir = app.state::<AppState>().settings_dir();
+    let file = dir.join(settings_files::SETTINGS);
+    reveal_item_in_dir(&app, if file.exists() { file } else { dir })
+}
 
 /// 毎日の自動のバックアップ（docs/config.md「バックアップ」）。起動したときと、その後は1時間ごとに、
 /// いちばん新しいバックアップから1日たっていれば書く。常駐したまま日をまたぐので、起動のときだけでは足りない
@@ -2090,916 +1665,6 @@ fn start_daily_backups(app: AppHandle) {
             }
         }
     });
-}
-
-/// サインインを待つ長さ。メールのリンクの期限（送ってから15分）より、送るまでの分だけ長く
-const MAWOK_SIGN_IN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
-
-/// Mawok のアカウントと結ぶ（docs/account-server.md「Mawok とアカウントを結ぶ」）。127.0.0.1 で待ち受け、ブラウザで窓口の結ぶ画面を開く。
-/// 窓口で結ぶと、ブラウザがこの待ち受けへ戻ってくるので、届いたコードをトークンに替える。
-/// 設定の画面を閉じても、時間切れまでは待ち続ける（メールのリンクを待つ間に画面を移ることがあるため）。
-/// 結べたらトークンを資格情報管理に置き、MAWOK_SIGN_IN_ENDED で知らせる。前の申し込みが続いていれば打ち切る
-#[tauri::command]
-async fn start_mawok_sign_in(app: AppHandle) -> Result<MawokSignIn, String> {
-    info!("start signing in to the Mawok account");
-    let client = http_client(&app)?;
-    let link = account::LinkRequest::new()?;
-    // ループバックだけで待ち受ける。ほかのアドレスで待ち受けると、OS がファイアウォールの許可を求めるため
-    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .map_err(|error| {
-            error!("couldn't listen for the sign-in: {error}");
-            error.to_string()
-        })?;
-    let port = listener
-        .local_addr()
-        .map_err(|error| error.to_string())?
-        .port();
-    let lang = app.state::<AppState>().lang();
-    // コンピューター名は macOS ではコマンド（scutil）を待って読むので、非同期の処理を止めない
-    let name = run_blocking(account::device_name).await?;
-    let url = link.url(port, &name, lang.code());
-    if let Err(error) = open_page(&app, &url) {
-        // ブラウザが開かなくても、画面の「ページを開き直す」から開ける
-        warn!("couldn't open the sign-in page: {error}");
-    }
-    let account_state = app.state::<AccountState>();
-    let id = account_state
-        .mawok_sign_in_id
-        .fetch_add(1, Ordering::SeqCst)
-        + 1;
-    let shown = MawokSignIn { id };
-    let task_app = app.clone();
-    let task = tauri::async_runtime::spawn(async move {
-        let signed_in = tokio::time::timeout(
-            MAWOK_SIGN_IN_TIMEOUT,
-            wait_for_link(&task_app, &client, &listener, &link, lang),
-        )
-        .await
-        .unwrap_or(false);
-        info!("signing in to the Mawok account ended (signed in: {signed_in})");
-        // 終わった申し込みを片付ける。やり直した後の新しい申し込みは残す
-        {
-            let account_state = task_app.state::<AccountState>();
-            let mut pending = account_state.mawok_sign_in.lock().unwrap();
-            if pending
-                .as_ref()
-                .is_some_and(|pending| pending.shown.id == id)
-            {
-                *pending = None;
-            }
-        }
-        let _ = task_app.emit(
-            events::MAWOK_SIGN_IN_ENDED,
-            MawokSignInEnded { id, signed_in },
-        );
-    });
-    let previous = account_state
-        .mawok_sign_in
-        .lock()
-        .unwrap()
-        .replace(PendingMawokSignIn {
-            shown: shown.clone(),
-            url,
-            task,
-        });
-    if let Some(previous) = previous {
-        previous.task.abort();
-    }
-    Ok(shown)
-}
-
-/// 窓口から戻ったブラウザを待ち、届いたコードをトークンに替えて置く。替えられなければ false。
-/// ブラウザにはこの待ち受けが答え、結果を伝えて Mawok へ戻るよう促す
-async fn wait_for_link(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    listener: &tokio::net::TcpListener,
-    link: &account::LinkRequest,
-    lang: i18n::Lang,
-) -> bool {
-    use tokio::io::AsyncWriteExt;
-    let (mut stream, code) = accept_callback(listener, &link.state).await;
-    let token = account::exchange_code(client, &code, &link.verifier)
-        .await
-        .inspect_err(|error| error!("couldn't get the Mawok account token: {error:?}"))
-        .ok();
-    // 置くのは別のタスクにする。置いている途中で申し込みが打ち切られても、置いたことと覚えたことが食い違わないように
-    let signed_in = match token {
-        Some(token) => {
-            let save_app = app.clone();
-            tauri::async_runtime::spawn(async move { save_mawok_token(&save_app, token).await })
-                .await
-                .unwrap_or(false)
-        }
-        None => false,
-    };
-    let (title, body) = lang.mawok_sign_in_page(signed_in);
-    let page = format!(
-        "<!doctype html><html lang=\"{lang}\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\">\
-         <meta name=\"color-scheme\" content=\"light dark\">\
-         <title>{title}</title><body style=\"font-family:system-ui,sans-serif;max-width:28rem;margin:3rem auto;padding:0 1rem;line-height:1.7;word-break:auto-phrase\">\
-         <h1 style=\"font-size:1.25rem\">{title}</h1><p>{body}</p></body></html>",
-        lang = lang.code()
-    );
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{page}",
-        page.len()
-    );
-    let _ = stream.get_mut().write_all(response.as_bytes()).await;
-    let _ = stream.get_mut().shutdown().await;
-    signed_in
-}
-
-/// 同時に読む接続の上限。ブラウザが開く接続は数本なので、十分に多く
-const MAX_CALLBACK_READERS: usize = 32;
-
-/// 結ぶ画面から戻った要求が届くまで待ち受け、その接続とコードを返す。
-/// 接続ごとに別のタスクで読む。ブラウザは要求を送らないままの接続を先に開くことがあり、
-/// 1件ずつ読むと、その接続を待つ間に本物の戻りが後回しになるため
-async fn accept_callback(
-    listener: &tokio::net::TcpListener,
-    state: &str,
-) -> (tokio::io::BufReader<tokio::net::TcpStream>, String) {
-    let (found_tx, mut found_rx) = tokio::sync::mpsc::channel(1);
-    let mut readers = tokio::task::JoinSet::new();
-    loop {
-        while readers.try_join_next().is_some() {}
-        tokio::select! {
-            accepted = listener.accept() => match accepted {
-                // 読みかけが多すぎれば、新しい接続は読まずに切る（読み取りのタスクを際限なく増やさないため）
-                Ok(_) if readers.len() >= MAX_CALLBACK_READERS => {}
-                Ok((stream, _)) => {
-                    let found_tx = found_tx.clone();
-                    let state = state.to_string();
-                    readers.spawn(async move {
-                        if let Some(found) = read_callback(stream, &state).await {
-                            let _ = found_tx.send(found).await;
-                        }
-                    });
-                }
-                Err(error) => {
-                    // 続けて失敗しても（記述子が尽きたときなど）回り続けないよう、少し待つ
-                    warn!("couldn't accept the sign-in connection: {error}");
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                }
-            },
-            // 残りの接続は、readers を落とすときに読むのをやめる
-            Some(found) = found_rx.recv() => return found,
-        }
-    }
-}
-
-/// 待ち受けに届いた接続の1行目を読み、結ぶ画面から戻った要求ならコードと組にして返す。
-/// ほかの要求（ファビコンなど）や、ほかの申し込みの戻りには 404 を返す。読めない・長すぎる要求は、何も答えずに切る
-async fn read_callback(
-    stream: tokio::net::TcpStream,
-    state: &str,
-) -> Option<(tokio::io::BufReader<tokio::net::TcpStream>, String)> {
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-    let mut stream = tokio::io::BufReader::new(stream);
-    let mut line = String::new();
-    let read = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        (&mut stream).take(8192).read_line(&mut line),
-    )
-    .await;
-    if !matches!(read, Ok(Ok(_))) {
-        return None;
-    }
-    match account::code_from(state, line.trim_end()) {
-        Some(code) => Some((stream, code)),
-        None => {
-            let _ = stream
-                .get_mut()
-                .write_all(
-                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                )
-                .await;
-            None
-        }
-    }
-}
-
-/// 受け取ったトークンを置き、サインインした状態にする。置けなければ false
-async fn save_mawok_token(app: &AppHandle, token: String) -> bool {
-    let account_state = app.state::<AccountState>();
-    let _token = account_state.token.lock().await;
-    clear_pro_state(app).await;
-    let saved = run_blocking(move || account_credentials::write_token(&token))
-        .await
-        .and_then(|result| result)
-        .inspect_err(|error| error!("couldn't save the Mawok account token: {error}"))
-        .is_ok();
-    if saved {
-        app.state::<AppState>()
-            .mawok_account_signed_in
-            .store(true, Ordering::Relaxed);
-        apply_config(app);
-        let refresh_app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let _ = refresh_mawok_account_status(&refresh_app).await;
-        });
-    }
-    saved
-}
-
-/// 続いている申し込み。設定の「アカウント」を開き直したときに、サインインの途中であることを出し直す
-#[tauri::command]
-fn mawok_sign_in_pending(app: AppHandle) -> Option<MawokSignIn> {
-    app.state::<AccountState>()
-        .mawok_sign_in
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|pending| pending.shown.clone())
-}
-
-/// 続いている申し込みを打ち切る（画面で「キャンセル」を押したとき）
-#[tauri::command]
-fn cancel_mawok_sign_in(app: AppHandle) {
-    let pending = app
-        .state::<AccountState>()
-        .mawok_sign_in
-        .lock()
-        .unwrap()
-        .take();
-    if let Some(pending) = pending {
-        pending.task.abort();
-    }
-}
-
-/// 続いている申し込みのサインインのページを開き直す（ブラウザが開かなかったとき、閉じてしまったとき）
-#[tauri::command]
-fn reopen_mawok_sign_in_page(app: AppHandle) -> Result<(), String> {
-    let url = app
-        .state::<AccountState>()
-        .mawok_sign_in
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|pending| pending.url.clone());
-    match url {
-        Some(url) => open_page(&app, &url),
-        None => Ok(()),
-    }
-}
-
-/// Mawok のアカウントのメールアドレスと残り。サインインしていなければ None。
-/// Pro の状態もこの問い合わせで更新する。トークンが窓口で外されていれば、手元のトークンも消して None を返す
-#[tauri::command]
-async fn mawok_account_status(app: AppHandle) -> Result<Option<account::AccountStatus>, String> {
-    refresh_mawok_account_status(&app).await
-}
-
-async fn refresh_mawok_account_status(
-    app: &AppHandle,
-) -> Result<Option<account::AccountStatus>, String> {
-    let generation = current_pro_generation(app);
-    let stale = || !pro_generation_is_current(app, generation);
-    let exists = run_blocking(account_credentials::exists)
-        .await?
-        .inspect_err(|error| warn!("couldn't check the Mawok account token: {error}"))?;
-    if stale() {
-        // 資格情報を確かめている間にサインインかサインアウトがあった。前の結果では、今の状態に触らない。
-        return Ok(None);
-    }
-    // サインインしていない状態を、まだ片付けていないときだけ片付ける
-    let clear_if_needed = || async {
-        let already_cleared = {
-            let state = app.state::<AppState>();
-            state.pro_state.lock().unwrap().is_none()
-                && !state.mawok_account_signed_in.load(Ordering::Relaxed)
-        };
-        if !already_cleared {
-            clear_pro_state(app).await;
-        }
-    };
-    if !exists {
-        clear_if_needed().await;
-        return Ok(None);
-    }
-    let reading = ReadingCredential::start(app);
-    let read = run_blocking(account_credentials::read_token).await?;
-    drop(reading);
-    if stale() {
-        // 読んでいる間にサインインかサインアウトがあった。前のトークンの結果では、今の状態に触らない。
-        return Ok(None);
-    }
-    let token = match read {
-        Ok(token) => {
-            let was_signed_in = app
-                .state::<AppState>()
-                .mawok_account_signed_in
-                .swap(true, Ordering::Relaxed);
-            if !was_signed_in {
-                apply_config(app);
-            }
-            token
-        }
-        // 項目が同期の鍵だけ（サインアウトと鍵の保存が重なった）のときも、ここに来る
-        Err(secrets::ReadError::NotFound) => {
-            clear_if_needed().await;
-            return Ok(None);
-        }
-        Err(secrets::ReadError::Unreadable(detail)) => {
-            error!("couldn't read the Mawok account token: {detail}");
-            app.state::<AppState>()
-                .mawok_account_signed_in
-                .store(false, Ordering::Relaxed);
-            apply_config(app);
-            return Err(error_codes::ACCOUNT_TOKEN_UNREADABLE.to_string());
-        }
-    };
-    let client = http_client(app)?;
-    let answer = account::status(&client, &token).await;
-    if stale() {
-        // 前のトークンへの答え。今のアカウントの状態にも、今のトークンにも触らない。
-        return Ok(None);
-    }
-    match answer {
-        Ok(status) => {
-            let changed_account = app
-                .state::<AppState>()
-                .pro_state
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|old| old.account_id != status.account_id);
-            if changed_account {
-                forget_sync_key(app).await;
-            }
-            remember_pro_state(app, &status, generation).await;
-            if status.pro.active {
-                refresh_sync_key(app, &client, &token, generation).await;
-            } else {
-                *app.state::<AppState>().sync_key_id.lock().unwrap() = None;
-                set_sync_key_status(app, SyncKeyStatus::None);
-            }
-            Ok(Some(status))
-        }
-        Err(account::AccountError::SignedOut) => {
-            info!("the Mawok account token was removed on the account page");
-            forget_mawok_token(app).await?;
-            Ok(None)
-        }
-        Err(error) => {
-            warn!("couldn't ask the Mawok account: {error:?}");
-            if app.state::<AppState>().pro_available()
-                && *app.state::<AppState>().sync_key_status.lock().unwrap() == SyncKeyStatus::None
-            {
-                restore_local_sync_key(app).await;
-            } else {
-                apply_config(app);
-            }
-            Err(error_codes::ACCOUNT_UNREACHABLE.to_string())
-        }
-    }
-}
-
-/// 窓口へつながらない間は、最後に確かめた Pro の猶予と資格情報管理の鍵で同期を続ける。
-async fn restore_local_sync_key(app: &AppHandle) {
-    // 読んでから置くまでの間に、パスワードで開いた鍵を、読んだ前の鍵で上書きしない
-    let state = app.state::<AppState>();
-    let _refresh = state.sync_key_refresh.lock().await;
-    if let Some(local) = load_sync_key().await {
-        use_unverified_sync_key(app, local);
-    }
-}
-
-fn use_unverified_sync_key(app: &AppHandle, local: Option<[u8; 32]>) {
-    *app.state::<AppState>().sync_key.lock().unwrap() = local;
-    // 同期は鍵の見分けも要る（sync_access）。窓口と照らせない間は、手元の鍵から導く
-    *app.state::<AppState>().sync_key_id.lock().unwrap() = local.as_ref().map(sync_key::key_id);
-    set_sync_key_status(app, sync_key::offline_status(local.as_ref()));
-}
-
-/// 同期の鍵の状態を置き、画面に反映する。
-fn set_sync_key_status(app: &AppHandle, status: SyncKeyStatus) {
-    *app.state::<AppState>().sync_key_status.lock().unwrap() = status;
-    apply_config(app);
-}
-
-/// 資格情報管理の同期の鍵。鍵が無ければ `Some(None)`、読めなければ警告を出して None
-async fn load_sync_key() -> Option<Option<[u8; 32]>> {
-    match run_blocking(sync_key::load).await {
-        Ok(Ok(key)) => Some(key),
-        Ok(Err(error)) | Err(error) => {
-            warn!("couldn't read the sync key: {error}");
-            None
-        }
-    }
-}
-
-fn current_pro_generation(app: &AppHandle) -> usize {
-    app.state::<AppState>()
-        .pro_generation
-        .load(Ordering::SeqCst)
-}
-
-fn pro_generation_is_current(app: &AppHandle, generation: usize) -> bool {
-    current_pro_generation(app) == generation
-}
-
-/// Pro の確認の直後に、窓口の包んだ鍵と資格情報管理の鍵を照らして、同期の鍵の状態を決める（docs/sync.md「同期のパスワード」）。
-async fn refresh_sync_key(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    token: &str,
-    generation: usize,
-) {
-    let state = app.state::<AppState>();
-    let _refresh = state.sync_key_refresh.lock().await;
-    if !pro_generation_is_current(app, generation) {
-        return;
-    }
-    // 読めない・壊れた手元の鍵は「無い」として照らす。抜けられない None のままにせず、包んだ鍵があれば「入力」、
-    // 無ければ「作成」の欄を出す（パスワードを入れれば上書きされる）
-    let local = load_sync_key().await.flatten();
-    let server = match account::sync_key(client, token).await {
-        Ok(server) => server,
-        Err(error) => {
-            warn!("couldn't check the sync key: {error:?}");
-            // 窓口と照らして決まっていた状態（NeedsPassword・NotStarted・Ready）は、一時的な失敗で手元の鍵から決め直さない。
-            // 決め直すと、画面が「入力」と同期の設定の間で揺れ、古い鍵で同期が始まる。まだ照らしていない（None）ときだけ使う
-            let unverified =
-                *app.state::<AppState>().sync_key_status.lock().unwrap() == SyncKeyStatus::None;
-            if unverified && pro_generation_is_current(app, generation) {
-                use_unverified_sync_key(app, local);
-            }
-            return;
-        }
-    };
-    if !pro_generation_is_current(app, generation) {
-        return;
-    }
-    app.state::<AppState>()
-        .sync_key_checks
-        .fetch_add(1, Ordering::SeqCst);
-    let status = sync_key::decide(
-        server.key_id.as_deref(),
-        server.wrapped_key.is_some(),
-        local.as_ref(),
-    );
-    *app.state::<AppState>().sync_key.lock().unwrap() = local;
-    *app.state::<AppState>().sync_key_id.lock().unwrap() = server.key_id;
-    if status != SyncKeyStatus::Ready {
-        // 窓口の鍵と揃うまでは同期しない。前の鍵の記録は、揃った後の鍵では使えないので消す
-        clear_sync_state(app).await;
-    }
-    set_sync_key_status(app, status);
-    if status == SyncKeyStatus::Ready {
-        request_sync(app);
-    }
-}
-
-async fn clear_sync_state(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let _commit = state.sync_commit.lock().await;
-    state.sync_record_generation.fetch_add(1, Ordering::SeqCst);
-    let cleared = state.store.lock().unwrap().commit(&store::Commit {
-        sync_state: Some(None),
-        ..store::Commit::default()
-    });
-    if let Err(error) = cleared {
-        warn!("couldn't clear the sync state: {error}");
-    }
-}
-
-/// サインアウトとアカウントの替わりで、同期の鍵の状態と進みを消す。
-/// 鍵の状態を置く処理（確かめ・始める・パスワードで開く）と同じ排他を取り、消すのを必ず後にする
-async fn forget_sync_key(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let _refresh = state.sync_key_refresh.lock().await;
-    *app.state::<AppState>().sync_key.lock().unwrap() = None;
-    *app.state::<AppState>().sync_key_id.lock().unwrap() = None;
-    *app.state::<AppState>().sync_key_status.lock().unwrap() = SyncKeyStatus::None;
-    clear_sync_state(app).await;
-    apply_config(app);
-}
-
-const PRO_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
-/// 定期同期の間隔（docs/sync.md「いつ同期するか」）。
-const SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
-
-/// 起動直後と6時間ごとに窓口へ確かめる。トークンが無いときは、問い合わせずに状態を片付ける。
-fn start_periodic_pro_checks(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(PRO_CHECK_INTERVAL);
-        loop {
-            interval.tick().await;
-            if let Err(error) = refresh_mawok_account_status(&app).await {
-                info!("couldn't refresh the Pro state: {error}");
-            }
-        }
-    });
-}
-
-fn start_periodic_sync(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        // スイッチを切り替えた後、記録を置く前にアプリが止まったときのため、起動のときにも置く
-        mark_paused_sync_kinds(&app).await;
-        let mut interval = tokio::time::interval(SYNC_INTERVAL);
-        loop {
-            interval.tick().await;
-            request_sync(&app);
-        }
-    });
-}
-
-/// 窓口が答えた状態は、次の起動でオフライン猶予を使えるよう別の状態ファイルに置く。保存に失敗しても、今回の窓口の答えは使う。
-async fn remember_pro_state(app: &AppHandle, status: &account::AccountStatus, generation: usize) {
-    let state = pro::State::from_status(status.account_id.clone(), &status.pro);
-    let path = app.state::<AppState>().pro_state_path.clone();
-    *app.state::<AppState>().pro_state.lock().unwrap() = Some(state.clone());
-    let saved_path = path.clone();
-    if let Err(error) = run_blocking(move || pro::save(&saved_path, &state)).await {
-        warn!("couldn't save the Pro state: {error}");
-    }
-    if !pro_generation_is_current(app, generation) {
-        // 保存している間に消された。消した後の状態に合わせ直す。
-        *app.state::<AppState>().pro_state.lock().unwrap() = None;
-        if let Ok(Err(error)) = run_blocking(move || pro::clear(&path)).await {
-            warn!("couldn't clear the Pro state: {error}");
-        }
-    }
-    apply_config(app);
-}
-
-/// サインインしていない状態にする。アカウントが替わったときに前のアカウントの猶予を使わないよう、メモリーと状態ファイルの両方を消す。
-async fn clear_pro_state(app: &AppHandle) {
-    let path = app.state::<AppState>().pro_state_path.clone();
-    app.state::<AppState>()
-        .pro_generation
-        .fetch_add(1, Ordering::SeqCst);
-    *app.state::<AppState>().pro_state.lock().unwrap() = None;
-    app.state::<AppState>()
-        .mawok_account_signed_in
-        .store(false, Ordering::Relaxed);
-    forget_sync_key(app).await;
-    match run_blocking(move || pro::clear(&path)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) | Err(error) => warn!("couldn't clear the Pro state: {error}"),
-    }
-    apply_config(app);
-}
-
-/// 手元のトークンを消し、サインインしていない状態にする
-async fn forget_mawok_token(app: &AppHandle) -> Result<(), String> {
-    let account_state = app.state::<AccountState>();
-    let _token = account_state.token.lock().await;
-    run_blocking(account_credentials::delete_token)
-        .await?
-        .inspect_err(|error| error!("couldn't delete the Mawok account token: {error}"))?;
-    clear_pro_state(app).await;
-    Ok(())
-}
-
-/// Mawok のアカウントからサインアウトする。窓口でトークンを外し、手元のトークンを消す。
-/// 窓口に届かなくても手元のトークンは消す（窓口の画面からも外せる）
-#[tauri::command]
-async fn sign_out_mawok(app: AppHandle) -> Result<(), String> {
-    info!("sign out of the Mawok account");
-    if let Ok(Ok(token)) = run_blocking(account_credentials::read_token).await {
-        let client = http_client(&app)?;
-        if let Err(error) = account::sign_out(&client, &token).await {
-            warn!("couldn't remove the token on the account server: {error:?}");
-        }
-    }
-    forget_mawok_token(&app).await
-}
-
-/// 窓口と同期の鍵の状態を照らし直し、画面に「状態が変わった」と返す。鍵の排他（sync_key_refresh）は放してから呼ぶ
-/// 読み直しそのものに失敗したら（つながらない・窓口の不調）、画面の欄は移っていないので、その失敗を返す
-async fn recheck_sync_key(app: &AppHandle) -> String {
-    let checks = || {
-        app.state::<AppState>()
-            .sync_key_checks
-            .load(Ordering::SeqCst)
-    };
-    let before = checks();
-    match refresh_mawok_account_status(app).await {
-        Err(error) => {
-            info!("couldn't recheck the sync key: {error}");
-            error
-        }
-        // Pro は確かめられたが、鍵を窓口と照らせなかった（refresh_sync_key は一時的な失敗で状態を保つ）
-        Ok(Some(status)) if status.pro.active && checks() == before => {
-            info!("couldn't recheck the sync key against the account server");
-            error_codes::ACCOUNT_UNREACHABLE.to_string()
-        }
-        Ok(_) => error_codes::SYNC_STATE_CHANGED.to_string(),
-    }
-}
-
-/// 鍵の排他を取った後に、サインインのトークンと、そのときの Pro の世代を読む。
-/// 排他を待つ間にサインアウトや別のアカウントへのサインインが済んでいても、今のアカウントのトークンで送るため
-async fn token_in_generation(app: &AppHandle) -> Result<(String, usize), String> {
-    let generation = current_pro_generation(app);
-    let token = mawok_token().await?;
-    if !pro_generation_is_current(app, generation) {
-        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
-    }
-    Ok((token, generation))
-}
-
-/// 窓口とのやり取りの失敗を、画面に渡す符号にする。トークンが外されていれば、手元もサインアウトする。
-/// 鍵の排他（sync_key_refresh）は放してから呼ぶ（Pro が終わったときに、鍵の状態を読み直すため）
-async fn account_failure(app: &AppHandle, context: &str, error: account::AccountError) -> String {
-    match error {
-        account::AccountError::SignedOut => {
-            info!("{context}: the Mawok account token was removed on the account page");
-            if let Err(error) = forget_mawok_token(app).await {
-                warn!("couldn't forget the Mawok account token: {error}");
-            }
-            error_codes::ACCOUNT_SIGN_IN_REQUIRED.to_string()
-        }
-        // Pro が終わっていた。Pro の状態を読み直すと、同期の所が閉じる
-        account::AccountError::Http(403) => {
-            info!("{context}: Pro is no longer active");
-            recheck_sync_key(app).await
-        }
-        account::AccountError::Http(status) if status == 429 || status >= 500 => {
-            warn!("{context}: HTTP {status}");
-            error_codes::ACCOUNT_UNREACHABLE.to_string()
-        }
-        // 送った要求の形が窓口と合わない。利用者には直せないので、ログを見るよう案内する
-        account::AccountError::Http(status) => {
-            warn!("{context}: HTTP {status}");
-            error_codes::UNEXPECTED.to_string()
-        }
-        account::AccountError::Other(detail) => {
-            warn!("{context}: {detail}");
-            error_codes::ACCOUNT_UNREACHABLE.to_string()
-        }
-    }
-}
-
-/// サインインのトークン。無ければ「サインインが要る」の符号
-async fn mawok_token() -> Result<String, String> {
-    match run_blocking(account_credentials::read_token).await? {
-        Ok(token) => Ok(token),
-        Err(secrets::ReadError::NotFound) => Err(error_codes::ACCOUNT_SIGN_IN_REQUIRED.to_string()),
-        Err(secrets::ReadError::Unreadable(detail)) => {
-            error!("couldn't read the Mawok account token: {detail}");
-            Err(error_codes::ACCOUNT_TOKEN_UNREADABLE.to_string())
-        }
-    }
-}
-
-/// パスワードで鍵を包む・開くのは重い（Argon2id）ので、画面のスレッドを止めない
-async fn unwrap_sync_key(wrapped: String, password: String) -> Result<[u8; 32], String> {
-    match run_blocking(move || sync_key::unwrap(&wrapped, &password)).await? {
-        Ok(key) => Ok(key),
-        Err(sync_key::UnwrapError::WrongPassword) => {
-            Err(error_codes::SYNC_WRONG_PASSWORD.to_string())
-        }
-        // 新しい版が包んだ鍵など。この版では開けない
-        Err(sync_key::UnwrapError::Unreadable(detail)) => {
-            warn!("couldn't read the wrapped sync key: {detail}");
-            Err(error_codes::UNEXPECTED.to_string())
-        }
-    }
-}
-
-/// 資格情報管理に鍵を置く。失敗は、ログに残して設定の失敗として返す
-async fn store_sync_key(key: [u8; 32]) -> Result<(), String> {
-    run_blocking(move || sync_key::store(&key))
-        .await?
-        .inspect_err(|error| error!("couldn't store the sync key: {error}"))
-}
-
-/// 窓口に断られたときに、資格情報管理の鍵を、置き換える前に戻す。前の鍵が無かった・読めなかった（`None`）なら消す。
-/// 読めなかった鍵は、新しい鍵を置いたときに上書きされていて、戻すものが無いため
-async fn restore_sync_key(previous: Option<Option<[u8; 32]>>) {
-    let restored = match previous.flatten() {
-        Some(key) => run_blocking(move || sync_key::store(&key)).await,
-        None => run_blocking(account_credentials::clear_key).await,
-    };
-    if let Ok(Err(error)) | Err(error) = restored {
-        warn!("couldn't restore the previous sync key: {error}");
-    }
-}
-
-/// 窓口の鍵と揃った鍵（資格情報管理には置いてある）をメモリーに置き、同期を始める。前の鍵の記録は消す
-async fn adopt_sync_key(app: &AppHandle, key: [u8; 32]) {
-    *app.state::<AppState>().sync_key.lock().unwrap() = Some(key);
-    *app.state::<AppState>().sync_key_id.lock().unwrap() = Some(sync_key::key_id(&key));
-    clear_sync_state(app).await;
-    set_sync_key_status(app, SyncKeyStatus::Ready);
-    request_sync(app);
-}
-
-/// 新しい鍵を同期のパスワードで包み、窓口に鍵が無いときだけ同期を始める。
-#[tauri::command]
-async fn start_sync(app: AppHandle, password: String) -> Result<(), String> {
-    info!("start sync");
-    if !sync_key::password_long_enough(&password) {
-        return Err(error_codes::SYNC_PASSWORD_TOO_SHORT.to_string());
-    }
-    let state = app.state::<AppState>();
-    let refresh = state.sync_key_refresh.lock().await;
-    let (token, generation) = token_in_generation(&app).await?;
-    // None は読めなかった。読めない鍵は、無かった鍵と同じに消さない（戻すときに触らない）
-    let previous = load_sync_key().await;
-    let key = run_blocking(sync_key::generate).await??;
-    let wrapped = run_blocking(move || sync_key::wrap(&key, &password)).await??;
-    let client = http_client(&app)?;
-    // 包んでいる間（1秒ほど）に、サインアウトや別のアカウントへのサインインが済んでいたら、何も置かない
-    if !pro_generation_is_current(&app, generation) {
-        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
-    }
-    // 窓口より先に手元へ置く。窓口が受け付けた後に手元へ置けないと、窓口だけが新しい鍵になり、このデバイスが加われない
-    store_sync_key(key).await?;
-    let started = account::start_sync(&client, &token, &sync_key::key_id(&key), &wrapped).await;
-    match started {
-        Ok(true) => {
-            adopt_sync_key(&app, key).await;
-            Ok(())
-        }
-        Ok(false) => {
-            info!("sync was already started on another device");
-            restore_sync_key(previous).await;
-            drop(refresh);
-            Err(recheck_sync_key(&app).await)
-        }
-        // 窓口が受けたか分からない（つながらない・窓口の不調）。窓口の今の key_id を読めて、新しい鍵なら受けていたので
-        // 新しい鍵で続ける。違う・読めないなら前の鍵に戻す。新しい鍵を残すのは、窓口が受けたと分かったときだけにし、
-        // 手元と窓口の鍵が食い違ったまま再起動して、新しいパスワードが黙って無くなるのを防ぐ
-        Err(error @ (account::AccountError::Other(_) | account::AccountError::Http(500..))) => {
-            let new_key_id = sync_key::key_id(&key);
-            match account::sync_key(&client, &token).await {
-                Ok(server) if server.key_id.as_deref() == Some(new_key_id.as_str()) => {
-                    info!("sync was started although the answer was lost");
-                    adopt_sync_key(&app, key).await;
-                    return Ok(());
-                }
-                Ok(_) => {}
-                Err(detail) => info!("couldn't check whether sync was started: {detail:?}"),
-            }
-            restore_sync_key(previous).await;
-            drop(refresh);
-            Err(account_failure(&app, "couldn't start sync", error).await)
-        }
-        // 窓口が断った（受けていない）。置く前の鍵に戻す。サインアウトは、トークンと一緒に鍵も消える
-        Err(error) => {
-            if !matches!(error, account::AccountError::SignedOut) {
-                restore_sync_key(previous).await;
-            }
-            drop(refresh);
-            Err(account_failure(&app, "couldn't start sync", error).await)
-        }
-    }
-}
-
-/// 窓口の同期データと包んだ鍵、このデバイスの同期の鍵を消す。各デバイスの設定と履歴は消さない。
-/// 始め直すのは「同期を始める」に任せ、ほかのデバイスは次の同期で鍵の食い違いに気づいて「同期を始める」へ移る
-#[tauri::command]
-async fn delete_sync_data(app: AppHandle) -> Result<(), String> {
-    info!("delete sync data");
-    let state = app.state::<AppState>();
-    let refresh = state.sync_key_refresh.lock().await;
-    let (token, generation) = token_in_generation(&app).await?;
-    let client = http_client(&app)?;
-    if let Err(error) = account::delete_sync(&client, &token).await {
-        drop(refresh);
-        return Err(account_failure(&app, "couldn't delete sync data", error).await);
-    }
-    if !pro_generation_is_current(&app, generation) {
-        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
-    }
-    let cleared = run_blocking(account_credentials::clear_key).await;
-    if let Ok(Err(error)) | Err(error) = cleared {
-        warn!("couldn't clear the sync key: {error}");
-    }
-    *state.sync_key.lock().unwrap() = None;
-    *state.sync_key_id.lock().unwrap() = None;
-    clear_sync_state(&app).await;
-    set_sync_key_status(&app, SyncKeyStatus::NotStarted);
-    Ok(())
-}
-
-/// 窓口の包んだ鍵と、その鍵の見分けを読む。どちらかが無い（ほかのデバイスで同期データが削除されて写しが消えた）ときは、
-/// 状態を読み直して画面の欄を移す。読み直しは鍵の排他を取るので、失敗したときは受け取った排他を放してから行う
-async fn read_wrapped_key<'a>(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    token: &str,
-    refresh: tokio::sync::MutexGuard<'a, ()>,
-) -> Result<(tokio::sync::MutexGuard<'a, ()>, String, String), String> {
-    let server = match account::sync_key(client, token).await {
-        Ok(server) => server,
-        Err(error) => {
-            drop(refresh);
-            return Err(account_failure(app, "couldn't read the sync key", error).await);
-        }
-    };
-    let (Some(key_id), Some(wrapped)) = (server.key_id, server.wrapped_key) else {
-        drop(refresh);
-        return Err(recheck_sync_key(app).await);
-    };
-    Ok((refresh, key_id, wrapped))
-}
-
-/// ほかのデバイスで始めた同期に加わる。窓口の包んだ鍵を同期のパスワードで開き、このデバイスに置く
-#[tauri::command]
-async fn unlock_sync(app: AppHandle, password: String) -> Result<(), String> {
-    info!("unlock sync");
-    let state = app.state::<AppState>();
-    let refresh = state.sync_key_refresh.lock().await;
-    let (token, generation) = token_in_generation(&app).await?;
-    let client = http_client(&app)?;
-    // 鍵を置き終えるまで排他を持つ（読み直しと重ならないように）
-    let (_refresh, key_id, wrapped) = read_wrapped_key(&app, &client, &token, refresh).await?;
-    let key = unwrap_sync_key(wrapped, password).await?;
-    if sync_key::key_id(&key) != key_id {
-        warn!("the wrapped sync key doesn't match its key ID");
-        return Err(error_codes::UNEXPECTED.to_string());
-    }
-    // 開いている間に、サインアウトや別のアカウントへのサインインが済んでいたら、置かない
-    if !pro_generation_is_current(&app, generation) {
-        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
-    }
-    store_sync_key(key).await?;
-    adopt_sync_key(&app, key).await;
-    Ok(())
-}
-
-/// 同期のパスワードを変える。同じ鍵を新しいパスワードで包み直して窓口に置く。ほかのデバイスは、入れ直さずに同期を続ける
-#[tauri::command]
-async fn change_sync_password(
-    app: AppHandle,
-    current: String,
-    password: String,
-) -> Result<(), String> {
-    info!("change the sync password");
-    if !sync_key::password_long_enough(&password) {
-        return Err(error_codes::SYNC_PASSWORD_TOO_SHORT.to_string());
-    }
-    let state = app.state::<AppState>();
-    let refresh = state.sync_key_refresh.lock().await;
-    let (token, generation) = token_in_generation(&app).await?;
-    let client = http_client(&app)?;
-    let (refresh, key_id, wrapped) = read_wrapped_key(&app, &client, &token, refresh).await?;
-    // 先に窓口の鍵と手元の鍵を照らす。ほかのデバイスが同期データを削除して手元の鍵が古いと、前のパスワードは開けず、
-    // 「パスワードが正しくありません」が出続けるため。違えば状態を読み直して「入力」の欄へ移す
-    let local = *app.state::<AppState>().sync_key.lock().unwrap();
-    if local.as_ref().map(sync_key::key_id) != Some(key_id) {
-        drop(refresh);
-        return Err(recheck_sync_key(&app).await);
-    }
-    // 今のパスワードで開けることで、変えてよい人かを確かめる（窓口はパスワードを知らない）
-    let key = unwrap_sync_key(wrapped, current).await?;
-    if local != Some(key) {
-        warn!("the wrapped sync key doesn't match its key ID");
-        return Err(error_codes::UNEXPECTED.to_string());
-    }
-    let rewrapped = run_blocking(move || sync_key::wrap(&key, &password)).await??;
-    if !pro_generation_is_current(&app, generation) {
-        return Err(error_codes::SYNC_STATE_CHANGED.to_string());
-    }
-    match account::put_sync_key(&client, &token, &sync_key::key_id(&key), &rewrapped).await {
-        Ok(true) => Ok(()),
-        // 開いた後に、ほかのデバイスが同期データを削除した
-        Ok(false) => {
-            drop(refresh);
-            Err(recheck_sync_key(&app).await)
-        }
-        Err(error) => {
-            drop(refresh);
-            Err(account_failure(&app, "couldn't change the sync password", error).await)
-        }
-    }
-}
-
-/// 同じアカウントにサインインしているデバイスの一覧（設定の「アカウント」の「デバイス」）
-#[tauri::command]
-async fn mawok_devices(app: AppHandle) -> Result<Vec<account::SignedInDevice>, String> {
-    let token = mawok_token().await?;
-    let client = http_client(&app)?;
-    match account::devices(&client, &token).await {
-        Ok(devices) => Ok(devices),
-        Err(error) => Err(account_failure(&app, "couldn't list the devices", error).await),
-    }
-}
-
-/// ほかのデバイスをサインアウトさせる。このデバイス自身は `sign_out_mawok` でサインアウトする
-#[tauri::command]
-async fn sign_out_mawok_device(app: AppHandle, id: String) -> Result<(), String> {
-    info!("sign out another device");
-    let token = mawok_token().await?;
-    let client = http_client(&app)?;
-    match account::sign_out_device(&client, &token, &id).await {
-        // 404 は、ほかの所で先にサインアウトしていた。画面は一覧を読み直すだけでよい
-        Ok(()) | Err(account::AccountError::Http(404)) => Ok(()),
-        Err(error) => Err(account_failure(&app, "couldn't sign out the device", error).await),
-    }
-}
-
-/// Pro の料金ページをブラウザーで開く。デバイスの画面の案内にも使う。
-#[tauri::command]
-fn open_mawok_pro_page(app: AppHandle) -> Result<(), String> {
-    open_page(&app, &account::pro_page_url())
 }
 
 /// OS の通知を出す。文言だけで、押しても何もしない。新しい版を見つけたことを知らせる（updater.rs）
@@ -3492,87 +2157,81 @@ fn autostart_at_launch(
     }
 }
 
-/// 設定の置き場を開く。壊れていれば、元のファイルを写して退けてから作り直す（docs/config.md「読むとき」）。
-/// 作り直せもしないときと、壊れてはいないが開けないとき（ロック・権限など）は、ファイルに手を付けず、保存しない置き場で動かす
-fn open_store(path: &std::path::Path) -> (store::Store, Option<ConfigProblem>) {
-    let opened = path
-        .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .map_err(|error| store::OpenError {
-            broken: false,
-            message: error.to_string(),
+/// 置き場のファイルから設定を読む（docs/config.md「読むとき」）。読めない項目は既定のままにしてログにだけ出す。
+/// 読めないファイルの項目は `fallback`（起動のときは既定、ほかで変わったときは今の設定）のままにして、そのファイルを問題として返す。
+/// ログイン時の起動は、デバイスの設定から読む
+fn load_config(
+    dir: &std::path::Path,
+    device: &device::Device,
+    fallback: &Config,
+) -> (Config, Option<ConfigProblem>) {
+    let read = settings_files::read(dir, &os_name());
+    let mut entries = read.entries;
+    let unreadable: Vec<String> = read
+        .unreadable
+        .iter()
+        .map(|(name, error)| {
+            warn!("couldn't read the settings file {name}: {error}");
+            name.to_string()
         })
-        .and_then(|()| store::Store::open(path));
-    let error = match opened {
-        Ok(store) => return (store, None),
-        Err(error) => error,
-    };
-    warn!("couldn't open the settings store: {}", error.message);
-    if !error.broken {
-        return (
-            store::Store::in_memory(),
-            Some(ConfigProblem::Unsaved(error.message)),
+        .collect();
+    if !unreadable.is_empty() {
+        for (name, value) in config::stored_entries(fallback) {
+            if unreadable
+                .iter()
+                .any(|file| file == settings_files::file_of(&name))
+            {
+                entries.insert(name, value);
+            }
+        }
+    }
+    entries.remove(config::key::AUTOSTART);
+    if let Some(autostart) = device.autostart {
+        entries.insert(
+            config::key::AUTOSTART.to_string(),
+            serde_json::Value::Bool(autostart),
         );
     }
-    // 書きかけの記録を先に消す。本体を消した後に失敗すると、作り直せないうえ元のファイルも残らない
-    let reset = atomic_file::back_up(path, SystemTime::now())
-        .and_then(|copy| store::remove_side_files(path).map(|()| copy))
-        .and_then(|copy| std::fs::remove_file(path).map(|()| copy))
-        .map_err(|error| error.to_string())
-        .and_then(|copy| {
-            store::Store::open(path)
-                .map(|store| (store, copy))
-                .map_err(|error| error.message)
-        });
-    match reset {
-        Ok((store, copy)) => {
-            let name = copy
-                .and_then(|copy| {
-                    copy.file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                })
-                .unwrap_or_default();
-            info!("moved the unreadable settings store to {name}");
-            (store, Some(ConfigProblem::Reset(name)))
-        }
-        Err(error) => {
-            warn!("couldn't recreate the settings store: {error}");
-            (
-                store::Store::in_memory(),
-                Some(ConfigProblem::Unsaved(error)),
-            )
-        }
-    }
-}
-
-/// 置き場から設定を読む。読めない項目は既定のままにしてログにだけ出す。振り直した行の ID は、次も同じ行を
-/// 見分けられるよう書き戻す
-fn load_config(store: &mut store::Store) -> Config {
-    let loaded = store
-        .entries()
-        .and_then(|entries| config::from_entries(&entries));
-    let loaded = match loaded {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            warn!("couldn't read the settings: {error}");
-            return Config::default();
-        }
-    };
+    let loaded = config::from_entries(&entries);
     if !loaded.skipped.is_empty() {
         warn!(
             "reset unreadable settings to defaults: {}",
             loaded.skipped.join(", ")
         );
     }
-    if loaded.repaired_item_ids {
-        if let Err(error) = store.commit(&store::Commit {
-            entries: Some(&config::stored_entries(&loaded.config)),
-            ..store::Commit::default()
-        }) {
-            warn!("couldn't save repaired row ids: {error}");
+    let problem = (!unreadable.is_empty()).then_some(ConfigProblem::Unreadable(unreadable));
+    (loaded.config, problem)
+}
+
+/// 置き場の設定のファイルがほかで変わった。読み直して、変わった分を入れる。自分で書いた変化の知らせも届くが、
+/// 読んだ設定が今と同じなら何もしない
+fn reload_config_from_files(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let current = state.config.lock().unwrap().clone();
+    let device = state.device.lock().unwrap().clone();
+    let (next, problem) = load_config(&state.settings_dir(), &device, &current);
+    let problem_changed = {
+        let mut problems = state.problems.lock().unwrap();
+        let changed = problems.config.is_some() != problem.is_some();
+        problems.config = problem;
+        changed
+    };
+    if next == current {
+        if problem_changed {
+            refresh_tray(app);
         }
+        return;
     }
-    loaded.config
+    info!("reloaded the settings changed outside the app");
+    match adopt_config(app, next, false) {
+        Ok(rejected) if !rejected.is_empty() => {
+            warn!("kept the current value of: {}", rejected.join(", "))
+        }
+        Ok(_) => {}
+        Err(error) => warn!("couldn't adopt the changed settings: {error}"),
+    }
+    // 設定画面は、行と打って直す欄（書体・色など）の写しを持つので、どの項目が変わっても写し直させる
+    let _ = app.emit(events::CONFIG_REPLACED, ());
 }
 
 /// 起動したときに、ログイン項目と設定をそろえる（`autostart_at_launch`）。合わせられなければ、トレイの ⚠ に出す理由を返す。
@@ -3688,7 +2347,6 @@ impl Drop for OpeningGuard {
 
 fn open_settings(app: &AppHandle) {
     info!("open settings");
-    request_sync(app);
     hide_draft_for_settings(app);
     focus::before_show(app);
     #[cfg(target_os = "macos")]
@@ -3755,8 +2413,9 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         let problems = state.problems.lock().unwrap();
         let mut texts = Vec::new();
         match &problems.config {
-            Some(ConfigProblem::Reset(file_name)) => texts.push(lang.settings_reset(file_name)),
-            Some(ConfigProblem::Unsaved(error)) => texts.push(lang.settings_unsaved(error)),
+            Some(ConfigProblem::Unreadable(files)) => {
+                texts.push(lang.settings_unreadable(&files.join(", ")))
+            }
             None => {}
         }
         if problems.hotkey_unavailable {
@@ -3929,14 +2588,6 @@ fn macos_app_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     STARTED_AT.get_or_init(Instant::now);
-    // 窓口とやり取りする HTTPS の暗号の実装（Cargo.toml の reqwest の注を参照）。reqwest のクライアントを作る前に入れる
-    if rustls::crypto::ring::default_provider()
-        .install_default()
-        .is_err()
-    {
-        warn!("a TLS crypto provider was already installed");
-    }
-
     // 識別子が、設定・履歴・ログのフォルダーと単一起動の見分けを決める
     let mut context = tauri::generate_context!();
     let identifier = profile::scoped(&context.config().identifier);
@@ -3978,6 +2629,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
@@ -3985,18 +2637,19 @@ pub fn run() {
                 .build(),
         )
         .manage(DraftState::default())
-        .manage(AccountState::default())
         .invoke_handler(tauri::generate_handler![
             commit,
             preview_replacement_matches,
             dismiss,
             page_ready,
             get_settings,
-            set_sync_kind,
-            set_sync_excluded_setting,
             settings_backups,
             back_up_settings,
             restore_settings_backup,
+            pick_settings_dir,
+            default_settings_dir,
+            set_settings_dir,
+            reveal_settings_dir,
             open_settings_window,
             toggle_settings_window,
             close_settings_window,
@@ -4021,13 +2674,6 @@ pub fn run() {
             set_replacements,
             set_snippets,
             add_snippet,
-            start_mawok_sign_in,
-            mawok_sign_in_pending,
-            cancel_mawok_sign_in,
-            reopen_mawok_sign_in_page,
-            mawok_account_status,
-            sign_out_mawok,
-            open_mawok_pro_page,
             set_hotkey,
             set_draft_key,
             reset_draft_key,
@@ -4045,12 +2691,6 @@ pub fn run() {
             show_manual_window,
             close_manual_window,
             open_license_source,
-            start_sync,
-            delete_sync_data,
-            unlock_sync,
-            change_sync_password,
-            mawok_devices,
-            sign_out_mawok_device,
             #[cfg(target_os = "macos")]
             updater::update_status,
             #[cfg(target_os = "macos")]
@@ -4153,20 +2793,32 @@ pub fn run() {
             }
 
             let config_dir = app.path().app_config_dir()?;
-            let pro_state_path = config_dir.join(pro::STATE_FILE_NAME);
-            let pro_state = match pro::load(&pro_state_path) {
-                Ok(state) => state,
-                Err(error) => {
-                    warn!("couldn't read the Pro state: {error}");
-                    None
-                }
-            };
-            let store_path = config_dir.join(store::FILE_NAME);
-            // 開くとファイルができるので、その前に見る
-            let store_missing = !store_path.exists();
-            let (mut store, config_problem) = open_store(&store_path);
-            let mut config = load_config(&mut store);
-            let first_launch = is_first_launch(store_missing, config_problem.as_ref());
+            let device_path = config_dir.join(device::FILE_NAME);
+            let device_missing = !device_path.exists();
+            let mut device = device::load(&device_path).unwrap_or_else(|error| {
+                warn!("couldn't read the device settings: {error}");
+                device::Device::default()
+            });
+            let made_id = device::ensure_id(&mut device).unwrap_or_else(|error| {
+                warn!("couldn't make the device id: {error}");
+                false
+            });
+            let device_saved = !made_id
+                || match device::save(&device_path, &device) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        warn!("couldn't save the device settings: {error}");
+                        false
+                    }
+                };
+            let settings_dir = device
+                .settings_dir
+                .clone()
+                .unwrap_or_else(|| config_dir.clone());
+            info!("settings folder: {}", settings_dir.display());
+            let (mut config, config_problem) =
+                load_config(&settings_dir, &device, &Config::default());
+            let first_launch = is_first_launch(device_missing, device_saved);
             let mut problems = Problems {
                 config: config_problem,
                 ..Problems::default()
@@ -4188,28 +2840,17 @@ pub fn run() {
             }
 
             app.manage(AppState {
-                store: Mutex::new(store),
+                device_path,
+                device: Mutex::new(device),
+                settings_dir: Mutex::new(settings_dir),
+                default_settings_dir: config_dir.clone(),
+                watch: Mutex::new(None),
                 backups_dir: backup::dir_in(&config_dir),
-                pro_state_path,
                 version: app.package_info().version.to_string(),
                 system_lang: Lang::system(),
                 config: Mutex::new(config),
                 problems: Mutex::new(problems),
                 settings_opening: AtomicBool::new(false),
-                pro_state: Mutex::new(pro_state),
-                mawok_account_signed_in: AtomicBool::new(false),
-                pro_generation: AtomicUsize::new(0),
-                sync_key: Mutex::new(None),
-                sync_key_id: Mutex::new(None),
-                sync_key_status: Mutex::new(SyncKeyStatus::None),
-                sync_key_refresh: tokio::sync::Mutex::new(()),
-                sync_key_checks: AtomicUsize::new(0),
-                sync_generation: AtomicUsize::new(0),
-                sync_record_generation: AtomicUsize::new(0),
-                sync_commit: tokio::sync::Mutex::new(()),
-                sync_schedule: Mutex::new(SyncSchedule::default()),
-                sync_debounce: debounce::Debounce::default(),
-                synced_on_show: Mutex::new(None),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "linux")]
@@ -4235,8 +2876,7 @@ pub fn run() {
                     move || resume_hotkey_after_menu(&end),
                 );
             }
-            start_periodic_pro_checks(app.handle().clone());
-            start_periodic_sync(app.handle().clone());
+            watch_settings_dir(app.handle());
             start_daily_backups(app.handle().clone());
             #[cfg(target_os = "macos")]
             updater::start_periodic_checks(app.handle());
@@ -4304,60 +2944,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_sync_kinds_off_do_not_start_a_sync() {
-        let config = Config {
-            sync_settings: false,
-            sync_keys: false,
-            sync_replacements: false,
-            sync_snippets: false,
-            sync_history: false,
-            ..Config::default()
-        };
-        assert!(!sync::kinds(&config).any());
-    }
-
-    #[test]
-    fn takes_the_callback_even_behind_a_silent_connection() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        runtime.block_on(async {
-            let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-                .await
-                .unwrap();
-            let address = listener.local_addr().unwrap();
-            let accepting = accept_callback(&listener, "s1");
-            let requests = async {
-                // 要求を送らない接続（ブラウザの先読みなど）を開いたまま、ほかの要求を送る
-                let _silent = tokio::net::TcpStream::connect(address).await.unwrap();
-                let mut other = tokio::net::TcpStream::connect(address).await.unwrap();
-                other
-                    .write_all(b"GET /favicon.ico HTTP/1.1\r\n\r\n")
-                    .await
-                    .unwrap();
-                let mut answer = String::new();
-                other.read_to_string(&mut answer).await.unwrap();
-                assert!(answer.starts_with("HTTP/1.1 404"));
-                let mut callback = tokio::net::TcpStream::connect(address).await.unwrap();
-                callback
-                    .write_all(b"GET /callback?code=c1&state=s1 HTTP/1.1\r\n\r\n")
-                    .await
-                    .unwrap();
-                callback
-            };
-            let ((_, code), _callback) =
-                tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                    tokio::join!(accepting, requests)
-                })
-                .await
-                .expect("the callback is taken without waiting for the silent connection");
-            assert_eq!(code, "c1");
-        });
-    }
-
-    #[test]
     fn keeps_launch_at_login_off_when_either_side_turned_it_off() {
         use AutostartAtLaunch::*;
         for (configured, registered, first_launch, expected) in [
@@ -4399,67 +2985,42 @@ mod tests {
             focused: false,
             settings_focused: false,
             settings_opening: false,
-            reading_credential: false,
         }
     }
 
     #[test]
-    fn an_unreadable_settings_store_is_copied_aside_and_recreated() {
-        let dir = test_support::TempDir::new("lib-broken-store");
-        let path = dir.join(store::FILE_NAME);
-        std::fs::write(&path, "not a database").unwrap();
-        let journal = dir.join(format!("{}-journal", store::FILE_NAME));
-        std::fs::write(&journal, "a journal of the broken file").unwrap();
-        let (mut store, problem) = open_store(&path);
-        let Some(ConfigProblem::Reset(copy)) = problem else {
-            panic!("the store should be recreated");
+    fn reads_the_settings_files_and_keeps_the_fallback_for_an_unreadable_file() {
+        let dir = test_support::TempDir::new("lib-load-config");
+        std::fs::write(dir.join(settings_files::SETTINGS), "theme = \"dark\"\n").unwrap();
+        std::fs::write(dir.join(settings_files::SNIPPETS), "snippets = [\n").unwrap();
+        let fallback = Config {
+            snippets: vec![Snippet {
+                name: "a".to_string(),
+                ..Snippet::default()
+            }],
+            ..Config::default()
         };
-        assert!(copy.starts_with("settings.broken-") && copy.ends_with(".db"));
-        assert!(!journal.exists());
-        assert_eq!(std::fs::read(dir.join(&copy)).unwrap(), b"not a database");
-        assert_eq!(load_config(&mut store), Config::default());
-        // 作り直した置き場は、次の起動でそのまま開ける
-        drop(store);
-        assert!(open_store(&path).1.is_none());
+        let device = device::Device {
+            autostart: Some(false),
+            ..device::Device::default()
+        };
+        let (config, problem) = load_config(dir.path(), &device, &fallback);
+        assert_eq!(config.theme, Theme::Dark);
+        assert!(!config.autostart);
+        assert_eq!(config.snippets, fallback.snippets);
+        let Some(ConfigProblem::Unreadable(files)) = problem else {
+            panic!("the snippets file is unreadable");
+        };
+        assert_eq!(files, [settings_files::SNIPPETS]);
     }
 
     #[test]
-    fn a_store_that_only_fails_to_open_is_left_as_it_is() {
-        let dir = test_support::TempDir::new("lib-unopenable-store");
-        // 置き場の名前のフォルダーは、SQLite が開けない（壊れたファイルではない）
-        let path = dir.join(store::FILE_NAME);
-        std::fs::create_dir(&path).unwrap();
-        let (_, problem) = open_store(&path);
-        assert!(matches!(problem, Some(ConfigProblem::Unsaved(_))));
-        assert!(path.is_dir());
-    }
-
-    #[test]
-    fn row_ids_repaired_on_loading_are_written_back() {
-        let mut store = store::Store::in_memory();
-        let entries = std::collections::BTreeMap::from([(
-            "replacements".to_string(),
-            serde_json::json!([{ "from": "a", "to": "b" }]),
-        )]);
-        store
-            .commit(&store::Commit {
-                entries: Some(&entries),
-                ..store::Commit::default()
-            })
-            .unwrap();
-        let first = load_config(&mut store);
-        // 振り直した ID を書き戻したので、読み直しても同じ行として見分けられる
-        assert_eq!(load_config(&mut store).replacements, first.replacements);
-    }
-
-    #[test]
-    fn shows_draft_only_when_settings_store_was_created() {
-        assert!(is_first_launch(true, None));
+    fn shows_draft_only_when_the_device_file_was_created() {
+        assert!(is_first_launch(true, true));
         // 2回目以降の起動
-        assert!(!is_first_launch(false, None));
-        // 作れなかったら、次の起動でも置き場がないので出さない
-        let unwritable = ConfigProblem::Unsaved("permission denied".to_string());
-        assert!(!is_first_launch(true, Some(&unwritable)));
+        assert!(!is_first_launch(false, true));
+        // 作れなかったら、次の起動でもファイルがないので出さない
+        assert!(!is_first_launch(true, false));
     }
 
     #[test]
@@ -4498,15 +3059,6 @@ mod tests {
         // ウィンドウの中のクリックで、知らせが外れて戻ることがある
         assert!(!should_hide_on_blur(BlurCheck {
             focused: true,
-            ..blurred()
-        }));
-    }
-
-    #[test]
-    fn keeps_draft_while_reading_credential() {
-        // macOS のキーチェーンの許可のダイアログにフォーカスが移っても、隠さない
-        assert!(!should_hide_on_blur(BlurCheck {
-            reading_credential: true,
             ..blurred()
         }));
     }

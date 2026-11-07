@@ -2,15 +2,13 @@
 
 pub const SETTINGS_CHANGED: &str = "settings-changed";
 pub const DRAFT_HISTORY_CLEARED: &str = "draft-history-cleared";
-/// 同期で履歴が替わった。テキストウィンドウは履歴を読み直す。
-pub const DRAFT_HISTORY_SYNCED: &str = "draft-history-synced";
+/// ほかのデバイスの履歴を混ぜて、履歴が替わった。テキストウィンドウは履歴を読み直す。
+pub const DRAFT_HISTORY_MERGED: &str = "draft-history-merged";
 pub const SNIPPET_ADDED: &str = "snippet-added";
-/// 同期かバックアップから戻したことで設定の行一覧が替わった。設定画面は行を新しい設定から写し直す。
+/// 設定のファイルがほかで変わったか、置き場を替えたか、バックアップから戻したことで、設定が替わった。設定画面は、持っている写し（行・打って直す欄）を今の設定から写し直す。
 pub const CONFIG_REPLACED: &str = "config-replaced";
 pub const SHOWN: &str = "shown";
 pub const HIDE_REQUESTED: &str = "hide-requested";
-/// Mawok のアカウントのサインインが済んだか、期限が切れた（中身は MawokSignInEnded）
-pub const MAWOK_SIGN_IN_ENDED: &str = "mawok-sign-in-ended";
 /// Mac 版の更新の様子か、下書きの書きかけのあるなしが変わった（中身は UpdateView）
 #[cfg(any(target_os = "macos", test))]
 pub const UPDATE_CHANGED: &str = "update-changed";

@@ -4,7 +4,7 @@
 	import type { Backup } from '$lib/bindings/Backup';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { ERROR_CODES } from '$lib/bindings/constants';
-	import { errorCode } from '$lib/errors';
+	import { errorCode, settingsFileUnreadable } from '$lib/errors';
 	import { OpenLoader } from '$lib/open-loader.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import type { Locale } from '$lib/paraglide/runtime';
@@ -38,7 +38,7 @@
 	const failure = (error: unknown) =>
 		errorCode(error) === ERROR_CODES.BACKUP_RESTORE_PARTIAL
 			? m.backup_restore_partial()
-			: m.settings_failed({ error: errorCode(error) });
+			: (settingsFileUnreadable(error) ?? m.settings_failed({ error: errorCode(error) }));
 
 	async function load(message = '') {
 		const current = loader.begin();

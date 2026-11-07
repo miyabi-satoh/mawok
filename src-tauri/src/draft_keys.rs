@@ -28,7 +28,7 @@ impl DraftAction {
         DraftAction::HistoryNewer,
     ];
 
-    /// 設定の置き場と同期での項目名
+    /// 設定のファイルでの項目名
     pub fn name(self) -> &'static str {
         match self {
             DraftAction::Copy => "copy",

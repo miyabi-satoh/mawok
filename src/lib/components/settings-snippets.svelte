@@ -1,10 +1,8 @@
 <script lang="ts">
-	import SyncToggle from '$lib/components/sync-toggle.svelte';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
-	import SettingsSyncNote from '$lib/components/settings-sync-note.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { m } from '$lib/paraglide/messages';
@@ -14,21 +12,17 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { focusFirstField } from '$lib/focus-field';
 	import { showsFilter } from '$lib/list-filter';
-	import type { SettingsView } from '$lib/settings.svelte';
 
 	/**
 	 * 設定画面の「定型文」の分類。定型文の並び。
 	 * 定型文の編集中の内容は、分類を移っても消えないよう、設定画面の本体が持つ
 	 */
-	let { view, editor }: { view: SettingsView; editor: SnippetsEditor } = $props();
+	let { editor }: { editor: SnippetsEditor } = $props();
 </script>
 
 <!-- 画面の題名と同じ見出しをカードに重ねない。よく触る定型文の並びを先に出す -->
 <div class="flex flex-col gap-5">
 	<div class="flex flex-col gap-3">
-		{#if view.proAvailable && !view.syncKinds.snippets}
-			<SettingsSyncNote text={m.settings_sync_snippets_off()} />
-		{/if}
 		<SettingsSection>
 			<SettingsRow>
 				{#if showsFilter(editor.snippets.rows.length, editor.filter)}
@@ -45,16 +39,6 @@
 				>
 					{#snippet trailing(row)}
 						{@const label = snippetLabel(row)}
-						{#if view.proAvailable && view.syncKinds.snippets}
-							<SyncToggle
-								pressed={row.sync}
-								name={label}
-								onchange={(sync) => {
-									row.sync = sync;
-									editor.snippets.save();
-								}}
-							/>
-						{/if}
 						<!-- 一覧から外すスイッチ。消さずに取っておける -->
 						<Switch
 							aria-label={label

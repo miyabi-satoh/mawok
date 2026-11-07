@@ -18,15 +18,6 @@ hooks-install:
 dev:
     pnpm tauri dev
 
-# D1 は手元のもの (account-server/.wrangler) を使い、メールは送らずリンクをログに出す
-[doc('窓口 (account-server/) を手元で起動する')]
-[group('開発')]
-dev-account-server:
-    cd site && pnpm run build
-    cd account-server && node -e "require('fs').existsSync('.dev.vars') || require('fs').copyFileSync('dev.vars.example', '.dev.vars')"
-    cd account-server && pnpm exec wrangler d1 migrations apply DB --local
-    cd account-server && pnpm exec wrangler dev --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787 --var MAIL_LOG_ONLY:1
-
 [doc('コードを整形する (cargo fmt・prettier)')]
 [group('開発')]
 fmt:
@@ -37,10 +28,10 @@ fmt:
 # CI (.github/workflows/ci.yml) が PR ごとに macOS で流す
 [doc('CI と同じ検査をまとめて流す (整形・lint・型検査・生成物・テスト)')]
 [group('検査')]
-ci: ci-app account-server-check site-check
+ci: ci-app site-check account-server-check
 
-# 窓口と紹介のサイトは OS によらない中身なので、CI は Windows ではこちらだけを流す
-[doc('アプリの検査だけを流す (ci から窓口と紹介のサイトを除いたもの)')]
+# 紹介のサイトとその置き場 (account-server/) は OS によらない中身なので、CI は Windows と Linux ではこちらだけを流す
+[doc('アプリの検査だけを流す (ci から紹介のサイトとその置き場を除いたもの)')]
 [group('検査')]
 ci-app: fmt-check lint check licenses-check pinned-deps-check test bindings-check
 
@@ -89,14 +80,13 @@ pinned-deps-check:
 licenses-check:
     node scripts/check-rust-licenses.mjs
 
-# 初めてのときは先に `cd account-server && pnpm install`
-[doc('窓口 (account-server/) を検査する (整形・生成した型・型検査・テスト)')]
+# 初めてのときは先に `cd account-server && pnpm install`。
+# 置く前の確かめ (wrangler deploy --dry-run) は site/dist を読むので、ci では site-check の後に流す
+[doc('紹介のサイトの置き場 (account-server/) の Worker の設定を検査する (整形・置く前の確かめ)')]
 [group('検査')]
 account-server-check:
     cd account-server && pnpm run lint
-    cd account-server && pnpm exec wrangler types --check
     cd account-server && pnpm run check
-    cd account-server && pnpm run test
 
 # 初めてのときは先に `cd site && pnpm install`
 [doc('紹介と規約類 (site/) を検査してビルドする')]
@@ -160,7 +150,7 @@ msix *args:
     node scripts/msix.mjs {{ args }}
 
 # build でユニバーサル版を署名・公証し、確認先の JSON と一緒に src-tauri/target/release-mac/<版>/ に並べる。
-# 版の番号の変更を main に入れてから、main で publish を流す。GitHub Releases に上げ、JSON を site/ に置いて窓口ごと置き直す。
+# 版の番号の変更を main に入れてから、main で publish を流す。GitHub Releases に上げ、JSON を site/ に置いてサイトごと置き直す。
 # 要: Developer ID の証明書と環境変数 TAURI_SIGNING_PRIVATE_KEY・APPLE_ID (→ docs/platform.md「Mac 版の配る版」)
 [doc('Mac 版の配る版を作る (build) ・出す (publish)')]
 [group('ビルド')]

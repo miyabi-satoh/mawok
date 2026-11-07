@@ -3,8 +3,7 @@
 ## 技術スタック
 
 - アプリ: Tauri 2 + SvelteKit（静的出力の SPA）+ Tailwind CSS 4 + shadcn-svelte + Paraglide JS（日本語 / 英語）
-- 窓口（`account-server/`）: Cloudflare Workers + Hono + D1
-- 紹介・規約類（`site/`）: Astro。窓口と同じ Worker の静的アセットで出す
+- 紹介・規約類（`site/`）: Astro。Cloudflare Workers の静的アセットで出す（`account-server/` は、その Worker の設定だけを持つ）
 
 ディレクトリ:
 
@@ -18,10 +17,8 @@
 技術の説明:
 
 - [設定の置き場](docs/config.md)
-- [設定と履歴の同期](docs/sync.md)
 - [OS ごとの作り](docs/platform.md)
 - [第三者のソフトウェア](docs/third-party-licenses.md)
-- [窓口（mawok.amiiby.com）](docs/account-server.md)
 
 ## セットアップ
 
@@ -34,7 +31,7 @@
 
 ```sh
 pnpm install
-(cd account-server && pnpm install) && (cd site && pnpm install)   # 窓口と紹介・規約類 (just ci が検査する)
+(cd account-server && pnpm install) && (cd site && pnpm install)   # 紹介・規約類と、それを出す Worker (just ci が検査する)
 just hooks-install   # push 時に整形を確かめるフックを入れる
 pnpm exec playwright install chromium   # 画面の部品テストで使うブラウザーを入れる
 ```
@@ -87,14 +84,9 @@ just release-mac publish
 
 ## デプロイ
 
-窓口（`account-server/`）と紹介・規約類（`site/`）は、同じ Cloudflare Worker で出す（→ [窓口](docs/account-server.md)）。コマンドは `account-server/` で打つ。
+紹介・規約類（`site/`）は、Cloudflare Worker の静的アセットで出す。コマンドは `account-server/` で打つ。
 
-- 手元で動かす: `just dev-account-server`。メールは送らず、サインインのリンクをログに出す。
 - 本番に置く: `pnpm run deploy`（`site/` をビルドしてから置く）。
-- staging に置く: `pnpm run deploy --env staging`（`site/` をビルドしてから置く）。
-- 開発版を staging の窓口に向ける: `MAWOK_ACCOUNT_URL=https://mawok-account-staging.amiiby.workers.dev just dev`。2台のデバイスの間の動き（同期）を確かめるときに、両方をこうして起動する。値はビルドのときに読むので、`just dev` を打つ所で付ける。URL の末尾に `/` は付けない。
-- 秘密の値: `pnpm exec wrangler secret put <名前>`（staging は `--env staging` を付ける）。
-- 表を変えたら、置く前に `pnpm exec wrangler d1 migrations apply DB --remote`（staging は `--env staging` も）。
 
 ## 設定とデータの置き場所
 

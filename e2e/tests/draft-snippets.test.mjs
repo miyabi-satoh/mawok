@@ -22,7 +22,7 @@ import {
 } from '../lib/os.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
 import { turnImeOff, turnImeOn, typeRomaji } from '../lib/ime.mjs';
-import { beginTestConfig, withoutSyncFields } from '../lib/config.mjs';
+import { beginTestConfig } from '../lib/config.mjs';
 import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { expectStays, waitFor } from '../lib/wait.mjs';
 
@@ -188,7 +188,7 @@ test.describe('定型文', () => {
 
 			const settings = await invokeApp(client, 'get_settings');
 			assert.deepEqual(
-				withoutSyncFields(settings.snippets),
+				settings.snippets,
 				[...SNIPPETS, { name: '', body: 'あいう' }].map(withDefaults)
 			);
 			const palette = await openPalette(client);
@@ -309,7 +309,7 @@ test.describe('定型文', () => {
 				{ label: '名前を直した定型文の保存' }
 			);
 			assert.deepEqual(
-				withoutSyncFields(settings.snippets).at(-1),
+				settings.snippets.at(-1),
 				withDefaults({
 					name: 'ねぎらい',
 					body: 'おつかれさま'

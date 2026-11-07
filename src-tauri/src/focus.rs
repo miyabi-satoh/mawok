@@ -192,24 +192,6 @@ pub fn make_draft_panel<R: Runtime>(window: &WebviewWindow<R>) {
     );
 }
 
-/// 出ている下書きウィンドウへ、キーボードのフォーカスを戻す。macOS ではアプリを前面にしない
-#[cfg(not(target_os = "macos"))]
-pub fn refocus_draft<R: Runtime>(_app: &AppHandle<R>, window: &WebviewWindow<R>) {
-    let _ = window.set_focus();
-}
-
-/// 出ている下書きウィンドウへ、キーボードのフォーカスを戻す。前面にすると、フルスクリーンの Space から外れるため
-#[cfg(target_os = "macos")]
-pub fn refocus_draft<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
-    use tauri_nspanel::ManagerExt;
-    match app.get_webview_panel(window.label()) {
-        Ok(panel) => panel.make_key_window(),
-        Err(_) => {
-            let _ = window.set_focus();
-        }
-    }
-}
-
 /// 下書きウィンドウを、アプリを前面にせずに出して、キーボードのフォーカスを入れる。パネルにできていなければ、ふつうのウィンドウとして出す
 #[cfg(target_os = "macos")]
 pub fn show_draft<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> tauri::Result<()> {

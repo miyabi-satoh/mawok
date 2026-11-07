@@ -9,14 +9,18 @@ import {
 	recoverStaleAutostartBackupIfAny
 } from './os.mjs';
 import { PROFILE_IDENTIFIER } from './app-conf.mjs';
+import { fileExists, readBackupRecord, recordPath, writeJsonAtomic } from './files.mjs';
 import {
-	fileExists,
-	readBackupRecord,
-	readTextIfExists,
-	recordPath,
-	writeJsonAtomic
-} from './files.mjs';
-import { BROKEN_PREFIX, readSettings, SETTINGS_FILE, writeSettings } from './settings-db.mjs';
+	DEVICE_FILE,
+	HISTORY_DIR,
+	historyFileOf,
+	readSettings,
+	removeConfigFiles,
+	restoreConfigDir,
+	SETTINGS_FILE,
+	snapshotConfigDir,
+	writeSettings
+} from './settings-files.mjs';
 
 // 自動の確認は、プロファイル `e2e` で起動する (tauri-driver.mjs の startTauriDriver が MAWOK_PROFILE を渡す。src-tauri/src/profile.rs)。
 // 設定・履歴・ログのフォルダーは識別子の後ろに `.e2e` が付き、常用の Mawok のものとは別になる。
@@ -30,21 +34,20 @@ if (!appData) {
 		'%APPDATA% が読めませんでした。設定の置き場の場所を解決できないため E2E を続行できません。'
 	);
 }
+// テストは置き場を選ばずに回すので、設定のファイルと履歴 (history フォルダー) もここに置かれる (settings-files.mjs)
 const CONFIG_DIR = path.join(appData, PROFILE_IDENTIFIER);
-const CONFIG_PATH = path.join(CONFIG_DIR, SETTINGS_FILE);
-// 下書きの履歴は、src-tauri/src/lib.rs の app_local_data_dir() の下（Windows は Roaming ではなく %LOCALAPPDATA%）
+// ログと WebView2 のデータは、src-tauri/src/lib.rs の app_local_data_dir() の下（Windows は Roaming ではなく %LOCALAPPDATA%）
 const localAppData = process.env.LOCALAPPDATA;
 if (!localAppData) {
 	throw new Error(
-		'%LOCALAPPDATA% が読めませんでした。history.json の場所を解決できないため E2E を続行できません。'
+		'%LOCALAPPDATA% が読めませんでした。ログの場所を解決できないため E2E を続行できません。'
 	);
 }
-/** 設定 (%APPDATA%) と、履歴・ログ・WebView2 のデータ (%LOCALAPPDATA%) の置き場所 */
+/** 設定・履歴 (%APPDATA%) と、ログ・WebView2 のデータ (%LOCALAPPDATA%) の置き場所 */
 export const APP_DATA_DIRS = Object.freeze({
 	roaming: CONFIG_DIR,
 	local: path.join(localAppData, PROFILE_IDENTIFIER)
 });
-const HISTORY_PATH = path.join(APP_DATA_DIRS.local, 'history.json');
 // window-state プラグインが、下書きと設定ウィンドウの位置と大きさを記録するファイル。位置や大きさを変えるテストが
 // 前のテストの記録に引きずられないよう、設定の置き場と一緒に控えて戻す
 export const WINDOW_STATE_PATH = path.join(CONFIG_DIR, '.window-state.json');
@@ -59,8 +62,8 @@ const BACKUP_PATH = recordPath('.config-backup.json');
 // で原子的に取り合う専用のロックファイルを別に置く
 const LOCK_PATH = recordPath('.e2e.lock');
 
-// 設定の置き場 (src-tauri/src/config.rs) は、既定と違う値だけを持つ。
-// テストは画面とのやり取りと同じ camelCase の名前で読み書きし (settings-db.mjs)、書いていない項目は既定値で埋める
+// 設定のファイル (src-tauri/src/config.rs) は、既定と違う値だけを持つ。
+// テストは画面とのやり取りと同じ camelCase の名前で読み書きし (settings-files.mjs)、書いていない項目は既定値で埋める
 
 // src-tauri/src/config.rs の DEFAULT_HOTKEY と同じ値
 export const DEFAULT_HOTKEY = 'CommandOrControl+Shift+Space';
@@ -100,26 +103,13 @@ const DEFAULT_DRAFT_KEYS = {
  * `inputGuidance` は、書いていなければ undefined (既定の案内) のまま
  */
 async function readConfig() {
-	const stored = (await readSettings(CONFIG_PATH)) ?? {};
+	const stored = (await readSettings(CONFIG_DIR)) ?? {};
 	return {
 		...DEFAULT_CONFIG,
 		...stored,
 		textWindowKeys: { ...DEFAULT_DRAFT_KEYS, ...stored.textWindowKeys },
 		replacements: (stored.replacements ?? []).map((row) => ({ enabled: true, ...row }))
 	};
-}
-
-/**
- * 置き換え辞書・定型文の行から、アプリが付ける `id` と `sync` を外す。
- * テストが渡した中身と比べるときに使う (`id` は行ごとに乱数で付き、`sync` は読む口によって出たり出なかったりする)
- */
-export function withoutSyncFields(rows) {
-	return rows.map((row) => {
-		const rest = { ...row };
-		delete rest.id;
-		delete rest.sync;
-		return rest;
-	});
 }
 
 /**
@@ -243,73 +233,18 @@ export async function releaseLock(token) {
 	await fs.rm(LOCK_PATH, { force: true });
 }
 
-/** ファイルの中身を読む。なければ `{ existed: false, text: null }` */
-async function readOptionalText(file) {
-	const text = await readTextIfExists(file);
-	return { existed: text !== null, text };
-}
-
-/** 読んだ中身を書き戻す。元々なければ、テスト中にできたファイルを消す */
-async function restoreOptionalText(file, { existed, text }) {
-	if (existed) {
-		await fs.writeFile(file, text, 'utf8');
-	} else {
-		await fs.rm(file, { force: true });
-	}
-}
-
-/** 設定の置き場 (SQLite のファイル) を、控えに置けるよう base64 で読む。なければ `{ existed: false, text: null }` */
-async function readOptionalDatabase(file) {
-	try {
-		return { existed: true, text: (await fs.readFile(file)).toString('base64') };
-	} catch (error) {
-		if (error.code === 'ENOENT') return { existed: false, text: null };
-		throw error;
-	}
-}
-
-/** base64 で控えた置き場を書き戻す。元々なければ、テスト中にできた置き場を消す */
-async function restoreOptionalDatabase(file, { existed, text }) {
-	// 書きかけのときに SQLite が置く journal は、控えた中身と食い違うので残さない
-	await fs.rm(`${file}-journal`, { force: true });
-	if (existed) {
-		await fs.writeFile(file, Buffer.from(text, 'base64'));
-	} else {
-		await fs.rm(file, { force: true });
-	}
-}
-
 /**
- * 設定の置き場 (base64)・履歴・.window-state.json の今の中身をバックアップファイルに書き、その記録
- * ({ existed, database, history, windowState }) を返す。
- * 置き場がまだ存在しない (アプリを一度も起動していないクリーンな環境) 場合も
- * `existed: false` として記録し、復元時にはテスト用に作った置き場を削除する。
+ * 設定のファイル・device.json・履歴・.window-state.json の今の中身をバックアップファイルに書き、その記録
+ * ({ savedAt, files }) を返す。まだ無いファイル (アプリを一度も起動していないクリーンな環境) は記録に載せず、
+ * 復元時にはテスト中にできたものを削除する。
  *
  * 書き込みは一時ファイルに書いてから rename する (途中で強制終了・電源断が起きても
  * 中途半端な内容がバックアップとして残らないようにするため)
  */
 async function backupConfigText() {
-	const config = await readOptionalDatabase(CONFIG_PATH);
-	const history = await readOptionalText(HISTORY_PATH);
-	const windowState = await readOptionalText(WINDOW_STATE_PATH);
-	const record = {
-		savedAt: new Date().toISOString(),
-		existed: config.existed,
-		database: config.text,
-		history,
-		windowState
-	};
+	const record = { savedAt: new Date().toISOString(), files: await snapshotConfigDir(CONFIG_DIR) };
 	await writeJsonAtomic(BACKUP_PATH, record);
 	return record;
-}
-
-function isValidFileRecord(record) {
-	return (
-		record !== null &&
-		typeof record === 'object' &&
-		typeof record.existed === 'boolean' &&
-		(record.existed ? typeof record.text === 'string' : record.text === null)
-	);
 }
 
 /** バックアップの記録として最低限の形をしているか (スキーマが不明なものを誤って復元しないため) */
@@ -317,52 +252,40 @@ function isValidBackupRecord(record) {
 	return (
 		record !== null &&
 		typeof record === 'object' &&
-		isValidFileRecord({ existed: record.existed, text: record.database }) &&
 		typeof record.savedAt === 'string' &&
-		isValidFileRecord(record.windowState) &&
-		isValidFileRecord(record.history)
+		record.files !== null &&
+		typeof record.files === 'object' &&
+		Object.values(record.files).every((text) => typeof text === 'string')
 	);
 }
 
-/** 記録を書き戻し (または、元々なければ削除し)、バックアップファイルを消す (正常終了時の後始末) */
-async function restoreAndClearBackup({ existed, database, history, windowState }) {
-	await restoreOptionalDatabase(CONFIG_PATH, { existed, text: database });
-	if (history) await restoreOptionalText(HISTORY_PATH, history);
-	if (windowState) await restoreOptionalText(WINDOW_STATE_PATH, windowState);
+/** 記録を書き戻し (元々なかったファイルは削除し)、バックアップファイルを消す (正常終了時の後始末) */
+async function restoreAndClearBackup({ files }) {
+	await restoreConfigDir(CONFIG_DIR, files);
 	await fs.rm(BACKUP_PATH, { force: true });
 }
 
-/** 置き場に中身をそのまま書く (SQLite として読めない置き場を試すとき用)。beginTestConfig で控えを取ってから呼ぶこと */
+/** 設定のファイル (settings.toml) に中身をそのまま書く (TOML として読めないファイルを試すとき用)。beginTestConfig で控えを取ってから呼ぶこと */
 export async function writeConfigBytes(bytes) {
-	await fs.writeFile(CONFIG_PATH, bytes);
+	await fs.writeFile(path.join(CONFIG_DIR, SETTINGS_FILE), bytes);
+}
+
+/** 設定のファイル (settings.toml) の中身 */
+export async function readConfigBytes() {
+	return fs.readFile(path.join(CONFIG_DIR, SETTINGS_FILE));
 }
 
 /** 置き場の項目を、camelCase の名前で書いた `settings` にそっくり置き換える。beginTestConfig で控えを取ってから、アプリを止めて呼ぶこと */
-export function writeTestSettings(settings) {
-	writeSettings(CONFIG_PATH, settings);
+export async function writeTestSettings(settings) {
+	await writeSettings(CONFIG_DIR, settings);
 }
 
-/** E2E のテスト間で下書きの履歴が混ざらないように消す */
+/**
+ * E2E のテスト間で下書きの履歴が混ざらないように消す。テストは置き場を選ばずに回す (writeSettings が既定に戻す) ので、
+ * 消すのは既定の置き場の履歴だけ。選んだ置き場が残っていても、そちらの (ほかのデバイスと同期しているかもしれない) 履歴には触れない
+ */
 export async function clearHistory() {
-	await fs.rm(HISTORY_PATH, { force: true });
-}
-
-/** 設定フォルダーにある `settings.broken-….db` の名前の一覧 */
-export async function listBrokenConfigCopies() {
-	const names = await fs.readdir(CONFIG_DIR);
-	return names.filter((name) => name.startsWith(BROKEN_PREFIX)).sort();
-}
-
-/** 設定フォルダーの `settings.broken-….db` を読む */
-export async function readBrokenConfigCopy(name) {
-	return fs.readFile(path.join(CONFIG_DIR, name));
-}
-
-/** 設定フォルダーの `settings.broken-….db` を消す (テストが作らせたものの後始末) */
-export async function removeBrokenConfigCopy(name) {
-	if (!name.startsWith(BROKEN_PREFIX))
-		throw new Error(`消せるのは ${BROKEN_PREFIX}….db だけです: ${name}`);
-	await fs.rm(path.join(CONFIG_DIR, name), { force: true });
+	await fs.rm(path.join(CONFIG_DIR, HISTORY_DIR), { recursive: true, force: true });
 }
 
 /**
@@ -378,7 +301,7 @@ export async function recoverStaleBackupIfAny() {
 		BACKUP_PATH,
 		isValidBackupRecord,
 		`${BACKUP_PATH} の内容が壊れているか想定した形をしていないため復元できません。` +
-			`設定の置き場 (${CONFIG_PATH}) が今どうなっているか手動で確認し、問題なければ ${BACKUP_PATH} を削除してから再実行してください。`
+			`設定の置き場 (${CONFIG_DIR}) が今どうなっているか手動で確認し、問題なければ ${BACKUP_PATH} を削除してから再実行してください。`
 	);
 	if (record === null) return false;
 
@@ -450,25 +373,25 @@ export function registerCrashRecovery(lockToken) {
  */
 export async function beginMissingConfig() {
 	const original = await backupConfigText();
-	await fs.rm(CONFIG_PATH, { force: true });
-	await fs.rm(`${CONFIG_PATH}-journal`, { force: true });
+	await removeConfigFiles(CONFIG_DIR);
 	return {
 		restore: () => restoreAndClearBackup(original)
 	};
 }
 
-/** 設定の置き場があるか */
+/** このデバイスの設定 (device.json) があるか。無ければ、アプリは初めての起動として動く */
 export async function configExists() {
-	return fileExists(CONFIG_PATH);
+	return fileExists(path.join(CONFIG_DIR, DEVICE_FILE));
 }
 
 /**
- * 下書きの履歴のファイル (history.json) にある履歴の件数。ファイルが無ければ 0。
+ * このデバイスの履歴のファイル (置き場の history/<デバイスの見分け>.json) にある履歴の件数。ファイルが無ければ 0。
  * 履歴を消した後も、消した時刻を置いたファイルが残るので、ファイルのあるなしでは履歴があるかを見分けられない
  */
 export async function historyEntryCount() {
-	const { existed, text } = await readOptionalText(HISTORY_PATH);
-	if (!existed) return 0;
+	const file = await historyFileOf(CONFIG_DIR).catch(() => null);
+	const text = file && (await fs.readFile(file, 'utf8').catch(() => null));
+	if (!text) return 0;
 	try {
 		return JSON.parse(text).entries.length;
 	} catch {
@@ -500,7 +423,7 @@ export async function historyEntryCount() {
 export async function beginTestConfig(overrides) {
 	const original = await backupConfigText();
 	await clearHistory();
-	const base = (await readSettings(CONFIG_PATH).catch(() => null)) ?? {};
+	const base = (await readSettings(CONFIG_DIR).catch(() => null)) ?? {};
 	// ホットキーと下書きウィンドウのキーは、ユーザーが変えていても既定のキーで回す
 	// (テストは Ctrl+Shift+Space や Ctrl+Enter などを押す前提)。変えるテストは overrides で渡す
 	const testConfig = {
@@ -510,10 +433,7 @@ export async function beginTestConfig(overrides) {
 		textWindowKeys: null,
 		...overrides
 	};
-	if (!original.existed) {
-		await fs.mkdir(CONFIG_DIR, { recursive: true });
-	}
-	writeSettings(CONFIG_PATH, testConfig);
+	await writeSettings(CONFIG_DIR, testConfig);
 	return {
 		restore: () => restoreAndClearBackup(original)
 	};

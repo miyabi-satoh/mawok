@@ -99,7 +99,7 @@ export function createSuite() {
 			await neutralizeForeground();
 			const mark = markLog(LOG_PATH);
 			const client = await launchApp({ port: driver.port });
-			// プロファイルを見ない版 (ビルドが古い) は、常用の置き場で動いてアカウントと同期する。
+			// プロファイルを見ない版 (ビルドが古い) は、常用の置き場で動いて利用者の設定を書き換える。
 			// プロファイルの置き場にログが書かれなければ、何も試さずに止める
 			try {
 				await waitFor(

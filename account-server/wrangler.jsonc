@@ -1,80 +1,16 @@
-// 窓口 (→ docs/account-server.md「窓口（mawok.amiiby.com）」)。秘密の値は `wrangler secret put` で置く (手元では .dev.vars)。
+// mawok.amiiby.com に、紹介と規約類 (site/ をビルドしたもの) と、Mac 版の更新の確認先の JSON (site/public/updates/) を出す。
+// 静的なファイルだけを出すので、Worker のコードは持たない。`pnpm run deploy` が先に site/ をビルドする。
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
+	// 名前を変えると別の Worker になり、本番のホスト名を付け直すことになるので、窓口だった頃の名前のままにする。
 	"name": "mawok-account",
-	"main": "src/index.ts",
 	"compatibility_date": "2026-08-22",
-	"observability": { "enabled": true },
-	// 本番のホスト名。workers.dev には出さず、窓口の URL を1つにする。
+	// 本番のホスト名。workers.dev には出さず、URL を1つにする。
 	"routes": [{ "pattern": "mawok.amiiby.com", "custom_domain": true }],
 	"workers_dev": false,
-	"triggers": { "crons": ["17 3 * * *"] },
-	// 紹介と規約類 (site/ をビルドしたもの)。窓口の画面 (`/account`) と Mawok・Stripe が呼ぶ `/v1/` は Worker が受ける。
-	// `pnpm run deploy` と `just dev-account-server` が先にビルドする。テストは使わない。
 	"assets": {
 		"directory": "../site/dist",
 		"not_found_handling": "404-page",
-		"html_handling": "force-trailing-slash",
-		"run_worker_first": ["/account", "/account/*", "/v1/*"]
-	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "mawok-account",
-			// 本番の D1。手元 (wrangler dev・テスト) では使われない。
-			"database_id": "50e99567-c290-4562-9afc-0039d1592c7c",
-			"migrations_dir": "migrations"
-		}
-	],
-	// 送り主ごとの上限 (→ src/index.ts の limited)。period は 10 か 60 (秒) だけ。
-	// namespace_id は Cloudflare のアカウントの中で重ならない数 (weblav は 1001〜1013 を使う)。
-	"ratelimits": [
-		// 結んだときのコードをトークンに替える: IP ごと。1台の Mawok がやり直しても当たらない数。
-		{ "name": "LINK_LIMITER", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
-		// サインインのリンクを送る: IP ごと。宛先を変えての送りつけを止める。
-		{ "name": "EMAIL_LIMITER", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
-		// 結ぶ: アカウントごと。1つのアカウントでコードを作りすぎないように。
-		{ "name": "CODE_LIMITER", "namespace_id": "2003", "simple": { "limit": 10, "period": 60 } },
-		// 設定と履歴の同期: アカウントごと。複数のデバイスからの連続した同期で D1 を使い切らないように。
-		{ "name": "SYNC_LIMITER", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } }
-	],
-	// 欠かせない秘密の値は無い (無くても動くものは src/env.d.ts)。空でも置くのは、生成する型 (worker-configuration.d.ts) が
-	// 手元の .dev.vars の中身で変わらないようにするため (置かないと wrangler types が .dev.vars から型を作る)。
-	"secrets": { "required": [] },
-	"vars": {
-		"MAIL_FROM": "Mawok <noreply@amiiby.com>",
-		// 国内の支払いに付ける手動の税率「消費税 10%・税込み」(→ src/stripe.ts)。秘密ではないので vars に置く。
-		"STRIPE_TAX_RATE_ID": "txr_1UM7mJPXESUJaYKotwoV79Pu"
-	},
-	// サンドボックスの Stripe で買う流れを通して確かめる検証用。`--env staging` で置く。workers.dev に出し、本番のホスト名は使わない。
-	// 環境ごとに書き直す決まりの項目 (D1・上限・secret・vars) は、本番と同じ形で書き直す。
-	"env": {
-		"staging": {
-			"routes": [],
-			"workers_dev": true,
-			"triggers": { "crons": ["17 3 * * *"] },
-			"d1_databases": [
-				{
-					"binding": "DB",
-					"database_name": "mawok-account-staging",
-					"database_id": "76febafa-c163-4ef9-929a-119deac55173",
-					"migrations_dir": "migrations"
-				}
-			],
-			"ratelimits": [
-				{ "name": "LINK_LIMITER", "namespace_id": "2011", "simple": { "limit": 10, "period": 60 } },
-				{ "name": "EMAIL_LIMITER", "namespace_id": "2012", "simple": { "limit": 5, "period": 60 } },
-				{ "name": "CODE_LIMITER", "namespace_id": "2013", "simple": { "limit": 10, "period": 60 } },
-				{ "name": "SYNC_LIMITER", "namespace_id": "2014", "simple": { "limit": 60, "period": 60 } }
-			],
-			"secrets": { "required": [] },
-			// メールは送らず、サインインのリンクをログに出す (`wrangler tail --env staging` で読む)。
-			"vars": {
-				"MAIL_FROM": "Mawok <noreply@amiiby.com>",
-				"MAIL_LOG_ONLY": "1",
-				// サンドボックスの税率。
-				"STRIPE_TAX_RATE_ID": "txr_1UM7jvBdeu1RIibiRtWDeFKZ"
-			}
-		}
+		"html_handling": "force-trailing-slash"
 	}
 }

@@ -1,4 +1,4 @@
-//! 設定の型と、設定の置き場（store.rs）に書く項目の値（docs/config.md）
+//! 設定の型と、設定のファイル（settings_files.rs）に書く項目の値（docs/config.md）
 
 use std::collections::BTreeMap;
 
@@ -42,26 +42,20 @@ pub enum Theme {
 #[cfg_attr(test, ts(export))]
 #[serde(default)]
 pub struct Snippet {
-    /// 同期でこの1件を見分けるランダムな値
-    pub id: String,
     /// 一覧で選ぶときの見出し。空なら、画面側で本文の最初の空でない行を代わりに出す
     pub name: String,
     /// 登録した文。選ぶと挿入する
     pub body: String,
     /// 消さずに一覧から外せるようにするため、1件ずつ切れる（置き換え辞書と同じ）
     pub enabled: bool,
-    /// ほかのデバイスと同期するか
-    pub sync: bool,
 }
 
 impl Default for Snippet {
     fn default() -> Self {
         Self {
-            id: String::new(),
             name: String::new(),
             body: String::new(),
             enabled: true,
-            sync: true,
         }
     }
 }
@@ -76,18 +70,6 @@ pub struct Config {
     /// 割り当てなしのままなら保存しても書かず、書いていない操作として既定のキーを使う扱いを保つ
     pub yielded_draft_keys: Vec<DraftAction>,
     pub autostart: bool,
-    /// Pro で、設定をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
-    pub sync_settings: bool,
-    /// Pro で、キー操作をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
-    pub sync_keys: bool,
-    /// Pro で、置き換え辞書をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
-    pub sync_replacements: bool,
-    /// Pro で、定型文をほかのデバイスと同期するか。デバイスごとに選ぶので、この項目は同期しない
-    pub sync_snippets: bool,
-    /// Pro で、テキストウィンドウの履歴をほかのデバイスと同期するか。同じく同期しない
-    pub sync_history: bool,
-    /// 種類「設定」から外した設定の項目名。知らない名前は残し、同期では無視する
-    pub sync_excluded_settings: Vec<String>,
     pub language: Language,
     pub theme: Theme,
     /// 下書きウィンドウを常に最前面に表示するか
@@ -96,7 +78,7 @@ pub struct Config {
     pub hide_text_window_on_blur: bool,
     /// 下書きの入力欄の上下に、操作のボタンを出すか
     pub show_text_window_buttons: bool,
-    /// 下書きの履歴の件数。0 なら覚えず、履歴本文は app_local_data_dir/history.json に書かない
+    /// 下書きの履歴の件数。0 なら覚えない（docs/config.md「履歴」）
     pub text_history_size: u16,
     /// クリップボードへ渡すときに、末尾の空白文字を取り除くか
     pub trim_trailing_whitespace: bool,
@@ -160,12 +142,6 @@ impl Default for Config {
             text_window_keys: DraftKeys::default(),
             yielded_draft_keys: Vec::new(),
             autostart: true,
-            sync_settings: true,
-            sync_keys: true,
-            sync_replacements: true,
-            sync_snippets: true,
-            sync_history: true,
-            sync_excluded_settings: Vec::new(),
             language: Language::default(),
             theme: Theme::default(),
             text_window_always_on_top: true,
@@ -278,26 +254,6 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
                 || config.punctuation_style != defaults.punctuation_style
         },
     },
-    ModifiedSetting::Value {
-        name: key::SYNC_SETTINGS,
-        differs: |config, defaults| config.sync_settings != defaults.sync_settings,
-    },
-    ModifiedSetting::Value {
-        name: key::SYNC_KEYS,
-        differs: |config, defaults| config.sync_keys != defaults.sync_keys,
-    },
-    ModifiedSetting::Value {
-        name: key::SYNC_REPLACEMENTS,
-        differs: |config, defaults| config.sync_replacements != defaults.sync_replacements,
-    },
-    ModifiedSetting::Value {
-        name: key::SYNC_SNIPPETS,
-        differs: |config, defaults| config.sync_snippets != defaults.sync_snippets,
-    },
-    ModifiedSetting::Value {
-        name: key::SYNC_HISTORY,
-        differs: |config, defaults| config.sync_history != defaults.sync_history,
-    },
 ];
 
 fn modified_setting_name(setting: ModifiedSetting) -> String {
@@ -338,17 +294,11 @@ pub fn modified_settings(config: &Config) -> Vec<String> {
         .collect()
 }
 
-/// 置き場と同期での項目名。読み込み（`from_entries`）と書き出し（`stored_entries`）で同じ名前を使う
+/// 設定のファイルでの項目名。読み込み（`from_entries`）と書き出し（`stored_entries`）で同じ名前を使う
 pub mod key {
     pub const HOTKEY: &str = "hotkey";
     pub const TEXT_WINDOW_KEYS: &str = "text_window_keys";
     pub const AUTOSTART: &str = "autostart";
-    pub const SYNC_SETTINGS: &str = "sync_settings";
-    pub const SYNC_KEYS: &str = "sync_keys";
-    pub const SYNC_REPLACEMENTS: &str = "sync_replacements";
-    pub const SYNC_SNIPPETS: &str = "sync_snippets";
-    pub const SYNC_HISTORY: &str = "sync_history";
-    pub const SYNC_EXCLUDED_SETTINGS: &str = "sync_excluded_settings";
     pub const LANGUAGE: &str = "language";
     pub const THEME: &str = "theme";
     pub const TEXT_WINDOW_ALWAYS_ON_TOP: &str = "text_window_always_on_top";
@@ -370,6 +320,34 @@ pub mod key {
     pub const TEXT_COLOR_LIGHT: &str = "text_color_light";
     pub const TEXT_COLOR_DARK: &str = "text_color_dark";
     pub const INPUT_GUIDANCE: &str = "input_guidance";
+
+    /// 置き場の設定のファイルに書く項目（ログイン時の起動はデバイスの設定に置く）。書くときは、ここに無い名前の項目を
+    /// 新しい版が書いたものや手で書いたものとして残す
+    pub const IN_FILES: &[&str] = &[
+        HOTKEY,
+        TEXT_WINDOW_KEYS,
+        LANGUAGE,
+        THEME,
+        TEXT_WINDOW_ALWAYS_ON_TOP,
+        HIDE_TEXT_WINDOW_ON_BLUR,
+        SHOW_TEXT_WINDOW_BUTTONS,
+        TEXT_HISTORY_SIZE,
+        TRIM_TRAILING_WHITESPACE,
+        REPLACEMENTS,
+        SNIPPETS,
+        PUNCTUATION_STYLE,
+        ALPHABET_WIDTH,
+        DIGIT_WIDTH,
+        SPACE_WIDTH,
+        SYMBOL_WIDTH,
+        KATAKANA_WIDTH,
+        EXCLUDE_FROM_CLIPBOARD_HISTORY,
+        TEXT_FONT_FAMILY,
+        TEXT_FONT_SIZE,
+        TEXT_COLOR_LIGHT,
+        TEXT_COLOR_DARK,
+        INPUT_GUIDANCE,
+    ];
 }
 
 /// 置き場に書く項目。既定と違う値だけを持つ（docs/config.md）。
@@ -388,12 +366,6 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     }
     field!(key::HOTKEY, hotkey);
     field!(key::AUTOSTART, autostart);
-    field!(key::SYNC_SETTINGS, sync_settings);
-    field!(key::SYNC_KEYS, sync_keys);
-    field!(key::SYNC_REPLACEMENTS, sync_replacements);
-    field!(key::SYNC_SNIPPETS, sync_snippets);
-    field!(key::SYNC_HISTORY, sync_history);
-    field!(key::SYNC_EXCLUDED_SETTINGS, sync_excluded_settings);
     field!(key::LANGUAGE, language);
     field!(key::THEME, theme);
     field!(key::TEXT_WINDOW_ALWAYS_ON_TOP, text_window_always_on_top);
@@ -457,13 +429,11 @@ pub struct Loaded {
     pub config: Config,
     /// 読めずに既定のままにした項目と行（`replacements[3]` など）。ログにだけ出す
     pub skipped: Vec<String>,
-    /// 同期する行の ID を振り直した。同じ行を次も見分けられるよう、呼ぶ側で書き戻す
-    pub repaired_item_ids: bool,
 }
 
 /// 置き場の項目から設定を作る。読めない項目は既定のまま読み進め、知らない項目は読み飛ばす
 /// （新しい版が書いた項目を、古い版で開いても動くようにする）
-pub fn from_entries(entries: &BTreeMap<String, Value>) -> Result<Loaded, String> {
+pub fn from_entries(entries: &BTreeMap<String, Value>) -> Loaded {
     let mut config = Config::default();
     let mut skipped = Vec::new();
     for (name, value) in entries {
@@ -497,12 +467,7 @@ pub fn from_entries(entries: &BTreeMap<String, Value>) -> Result<Loaded, String>
     );
     skipped.extend(resolved.removed);
     config.yielded_draft_keys = resolved.yielded;
-    let repaired_item_ids = repair_item_ids_in_config(&mut config)?;
-    Ok(Loaded {
-        config,
-        skipped,
-        repaired_item_ids,
-    })
+    Loaded { config, skipped }
 }
 
 /// 行の並び。型の合わない行だけを読み飛ばし、1行の読めない値で全体を失わないようにする
@@ -524,7 +489,7 @@ fn read_rows<T: DeserializeOwned>(name: &str, value: &Value, skipped: &mut Vec<S
 }
 
 /// 1つの設定を、画面から変えるときと同じ検査を通して入れる。入れられない値なら何も変えずに false、知らない項目名なら None。
-/// 置き場から読むときと、同期で届いたときに使う。範囲の外の値は収めずに断る（収めて入れると、届いた値と違う値を書き戻すため）。
+/// 設定のファイルから読むときに使う。範囲の外の値は収めずに断る（収めて入れると、手で書いた値と違う値が使われるため）。
 /// ホットキー・キー操作・行は扱わない
 pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> Option<bool> {
     fn set<T: DeserializeOwned>(target: &mut T, value: &Value) -> bool {
@@ -545,12 +510,6 @@ pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> Option<b
     }
     Some(match name {
         key::AUTOSTART => set(&mut config.autostart, value),
-        key::SYNC_SETTINGS => set(&mut config.sync_settings, value),
-        key::SYNC_KEYS => set(&mut config.sync_keys, value),
-        key::SYNC_REPLACEMENTS => set(&mut config.sync_replacements, value),
-        key::SYNC_SNIPPETS => set(&mut config.sync_snippets, value),
-        key::SYNC_HISTORY => set(&mut config.sync_history, value),
-        key::SYNC_EXCLUDED_SETTINGS => set(&mut config.sync_excluded_settings, value),
         key::LANGUAGE => set(&mut config.language, value),
         key::THEME => set(&mut config.theme, value),
         key::TEXT_WINDOW_ALWAYS_ON_TOP => set(&mut config.text_window_always_on_top, value),
@@ -591,79 +550,7 @@ fn set_color(target: &mut String, value: &Value) -> bool {
     }
 }
 
-pub(crate) fn valid_item_id(id: &str) -> bool {
-    id.len() == 32
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-/// 空・不正・重複の ID を、新しいランダムな値へ替える。
-///
-/// 画面から足した行もこの入口を通るので、ID は Rust 側だけで作る。
-pub(crate) fn repair_item_ids<T: SyncRow>(items: &mut [T]) -> Result<bool, String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut changed = false;
-    for item in items {
-        let item_id = item.id();
-        if !valid_item_id(item_id) || !seen.insert(item_id.to_string()) {
-            let next = loop {
-                let next = crate::hex::random_hex::<16>()?;
-                if seen.insert(next.clone()) {
-                    break next;
-                }
-            };
-            item.set_id(next);
-            changed = true;
-        }
-    }
-    Ok(changed)
-}
-
-/// 設定の行の ID を、種類ごとに直す。
-fn repair_item_ids_in_config(config: &mut Config) -> Result<bool, String> {
-    let replacements = repair_item_ids(&mut config.replacements)?;
-    let snippets = repair_item_ids(&mut config.snippets)?;
-    Ok(replacements || snippets)
-}
-
-/// 同期する行（置き換え辞書・定型文）。ID で同じ行を見分け、行ごとに同期するかを持つ
-pub(crate) trait SyncRow: Serialize + for<'a> Deserialize<'a> + Clone {
-    fn id(&self) -> &str;
-    fn set_id(&mut self, id: String);
-    fn sync(&self) -> bool;
-    fn set_sync(&mut self, sync: bool);
-}
-impl SyncRow for Replacement {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn set_id(&mut self, id: String) {
-        self.id = id
-    }
-    fn sync(&self) -> bool {
-        self.sync
-    }
-    fn set_sync(&mut self, sync: bool) {
-        self.sync = sync
-    }
-}
-impl SyncRow for Snippet {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn set_id(&mut self, id: String) {
-        self.id = id
-    }
-    fn sync(&self) -> bool {
-        self.sync
-    }
-    fn set_sync(&mut self, sync: bool) {
-        self.sync = sync
-    }
-}
-
-/// 選択肢の名前。serde の `rename_all` で決めた書き方で、置き場・同期・画面とのやり取りで同じ名前を使う
+/// 選択肢の名前。serde の `rename_all` で決めた書き方で、設定のファイル・画面とのやり取りで同じ名前を使う
 pub fn choice_name<T: Serialize>(choice: &T) -> String {
     serde_json::to_value(choice)
         .ok()
@@ -678,7 +565,46 @@ mod tests {
     use serde_json::json;
 
     fn round_trip(config: &Config) -> Config {
-        from_entries(&stored_entries(config)).unwrap().config
+        from_entries(&stored_entries(config)).config
+    }
+
+    #[test]
+    fn every_stored_item_other_than_autostart_goes_to_the_files() {
+        let mut config = Config {
+            hotkey: "CommandOrControl+Shift+KeyM".to_string(),
+            autostart: false,
+            language: Language::En,
+            theme: Theme::Dark,
+            text_window_always_on_top: false,
+            hide_text_window_on_blur: false,
+            show_text_window_buttons: false,
+            text_history_size: 0,
+            trim_trailing_whitespace: false,
+            replacements: vec![Replacement::default()],
+            snippets: vec![Snippet::default()],
+            punctuation_style: PunctuationStyle::Comma,
+            exclude_from_clipboard_history: false,
+            text_font_family: "a".to_string(),
+            text_font_size: MIN_DRAFT_FONT_SIZE,
+            text_color_light: "#000000".to_string(),
+            text_color_dark: "#ffffff".to_string(),
+            input_guidance: Some(String::new()),
+            ..Config::default()
+        };
+        config.text_window_keys.copy = "CommandOrControl+KeyJ".to_string();
+        config.char_widths = CharWidths {
+            alphabet: WidthStyle::Full,
+            digit: WidthStyle::Full,
+            space: WidthStyle::Full,
+            symbol: WidthStyle::Full,
+            katakana: crate::text::KatakanaWidth::Full,
+        };
+        for name in stored_entries(&config).keys() {
+            assert!(
+                name == key::AUTOSTART || key::IN_FILES.contains(&name.as_str()),
+                "{name} is not written to the files"
+            );
+        }
     }
 
     #[test]
@@ -691,17 +617,13 @@ mod tests {
         let config = Config {
             hotkey: "CommandOrControl+Shift+KeyM".to_string(),
             autostart: false,
-            sync_snippets: false,
-            sync_excluded_settings: vec!["theme".to_string()],
             language: Language::En,
             theme: Theme::Dark,
             text_history_size: 0,
             replacements: vec![Replacement {
-                id: "a".repeat(32),
                 from: "濃度".to_string(),
                 to: "Node.js".to_string(),
                 enabled: false,
-                sync: false,
             }],
             char_widths: CharWidths {
                 digit: WidthStyle::Half,
@@ -709,7 +631,6 @@ mod tests {
             },
             text_font_size: MAX_DRAFT_FONT_SIZE,
             snippets: vec![Snippet {
-                id: "b".repeat(32),
                 name: "挨拶".to_string(),
                 body: "お世話になっております。".to_string(),
                 ..Snippet::default()
@@ -722,7 +643,6 @@ mod tests {
         let entries = stored_entries(&config);
         assert_eq!(entries["digit_width"], json!("half"));
         assert!(!entries.contains_key("alphabet_width"));
-        assert!(!entries.contains_key("sync_settings"));
     }
 
     #[test]
@@ -748,7 +668,7 @@ mod tests {
                 json!([{ "from": "a", "to": "b" }, { "from": 1 }]),
             ),
         ]);
-        let loaded = from_entries(&entries).unwrap();
+        let loaded = from_entries(&entries);
         assert_eq!(loaded.config.theme, Theme::System);
         assert_eq!(loaded.config.text_font_size, DEFAULT_DRAFT_FONT_SIZE);
         assert_eq!(loaded.config.language, Language::Ja);
@@ -757,9 +677,6 @@ mod tests {
             loaded.skipped,
             ["replacements[1]", "text_font_size", "theme"]
         );
-        // 行の ID が無かったので振り直し、呼ぶ側が書き戻す
-        assert!(loaded.repaired_item_ids);
-        assert!(valid_item_id(&loaded.config.replacements[0].id));
     }
 
     #[test]

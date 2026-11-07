@@ -10,19 +10,13 @@
 	import { clamp } from '$lib/clamp';
 	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '$lib/color';
 	import { EVENTS } from '$lib/bindings/constants';
-	import type { AccountStatus } from '$lib/bindings/AccountStatus';
-	import { errorCode } from '$lib/errors';
-	import SyncToggle from '$lib/components/sync-toggle.svelte';
+	import { errorCode, settingsFileUnreadable } from '$lib/errors';
 	import BackupDialog from '$lib/components/backup-dialog.svelte';
 	import SettingsSnippets from '$lib/components/settings-snippets.svelte';
-	import SettingsMawokAccount from '$lib/components/settings-mawok-account.svelte';
-	import SettingsMawokDevices from '$lib/components/settings-mawok-devices.svelte';
+	import SettingsFolder from '$lib/components/settings-folder.svelte';
 	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
-	import SettingsSync from '$lib/components/settings-sync.svelte';
-	import SettingsSyncNote from '$lib/components/settings-sync-note.svelte';
-	import SettingSyncToggle from '$lib/components/setting-sync-toggle.svelte';
 	import SettingsUpdate from '$lib/components/settings-update.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
@@ -43,7 +37,6 @@
 	import KeyCaps from '$lib/components/key-caps.svelte';
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { matchedKeys, showsFilter, shownRows } from '$lib/list-filter';
-	import { accountErrorMessage } from '$lib/account-errors';
 	import { RowList } from '$lib/row-list.svelte';
 	import { coalescedSaver } from '$lib/saver';
 	import { CHAR_WIDTH_KINDS, LANGUAGES, PUNCTUATION_STYLES, THEMES } from '$lib/setting-options';
@@ -82,46 +75,9 @@
 	let error = $state('');
 
 	const showError = (message: string) => (error = message);
-	const settingsFailed = (e: unknown) => m.settings_failed({ error: errorCode(e) });
+	const settingsFailed = (e: unknown) =>
+		settingsFileUnreadable(e) ?? m.settings_failed({ error: errorCode(e) });
 	const callSettings = commandCaller(settingsFailed, showError);
-	/** アカウントの窓口を使うコマンドを呼ぶ。失敗したら、アカウントの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
-	const callAccount = commandCaller((e) => accountErrorMessage(e) ?? settingsFailed(e), showError);
-	/** 欄の下に出さない失敗を、アカウントの符号なら何をすればよいかの案内に、そうでなければ設定の失敗として出す */
-	const showAccountError = (e: unknown) => showError(accountErrorMessage(e) ?? settingsFailed(e));
-	/** 設定ウィンドウを載せたときの Mawok のアカウントの様子。null はサインインしていないか、問い合わせられなかった。 */
-	let mawokAccountStatus = $state<AccountStatus | null | undefined>(undefined);
-	let refreshingMawokAccountStatus = false;
-	/** 問い合わせの通し番号。サインインやサインアウトの前に出した問い合わせの答えを捨てる */
-	let mawokAccountRefresh = 0;
-
-	/** `changed` はサインイン・サインアウトの直後。前のアカウントの様子を出したままにせず、答えが来るまで空にする */
-	async function refreshMawokAccountStatus(changed = false) {
-		if (changed) mawokAccountStatus = undefined;
-		else if (refreshingMawokAccountStatus) return;
-		const refresh = ++mawokAccountRefresh;
-		refreshingMawokAccountStatus = true;
-		// 裏で確かめ直すだけなので、つながらなくても画面のエラーにはしない。
-		// 資格情報を読めなかったときは Rust 側がサインインしていない扱いにするので、「サインイン」からやり直せる。
-		let status: AccountStatus | null;
-		try {
-			status = await invoke<AccountStatus | null>('mawok_account_status');
-		} catch {
-			if (refresh !== mawokAccountRefresh) return;
-			refreshingMawokAccountStatus = false;
-			mawokAccountStatus = null;
-			return;
-		}
-		if (refresh !== mawokAccountRefresh) return;
-		refreshingMawokAccountStatus = false;
-		mawokAccountStatus = status;
-	}
-
-	// 窓口で Pro を申し込んで戻ったとき、設定を開き直さず表示を更新する。
-	$effect(() => {
-		const onFocus = () => void refreshMawokAccountStatus();
-		window.addEventListener('focus', onFocus);
-		return () => window.removeEventListener('focus', onFocus);
-	});
 
 	/** バックアップから戻す窓を出しているか */
 	let backupOpen = $state(false);
@@ -142,14 +98,6 @@
 	/** 設定を変えるコマンドを呼び、できたかを返す。変わった設定は settings-changed で届き、画面に反映される */
 	async function run(command: string, args?: Record<string, unknown>) {
 		return (await callSettings(command, args)).ok;
-	}
-
-	/** 行の保存で Rust が足した ID を、入力中の行を作り直さず画面側へ戻す。 */
-	async function saveItems<T>(
-		command: string,
-		args: Record<string, unknown>
-	): Promise<T[] | undefined> {
-		return okValue(await callSettings<T[]>(command, args));
 	}
 
 	async function startRecording(target: 'hotkey' | DraftAction) {
@@ -215,12 +163,13 @@
 			await invoke('set_hotkey', { accelerator });
 		} catch (e) {
 			// 下書きの操作と重なって断られたときは符号が返る。それ以外は OS に登録できなかった
-			hotkeyError = isKeyRejection(e)
-				? keyRejectionMessage(e, accelerator, view.platform)
-				: m.settings_hotkey_unavailable({
-						keys: formatKeys(accelerator, view.platform),
-						current: view.hotkey ? formatKeys(view.hotkey, view.platform) : m.settings_key_none()
-					});
+			hotkeyError =
+				isKeyRejection(e) || settingsFileUnreadable(e)
+					? keyRejectionMessage(e, accelerator, view.platform)
+					: m.settings_hotkey_unavailable({
+							keys: formatKeys(accelerator, view.platform),
+							current: view.hotkey ? formatKeys(view.hotkey, view.platform) : m.settings_key_none()
+						});
 		}
 	}
 
@@ -252,8 +201,9 @@
 	 */
 	const replacements = new RowList<Replacement>(
 		settings.current?.replacements ?? [],
-		(replacements) => saveItems<Replacement>('set_replacements', { replacements }),
-		isBlankReplacement
+		(replacements) => run('set_replacements', { replacements }),
+		isBlankReplacement,
+		(replacement) => replacement.from
 	);
 
 	/** 定型文。分類を開いている間だけ描くので、分類を移っても消えないよう本体が持つ */
@@ -406,12 +356,16 @@
 		if (textColorInputs[theme].trim() === '') textColorInputs[theme] = DEFAULT_TEXT_COLORS[theme];
 	}
 
-	// 同期やバックアップから戻すことで設定が替わったら、画面側で持っている一覧と欄を、新しい設定から写し直す。
+	// 設定のファイルがほかで変わったか、バックアップから戻したことで設定が替わったら、画面側で持っている一覧と欄を、新しい設定から写し直す。
 	// 写し直さないと、次に画面で直したときに、届く前の並びや値で保存して、届いた分を消してしまう。
-	// Rust 側は、通信の間に画面からの保存が無かったときだけ知らせるので、打った内容は届いた設定に入っている
+	// 知らせは中身を持たないので、今の設定を読み直して写す
 	$effect(() =>
-		onEvent<SettingsView>(EVENTS.CONFIG_REPLACED, (view) => {
-			replacements.recopy(view.replacements, true);
+		onEvent(EVENTS.CONFIG_REPLACED, async () => {
+			const view = okValue(
+				await callSettings<SettingsView>('get_settings', undefined, { keepError: true })
+			);
+			if (!view) return;
+			replacements.recopy(view.replacements);
 			snippetsEditor.recopy(view);
 			fontFamily = view.textFontFamily;
 			fontSize = view.textFontSize;
@@ -430,14 +384,14 @@
 	function addReplacement() {
 		// 置き換える前の文字列が空の行は何もしないので、書きかけのまま保存してよい
 		replacementFilter = '';
-		const row = replacements.addBlank({ id: '', from: '', to: '', enabled: true, sync: true });
+		const row = replacements.addBlank({ from: '', to: '', enabled: true });
 		focusFirstField(`replacement-${row.key}`);
 	}
 
 	/** キーの記録中でないときのキー。記録中の Esc は記録の中止なので、そちらが受け取る */
 	function onKeydown(event: KeyboardEvent) {
 		const platform = settings.current?.platform;
-		// 確かめや選ぶ画面のダイアログ（同期データの削除・バックアップから戻す）を出している間は、Esc で設定画面を閉じない
+		// 確かめや選ぶ画面のダイアログ（置き場を替えるときの確かめ・バックアップから戻す）を出している間は、Esc で設定画面を閉じない
 		if (document.querySelector('[role="alertdialog"]')) return;
 		// 行の「…」メニューなど、開いている部品が受け持った Esc（bits-ui が preventDefault する）では、設定画面は閉じない。
 		// フォーカスの位置では、開いた直後のまだメニューに移っていない間を見分けられず、
@@ -452,7 +406,6 @@
 	/** 設定ウィンドウは隠して作られるので、画面を描いてから表示させる */
 	function showWindow() {
 		invoke('show_settings_window');
-		void refreshMawokAccountStatus();
 	}
 </script>
 
@@ -504,9 +457,6 @@
 
 {#if settings.current}
 	{@const view = settings.current}
-	{#snippet syncSetting(name: string, label: string)}
-		<SettingSyncToggle {view} {name} {label} call={callSettings} />
-	{/snippet}
 	<!-- 今のキーを出すボタン。キーの表示そのものを押して記録を始める（macOS のシステム設定のキーボードショートカットと同じ） -->
 	{#snippet keyButton(target: 'hotkey' | DraftAction, key: string, label: string, classes: string)}
 		<Button
@@ -522,7 +472,7 @@
 			{/if}
 		</Button>
 	{/snippet}
-	<!-- スイッチ1個の設定の行。name は設定の項目名で、既定から変えた印と同期の印に使う -->
+	<!-- スイッチ1個の設定の行。name は設定の項目名で、既定から変えた印に使う -->
 	{#snippet switchRow(
 		name: string,
 		id: string,
@@ -535,7 +485,6 @@
 			<Field.Field orientation="horizontal" class="min-h-8">
 				<div class="flex-auto">
 					<Field.Label class="inline" for={id}>{label}</Field.Label>
-					{@render syncSetting(name, label)}
 				</div>
 				<Switch {id} bind:checked={() => checked, (enabled) => run(command, { enabled })} />
 			</Field.Field>
@@ -663,7 +612,6 @@
 										<Field.Label class="inline" for="draft-history-size"
 											>{m.settings_draft_history_size()}</Field.Label
 										>
-										{@render syncSetting('text_history_size', m.settings_draft_history_size())}
 									</div>
 									<Input
 										id="draft-history-size"
@@ -685,7 +633,6 @@
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<div class="flex flex-auto items-center gap-1">
 										<Field.Title id="language">{m.settings_language()}</Field.Title>
-										{@render syncSetting('language', m.settings_language())}
 									</div>
 									<!-- 選択中の項目を押すと空になるので、空は無視して今の設定のまま表示する -->
 									<ToggleGroup.Root
@@ -709,7 +656,6 @@
 								<Field.Field orientation="horizontal" class="flex-wrap">
 									<div class="flex flex-auto items-center gap-1">
 										<Field.Title id="theme">{m.settings_theme()}</Field.Title>
-										{@render syncSetting('theme', m.settings_theme())}
 									</div>
 									<ToggleGroup.Root
 										type="single"
@@ -867,7 +813,6 @@
 						<SettingsRow modified={modifiedName(view, 'text_font')}>
 							<div class="flex items-center gap-1">
 								<Field.Label for="draft-font-family">{m.settings_draft_font()}</Field.Label>
-								{@render syncSetting('text_font_family', m.settings_draft_font())}
 							</div>
 							<!-- 入力欄の文字の大きさは class で決め打ちする。部品の既定はウィンドウの幅 768px で切り替わり、広げる途中で小さくなるため（辞書の欄も同じ） -->
 							<div class="flex flex-wrap gap-2">
@@ -888,7 +833,6 @@
 										class="text-xs whitespace-nowrap text-muted-foreground"
 										>{m.settings_draft_font_size()}</span
 									>
-									{@render syncSetting('text_font_size', m.settings_draft_font_size())}
 									<Input
 										id="draft-font-size"
 										type="number"
@@ -933,7 +877,6 @@
 												>
 													{row.label()}
 												</Field.Label>
-												{@render syncSetting(`text_color_${row.theme}`, row.label())}
 											</div>
 											<!-- 色見本は #rrggbb しか扱えないので、既定のときは標準の色を見せる -->
 											<input
@@ -971,7 +914,6 @@
 									<Field.Label class="inline" for="draft-guidance"
 										>{m.settings_draft_guidance()}</Field.Label
 									>
-									{@render syncSetting('input_guidance', m.settings_draft_guidance())}
 								</div>
 								<!-- 既定のままなら戻すものがないので押せなくする -->
 								<Button variant="outline" disabled={guidance === null} onclick={resetGuidance}>
@@ -1018,7 +960,6 @@
 									<span id="char-width-punctuation" class="text-sm"
 										>{m.settings_char_width_punctuation()}</span
 									>
-									{@render syncSetting('punctuation_style', m.settings_char_width_punctuation())}
 								</div>
 								<ToggleGroup.Root
 									type="single"
@@ -1040,7 +981,6 @@
 								<Field.Field orientation="horizontal" class="flex-wrap justify-between">
 									<div class="flex items-center gap-1">
 										<span id="char-width-{row.kind}" class="text-sm">{row.label()}</span>
-										{@render syncSetting(`${row.kind}_width`, row.label())}
 									</div>
 									<ToggleGroup.Root
 										type="single"
@@ -1067,9 +1007,6 @@
 							<Field.Field orientation="horizontal" class="min-h-8">
 								<Field.Title>{m.settings_replacements()}</Field.Title>
 							</Field.Field>
-							{#if view.proAvailable && !view.syncKinds.replacements}
-								<SettingsSyncNote text={m.settings_sync_replacements_off()} />
-							{/if}
 							{#if showsFilter(replacements.rows.length, replacementFilter)}
 								<ListFilter
 									label={m.settings_replacements_filter()}
@@ -1116,16 +1053,6 @@
 													}
 												}
 											/>
-											{#if view.proAvailable && view.syncKinds.replacements}
-												<SyncToggle
-													pressed={replacement.sync}
-													name={replacement.from}
-													onchange={(sync) => {
-														replacement.sync = sync;
-														replacements.save();
-													}}
-												/>
-											{/if}
 											<Button
 												variant="ghost"
 												size="icon"
@@ -1147,32 +1074,13 @@
 				</Tabs.Content>
 				<Tabs.Content value="snippets">
 					{#if category === 'snippets'}
-						<SettingsSnippets {view} editor={snippetsEditor} />
+						<SettingsSnippets editor={snippetsEditor} />
 					{/if}
 				</Tabs.Content>
-				<Tabs.Content value="account">
-					{#if category === 'account'}
-						<div class="flex flex-col gap-5">
-							<SettingsSection>
-								<SettingsRow>
-									<SettingsMawokAccount
-										call={callAccount}
-										signedIn={view.mawokAccountSignedIn}
-										status={mawokAccountStatus}
-										proAvailable={view.proAvailable}
-										onchanged={() => refreshMawokAccountStatus(true)}
-									/>
-								</SettingsRow>
-							</SettingsSection>
-							<!-- サインインしてデバイスを登録してから同期を始めるので、その順に並べる -->
-							{#if view.mawokAccountSignedIn}
-								<SettingsMawokDevices call={callAccount} />
-							{/if}
-							{#if view.proAvailable}
-								<SettingsSync {view} call={callSettings} onfailure={showAccountError} />
-							{/if}
-						</div>
-					{/if}
+				<Tabs.Content value="sync">
+					<SettingsSection>
+						<SettingsFolder {view} call={callSettings} />
+					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="about">
 					<SettingsSection>

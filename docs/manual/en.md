@@ -68,23 +68,19 @@ Add snippets under “Snippets” in Settings. You can also save the text you ar
 
 ## Sync settings and history
 
-With Pro, you can sync your settings and history across the devices on your account.
+Settings and history are files in the settings folder. Choose a folder in cloud storage such as iCloud Drive, OneDrive, or Dropbox as the settings folder to sync them with your other devices.
 
-1. Sign in to Mawok under “Account” in Settings. If you don't have Pro, get it from “View Pro pricing”.
-2. Select “Create password”, choose a password, enter it twice, and select “Start syncing”.
-3. Sign in on your other devices too, select “Enter password”, enter the same password, and select “Join syncing”.
+1. Under “Sync” in Settings, select “Change...” next to “Settings folder”, and choose a folder in your cloud storage.
+2. Choose the same folder on your other devices. When asked whether to use the settings in that folder, select “Use settings in this folder”.
 
-To change the password, select “Change” next to “Sync password” under “Account” in Settings. You don't need to enter it again on your other devices.
+To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. How long it takes to arrive depends on your cloud storage.
 
-If you forget your password, it cannot be recovered. In Settings, under “Account”, select “Delete...” next to “Sync data” to delete the sync data, then start syncing with a new password. The data on each device is kept. On your other devices, join syncing with the new password.
+- Synced: settings, keyboard shortcuts, replacements, snippets, and history. The hotkey and keyboard shortcuts are shared only between {macos:Macs}{windows:Windows devices}{linux:Linux devices}.
+- Kept per device: launch at login and the folder you chose.
+- Settings are in `settings.toml`, snippets in `snippets.toml`, and replacements in `replacements.toml`, as text files. You can also edit them in a text editor; they take effect as soon as you save. You can manage them with a dotfiles tool too.
+- History is kept in the `history` folder inside the settings folder, one file per device. If you manage your dotfiles with Git, leave the `history` folder out.
 
-To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. Right after copying, it may not have arrived yet. Wait a moment and show the text window again.
-
-- Synced: settings, keyboard shortcuts, replacements, snippets, and history. Turn each kind on or off under “Account” in Settings.
-- Kept per device: launch at login. The hotkey and keyboard shortcuts sync only between {macos:Macs}{windows:Windows devices}{linux:Linux devices}.
-- For settings, replacements, and snippets, turn off the cloud mark to stop syncing just that item or row.
-
-If you change the same setting on different devices, the one changed last is used. To go back to earlier settings, restore them from a backup (see “[Settings](#settings)”).
+If two devices change the same file at the same time, the one saved last is kept. To go back to earlier settings, restore them from a backup (see “[Settings](#settings)”).
 
 ## Keyboard shortcuts
 
@@ -116,26 +112,15 @@ Settings are backed up automatically every day. To go back to earlier settings, 
 - **Closing the text window doesn't take you back to the app you came from**: Your desktop decides which window comes forward after it closes. Click the app you came from, then paste.
 - **Mawok's icon does not appear in the tray**: On GNOME, run `gnome-extensions enable ubuntu-appindicators@ubuntu.com` to turn on the extension that shows the tray. On Hyprland, add the tray to your bar's configuration (such as waybar).
 :::
-::: macos
-- **“Couldn't read your Mawok account sign-in information” appears**: After you reinstall the app, you will be asked to allow access to the Keychain. Allow it. If that doesn't help, sign in again under “Account” in Settings.
-:::
-::: windows
-- **“Couldn't read your Mawok account sign-in information” appears**: Sign in again under “Account” in Settings.
-:::
-::: linux
-- **“Couldn't read your Mawok account sign-in information” appears**: Check that a service that stores passwords, such as GNOME Keyring, is running. If it is, sign in again under “Account” in Settings.
-:::
-- **“Couldn't read the settings, so started with the defaults” appears**: Select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
-- **“Couldn't save the settings” appears**: Settings you change go back when you quit. Check that there is free disk space, then restart Mawok.
-- **“Couldn't reach...” appears and trying again doesn't help**: Check that you are connected to the network. If you are, the Mawok server is having problems. Try again after a while.
+- **“Couldn't read the settings file ...” appears**: There is a mistake from editing it in a text editor. The log shows the line that can't be read. Fix it and save, and Mawok reads it again right away. If you can't fix it, delete the file, or select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
+- **Settings changed on another device don't arrive**: Under “Sync” in Settings, check that both devices chose the same folder. If they did, your cloud storage hasn't synced yet. Check its status in your cloud storage app.
 
 When reporting a problem, attach the log. It does not contain your text. Open its location from “About” in Settings.
 
 ## What is sent and privacy
 
 - Mawok does not send usage statistics or error reports.
-- It sends your text outside the app only when you sync with Pro.
-- While you sync with Pro, what you sync is encrypted and stored on Mawok's server. Mawok's server cannot read it.
+- Mawok does not send your text or settings anywhere. If the settings folder is in cloud storage, that cloud storage sends your settings and history.
 
 ::: linux
 ## Installing and updating
@@ -147,18 +132,17 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 ## Uninstalling
 
 ::: macos
-1. If you signed in to Mawok, select “Sign out” under “Account”.
-2. Choose “Quit” in the menu bar menu, then move `/Applications/Mawok.app` to the Trash.
-3. To also remove settings and history, delete `~/Library/Application Support/com.amiiby.mawok/` and `~/Library/Logs/com.amiiby.mawok/`.
+1. Choose “Quit” in the menu bar menu, then move `/Applications/Mawok.app` to the Trash.
+2. To also remove settings and history, delete `~/Library/Application Support/com.amiiby.mawok/` and `~/Library/Logs/com.amiiby.mawok/`. If you changed the settings folder, also delete the settings files and the `history` folder there.
 :::
 
 ::: windows
-1. If you signed in to Mawok, select “Sign out” under “Account”.
-2. Uninstall Mawok from “Apps” in Windows “Settings”. Settings and history are removed too.
+1. Uninstall Mawok from “Apps” in Windows “Settings”. Settings and history are removed too.
+2. If you changed the settings folder, the settings files and the `history` folder there are kept. Delete them if you don't need them.
 :::
 
 ::: linux
-1. If you signed in to Mawok, select “Sign out” under “Account”. Turn off “Launch at login” under “General”.
+1. Turn off “Launch at login” under “General”.
 2. Choose “Quit” in the tray menu, then run `sudo apt remove mawok` on Ubuntu or `sudo pacman -R mawok-bin` on Arch Linux. To also remove the apt repository, follow the steps on mawok.amiiby.com.
-3. To also remove settings and history, delete `~/.config/com.amiiby.mawok/` and `~/.local/share/com.amiiby.mawok/`.
+3. To also remove settings and history, delete `~/.config/com.amiiby.mawok/` and `~/.local/share/com.amiiby.mawok/`. If you changed the settings folder, also delete the settings files and the `history` folder there.
 :::
