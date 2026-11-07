@@ -3,7 +3,15 @@
 /**
  * 選んだフォルダー。置き場を替える前に、画面がそちらの設定を使うかを聞くのに使う
  */
-export type PickedSettingsDir = { path: string, 
+export type PickedSettingsDir = { 
+/**
+ * 置き場を替えるときに渡すパス
+ */
+path: string, 
+/**
+ * 画面に出すパス。MSIX 版では回された先（shown_path）
+ */
+shownPath: string, 
 /**
  * そのフォルダーに設定のファイルがあるか
  */

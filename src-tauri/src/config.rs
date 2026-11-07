@@ -550,6 +550,21 @@ fn set_color(target: &mut String, value: &Value) -> bool {
     }
 }
 
+/// 行（定型文・置き換え辞書）を、書いていない項目を既定の値で埋めた形にする。手で書いた行と、画面から書く行を比べるのに使う。
+/// 行として読めなければ None
+pub fn normalized_row(item_name: &str, row: &Value) -> Option<Value> {
+    fn normalize<T: Serialize + DeserializeOwned>(row: &Value) -> Option<Value> {
+        serde_json::from_value::<T>(row.clone())
+            .ok()
+            .map(|row| json(&row))
+    }
+    match item_name {
+        key::SNIPPETS => normalize::<Snippet>(row),
+        key::REPLACEMENTS => normalize::<Replacement>(row),
+        _ => None,
+    }
+}
+
 /// 選択肢の名前。serde の `rename_all` で決めた書き方で、設定のファイル・画面とのやり取りで同じ名前を使う
 pub fn choice_name<T: Serialize>(choice: &T) -> String {
     serde_json::to_value(choice)

@@ -37,7 +37,7 @@
 
 	/** 替え先に設定が無ければ、聞かずにこのデバイスの設定を書いて替える */
 	function ask(path: string | null, target: PickedSettingsDir) {
-		if (target.hasSettings) pending = { path, shown: target.path };
+		if (target.hasSettings) pending = { path, shown: target.shownPath };
 		else void move(path, false);
 	}
 

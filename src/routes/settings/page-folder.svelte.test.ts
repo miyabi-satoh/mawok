@@ -19,7 +19,7 @@ const DEFAULT = '/Users/me/Library/Application Support/com.amiiby.mawok';
 /** フォルダーを選ぶ窓と既定の置き場の答え。set_settings_dir は失敗させるときだけ符号を返す */
 function answer(
 	picked: PickedSettingsDir | null,
-	defaultDir: PickedSettingsDir = { path: DEFAULT, hasSettings: false },
+	defaultDir: PickedSettingsDir = { path: DEFAULT, shownPath: DEFAULT, hasSettings: false },
 	setError?: string
 ) {
 	invoked.mockImplementation((command) => {
@@ -45,7 +45,7 @@ describe('設定の置き場', () => {
 	});
 
 	it('設定の無いフォルダーを選ぶと、聞かずにこのデバイスの設定で替える', async () => {
-		answer({ path: CLOUD, hasSettings: false });
+		answer({ path: CLOUD, shownPath: CLOUD, hasSettings: false });
 		const screen = await renderAt(m.settings_category_sync);
 		await screen.getByRole('button', { name: change() }).click();
 		await vi.waitFor(() =>
@@ -57,7 +57,7 @@ describe('設定の置き場', () => {
 	});
 
 	it('設定のあるフォルダーを選ぶと聞き、選んだほうで替える', async () => {
-		answer({ path: CLOUD, hasSettings: true });
+		answer({ path: CLOUD, shownPath: CLOUD, hasSettings: true });
 		const screen = await renderAt(m.settings_category_sync);
 		await screen.getByRole('button', { name: change() }).click();
 		const dialog = screen.getByRole('alertdialog', {
@@ -72,7 +72,7 @@ describe('設定の置き場', () => {
 
 	it('既定に戻すときも、既定の置き場に設定があれば聞く', async () => {
 		settings.current = settingsView({ settingsDir: CLOUD, settingsDirIsDefault: false });
-		answer(null, { path: DEFAULT, hasSettings: true });
+		answer(null, { path: DEFAULT, shownPath: DEFAULT, hasSettings: true });
 		const screen = await renderAt(m.settings_category_sync);
 		await screen.getByRole('button', { name: m.settings_folder_reset() }).click();
 		const dialog = screen.getByRole('alertdialog', {
@@ -85,7 +85,11 @@ describe('設定の置き場', () => {
 	});
 
 	it('選んだフォルダーの設定のファイルを読めなければ、その旨を出す', async () => {
-		answer({ path: CLOUD, hasSettings: true }, undefined, ERROR_CODES.SETTINGS_FILE_UNREADABLE);
+		answer(
+			{ path: CLOUD, shownPath: CLOUD, hasSettings: true },
+			undefined,
+			ERROR_CODES.SETTINGS_FILE_UNREADABLE
+		);
 		const screen = await renderAt(m.settings_category_sync);
 		await screen.getByRole('button', { name: change() }).click();
 		await screen.getByRole('button', { name: m.settings_folder_use_existing() }).click();

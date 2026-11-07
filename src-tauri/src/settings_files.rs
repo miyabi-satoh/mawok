@@ -178,15 +178,34 @@ fn update_settings(
             continue;
         }
         if PER_OS.contains(&name) {
-            let mut per_os = match table.remove(name) {
-                Some(Item::Table(per_os)) => per_os,
+            let existing = table.get(name);
+            let inline = matches!(
+                existing,
+                Some(Item::Value(toml_edit::Value::InlineTable(_)))
+            );
+            let mut per_os = match existing {
+                Some(Item::Table(per_os)) => per_os.clone(),
                 // 1行の表（`hotkey = { macos = "…" }`）で書いてあっても、ほかの OS の値を残す
-                Some(Item::Value(toml_edit::Value::InlineTable(per_os))) => per_os.into_table(),
+                Some(Item::Value(toml_edit::Value::InlineTable(per_os))) => {
+                    per_os.clone().into_table()
+                }
                 // OS の欄でない形で書いてあれば、読むときも読み飛ばしているので、書くときに今の形に直す
                 _ => Table::new(),
             };
+            let before = existing.and_then(to_json);
             set_or_remove(&mut per_os, os, entries.get(name));
-            if !per_os.is_empty() {
+            // この OS の値が変わらなければ、書き方（1行の表・コメント・位置）を残すため触らない
+            if before == Some(table_to_json(per_os.iter())) {
+                continue;
+            }
+            if per_os.is_empty() {
+                table.remove(name);
+            } else if inline {
+                table.insert(
+                    name,
+                    Item::Value(toml_edit::Value::InlineTable(per_os.into_inline_table())),
+                );
+            } else {
                 table.insert(name, Item::Table(per_os));
             }
         } else {
@@ -208,7 +227,7 @@ fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
     // コメントや書き方を消さないため
     if let (Some(Item::ArrayOfTables(tables)), Value::Array(rows)) = (table.get_mut(name), value) {
         if !rows.is_empty() && rows.iter().all(Value::is_object) {
-            update_rows(tables, rows);
+            update_rows(name, tables, rows);
             return;
         }
     }
@@ -217,20 +236,57 @@ fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
     }
 }
 
-fn update_rows(tables: &mut ArrayOfTables, rows: &[Value]) {
-    while tables.len() > rows.len() {
-        tables.remove(tables.len() - 1);
-    }
+/// 行の並びを書き換える。中身が同じ行は、元の表（前に付けたコメント・書き方・知らない項目）をそのまま使い、
+/// 位置が変わっても書き直さない。同じ位置で中身の変わった行は、元の表の値だけを書き換えて、コメントと知らない項目を残す。
+/// 比べるときは、書いていない項目を既定の値で埋める（`enabled` を省いた手書きの行を、毎回書き直さないため）
+fn update_rows(item_name: &str, tables: &mut ArrayOfTables, rows: &[Value]) {
+    let existing: Vec<Table> = tables.iter().cloned().collect();
+    let normalized: Vec<Option<Value>> = existing
+        .iter()
+        .map(|table| crate::config::normalized_row(item_name, &table_to_json(table.iter())))
+        .collect();
+    let mut used = vec![false; existing.len()];
+    let mut next = ArrayOfTables::new();
     for (index, row) in rows.iter().enumerate() {
         let Some(object) = row.as_object() else {
             continue;
         };
-        match tables.get_mut(index) {
-            Some(existing) if table_to_json(existing.iter()) == *row => {}
-            Some(existing) => *existing = to_table(object),
-            None => tables.push(to_table(object)),
-        }
+        let wanted = crate::config::normalized_row(item_name, row);
+        let same = (0..existing.len())
+            .find(|&at| !used[at] && wanted.is_some() && normalized[at] == wanted);
+        let table = match same {
+            Some(at) => {
+                used[at] = true;
+                existing[at].clone()
+            }
+            // 同じ位置の行がほかの行と合っていなければ、その行を直したとみる
+            None if index < existing.len()
+                && !used[index]
+                && !rows.iter().any(|other| {
+                    crate::config::normalized_row(item_name, other) == normalized[index]
+                }) =>
+            {
+                used[index] = true;
+                let mut table = existing[index].clone();
+                for (name, value) in object {
+                    set_or_remove(&mut table, name, Some(value));
+                }
+                table
+            }
+            None => to_table(object),
+        };
+        next.push(table);
     }
+    // 表は、並びでなく文書の中の位置で書き出されるので、新しい並びの順に位置を振り直す
+    let base = existing
+        .iter()
+        .filter_map(Table::position)
+        .min()
+        .unwrap_or(0);
+    for (index, table) in next.iter_mut().enumerate() {
+        table.set_position(Some(base + index as isize));
+    }
+    *tables = next;
 }
 
 fn to_json(item: &Item) -> Option<Value> {
@@ -441,6 +497,45 @@ mod tests {
             "{snippets}"
         );
         assert_eq!(read(dir.path(), "macos").entries, next);
+    }
+
+    #[test]
+    fn keeps_rows_moved_or_written_without_defaults_and_an_untouched_inline_table() {
+        let dir = TempDir::new("settings-files-rows");
+        let settings = "hotkey = { windows = \"Control+Space\" } # 会社の PC\ntheme = \"dark\"\n";
+        fs::write(dir.join(SETTINGS), settings).unwrap();
+        let snippets = "# 挨拶\n[[snippets]]\nname = 'a'\nbody = 'b'\n\n# 署名\n[[snippets]]\nname = 'c'\nbody = 'd'\n";
+        fs::write(dir.join(SNIPPETS), snippets).unwrap();
+        // 読んだままの設定を書いても、どのファイルも書き換えない（`enabled` を省いた行も、既定の値で埋めて比べる）
+        let read_back = read(dir.path(), "macos").entries;
+        let mut same = read_back.clone();
+        same.insert(
+            "snippets".to_string(),
+            json!([
+                { "name": "a", "body": "b", "enabled": true },
+                { "name": "c", "body": "d", "enabled": true }
+            ]),
+        );
+        write(dir.path(), "macos", MANAGED, &same).unwrap();
+        assert_eq!(fs::read_to_string(dir.join(SETTINGS)).unwrap(), settings);
+        assert_eq!(fs::read_to_string(dir.join(SNIPPETS)).unwrap(), snippets);
+        // 並べ替えても、行に付けたコメントは行と一緒に動く
+        let mut moved = same.clone();
+        moved.insert(
+            "snippets".to_string(),
+            json!([
+                { "name": "c", "body": "d", "enabled": true },
+                { "name": "a", "body": "b", "enabled": true }
+            ]),
+        );
+        write(dir.path(), "macos", MANAGED, &moved).unwrap();
+        let after = fs::read_to_string(dir.join(SNIPPETS)).unwrap();
+        let (signature, greeting) = (after.find("# 署名").unwrap(), after.find("# 挨拶").unwrap());
+        assert!(signature < greeting, "{after}");
+        assert!(
+            after.find("name = 'c'").unwrap() < after.find("name = 'a'").unwrap(),
+            "{after}"
+        );
     }
 
     #[test]

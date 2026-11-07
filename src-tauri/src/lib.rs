@@ -187,6 +187,7 @@ struct Problems {
 }
 
 /// 設定の置き場についてトレイに出すこと。直して読めたら消す
+#[derive(PartialEq)]
 enum ConfigProblem {
     /// 読めなかった設定のファイルの名前。読めたファイルの設定と、読めないファイルは前に読めた設定（起動のときは既定）で動かす
     Unreadable(Vec<String>),
@@ -883,20 +884,18 @@ fn get_settings(state: tauri::State<'_, AppState>) -> SettingsView {
 
 /// 設定を変えて保存する。保存できなければ何も変えない。画面とトレイへの反映は `apply_config` で行う
 fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
+    settings_dir_ready(app);
     let state = app.state::<AppState>();
     let mut config = state.config.lock().unwrap();
     let mut next = config.clone();
     change(&mut next);
-    write_config(&state, &next)?;
+    write_config(&state, &config, &next)?;
     *config = next;
     Ok(())
 }
 
 /// 設定をファイルに書く。ログイン時の起動はデバイスの設定に、ほかは置き場の設定のファイルに書く
-fn write_config(state: &AppState, next: &Config) -> Result<(), String> {
-    if !state.settings_dir_available.load(Ordering::SeqCst) {
-        return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string());
-    }
+fn write_config(state: &AppState, current: &Config, next: &Config) -> Result<(), String> {
     let autostart = (next.autostart != Config::default().autostart).then_some(next.autostart);
     {
         let mut device = state.device.lock().unwrap();
@@ -911,6 +910,16 @@ fn write_config(state: &AppState, next: &Config) -> Result<(), String> {
     }
     let mut entries = config::stored_entries(next);
     entries.remove(config::key::AUTOSTART);
+    // 置き場の設定と今の設定が同じなら書かない。置き場が無い間に、デバイスの設定（ログイン時の起動）だけを変えたときのため
+    if !state.settings_dir_available.load(Ordering::SeqCst) {
+        let mut unchanged = config::stored_entries(current);
+        unchanged.remove(config::key::AUTOSTART);
+        return if unchanged == entries {
+            Ok(())
+        } else {
+            Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string())
+        };
+    }
     settings_files::write(
         &state.settings_dir(),
         &os_name(),
@@ -1193,16 +1202,61 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
     }
 }
 
-/// 選んだ置き場のフォルダーがあるか。無い間は履歴も書かない（画面の履歴はそのまま使える）
-fn settings_dir_available(app: &AppHandle) -> bool {
-    app.state::<AppState>()
-        .settings_dir_available
-        .load(Ordering::SeqCst)
+/// 選んだ置き場のフォルダーがあるかを、書く前に確かめる。動いている途中で無くなっていたら（クラウドストレージのドライブが
+/// 外れたなど）、無いものとしてトレイに出し、現れるのを待つ。そのまま書くと、ドライブの場所に普通のフォルダーを作って、
+/// 既定の設定を書くため
+fn settings_dir_ready(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    if !state.settings_dir_available.load(Ordering::SeqCst) {
+        return false;
+    }
+    let chosen = state.device.lock().unwrap().settings_dir.is_some();
+    let dir = state.settings_dir();
+    if !chosen || dir.is_dir() {
+        return true;
+    }
+    warn!("the settings folder went away; waiting for it");
+    state.settings_dir_available.store(false, Ordering::SeqCst);
+    state.problems.lock().unwrap().config =
+        Some(ConfigProblem::FolderMissing(dir.display().to_string()));
+    *state.watch.lock().unwrap() = None;
+    refresh_tray(app);
+    wait_for_settings_dir(app.clone());
+    false
+}
+
+/// 置き場のフォルダーが無い間に、画面から届いた履歴の消去と保存。現れたら、この順で書く（消去の後に届いた一覧を保存する）
+#[derive(Default)]
+struct PendingHistory {
+    cleared: bool,
+    texts: Option<Vec<String>>,
+}
+
+static PENDING_HISTORY: Mutex<PendingHistory> = Mutex::new(PendingHistory {
+    cleared: false,
+    texts: None,
+});
+
+/// 置き場のフォルダーが現れたときに、無い間に届いた履歴の消去と保存を書く
+fn write_pending_history(app: &AppHandle) {
+    let pending = std::mem::take(&mut *PENDING_HISTORY.lock().unwrap());
+    if pending.cleared {
+        if let Err(error) = clear_draft_history_file(app, true) {
+            warn!("couldn't clear draft history after the folder appeared: {error}");
+        }
+    }
+    if let Some(texts) = pending.texts {
+        if let Err(error) = save_draft_history(app.clone(), texts) {
+            warn!("couldn't save draft history after the folder appeared: {error}");
+        }
+    }
 }
 
 #[tauri::command]
 fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String> {
-    if !settings_dir_available(&app) {
+    if !settings_dir_ready(&app) {
+        // 画面の一覧はそのまま使え、現れたときに書く（write_pending_history）
+        PENDING_HISTORY.lock().unwrap().texts = Some(entries);
         return Ok(());
     }
     let path = app.state::<AppState>().history_path();
@@ -1240,7 +1294,11 @@ fn clear_draft_history(app: AppHandle) -> Result<(), String> {
 /// 履歴を消し、消した時刻を置く（docs/config.md「履歴」）。ほかのデバイスの、その時刻より前の履歴も見せなくなる。
 /// `always` が false なら、消す履歴があるときだけ置く
 fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String> {
-    if !settings_dir_available(app) {
+    if !settings_dir_ready(app) {
+        let mut pending = PENDING_HISTORY.lock().unwrap();
+        // 消した後に届く一覧は、消した後のもの。消す前に届いた一覧は書かない
+        pending.texts = None;
+        pending.cleared |= always;
         return Ok(());
     }
     let path = app.state::<AppState>().history_path();
@@ -1259,7 +1317,7 @@ fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String>
 /// ほかのデバイスの履歴のファイルが変わった。混ぜた履歴を自分のファイルにも入れ、テキストウィンドウに読み直させる。
 /// 自分のファイルに入れておくと、次に画面から保存するときに、混ぜた履歴と照らして時刻を付けられる
 fn merge_history_from_other_devices(app: &AppHandle) {
-    if !settings_dir_available(app) {
+    if !settings_dir_ready(app) {
         return;
     }
     let path = app.state::<AppState>().history_path();
@@ -1581,6 +1639,7 @@ fn wait_for_settings_dir(app: AppHandle) {
             let handle = app.clone();
             let result = app.run_on_main_thread(move || {
                 reload_config_from_files(&handle);
+                write_pending_history(&handle);
                 merge_history_from_other_devices(&handle);
                 watch_settings_dir(&handle);
                 let _ = handle.emit(events::DRAFT_HISTORY_MERGED, ());
@@ -1599,7 +1658,10 @@ fn wait_for_settings_dir(app: AppHandle) {
 #[cfg_attr(test, ts(export))]
 #[serde(rename_all = "camelCase")]
 struct PickedSettingsDir {
+    /// 置き場を替えるときに渡すパス
     path: String,
+    /// 画面に出すパス。MSIX 版では回された先（shown_path）
+    shown_path: String,
     /// そのフォルダーに設定のファイルがあるか
     has_settings: bool,
 }
@@ -1615,19 +1677,21 @@ async fn pick_settings_dir(app: AppHandle) -> Result<Option<PickedSettingsDir>, 
         return Ok(None);
     };
     let path = picked.into_path().map_err(|error| error.to_string())?;
-    Ok(Some(PickedSettingsDir {
-        has_settings: settings_files::exists_in(&path),
-        path: path.display().to_string(),
-    }))
+    Ok(Some(picked_dir(&app.state::<AppState>(), path)))
 }
 
 /// 既定の置き場（OS 標準のアプリ設定フォルダー）。戻す前に、画面がそちらの設定を使うかを聞くのに使う
 #[tauri::command]
 fn default_settings_dir(app: AppHandle) -> PickedSettingsDir {
-    let dir = app.state::<AppState>().default_settings_dir.clone();
+    let state = app.state::<AppState>();
+    picked_dir(&state, state.default_settings_dir.clone())
+}
+
+fn picked_dir(state: &AppState, path: PathBuf) -> PickedSettingsDir {
     PickedSettingsDir {
-        has_settings: settings_files::exists_in(&dir),
-        path: dir.display().to_string(),
+        has_settings: settings_files::exists_in(&path),
+        shown_path: shown_path(state, path.clone()).display().to_string(),
+        path: path.display().to_string(),
     }
 }
 
@@ -1698,6 +1762,7 @@ fn set_settings_dir(
     state.settings_dir_available.store(true, Ordering::SeqCst);
     state.problems.lock().unwrap().config = None;
     watch_settings_dir(&app);
+    write_pending_history(&app);
     if let Some(next) = adopted {
         let changed = next != current;
         let rejected = adopt_config(&app, next, false)?;
@@ -1728,6 +1793,14 @@ fn start_daily_backups(app: AppHandle) {
         let mut interval = tokio::time::interval(Duration::from_secs(60 * 60));
         loop {
             interval.tick().await;
+            // 置き場が無い間の設定は既定のままなので、控えに残さない。残すと、本当の設定の控えより新しい既定の控えが並ぶ
+            if !app
+                .state::<AppState>()
+                .settings_dir_available
+                .load(Ordering::SeqCst)
+            {
+                continue;
+            }
             let dir = app.state::<AppState>().backups_dir.clone();
             match run_blocking(move || backup::due(&dir, SystemTime::now())).await {
                 Ok(Ok(true)) => {
@@ -2290,7 +2363,7 @@ fn reload_config_from_files(app: &AppHandle) {
     next.autostart = current.autostart;
     let problem_changed = {
         let mut problems = state.problems.lock().unwrap();
-        let changed = problems.config.is_some() != problem.is_some();
+        let changed = problems.config != problem;
         problems.config = problem;
         changed
     };
