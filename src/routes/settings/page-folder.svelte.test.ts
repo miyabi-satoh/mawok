@@ -38,7 +38,7 @@ describe('設定の保存先', () => {
 		settings.current = settingsView({ settingsDir: DEFAULT, settingsDirIsDefault: true });
 	});
 
-	it('今の置き場を出し、既定のままなら「既定に戻す」を出さない', async () => {
+	it('今の保存先を出し、既定のままなら「既定に戻す」を出さない', async () => {
 		const screen = await renderAt(m.settings_category_general);
 		await expect.element(screen.getByText(DEFAULT)).toBeVisible();
 		expect(screen.getByRole('button', { name: m.settings_folder_reset() }).elements()).toEqual([]);
@@ -70,7 +70,7 @@ describe('設定の保存先', () => {
 		]);
 	});
 
-	it('既定に戻すときも、既定の置き場に設定があれば聞く', async () => {
+	it('既定に戻すときも、既定の保存先に設定があれば聞く', async () => {
 		settings.current = settingsView({ settingsDir: CLOUD, settingsDirIsDefault: false });
 		answer(null, { path: DEFAULT, shownPath: DEFAULT, hasSettings: true });
 		const screen = await renderAt(m.settings_category_general);

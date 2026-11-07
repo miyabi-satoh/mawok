@@ -12,7 +12,7 @@
 	import type { SettingsView } from '$lib/settings.svelte';
 
 	/**
-	 * 設定の置き場の行（docs/config.md「置き場」）。替えた先に設定があれば、そちらを使うか、このデバイスの設定で上書きするかを聞く。
+	 * 設定の保存先の行（docs/config.md「置き場」）。替えた先に設定があれば、そちらを使うか、このデバイスの設定で上書きするかを聞く。
 	 * 替えた結果は settings-changed で届く
 	 */
 	let { view, call }: { view: SettingsView; call: Call } = $props();
