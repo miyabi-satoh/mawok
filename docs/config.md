@@ -5,7 +5,7 @@
 ## 置き場
 
 - 既定は OS 標準のアプリ設定フォルダー（macOS は `~/Library/Application Support/<identifier>/`、Windows は `%APPDATA%\<identifier>\`、Linux は `~/.config/<identifier>/`）。MSIX 版では、ここへ書いたファイルはパッケージの中へ回される（docs/platform.md「Windows の MSIX 版」）ので、画面には回された先のパスを出す。
-- 設定の「同期」で、別のフォルダーを選べる。Windows では symlink を張るのに権限が要るので、symlink だけに頼らない。
+- 設定の「一般」の「設定の保存先」で、別のフォルダーを選べる。Windows では symlink を張るのに権限が要るので、symlink だけに頼らない。
 - 置き場を替えるとき:
   - 替えた先に設定のファイルがあれば、そちらを使うか、このデバイスの設定で上書きするかを利用者に選んでもらう。そちらを使うなら、読めないファイルがあるときは替えない。
   - このデバイスの履歴は、替えた先の履歴に混ぜて持っていく。

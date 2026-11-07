@@ -63,10 +63,13 @@
 	}
 </script>
 
+<!-- 節の見出しが「設定の置き場」なので、行の題は付けず、今の場所と操作だけを出す -->
 <SettingsRow>
-	<!-- 狭いときは、題名を折らずに操作を次の行へ回す -->
-	<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
-		<Field.Title>{m.settings_folder()}</Field.Title>
+	<!-- 長いパスも窓に収まるよう、どこででも折り返す。写して使えるよう選べるようにする -->
+	<p class="font-mono text-sm wrap-anywhere select-text" data-testid="settings-folder-path">
+		{view.settingsDir}
+	</p>
+	<Field.Field orientation="horizontal" class="flex-wrap">
 		<div class="flex flex-wrap items-center gap-2">
 			<Button variant="outline" size="sm" disabled={busy} onclick={change}>
 				{m.settings_folder_change()}
@@ -94,10 +97,6 @@
 			{/if}
 		</div>
 	</Field.Field>
-	<!-- 長いパスも窓に収まるよう、どこででも折り返す。写して使えるよう選べるようにする -->
-	<p class="font-mono text-sm wrap-anywhere select-text" data-testid="settings-folder-path">
-		{view.settingsDir}
-	</p>
 	{#if error}
 		<Field.Error>{error}</Field.Error>
 	{/if}

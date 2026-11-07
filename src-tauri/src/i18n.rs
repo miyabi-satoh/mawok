@@ -97,7 +97,7 @@ impl Lang {
     pub fn pick_settings_folder(self) -> &'static str {
         match self {
             Lang::En => "Choose the Settings Folder",
-            Lang::Ja => "設定の置き場を選ぶ",
+            Lang::Ja => "設定の保存先を選ぶ",
         }
     }
 
@@ -109,7 +109,7 @@ impl Lang {
                 "The settings folder {dir} isn't available. Changes aren't saved until it is"
             ),
             Lang::Ja => format!(
-                "設定の置き場 {dir} が見つかりません。見つかるまで、変えた設定は保存されません"
+                "設定の保存先 {dir} が見つかりません。見つかるまで、変えた設定は保存されません"
             ),
         }
     }

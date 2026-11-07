@@ -21,7 +21,6 @@
 	"settings_category_draft": "テキストの見た目",
 	"settings_category_copy": "コピーの整え",
 	"settings_category_snippets": "定型文",
-	"settings_category_sync": "同期",
 	"settings_category_about": "このアプリについて",
 	"settings_section_startup": "起動",
 	"settings_section_draft_window": "テキストウィンドウ",
@@ -183,12 +182,12 @@
 	"draft_snippet_registered": "定型文に登録しました。",
 	"draft_snippet_already_registered": "同じ本文の定型文がすでにあります。",
 	"draft_snippet_register_failed": "定型文を登録できませんでした",
-	"settings_folder": "設定の置き場",
+	"settings_folder": "設定の保存先",
 	"settings_folder_change": "変更...",
 	"settings_folder_reset": "既定に戻す",
-	"settings_folder_reveal_macos": "設定の置き場を Finder で表示",
-	"settings_folder_reveal_windows": "設定の置き場をエクスプローラーで表示",
-	"settings_folder_reveal_linux": "設定の置き場をファイルマネージャーで表示",
+	"settings_folder_reveal_macos": "設定の保存先を Finder で表示",
+	"settings_folder_reveal_windows": "設定の保存先をエクスプローラーで表示",
+	"settings_folder_reveal_linux": "設定の保存先をファイルマネージャーで表示",
 	"settings_folder_has_settings_title": "このフォルダーには設定があります",
 	"settings_folder_has_settings_description": "このデバイスの設定で上書きすると、このフォルダーにある設定は消えます。",
 	"settings_folder_use_existing": "このフォルダーの設定を使う",
@@ -196,5 +195,5 @@
 	"settings_folder_unreadable": "このフォルダーにある設定のファイルを読めないため、変更できませんでした。",
 	"settings_folder_link_missing": "このフォルダーか、中にある設定のファイルの symlink の先が見つからないため、変更できませんでした。",
 	"settings_file_unreadable": "設定のファイルを読めないため、保存できませんでした。",
-	"settings_folder_unavailable": "設定の置き場が見つからないため、保存できませんでした。"
+	"settings_folder_unavailable": "設定の保存先が見つからないため、保存できませんでした。"
 }

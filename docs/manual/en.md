@@ -55,7 +55,7 @@ Copied text is kept in history.
 
 - Press `↑` at the start of the text box to show text you copied earlier. Each press goes further back; press `↓` at the end of the text box to go forward again. The “Previous” and “Next” buttons at the top do the same.
 - Change how many are kept under “General” in Settings. Set it to 0 to keep no history.
-- While history is synced, selecting “Clear history” in Settings or setting the number to 0 also clears the history on your other devices (see “[Sync settings and history](#sync-settings-and-history)”).
+- While history is synced, selecting “Clear history” in Settings or setting the number to 0 also clears the history on your other devices (see “[Change the settings folder](#change-the-settings-folder)”).
 
 ## Use snippets
 
@@ -66,11 +66,11 @@ Save text you use often, then pick it from a list to insert it.
 
 Add snippets under “Snippets” in Settings. You can also save the text you are writing right away by choosing “Save the text as a snippet” at the end of the list. If you have a selection, the selection is saved. If you typed in the filter, what you typed becomes the name.
 
-## Sync settings and history
+## Change the settings folder
 
 Settings and history are files in the settings folder. Choose a folder in cloud storage such as iCloud Drive, OneDrive, or Dropbox as the settings folder to sync them with your other devices.
 
-1. Under “Sync” in Settings, select “Change...” next to “Settings folder”, and choose a folder in your cloud storage.
+1. Under “Settings folder” in “General” in Settings, select “Change...” and choose a folder in your cloud storage.
 2. Choose the same folder on your other devices. When asked whether to use the settings in that folder, select “Use settings in this folder”.
 
 To continue with text you wrote on another device, press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} to copy and close, then press `↑` in the text window on the other device to bring it up from the history. How long it takes to arrive depends on your cloud storage.
@@ -113,8 +113,8 @@ Settings are backed up automatically every day. To go back to earlier settings, 
 - **Mawok's icon does not appear in the tray**: On GNOME, run `gnome-extensions enable ubuntu-appindicators@ubuntu.com` to turn on the extension that shows the tray. On Hyprland, add the tray to your bar's configuration (such as waybar).
 :::
 - **“Couldn't read the settings file ...” appears**: There is a mistake from editing it in a text editor. The log shows the line that can't be read. Fix it and save, and Mawok reads it again right away. If you can't fix it, delete the file, or select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
-- **“The settings folder ... isn't available” appears**: The drive with the folder you chose isn't connected, or the folder was deleted. Once it's connected, Mawok reads it again right away. If you deleted the folder, choose the settings folder again under “Sync” in Settings. If your settings files are symlinks, this also appears when the file a link points to is missing.
-- **Settings changed on another device don't arrive**: Under “Sync” in Settings, check that both devices chose the same folder. If they did, your cloud storage hasn't synced yet. Check its status in your cloud storage app.
+- **“The settings folder ... isn't available” appears**: The drive with the folder you chose isn't connected, or the folder was deleted. Once it's connected, Mawok reads it again right away. If you deleted the folder, choose it again under “Settings folder” in “General” in Settings. If your settings files are symlinks, this also appears when the file a link points to is missing.
+- **Settings changed on another device don't arrive**: Under “Settings folder” in “General” in Settings, check that both devices chose the same folder. If they did, your cloud storage hasn't synced yet. Check its status in your cloud storage app.
 
 When reporting a problem, attach the log. It does not contain your text. Open its location from “About” in Settings.
 

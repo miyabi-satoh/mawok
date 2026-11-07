@@ -32,21 +32,21 @@ function answer(
 
 const change = () => m.settings_folder_change();
 
-describe('設定の置き場', () => {
+describe('設定の保存先', () => {
 	beforeEach(() => {
 		invoked.mockReset();
 		settings.current = settingsView({ settingsDir: DEFAULT, settingsDirIsDefault: true });
 	});
 
 	it('今の置き場を出し、既定のままなら「既定に戻す」を出さない', async () => {
-		const screen = await renderAt(m.settings_category_sync);
+		const screen = await renderAt(m.settings_category_general);
 		await expect.element(screen.getByText(DEFAULT)).toBeVisible();
 		expect(screen.getByRole('button', { name: m.settings_folder_reset() }).elements()).toEqual([]);
 	});
 
 	it('設定の無いフォルダーを選ぶと、聞かずにこのデバイスの設定で替える', async () => {
 		answer({ path: CLOUD, shownPath: CLOUD, hasSettings: false });
-		const screen = await renderAt(m.settings_category_sync);
+		const screen = await renderAt(m.settings_category_general);
 		await screen.getByRole('button', { name: change() }).click();
 		await vi.waitFor(() =>
 			expect(callsOf(invoked, 'set_settings_dir')).toEqual([
@@ -58,7 +58,7 @@ describe('設定の置き場', () => {
 
 	it('設定のあるフォルダーを選ぶと聞き、選んだほうで替える', async () => {
 		answer({ path: CLOUD, shownPath: CLOUD, hasSettings: true });
-		const screen = await renderAt(m.settings_category_sync);
+		const screen = await renderAt(m.settings_category_general);
 		await screen.getByRole('button', { name: change() }).click();
 		const dialog = screen.getByRole('alertdialog', {
 			name: m.settings_folder_has_settings_title()
@@ -73,7 +73,7 @@ describe('設定の置き場', () => {
 	it('既定に戻すときも、既定の置き場に設定があれば聞く', async () => {
 		settings.current = settingsView({ settingsDir: CLOUD, settingsDirIsDefault: false });
 		answer(null, { path: DEFAULT, shownPath: DEFAULT, hasSettings: true });
-		const screen = await renderAt(m.settings_category_sync);
+		const screen = await renderAt(m.settings_category_general);
 		await screen.getByRole('button', { name: m.settings_folder_reset() }).click();
 		const dialog = screen.getByRole('alertdialog', {
 			name: m.settings_folder_has_settings_title()
@@ -90,7 +90,7 @@ describe('設定の置き場', () => {
 			undefined,
 			ERROR_CODES.SETTINGS_FILE_UNREADABLE
 		);
-		const screen = await renderAt(m.settings_category_sync);
+		const screen = await renderAt(m.settings_category_general);
 		await screen.getByRole('button', { name: change() }).click();
 		await screen.getByRole('button', { name: m.settings_folder_use_existing() }).click();
 		await expect.element(screen.getByText(m.settings_folder_unreadable())).toBeVisible();

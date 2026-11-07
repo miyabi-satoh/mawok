@@ -675,6 +675,9 @@
 								</Field.Field>
 							</SettingsRow>
 						</SettingsSection>
+						<SettingsSection title={m.settings_folder()}>
+							<SettingsFolder {view} call={callSettings} />
+						</SettingsSection>
 					</div>
 				</Tabs.Content>
 				<Tabs.Content value="keys">
@@ -1076,11 +1079,6 @@
 					{#if category === 'snippets'}
 						<SettingsSnippets editor={snippetsEditor} />
 					{/if}
-				</Tabs.Content>
-				<Tabs.Content value="sync">
-					<SettingsSection>
-						<SettingsFolder {view} call={callSettings} />
-					</SettingsSection>
 				</Tabs.Content>
 				<Tabs.Content value="about">
 					<SettingsSection>

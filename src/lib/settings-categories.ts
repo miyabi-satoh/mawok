@@ -1,4 +1,3 @@
-import FolderSyncIcon from '@lucide/svelte/icons/folder-sync';
 import InfoIcon from '@lucide/svelte/icons/info';
 import KeyboardIcon from '@lucide/svelte/icons/keyboard';
 import SettingsIcon from '@lucide/svelte/icons/settings';
@@ -15,7 +14,6 @@ export function settingsCategories() {
 		{ value: 'draft', label: m.settings_category_draft, icon: TypeIcon },
 		{ value: 'copy', label: m.settings_category_copy, icon: WandSparklesIcon },
 		{ value: 'snippets', label: m.settings_category_snippets, icon: TextQuoteIcon },
-		{ value: 'sync', label: m.settings_category_sync, icon: FolderSyncIcon },
 		{ value: 'about', label: m.settings_category_about, icon: InfoIcon }
 	];
 }
