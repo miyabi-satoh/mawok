@@ -1762,11 +1762,13 @@ fn set_settings_dir(
     if !next_dir.is_absolute() {
         return Err("the settings folder must be an absolute path".to_string());
     }
-    std::fs::create_dir_all(&next_dir).map_err(|error| error.to_string())?;
-    // 先の無い symlink に書くと、普通のファイルに置き換えるので、替えない（docs/config.md「置き場」）
-    if missing_settings_place(&next_dir, chosen.is_some()).is_some() {
+    // 先の無い symlink に書くと、普通のファイルに置き換えるので、替えない（docs/config.md「置き場」）。
+    // フォルダーそのものが先の無い symlink だと、作るところで OS のエラーになるので、作る前に見る
+    let broken_link = next_dir.is_symlink() && !next_dir.is_dir();
+    if broken_link || settings_files::dangling_link_target(&next_dir).is_some() {
         return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string());
     }
+    std::fs::create_dir_all(&next_dir).map_err(|error| error.to_string())?;
     info!(
         "change the settings folder to {} (use existing: {use_existing})",
         next_dir.display()

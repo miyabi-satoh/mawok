@@ -51,7 +51,9 @@
 			error =
 				code === ERROR_CODES.SETTINGS_FILE_UNREADABLE
 					? m.settings_folder_unreadable()
-					: m.settings_failed({ error: code });
+					: code === ERROR_CODES.SETTINGS_FOLDER_UNAVAILABLE
+						? m.settings_folder_link_missing()
+						: m.settings_failed({ error: code });
 		} finally {
 			busy = false;
 		}

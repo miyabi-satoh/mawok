@@ -195,6 +195,7 @@
 	"settings_folder_use_existing": "Use settings in this folder",
 	"settings_folder_overwrite": "Overwrite with this device's settings",
 	"settings_folder_unreadable": "Couldn't change the folder because a settings file in it can't be read.",
+	"settings_folder_link_missing": "Couldn't change the folder because a settings file in it is a symlink to a missing file.",
 	"settings_file_unreadable": "Couldn't save because a settings file can't be read.",
 	"settings_folder_unavailable": "Couldn't save because the settings folder isn't available."
 }
