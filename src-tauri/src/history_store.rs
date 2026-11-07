@@ -154,8 +154,8 @@ impl ScreenCopy {
         self.stale = None;
     }
 
-    /// ほかのデバイスの履歴を混ぜて、ファイルを入れ替えた。`before` は入れ替える前のファイル。先の入れ替えを画面がまだ読み直して
-    /// いなければ、画面が持つのはそのときの履歴のまま
+    /// ファイルが、画面の持つ履歴と違うものになった（ほかのデバイスの履歴を混ぜて入れ替えた・置き場が無い間に空の一覧を渡した・
+    /// 置き場を替えた）。`before` は画面が持つ履歴。先の入れ替えを画面がまだ読み直していなければ、画面が持つのはそのときの履歴のまま
     pub fn replaced_by_other_devices(&mut self, before: History) {
         self.stale.get_or_insert(before);
     }

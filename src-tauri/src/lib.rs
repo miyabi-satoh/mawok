@@ -1248,7 +1248,7 @@ static PENDING_HISTORY: Mutex<PendingHistory> = Mutex::new(PendingHistory {
 fn write_pending_history(app: &AppHandle) {
     let pending = std::mem::take(&mut *PENDING_HISTORY.lock().unwrap());
     if let Some(at) = pending.cleared_at {
-        if let Err(error) = clear_history_file_at(app, true, at) {
+        if let Err(error) = clear_history_file_at(app, true, at, true) {
             warn!("couldn't clear draft history after the folder appeared: {error}");
         }
     }
@@ -1301,10 +1301,18 @@ fn clear_draft_history(app: AppHandle) -> Result<(), String> {
 /// 履歴を消し、消した時刻を置く（docs/config.md「履歴」）。ほかのデバイスの、その時刻より前の履歴も見せなくなる。
 /// `always` が false なら、消す履歴があるときだけ置く
 fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String> {
-    clear_history_file_at(app, always, now_millis())
+    clear_history_file_at(app, always, now_millis(), false)
 }
 
-fn clear_history_file_at(app: &AppHandle, always: bool, now: u64) -> Result<(), String> {
+/// `own_only` は、置き場が無い間に消した分を後から書くとき。消した時刻を、このデバイスのファイルの履歴とだけ比べる。
+/// 混ぜた履歴と比べると、ほかのデバイスがその間に覚えた履歴の時刻まで進み、それも見せなくなる。このデバイスのファイルは、
+/// 無い間に増えないので、消したときに画面が持っていた履歴より新しいものを含まない
+fn clear_history_file_at(
+    app: &AppHandle,
+    always: bool,
+    now: u64,
+    own_only: bool,
+) -> Result<(), String> {
     if !settings_dir_ready(app) {
         let mut pending = PENDING_HISTORY.lock().unwrap();
         // 消した後に届く一覧は、消した後のもの。消す前に届いた一覧は書かない
@@ -1317,7 +1325,11 @@ fn clear_history_file_at(app: &AppHandle, always: bool, now: u64) -> Result<(), 
     let path = app.state::<AppState>().history_path();
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     screen.caught_up();
-    let merged = history_store::load_merged(&path);
+    let merged = if own_only {
+        history_store::load(&path)
+    } else {
+        history_store::load_merged(&path)
+    };
     if !always && matches!(&merged, Ok(history) if history.entries.is_empty()) {
         return Ok(());
     }
