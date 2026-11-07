@@ -225,6 +225,13 @@ mod tests {
         let history = dir.join("history");
         std::fs::create_dir_all(&history).unwrap();
         std::fs::write(dir.join(settings_files::SETTINGS), "a = 1").unwrap();
+        // 続けて書くと、時刻の刻み (Windows は約 15 ms) の中に収まり、更新時刻が変わらないことがあるので、前の版を過去にしておく
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join(settings_files::SETTINGS))
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(10))
+            .unwrap();
         let (sender, receiver) = mpsc::channel();
         let _stop = poll(
             dir.path().to_path_buf(),
@@ -235,13 +242,6 @@ mod tests {
         let next = || receiver.recv_timeout(Duration::from_secs(5)).unwrap();
         // 同じ長さの中身に書き換えても、更新時刻で気づく
         std::fs::write(dir.join(settings_files::SETTINGS), "a = 2").unwrap();
-        // 続けて書くと、時刻の刻み (Windows は約 15 ms) の中に収まり、更新時刻が変わらないことがあるので進めておく
-        std::fs::File::options()
-            .write(true)
-            .open(dir.join(settings_files::SETTINGS))
-            .unwrap()
-            .set_modified(SystemTime::now() + Duration::from_secs(1))
-            .unwrap();
         assert_eq!(
             next(),
             Changed {
