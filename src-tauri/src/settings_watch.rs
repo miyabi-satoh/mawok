@@ -152,9 +152,10 @@ fn poll(
     sender: mpsc::Sender<Changed>,
 ) -> mpsc::Sender<()> {
     let (stop, stopped) = mpsc::channel::<()>();
+    // 返す前に控えを取る。スレッドが動き出すまでの間の変化を、控えに含めて見落とさないため
+    let mut settings = settings_stamp(&dir);
+    let mut history = history_stamp(&history_dir);
     thread::spawn(move || {
-        let mut settings = settings_stamp(&dir);
-        let mut history = history_stamp(&history_dir);
         while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
             let (next_settings, next_history) = (settings_stamp(&dir), history_stamp(&history_dir));
             let changed = Changed {
@@ -233,7 +234,6 @@ mod tests {
         );
         let next = || receiver.recv_timeout(Duration::from_secs(5)).unwrap();
         // 同じ長さの中身に書き換えても、更新時刻で気づく
-        thread::sleep(Duration::from_millis(50));
         std::fs::write(dir.join(settings_files::SETTINGS), "a = 2").unwrap();
         assert_eq!(
             next(),
