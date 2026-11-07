@@ -26,7 +26,7 @@ status: coming-soon
 
 ホットキーでテキストウィンドウを出して書き、コピーすると、ウィンドウが閉じて元のアプリに戻ります。そのまま貼り付けられます。
 
-<video src="/flow.mp4" autoplay loop muted playsinline width="1492" height="770" aria-label="チャットの画面でホットキーを押すとテキストウィンドウが出て、「来週の打ち合わせの案内を、丁寧なメールの文にしてください。」と書く。コピーするとウィンドウが閉じ、チャットの入力欄に同じ文が貼り付けられる（まだ送っていない）" style="max-width:100%;height:auto"></video>
+<video src="/flow.mp4" autoplay loop muted playsinline width="1492" height="720" aria-label="チャットの画面でホットキーを押すとテキストウィンドウが出て、「来週の打ち合わせの案内を、丁寧なメールの文にしてください。」と書く。コピーするとウィンドウが閉じ、チャットの入力欄に同じ文が貼り付けられる（まだ送っていない）" style="max-width:100%;height:auto"></video>
 
 ## スクリーンショット
 
