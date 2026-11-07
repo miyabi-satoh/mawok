@@ -201,10 +201,20 @@ fn update_settings(
             if per_os.is_empty() {
                 table.remove(name);
             } else if inline {
-                table.insert(
-                    name,
-                    Item::Value(toml_edit::Value::InlineTable(per_os.into_inline_table())),
-                );
+                // 元の1行の表をその場で書き換える。入れ替えると、行末のコメントと空白（値の装飾）が消えるため
+                let value = entries.get(name).and_then(to_value);
+                if let Some(Item::Value(toml_edit::Value::InlineTable(existing))) =
+                    table.get_mut(name)
+                {
+                    let added_or_removed = match value {
+                        Some(value) => existing.insert(os, value).is_none(),
+                        None => existing.remove(os).is_some(),
+                    };
+                    // 欄が増減すると、前の最後の値の後ろの空白が `,` の前に残るので、中の空白だけを整える
+                    if added_or_removed {
+                        existing.fmt();
+                    }
+                }
             } else {
                 table.insert(name, Item::Table(per_os));
             }
@@ -535,6 +545,17 @@ mod tests {
         assert!(
             after.find("name = 'c'").unwrap() < after.find("name = 'a'").unwrap(),
             "{after}"
+        );
+        // この OS の値を変えても、1行の表の行末のコメントは残る
+        let mut hotkey = moved.clone();
+        hotkey.insert("hotkey".to_string(), json!("Alt+KeyM"));
+        write(dir.path(), "macos", MANAGED, &hotkey).unwrap();
+        let written = fs::read_to_string(dir.join(SETTINGS)).unwrap();
+        assert!(
+            written.starts_with(
+                "hotkey = { windows = \"Control+Space\", macos = \"Alt+KeyM\" } # 会社の PC\n"
+            ),
+            "{written}"
         );
     }
 

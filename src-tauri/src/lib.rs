@@ -1173,6 +1173,12 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
+    if !settings_dir_ready(&app) {
+        // 画面は空の一覧で始まる。置き場の履歴を読んだことにすると、現れたときの保存が、このデバイスの前の履歴を
+        // 空の一覧に合わせて落とすので、画面は空の履歴を持っているとして照らさせる
+        screen.replaced_by_other_devices(history_store::History::default());
+        return Ok(Vec::new());
+    }
     match history_store::load_merged(&path) {
         Ok(history) => {
             screen.caught_up();
@@ -1228,20 +1234,21 @@ fn settings_dir_ready(app: &AppHandle) -> bool {
 /// 置き場のフォルダーが無い間に、画面から届いた履歴の消去と保存。現れたら、この順で書く（消去の後に届いた一覧を保存する）
 #[derive(Default)]
 struct PendingHistory {
-    cleared: bool,
+    /// 消した時刻。現れたときの時刻で消すと、ほかのデバイスがその間に覚えた履歴まで見せなくなる
+    cleared_at: Option<u64>,
     texts: Option<Vec<String>>,
 }
 
 static PENDING_HISTORY: Mutex<PendingHistory> = Mutex::new(PendingHistory {
-    cleared: false,
+    cleared_at: None,
     texts: None,
 });
 
 /// 置き場のフォルダーが現れたときに、無い間に届いた履歴の消去と保存を書く
 fn write_pending_history(app: &AppHandle) {
     let pending = std::mem::take(&mut *PENDING_HISTORY.lock().unwrap());
-    if pending.cleared {
-        if let Err(error) = clear_draft_history_file(app, true) {
+    if let Some(at) = pending.cleared_at {
+        if let Err(error) = clear_history_file_at(app, true, at) {
             warn!("couldn't clear draft history after the folder appeared: {error}");
         }
     }
@@ -1294,11 +1301,17 @@ fn clear_draft_history(app: AppHandle) -> Result<(), String> {
 /// 履歴を消し、消した時刻を置く（docs/config.md「履歴」）。ほかのデバイスの、その時刻より前の履歴も見せなくなる。
 /// `always` が false なら、消す履歴があるときだけ置く
 fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String> {
+    clear_history_file_at(app, always, now_millis())
+}
+
+fn clear_history_file_at(app: &AppHandle, always: bool, now: u64) -> Result<(), String> {
     if !settings_dir_ready(app) {
         let mut pending = PENDING_HISTORY.lock().unwrap();
         // 消した後に届く一覧は、消した後のもの。消す前に届いた一覧は書かない
         pending.texts = None;
-        pending.cleared |= always;
+        if always {
+            pending.cleared_at = Some(now);
+        }
         return Ok(());
     }
     let path = app.state::<AppState>().history_path();
@@ -1308,7 +1321,7 @@ fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String>
     if !always && matches!(&merged, Ok(history) if history.entries.is_empty()) {
         return Ok(());
     }
-    let cleared = merged.unwrap_or_default().cleared(now_millis());
+    let cleared = merged.unwrap_or_default().cleared(now);
     history_store::save(&path, &cleared).map_err(|error| error.to_string())?;
     info!("cleared draft history");
     Ok(())
@@ -1635,9 +1648,14 @@ fn wait_for_settings_dir(app: AppHandle) {
                 continue;
             }
             info!("the settings folder appeared");
-            state.settings_dir_available.store(true, Ordering::SeqCst);
             let handle = app.clone();
             let result = app.run_on_main_thread(move || {
+                // 読み直す直前に、メインスレッドで書けるようにする。先に書けるようにすると、その間に届いた設定の保存が、
+                // 起動のときに読めなかったために持っている既定の設定を、置き場のファイルに書く
+                handle
+                    .state::<AppState>()
+                    .settings_dir_available
+                    .store(true, Ordering::SeqCst);
                 reload_config_from_files(&handle);
                 write_pending_history(&handle);
                 merge_history_from_other_devices(&handle);
@@ -1737,12 +1755,15 @@ fn set_settings_dir(
         .join(history_store::DIR_NAME)
         .join(old_history.file_name().unwrap_or_default());
     {
-        let _screen = HISTORY_FILE_LOCK.lock().unwrap();
+        let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
         match (
             history_store::load_merged(&old_history),
             history_store::load(&next_history),
         ) {
             (Ok(old), Ok(there)) => {
+                // 画面が読み直すまでは、前の置き場の履歴を持っている。替えた先のファイルと照らすと、
+                // その間の保存が、替えた先にあった履歴を画面の一覧に合わせて落とす
+                screen.replaced_by_other_devices(old.clone());
                 let merged = history_store::merge(&old, &there)
                     .truncated(current.text_history_size as usize);
                 if let Err(error) = history_store::save(&next_history, &merged) {
@@ -2355,6 +2376,10 @@ fn load_config(
 /// 置き場の設定のファイルがほかで変わった。読み直して、変わった分を入れる。自分で書いた変化の知らせも届くが、
 /// 読んだ設定が今と同じなら何もしない
 fn reload_config_from_files(app: &AppHandle) {
+    // 動いている途中でフォルダーが消えた知らせでは、無いファイルを既定の値として読んでしまう
+    if !settings_dir_ready(app) {
+        return;
+    }
     let state = app.state::<AppState>();
     let current = state.config.lock().unwrap().clone();
     let device = state.device.lock().unwrap().clone();
