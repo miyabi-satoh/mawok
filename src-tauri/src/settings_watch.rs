@@ -5,10 +5,10 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
-use notify::{PollWatcher, RecommendedWatcher, RecursiveMode, Watcher as _};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
 
 use crate::{history_store, settings_files};
 
@@ -17,7 +17,7 @@ use crate::{history_store, settings_files};
 const SETTLE: Duration = Duration::from_millis(500);
 
 /// OS の知らせが来ない置き場のために、ファイルを見に行く間隔（docs/config.md「ほかで変わったとき」）。置き場が現れるのを
-/// 待つ間隔と同じく、気づくまでの遅れが気にならず、数個のファイルを見に行く負荷も無視できる間隔にする
+/// 待つ間隔と同じく、気づくまでの遅れが気にならず、数個のファイルの属性を見る負荷も無視できる間隔にする
 const POLL: Duration = Duration::from_secs(5);
 
 /// 何が変わったか
@@ -30,7 +30,8 @@ pub struct Changed {
 /// 見張りを止めるには手放す
 pub struct Watch {
     _watcher: RecommendedWatcher,
-    _poller: PollWatcher,
+    /// 手放すと、見に行くスレッドが止まる
+    _stop_polling: mpsc::Sender<()>,
     targets: Vec<PathBuf>,
 }
 
@@ -70,31 +71,25 @@ pub fn start(
             watched.push(parent.to_path_buf());
         }
     }
-    let handler = |sender: mpsc::Sender<Changed>| {
-        let (settings_dir, targets, history) =
-            (settings_dir.clone(), targets.clone(), history.clone());
-        move |event: notify::Result<notify::Event>| {
-            let Ok(event) = event else {
-                return;
-            };
-            let changed = classify(&settings_dir, &targets, &history, &event.paths);
-            if changed != Changed::default() {
-                let _ = sender.send(changed);
-            }
+    let classified = targets.clone();
+    let notified = sender.clone();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let Ok(event) = event else {
+            return;
+        };
+        let changed = classify(&settings_dir, &classified, &history, &event.paths);
+        if changed != Changed::default() {
+            let _ = notified.send(changed);
         }
-    };
-    let mut watcher = notify::recommended_watcher(handler(sender.clone()))?;
-    // OS の知らせと両方で気づいたときは、2回読み直すが、読んだ設定が今と同じなら何もしないので害は無い
-    let mut poller = PollWatcher::new(
-        handler(sender),
-        notify::Config::default().with_poll_interval(POLL),
-    )?;
+    })?;
     // まだ無いファイルは見張れないので、フォルダーを見張って名前で選ぶ
     // 比べるのと同じ実体のパスで見張る。Windows と Linux は、見張ったパスに名前を付けたパスで知らせるため
-    for dir in watched.iter().chain([&history_watched]) {
-        watcher.watch(dir, RecursiveMode::NonRecursive)?;
-        poller.watch(dir, RecursiveMode::NonRecursive)?;
+    for settings_dir in &watched {
+        watcher.watch(settings_dir, RecursiveMode::NonRecursive)?;
     }
+    watcher.watch(&history_watched, RecursiveMode::NonRecursive)?;
+    // OS の知らせが来ない置き場（docs/config.md「ほかで変わったとき」）でも気づけるよう、見にも行く
+    let stop_polling = poll(dir.to_path_buf(), history_watched.clone(), POLL, sender);
     thread::spawn(move || {
         while let Ok(first) = receiver.recv() {
             let mut changed = first;
@@ -107,9 +102,72 @@ pub fn start(
     });
     Ok(Watch {
         _watcher: watcher,
-        _poller: poller,
+        _stop_polling: stop_polling,
         targets,
     })
+}
+
+/// ファイルの属性の控え。中身は読まない。置き場がクラウドストレージなら、読むとファイルを落とすことになるため
+type Stamp = Vec<(PathBuf, Option<(u64, SystemTime)>)>;
+
+fn stamp(paths: impl Iterator<Item = PathBuf>) -> Stamp {
+    let mut stamp: Stamp = paths
+        .map(|path| {
+            // symlink なら先のファイルの属性を見る
+            let attributes = std::fs::metadata(&path).ok().map(|metadata| {
+                (
+                    metadata.len(),
+                    metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                )
+            });
+            (path, attributes)
+        })
+        .collect();
+    stamp.sort();
+    stamp
+}
+
+fn settings_stamp(dir: &Path) -> Stamp {
+    stamp(settings_files::FILE_NAMES.iter().map(|name| dir.join(name)))
+}
+
+fn history_stamp(history_dir: &Path) -> Stamp {
+    let entries = std::fs::read_dir(history_dir)
+        .into_iter()
+        .flatten()
+        .flatten();
+    stamp(
+        entries
+            .map(|entry| entry.path())
+            .filter(|path| history_store::is_device_file(path)),
+    )
+}
+
+/// OS の知らせが来ない置き場のために、設定と履歴のファイルの大きさと更新時刻を見に行き、変わっていたら知らせる。
+/// 返したものを手放すと止まる
+fn poll(
+    dir: PathBuf,
+    history_dir: PathBuf,
+    every: Duration,
+    sender: mpsc::Sender<Changed>,
+) -> mpsc::Sender<()> {
+    let (stop, stopped) = mpsc::channel::<()>();
+    thread::spawn(move || {
+        let mut settings = settings_stamp(&dir);
+        let mut history = history_stamp(&history_dir);
+        while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
+            let (next_settings, next_history) = (settings_stamp(&dir), history_stamp(&history_dir));
+            let changed = Changed {
+                settings: next_settings != settings,
+                history: next_history != history,
+            };
+            (settings, history) = (next_settings, next_history);
+            if changed != Changed::default() && sender.send(changed).is_err() {
+                return;
+            }
+        }
+    });
+    stop
 }
 
 fn classify(
@@ -158,6 +216,43 @@ mod tests {
         std::fs::remove_file(&link).unwrap();
         symlink(dotfiles.join("b.toml"), &link).unwrap();
         assert!(watch.targets_changed(&dir));
+    }
+
+    #[test]
+    fn polling_notices_changes_without_os_notifications() {
+        let dir = crate::test_support::TempDir::new("settings-watch-poll");
+        let history = dir.join("history");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::write(dir.join(settings_files::SETTINGS), "a = 1").unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let _stop = poll(
+            dir.path().to_path_buf(),
+            history.clone(),
+            Duration::from_millis(10),
+            sender,
+        );
+        let next = || receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        // 同じ長さの中身に書き換えても、更新時刻で気づく
+        thread::sleep(Duration::from_millis(50));
+        std::fs::write(dir.join(settings_files::SETTINGS), "a = 2").unwrap();
+        assert_eq!(
+            next(),
+            Changed {
+                settings: true,
+                history: false
+            }
+        );
+        std::fs::write(history.join("a1b2.json"), "{}").unwrap();
+        assert_eq!(
+            next(),
+            Changed {
+                settings: false,
+                history: true
+            }
+        );
+        // 設定でも履歴でもないファイルでは知らせない
+        std::fs::write(dir.join("notes.txt"), "").unwrap();
+        assert!(receiver.recv_timeout(Duration::from_millis(200)).is_err());
     }
 
     #[test]
