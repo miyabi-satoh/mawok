@@ -40,21 +40,8 @@ impl Watch {
 fn targets(dir: &Path) -> Vec<PathBuf> {
     settings_files::FILE_NAMES
         .iter()
-        .filter_map(|name| target(&dir.join(name)))
+        .filter_map(|name| std::fs::canonicalize(dir.join(name)).ok())
         .collect()
-}
-
-/// 先のファイルが無い symlink（dotfiles でそのファイルの無いブランチに切り替えた間など）も、先のパスにする。
-/// 外すと先のフォルダーを見張らなくなり、ファイルが戻っても気づかない
-fn target(path: &Path) -> Option<PathBuf> {
-    if let Ok(real) = std::fs::canonicalize(path) {
-        return Some(real);
-    }
-    let link = std::fs::read_link(path).ok()?;
-    let link = path.parent()?.join(link);
-    // 知らせのパスと比べられるよう、フォルダーは実体のパスにする（macOS の /var は /private/var）
-    let parent = std::fs::canonicalize(link.parent()?).ok()?;
-    Some(parent.join(link.file_name()?))
 }
 
 /// `dir` の設定のファイルと、`history_dir` の履歴のファイルを見張る。履歴のフォルダーが無ければ作ってから見張る
@@ -140,7 +127,7 @@ mod tests {
     // Windows は symlink を張るのに権限が要るので、Unix だけで確かめる
     #[cfg(unix)]
     #[test]
-    fn notices_links_re_pointed_or_left_without_their_target() {
+    fn notices_links_re_pointed() {
         use std::os::unix::fs::symlink;
         let root = crate::test_support::TempDir::new("settings-watch-links");
         let dir = root.join("Mawok");
@@ -152,9 +139,6 @@ mod tests {
         let link = dir.join(settings_files::SETTINGS);
         symlink(dotfiles.join("a.toml"), &link).unwrap();
         let watch = start(&dir, &dir.join("history"), |_| {}).unwrap();
-        assert!(!watch.targets_changed(&dir));
-        // 先のファイルが無い間も、同じ先のままとみる
-        std::fs::remove_file(dotfiles.join("a.toml")).unwrap();
         assert!(!watch.targets_changed(&dir));
         std::fs::remove_file(&link).unwrap();
         symlink(dotfiles.join("b.toml"), &link).unwrap();

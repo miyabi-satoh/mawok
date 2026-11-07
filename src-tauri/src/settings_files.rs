@@ -403,6 +403,7 @@ fn to_value(value: &Value) -> Option<toml_edit::Value> {
 mod tests {
     use super::*;
     use crate::test_support::TempDir;
+    use serde_json::json;
 
     // Windows は symlink を張るのに権限が要るので、Unix だけで確かめる
     #[cfg(unix)]
@@ -418,7 +419,6 @@ mod tests {
             Some(dir.join("mawok.toml"))
         );
     }
-    use serde_json::json;
 
     const MANAGED: &[&str] = &[
         key::HOTKEY,

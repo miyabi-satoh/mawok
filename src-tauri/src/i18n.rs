@@ -93,7 +93,8 @@ impl Lang {
         }
     }
 
-    /// 選んだ置き場のフォルダーが無い（クラウドストレージのドライブがつながっていない・フォルダーを消した など）。現れたら消す
+    /// 選んだ置き場のフォルダーか、設定のファイルの symlink の先が無い（クラウドストレージのドライブがつながっていない・
+    /// フォルダーを消した・dotfiles でファイルの無いブランチに切り替えた など）。現れたら消す
     pub fn settings_folder_missing(self, dir: &str) -> String {
         match self {
             Lang::En => format!(

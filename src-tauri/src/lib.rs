@@ -1233,7 +1233,8 @@ fn settings_dir_ready(app: &AppHandle) -> bool {
 /// 置き場のうち無いもの（docs/config.md「置き場」）。選んだフォルダーが無いか、設定のファイルの symlink の先が無い。
 /// 既定の置き場は、無ければ作ってよい
 fn missing_settings_place(dir: &Path, chosen: bool) -> Option<PathBuf> {
-    if chosen && !dir.is_dir() {
+    // 既定の置き場が、先の無い symlink（stow がフォルダーごと張ったもの）のときも無いとみる
+    if (chosen || dir.is_symlink()) && !dir.is_dir() {
         return Some(dir.to_path_buf());
     }
     settings_files::dangling_link_target(dir)
@@ -1678,7 +1679,7 @@ fn wait_for_settings_dir(app: AppHandle) {
             if missing_settings_place(&state.settings_dir(), chosen).is_some() {
                 continue;
             }
-            info!("the settings folder appeared");
+            info!("the settings folder is available again");
             let handle = app.clone();
             let result = app.run_on_main_thread(move || {
                 // 読み直す直前に、メインスレッドで書けるようにする。先に書けるようにすると、その間に届いた設定の保存が、
@@ -1762,6 +1763,10 @@ fn set_settings_dir(
         return Err("the settings folder must be an absolute path".to_string());
     }
     std::fs::create_dir_all(&next_dir).map_err(|error| error.to_string())?;
+    // 先の無い symlink に書くと、普通のファイルに置き換えるので、替えない（docs/config.md「置き場」）
+    if missing_settings_place(&next_dir, chosen.is_some()).is_some() {
+        return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string());
+    }
     info!(
         "change the settings folder to {} (use existing: {use_existing})",
         next_dir.display()
