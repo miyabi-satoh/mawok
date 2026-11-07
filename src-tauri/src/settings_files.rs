@@ -180,6 +180,8 @@ fn update_settings(
         if PER_OS.contains(&name) {
             let mut per_os = match table.remove(name) {
                 Some(Item::Table(per_os)) => per_os,
+                // 1行の表（`hotkey = { macos = "…" }`）で書いてあっても、ほかの OS の値を残す
+                Some(Item::Value(toml_edit::Value::InlineTable(per_os))) => per_os.into_table(),
                 // OS の欄でない形で書いてあれば、読むときも読み飛ばしているので、書くときに今の形に直す
                 _ => Table::new(),
             };
@@ -202,8 +204,32 @@ fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
     if table.get(name).and_then(to_json).as_ref() == Some(value) {
         return;
     }
+    // 行の並び（`[[snippets]]` など）は、変わった行だけを書き換える。1行を直しただけで、ほかの行に手で書いた
+    // コメントや書き方を消さないため
+    if let (Some(Item::ArrayOfTables(tables)), Value::Array(rows)) = (table.get_mut(name), value) {
+        if !rows.is_empty() && rows.iter().all(Value::is_object) {
+            update_rows(tables, rows);
+            return;
+        }
+    }
     if let Some(item) = to_item(value) {
         table.insert(name, item);
+    }
+}
+
+fn update_rows(tables: &mut ArrayOfTables, rows: &[Value]) {
+    while tables.len() > rows.len() {
+        tables.remove(tables.len() - 1);
+    }
+    for (index, row) in rows.iter().enumerate() {
+        let Some(object) = row.as_object() else {
+            continue;
+        };
+        match tables.get_mut(index) {
+            Some(existing) if table_to_json(existing.iter()) == *row => {}
+            Some(existing) => *existing = to_table(object),
+            None => tables.push(to_table(object)),
+        }
     }
 }
 
@@ -377,6 +403,44 @@ mod tests {
             reset.contains("windows = \"Control+Shift+Space\""),
             "{reset}"
         );
+    }
+
+    #[test]
+    fn keeps_the_other_os_of_an_inline_table_and_the_comments_of_untouched_rows() {
+        let dir = TempDir::new("settings-files-inline");
+        fs::write(
+            dir.join(SETTINGS),
+            "hotkey = { macos = \"Alt+Space\", windows = \"Control+Space\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join(SNIPPETS),
+            "# 挨拶\n[[snippets]]\nname = 'a'\nbody = 'b'\nenabled = true\n\n[[snippets]]\nname = 'c'\nbody = 'd'\nenabled = true\n",
+        )
+        .unwrap();
+        let next = entries(&[
+            ("hotkey", json!("Alt+KeyM")),
+            (
+                "snippets",
+                json!([
+                    { "name": "a", "body": "b", "enabled": true },
+                    { "name": "c", "body": "d", "enabled": false }
+                ]),
+            ),
+        ]);
+        write(dir.path(), "macos", MANAGED, &next).unwrap();
+        let settings = fs::read_to_string(dir.join(SETTINGS)).unwrap();
+        assert!(
+            settings.contains("windows = \"Control+Space\""),
+            "{settings}"
+        );
+        assert!(settings.contains("macos = \"Alt+KeyM\""), "{settings}");
+        let snippets = fs::read_to_string(dir.join(SNIPPETS)).unwrap();
+        assert!(
+            snippets.contains("# 挨拶\n[[snippets]]\nname = 'a'"),
+            "{snippets}"
+        );
+        assert_eq!(read(dir.path(), "macos").entries, next);
     }
 
     #[test]

@@ -40,6 +40,7 @@ export const EVENTS = {{\n\
 export const ERROR_CODES = {{\n\
 \tBACKUP_RESTORE_PARTIAL: {:?},\n\
 \tSETTINGS_FILE_UNREADABLE: {:?},\n\
+\tSETTINGS_FOLDER_UNAVAILABLE: {:?},\n\
 \tKEYS_INVALID: {:?},\n\
 \tKEYS_EDITING: {:?},\n\
 \tKEYS_HOTKEY: {:?},\n\
@@ -64,6 +65,7 @@ export const ERROR_CODES = {{\n\
         events::UPDATE_CHANGED,
         error_codes::BACKUP_RESTORE_PARTIAL,
         error_codes::SETTINGS_FILE_UNREADABLE,
+        error_codes::SETTINGS_FOLDER_UNAVAILABLE,
         error_codes::KEYS_INVALID,
         error_codes::KEYS_EDITING,
         error_codes::KEYS_HOTKEY,

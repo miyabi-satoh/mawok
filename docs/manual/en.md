@@ -113,6 +113,7 @@ Settings are backed up automatically every day. To go back to earlier settings, 
 - **Mawok's icon does not appear in the tray**: On GNOME, run `gnome-extensions enable ubuntu-appindicators@ubuntu.com` to turn on the extension that shows the tray. On Hyprland, add the tray to your bar's configuration (such as waybar).
 :::
 - **“Couldn't read the settings file ...” appears**: There is a mistake from editing it in a text editor. The log shows the line that can't be read. Fix it and save, and Mawok reads it again right away. If you can't fix it, delete the file, or select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
+- **“The settings folder ... isn't available” appears**: The drive with the folder you chose isn't connected, or the folder was deleted. Once it's connected, Mawok reads it again right away. If you deleted the folder, choose the settings folder again under “Sync” in Settings.
 - **Settings changed on another device don't arrive**: Under “Sync” in Settings, check that both devices chose the same folder. If they did, your cloud storage hasn't synced yet. Check its status in your cloud storage app.
 
 When reporting a problem, attach the log. It does not contain your text. Open its location from “About” in Settings.

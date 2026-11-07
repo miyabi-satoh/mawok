@@ -16,7 +16,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '$lib/font';
 	import { draftGuidance } from '$lib/guidance';
-	import { errorCode, settingsFileUnreadable } from '$lib/errors';
+	import { errorCode, settingsSaveProblem } from '$lib/errors';
 	import { insertAsTyped } from '$lib/insert-text';
 	import {
 		DEFAULT_DRAFT_HISTORY_SIZE,
@@ -364,7 +364,7 @@
 			});
 			showNotice(added ? m.draft_snippet_registered() : m.draft_snippet_already_registered());
 		} catch (e) {
-			showError(m.draft_snippet_register_failed(), settingsFileUnreadable(e) ?? errorCode(e));
+			showError(m.draft_snippet_register_failed(), settingsSaveProblem(e) ?? errorCode(e));
 		}
 	}
 

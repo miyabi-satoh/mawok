@@ -39,6 +39,7 @@ pub fn start(
     // 知らせのパスは、OS によって実体のパスで届く（macOS の /var は /private/var）ので、比べる側も実体のパスにする
     let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let history = real(history_dir);
+    let history_watched = history.clone();
     // symlink にした設定のファイル（stow など）は、先のファイルを直すと先のフォルダーにだけ知らせが来るので、そこも見張る
     let mut settings_dirs = vec![real(dir)];
     for name in settings_files::FILE_NAMES {
@@ -62,10 +63,11 @@ pub fn start(
         }
     })?;
     // まだ無いファイルは見張れないので、フォルダーを見張って名前で選ぶ
+    // 比べるのと同じ実体のパスで見張る。Windows と Linux は、見張ったパスに名前を付けたパスで知らせるため
     for settings_dir in &watched {
         watcher.watch(settings_dir, RecursiveMode::NonRecursive)?;
     }
-    watcher.watch(history_dir, RecursiveMode::NonRecursive)?;
+    watcher.watch(&history_watched, RecursiveMode::NonRecursive)?;
     thread::spawn(move || {
         while let Ok(first) = receiver.recv() {
             let mut changed = first;

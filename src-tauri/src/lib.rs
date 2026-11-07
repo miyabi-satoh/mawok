@@ -126,6 +126,14 @@ struct AppState {
     settings_dir: Mutex<PathBuf>,
     /// 置き場を選んでいないときの置き場。OS 標準のアプリ設定フォルダー
     default_settings_dir: PathBuf,
+    /// MSIX 版で回される先を求めるための、AppData のフォルダー（shown_path）
+    #[cfg(windows)]
+    roaming_dir: PathBuf,
+    #[cfg(windows)]
+    local_dir: PathBuf,
+    /// 選んだ置き場のフォルダーがあるか。無い間（クラウドストレージのドライブがまだつながっていないなど）は、
+    /// 設定と履歴を書かない。既定のままの設定で書くと、つながった後に同期先のファイルを既定で上書きするため
+    settings_dir_available: AtomicBool,
     /// 設定の置き場の見張り。置き場を替えたら張り直す
     watch: Mutex<Option<settings_watch::Watch>>,
     /// 設定のバックアップの置き場（backup.rs）。置き場に置くと、同期したほかのデバイスのバックアップと混ざるので、デバイスの手元に置く
@@ -182,6 +190,8 @@ struct Problems {
 enum ConfigProblem {
     /// 読めなかった設定のファイルの名前。読めたファイルの設定と、読めないファイルは前に読めた設定（起動のときは既定）で動かす
     Unreadable(Vec<String>),
+    /// 選んだ置き場のフォルダーが無い。現れるまで既定の設定で動かし、何も書かない
+    FolderMissing(String),
 }
 
 impl Problems {
@@ -279,7 +289,7 @@ fn settings_view(state: &AppState) -> SettingsView {
     let desktop_hotkey: Option<String> = None;
     SettingsView {
         revision,
-        settings_dir: settings_dir.display().to_string(),
+        settings_dir: shown_path(state, settings_dir).display().to_string(),
         settings_dir_is_default,
         locale: lang.code(),
         platform: Platform::current(),
@@ -319,6 +329,20 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_color_light: config.text_color_light,
         text_color_dark: config.text_color_dark,
         version: state.version.clone(),
+    }
+}
+
+/// 画面に出すパス。MSIX 版では、AppData の下へ書いたファイルがパッケージの中へ回されるので、回された先を出す。
+/// 元のパスは、パッケージの外（エディターや同期のアプリ）からは開けないため
+fn shown_path(state: &AppState, path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        package::path_for_explorer(path, &state.roaming_dir, &state.local_dir)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = state;
+        path
     }
 }
 
@@ -870,6 +894,9 @@ fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), 
 
 /// 設定をファイルに書く。ログイン時の起動はデバイスの設定に、ほかは置き場の設定のファイルに書く
 fn write_config(state: &AppState, next: &Config) -> Result<(), String> {
+    if !state.settings_dir_available.load(Ordering::SeqCst) {
+        return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string());
+    }
     let autostart = (next.autostart != Config::default().autostart).then_some(next.autostart);
     {
         let mut device = state.device.lock().unwrap();
@@ -1166,8 +1193,18 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
     }
 }
 
+/// 選んだ置き場のフォルダーがあるか。無い間は履歴も書かない（画面の履歴はそのまま使える）
+fn settings_dir_available(app: &AppHandle) -> bool {
+    app.state::<AppState>()
+        .settings_dir_available
+        .load(Ordering::SeqCst)
+}
+
 #[tauri::command]
 fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String> {
+    if !settings_dir_available(&app) {
+        return Ok(());
+    }
     let path = app.state::<AppState>().history_path();
     // 件数の設定は、ロックを取ってから読む。読んだ後に件数 0 へ変えられて消されると、
     // 消した後に古い履歴を書き戻してしまう
@@ -1203,6 +1240,9 @@ fn clear_draft_history(app: AppHandle) -> Result<(), String> {
 /// 履歴を消し、消した時刻を置く（docs/config.md「履歴」）。ほかのデバイスの、その時刻より前の履歴も見せなくなる。
 /// `always` が false なら、消す履歴があるときだけ置く
 fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String> {
+    if !settings_dir_available(app) {
+        return Ok(());
+    }
     let path = app.state::<AppState>().history_path();
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     screen.caught_up();
@@ -1219,6 +1259,9 @@ fn clear_draft_history_file(app: &AppHandle, always: bool) -> Result<(), String>
 /// ほかのデバイスの履歴のファイルが変わった。混ぜた履歴を自分のファイルにも入れ、テキストウィンドウに読み直させる。
 /// 自分のファイルに入れておくと、次に画面から保存するときに、混ぜた履歴と照らして時刻を付けられる
 fn merge_history_from_other_devices(app: &AppHandle) {
+    if !settings_dir_available(app) {
+        return;
+    }
     let path = app.state::<AppState>().history_path();
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     let size = draft_history_size(app);
@@ -1518,6 +1561,38 @@ fn watch_settings_dir(app: &AppHandle) {
     }
 }
 
+/// 選んだ置き場のフォルダーが現れるのを待つ。現れたら読み直して、見張りを始める
+fn wait_for_settings_dir(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        // クラウドストレージのドライブは、ログインの後しばらくしてつながる。気づくまでの遅れが気にならず、
+        // 見に行く負荷も無視できる間隔にする
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let state = app.state::<AppState>();
+            if state.settings_dir_available.load(Ordering::SeqCst) {
+                return;
+            }
+            if !state.settings_dir().is_dir() {
+                continue;
+            }
+            info!("the settings folder appeared");
+            state.settings_dir_available.store(true, Ordering::SeqCst);
+            let handle = app.clone();
+            let result = app.run_on_main_thread(move || {
+                reload_config_from_files(&handle);
+                merge_history_from_other_devices(&handle);
+                watch_settings_dir(&handle);
+                let _ = handle.emit(events::DRAFT_HISTORY_MERGED, ());
+            });
+            if let Err(error) = result {
+                error!("couldn't reload the settings folder: {error}");
+            }
+            return;
+        }
+    });
+}
+
 /// 選んだフォルダー。置き場を替える前に、画面がそちらの設定を使うかを聞くのに使う
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -1620,6 +1695,7 @@ fn set_settings_dir(
     device::save(&state.device_path, &updated).map_err(|error| error.to_string())?;
     *state.device.lock().unwrap() = updated;
     *state.settings_dir.lock().unwrap() = next_dir;
+    state.settings_dir_available.store(true, Ordering::SeqCst);
     state.problems.lock().unwrap().config = None;
     watch_settings_dir(&app);
     if let Some(next) = adopted {
@@ -2209,7 +2285,9 @@ fn reload_config_from_files(app: &AppHandle) {
     let state = app.state::<AppState>();
     let current = state.config.lock().unwrap().clone();
     let device = state.device.lock().unwrap().clone();
-    let (next, problem) = load_config(&state.settings_dir(), &device, &current);
+    let (mut next, problem) = load_config(&state.settings_dir(), &device, &current);
+    // ログイン時の起動は設定のファイルに無く、OS への登録に合わせた今の値（起動のときにそろえたもの）を保つ
+    next.autostart = current.autostart;
     let problem_changed = {
         let mut problems = state.problems.lock().unwrap();
         let changed = problems.config.is_some() != problem.is_some();
@@ -2415,6 +2493,9 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         match &problems.config {
             Some(ConfigProblem::Unreadable(files)) => {
                 texts.push(lang.settings_unreadable(&files.join(", ")))
+            }
+            Some(ConfigProblem::FolderMissing(dir)) => {
+                texts.push(lang.settings_folder_missing(dir))
             }
             None => {}
         }
@@ -2793,7 +2874,10 @@ pub fn run() {
             }
 
             let config_dir = app.path().app_config_dir()?;
-            let device_path = config_dir.join(device::FILE_NAME);
+            // デバイスの手元に置くもの（docs/config.md「デバイスの手元に置くもの」）は、既定の置き場と別のフォルダーに置く。
+            // 既定の置き場を dotfiles などで同期しても、デバイスの見分けやバックアップがほかのデバイスに渡らないため
+            let local_dir = app.path().app_local_data_dir()?;
+            let device_path = local_dir.join(device::FILE_NAME);
             let device_missing = !device_path.exists();
             let mut device = device::load(&device_path).unwrap_or_else(|error| {
                 warn!("couldn't read the device settings: {error}");
@@ -2816,8 +2900,21 @@ pub fn run() {
                 .clone()
                 .unwrap_or_else(|| config_dir.clone());
             info!("settings folder: {}", settings_dir.display());
-            let (mut config, config_problem) =
-                load_config(&settings_dir, &device, &Config::default());
+            // 既定の置き場は作ってよいが、選んだ置き場は作らない。つながっていないドライブの場所に作ると、
+            // つながった後のフォルダーと別物になるため
+            let settings_dir_available = device.settings_dir.is_none() || settings_dir.is_dir();
+            let (mut config, config_problem) = if settings_dir_available {
+                load_config(&settings_dir, &device, &Config::default())
+            } else {
+                warn!("the settings folder is missing; waiting for it");
+                let (config, _) = load_config(&settings_dir, &device, &Config::default());
+                (
+                    config,
+                    Some(ConfigProblem::FolderMissing(
+                        settings_dir.display().to_string(),
+                    )),
+                )
+            };
             let first_launch = is_first_launch(device_missing, device_saved);
             let mut problems = Problems {
                 config: config_problem,
@@ -2844,8 +2941,13 @@ pub fn run() {
                 device: Mutex::new(device),
                 settings_dir: Mutex::new(settings_dir),
                 default_settings_dir: config_dir.clone(),
+                settings_dir_available: AtomicBool::new(settings_dir_available),
+                #[cfg(windows)]
+                roaming_dir: app.path().data_dir()?,
+                #[cfg(windows)]
+                local_dir: app.path().local_data_dir()?,
                 watch: Mutex::new(None),
-                backups_dir: backup::dir_in(&config_dir),
+                backups_dir: backup::dir_in(&local_dir),
                 version: app.package_info().version.to_string(),
                 system_lang: Lang::system(),
                 config: Mutex::new(config),
@@ -2876,7 +2978,11 @@ pub fn run() {
                     move || resume_hotkey_after_menu(&end),
                 );
             }
-            watch_settings_dir(app.handle());
+            if settings_dir_available {
+                watch_settings_dir(app.handle());
+            } else {
+                wait_for_settings_dir(app.handle().clone());
+            }
             start_daily_backups(app.handle().clone());
             #[cfg(target_os = "macos")]
             updater::start_periodic_checks(app.handle());

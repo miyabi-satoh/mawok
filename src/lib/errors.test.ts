@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ERROR_CODES } from '$lib/bindings/constants';
 import { m } from '$lib/paraglide/messages';
-import { describeError, errorCode, settingsFileUnreadable } from './errors';
+import { describeError, errorCode, settingsSaveProblem } from './errors';
 
 function errorWithStack(message: string, stack: string | undefined) {
 	const error = new TypeError(message);
@@ -42,11 +42,11 @@ describe('errorCode', () => {
 	});
 });
 
-describe('settingsFileUnreadable', () => {
+describe('settingsSaveProblem', () => {
 	it('設定のファイルを読めなかった符号だけを、その旨の文にする', () => {
-		expect(settingsFileUnreadable(ERROR_CODES.SETTINGS_FILE_UNREADABLE)).toBe(
+		expect(settingsSaveProblem(ERROR_CODES.SETTINGS_FILE_UNREADABLE)).toBe(
 			m.settings_file_unreadable()
 		);
-		expect(settingsFileUnreadable(ERROR_CODES.KEYS_INVALID)).toBeUndefined();
+		expect(settingsSaveProblem(ERROR_CODES.KEYS_INVALID)).toBeUndefined();
 	});
 });

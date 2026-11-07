@@ -11,7 +11,7 @@ import {
 import { PROFILE_IDENTIFIER } from './app-conf.mjs';
 import { fileExists, readBackupRecord, recordPath, writeJsonAtomic } from './files.mjs';
 import {
-	DEVICE_FILE,
+	deviceFileOf,
 	HISTORY_DIR,
 	historyFileOf,
 	readSettings,
@@ -381,7 +381,7 @@ export async function beginMissingConfig() {
 
 /** このデバイスの設定 (device.json) があるか。無ければ、アプリは初めての起動として動く */
 export async function configExists() {
-	return fileExists(path.join(CONFIG_DIR, DEVICE_FILE));
+	return fileExists(deviceFileOf(CONFIG_DIR));
 }
 
 /**

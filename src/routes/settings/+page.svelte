@@ -10,7 +10,7 @@
 	import { clamp } from '$lib/clamp';
 	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '$lib/color';
 	import { EVENTS } from '$lib/bindings/constants';
-	import { errorCode, settingsFileUnreadable } from '$lib/errors';
+	import { errorCode, settingsSaveProblem } from '$lib/errors';
 	import BackupDialog from '$lib/components/backup-dialog.svelte';
 	import SettingsSnippets from '$lib/components/settings-snippets.svelte';
 	import SettingsFolder from '$lib/components/settings-folder.svelte';
@@ -76,7 +76,7 @@
 
 	const showError = (message: string) => (error = message);
 	const settingsFailed = (e: unknown) =>
-		settingsFileUnreadable(e) ?? m.settings_failed({ error: errorCode(e) });
+		settingsSaveProblem(e) ?? m.settings_failed({ error: errorCode(e) });
 	const callSettings = commandCaller(settingsFailed, showError);
 
 	/** バックアップから戻す窓を出しているか */
@@ -164,7 +164,7 @@
 		} catch (e) {
 			// 下書きの操作と重なって断られたときは符号が返る。それ以外は OS に登録できなかった
 			hotkeyError =
-				isKeyRejection(e) || settingsFileUnreadable(e)
+				isKeyRejection(e) || settingsSaveProblem(e)
 					? keyRejectionMessage(e, accelerator, view.platform)
 					: m.settings_hotkey_unavailable({
 							keys: formatKeys(accelerator, view.platform),

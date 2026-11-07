@@ -24,10 +24,6 @@ updates:
       - dependency-name: 'objc2'
       - dependency-name: 'objc2-foundation'
       - dependency-name: 'objc2-app-kit'
-      # sha2 と hkdf は同じ digest の版で組む (src-tauri/src/sync_key.rs の Hkdf::<Sha256>)。片方だけ上がるとビルドが通らず、
-      # sha2 を上げると Tauri (wry・tauri-codegen) の使う 0.10 と2版入る。Tauri が移ったら、2つを手で一緒に上げる
-      - dependency-name: 'sha2'
-      - dependency-name: 'hkdf'
     groups:
       cargo-minor-patch:
         patterns: ['*']

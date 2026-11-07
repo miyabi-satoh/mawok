@@ -29,11 +29,17 @@ export function codeMessage(messages: Record<string, () => string>, code: string
 }
 
 /**
- * 設定を保存するコマンドが、置き場の設定のファイルを読めずに保存しなかったときの文。ほかの失敗なら undefined。
- * 手で書きかけのファイルを画面からの変更で消さないよう、Rust 側は読めないファイルを書き換えない
+ * 設定を保存するコマンドが、置き場の都合で保存しなかったときの文。ほかの失敗なら undefined。
+ * 読めない設定のファイルは、手で書きかけのものを画面からの変更で消さないよう書き換えない。選んだ置き場のフォルダーが
+ * 無い間は、つながった後のファイルを既定の設定で上書きしないよう何も書かない
  */
-export function settingsFileUnreadable(error: unknown): string | undefined {
-	return errorCode(error) === ERROR_CODES.SETTINGS_FILE_UNREADABLE
-		? m.settings_file_unreadable()
-		: undefined;
+export function settingsSaveProblem(error: unknown): string | undefined {
+	switch (errorCode(error)) {
+		case ERROR_CODES.SETTINGS_FILE_UNREADABLE:
+			return m.settings_file_unreadable();
+		case ERROR_CODES.SETTINGS_FOLDER_UNAVAILABLE:
+			return m.settings_folder_unavailable();
+		default:
+			return undefined;
+	}
 }

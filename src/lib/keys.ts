@@ -1,4 +1,4 @@
-import { errorCode, settingsFileUnreadable } from '$lib/errors';
+import { errorCode, settingsSaveProblem } from '$lib/errors';
 import { CONSTANTS, ERROR_CODES } from '$lib/bindings/constants';
 import type { DraftAction as GeneratedDraftAction } from '$lib/bindings/DraftAction';
 import type { DraftKeys as GeneratedDraftKeys } from '$lib/bindings/DraftKeys';
@@ -122,7 +122,7 @@ export function keyRejectionMessage(error: unknown, key: string, platform: Platf
 			action: draftActionLabel(action as DraftAction)
 		});
 	}
-	return settingsFileUnreadable(error) ?? code;
+	return settingsSaveProblem(error) ?? code;
 }
 
 /** 記号と矢印のキーは、名前ではなく刻印と同じ見た目にする。記号の位置は配列で変わるが、US 配列の刻印で出す */

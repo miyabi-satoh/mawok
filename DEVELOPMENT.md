@@ -47,9 +47,9 @@ just licenses   # Rust の依存のライセンス表示を作り直す（依存
 
 開発版では、ログイン時の自動起動を登録しません。
 
-開発版は、常用の Mawok と別の設定・履歴・資格情報で動きます（プロファイル `dev`。→ docs/platform.md「プロファイル」）。サインインも開発版の中で別に行います。
+開発版は、常用の Mawok と別の設定・履歴で動きます（プロファイル `dev`。→ docs/platform.md「プロファイル」）。
 
-Linux（Ubuntu 24.04 以上の GNOME と Hyprland を支える）でも、`just ci` と `just dev` が動きます。資格情報は Secret Service に置くので、GNOME キーリングなどが動いている必要があります。Wayland では、開発版のホットキーもデスクトップの portal か、デスクトップのキー設定から `src-tauri/target/debug/mawok --toggle` を呼ぶ形になります（→ docs/platform.md「Linux のホットキー」）。
+Linux（Ubuntu 24.04 以上の GNOME と Hyprland を支える）でも、`just ci` と `just dev` が動きます。Wayland では、開発版のホットキーもデスクトップの portal か、デスクトップのキー設定から `src-tauri/target/debug/mawok --toggle` を呼ぶ形になります（→ docs/platform.md「Linux のホットキー」）。
 
 ## テスト
 

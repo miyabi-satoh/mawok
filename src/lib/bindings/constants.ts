@@ -25,6 +25,7 @@ export const EVENTS = {
 export const ERROR_CODES = {
 	BACKUP_RESTORE_PARTIAL: "backup.restore_partial",
 	SETTINGS_FILE_UNREADABLE: "settings.file_unreadable",
+	SETTINGS_FOLDER_UNAVAILABLE: "settings.folder_unavailable",
 	KEYS_INVALID: "keys.invalid",
 	KEYS_EDITING: "keys.editing",
 	KEYS_HOTKEY: "keys.hotkey",

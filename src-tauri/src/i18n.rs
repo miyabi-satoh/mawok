@@ -93,6 +93,18 @@ impl Lang {
         }
     }
 
+    /// 選んだ置き場のフォルダーが無い（クラウドストレージのドライブがつながっていない・フォルダーを消した など）。現れたら消す
+    pub fn settings_folder_missing(self, dir: &str) -> String {
+        match self {
+            Lang::En => format!(
+                "The settings folder {dir} isn't available. Changes aren't saved until it is"
+            ),
+            Lang::Ja => format!(
+                "設定の置き場 {dir} が見つかりません。見つかるまで、変えた設定は保存されません"
+            ),
+        }
+    }
+
     /// 原因（他のアプリとの衝突など）の詳細はログに残す
     pub fn hotkey_unavailable(self, hotkey: &str) -> String {
         match self {
