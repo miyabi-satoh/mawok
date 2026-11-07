@@ -8,13 +8,17 @@ use std::{
     time::Duration,
 };
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
+use notify::{PollWatcher, RecommendedWatcher, RecursiveMode, Watcher as _};
 
 use crate::{history_store, settings_files};
 
 /// 変わってから知らせるまで待つ長さ。エディターの保存やクラウドストレージの書き込みは、一時ファイル・消す・差し替えの
 /// 何回かの変化になるので、まとめて1回にする。待つ間は前の設定のままなので、長すぎない値にする
 const SETTLE: Duration = Duration::from_millis(500);
+
+/// OS の知らせが来ない置き場のために、ファイルを見に行く間隔（docs/config.md「ほかで変わったとき」）。置き場が現れるのを
+/// 待つ間隔と同じく、気づくまでの遅れが気にならず、数個のファイルを見に行く負荷も無視できる間隔にする
+const POLL: Duration = Duration::from_secs(5);
 
 /// 何が変わったか
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +30,7 @@ pub struct Changed {
 /// 見張りを止めるには手放す
 pub struct Watch {
     _watcher: RecommendedWatcher,
+    _poller: PollWatcher,
     targets: Vec<PathBuf>,
 }
 
@@ -65,22 +70,31 @@ pub fn start(
             watched.push(parent.to_path_buf());
         }
     }
-    let classified = targets.clone();
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        let Ok(event) = event else {
-            return;
-        };
-        let changed = classify(&settings_dir, &classified, &history, &event.paths);
-        if changed != Changed::default() {
-            let _ = sender.send(changed);
+    let handler = |sender: mpsc::Sender<Changed>| {
+        let (settings_dir, targets, history) =
+            (settings_dir.clone(), targets.clone(), history.clone());
+        move |event: notify::Result<notify::Event>| {
+            let Ok(event) = event else {
+                return;
+            };
+            let changed = classify(&settings_dir, &targets, &history, &event.paths);
+            if changed != Changed::default() {
+                let _ = sender.send(changed);
+            }
         }
-    })?;
+    };
+    let mut watcher = notify::recommended_watcher(handler(sender.clone()))?;
+    // OS の知らせと両方で気づいたときは、2回読み直すが、読んだ設定が今と同じなら何もしないので害は無い
+    let mut poller = PollWatcher::new(
+        handler(sender),
+        notify::Config::default().with_poll_interval(POLL),
+    )?;
     // まだ無いファイルは見張れないので、フォルダーを見張って名前で選ぶ
     // 比べるのと同じ実体のパスで見張る。Windows と Linux は、見張ったパスに名前を付けたパスで知らせるため
-    for settings_dir in &watched {
-        watcher.watch(settings_dir, RecursiveMode::NonRecursive)?;
+    for dir in watched.iter().chain([&history_watched]) {
+        watcher.watch(dir, RecursiveMode::NonRecursive)?;
+        poller.watch(dir, RecursiveMode::NonRecursive)?;
     }
-    watcher.watch(&history_watched, RecursiveMode::NonRecursive)?;
     thread::spawn(move || {
         while let Ok(first) = receiver.recv() {
             let mut changed = first;
@@ -93,6 +107,7 @@ pub fn start(
     });
     Ok(Watch {
         _watcher: watcher,
+        _poller: poller,
         targets,
     })
 }
