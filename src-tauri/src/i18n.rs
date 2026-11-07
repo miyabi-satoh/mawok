@@ -93,6 +93,14 @@ impl Lang {
         }
     }
 
+    /// 設定の置き場にするフォルダーを選ぶ、OS のフォルダーの窓の題
+    pub fn pick_settings_folder(self) -> &'static str {
+        match self {
+            Lang::En => "Choose the Settings Folder",
+            Lang::Ja => "設定の置き場を選ぶ",
+        }
+    }
+
     /// 選んだ置き場のフォルダーか、設定のファイルの symlink の先が無い（クラウドストレージのドライブがつながっていない・
     /// フォルダーを消した・dotfiles でファイルの無いブランチに切り替えた など）。現れたら消す
     pub fn settings_folder_missing(self, dir: &str) -> String {

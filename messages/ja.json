@@ -189,7 +189,6 @@
 	"settings_folder_reveal_macos": "設定の置き場を Finder で表示",
 	"settings_folder_reveal_windows": "設定の置き場をエクスプローラーで表示",
 	"settings_folder_reveal_linux": "設定の置き場をファイルマネージャーで表示",
-	"settings_folder_description": "クラウドストレージや dotfiles のフォルダーを選ぶと、ほかのデバイスと設定と履歴を同期できます。",
 	"settings_folder_has_settings_title": "このフォルダーには設定があります",
 	"settings_folder_has_settings_description": "このデバイスの設定で上書きすると、このフォルダーにある設定は消えます。",
 	"settings_folder_use_existing": "このフォルダーの設定を使う",

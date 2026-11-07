@@ -255,9 +255,16 @@ fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
             return;
         }
     }
-    if let Some(item) = to_item(value) {
-        table.insert(name, item);
+    let Some(item) = to_item(value) else {
+        return;
+    };
+    // 値だけを入れ替える。`insert` は、キーの上の行のコメントと行末のコメント（キーと値の装飾）を消すため
+    if let (Some(Item::Value(old)), Item::Value(mut new)) = (table.get_mut(name), item.clone()) {
+        *new.decor_mut() = old.decor().clone();
+        *old = new;
+        return;
     }
+    table.insert(name, item);
 }
 
 /// 行の並びを書き換える。中身が同じ行は、元の表（前に付けたコメント・書き方・知らない項目）をそのまま使い、
@@ -536,6 +543,22 @@ mod tests {
             "{snippets}"
         );
         assert_eq!(read(dir.path(), "macos").entries, next);
+    }
+
+    #[test]
+    fn keeps_the_comments_of_a_changed_value() {
+        let dir = TempDir::new("settings-files-changed-value");
+        fs::write(
+            dir.join(SETTINGS),
+            "# 大きめにする\ntext_font_size = 20 # 会社の画面\n",
+        )
+        .unwrap();
+        let next = entries(&[("text_font_size", json!(24))]);
+        write(dir.path(), "macos", MANAGED, &next).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join(SETTINGS)).unwrap(),
+            "# 大きめにする\ntext_font_size = 24 # 会社の画面\n"
+        );
     }
 
     #[test]

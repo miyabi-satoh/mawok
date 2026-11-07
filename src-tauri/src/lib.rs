@@ -1720,8 +1720,16 @@ struct PickedSettingsDir {
 #[tauri::command]
 async fn pick_settings_dir(app: AppHandle) -> Result<Option<PickedSettingsDir>, String> {
     use tauri_plugin_dialog::DialogExt as _;
-    let start = app.state::<AppState>().settings_dir();
-    let picker = app.dialog().file().set_directory(start);
+    let state = app.state::<AppState>();
+    let mut picker = app
+        .dialog()
+        .file()
+        .set_directory(state.settings_dir())
+        .set_title(state.lang().pick_settings_folder());
+    // 設定の窓に結び付ける。結び付けないと、窓を開いたまま「変更...」をもう一度押せて、2つ目が開く
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
+        picker = picker.set_parent(&window);
+    }
     let picked = run_blocking(move || picker.blocking_pick_folder()).await?;
     let Some(picked) = picked else {
         return Ok(None);

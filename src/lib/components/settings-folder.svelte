@@ -24,7 +24,10 @@
 
 	async function change() {
 		error = '';
+		// 選ぶ窓が開いている間は押せなくする。OS によっては窓が設定の窓をふさがず、もう一度押すと2つ目が開く
+		busy = true;
 		const picked = await call<PickedSettingsDir | null>('pick_settings_dir');
+		busy = false;
 		if (!picked.ok || !picked.value || picked.value.path === view.settingsDir) return;
 		ask(picked.value.path, picked.value);
 	}
@@ -98,7 +101,6 @@
 	{#if error}
 		<Field.Error>{error}</Field.Error>
 	{/if}
-	<Field.Description class="leading-snug">{m.settings_folder_description()}</Field.Description>
 </SettingsRow>
 
 <AlertDialog.Root

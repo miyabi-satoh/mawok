@@ -189,7 +189,6 @@
 	"settings_folder_reveal_macos": "Show settings folder in Finder",
 	"settings_folder_reveal_windows": "Show settings folder in File Explorer",
 	"settings_folder_reveal_linux": "Show settings folder in File Manager",
-	"settings_folder_description": "Choose a folder in cloud storage or your dotfiles to sync settings and history with your other devices.",
 	"settings_folder_has_settings_title": "This folder already has settings",
 	"settings_folder_has_settings_description": "If you overwrite them with this device's settings, the settings in this folder will be lost.",
 	"settings_folder_use_existing": "Use settings in this folder",
