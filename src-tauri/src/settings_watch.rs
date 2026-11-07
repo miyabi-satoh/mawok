@@ -235,6 +235,13 @@ mod tests {
         let next = || receiver.recv_timeout(Duration::from_secs(5)).unwrap();
         // 同じ長さの中身に書き換えても、更新時刻で気づく
         std::fs::write(dir.join(settings_files::SETTINGS), "a = 2").unwrap();
+        // 続けて書くと、時刻の刻み (Windows は約 15 ms) の中に収まり、更新時刻が変わらないことがあるので進めておく
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join(settings_files::SETTINGS))
+            .unwrap()
+            .set_modified(SystemTime::now() + Duration::from_secs(1))
+            .unwrap();
         assert_eq!(
             next(),
             Changed {
