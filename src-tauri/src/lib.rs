@@ -1629,6 +1629,16 @@ fn watch_settings_dir(app: &AppHandle) {
             let result = handle.run_on_main_thread(move || {
                 if changed.settings {
                     reload_config_from_files(&app);
+                    let state = app.state::<AppState>();
+                    let outdated = state
+                        .watch
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .is_some_and(|watch| watch.targets_changed(&state.settings_dir()));
+                    if outdated {
+                        watch_settings_dir(&app);
+                    }
                 }
                 if changed.history {
                     merge_history_from_other_devices(&app);

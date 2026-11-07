@@ -26,6 +26,22 @@ pub struct Changed {
 /// 見張りを止めるには手放す
 pub struct Watch {
     _watcher: RecommendedWatcher,
+    targets: Vec<PathBuf>,
+}
+
+impl Watch {
+    /// 見張りを始めた後に、設定のファイルの symlink が張られた・張り替えられたか。そうなら、新しい先を見張るよう始め直す
+    pub fn targets_changed(&self, dir: &Path) -> bool {
+        targets(dir) != self.targets
+    }
+}
+
+/// 設定のファイルの実体のパス。symlink なら先のファイル
+fn targets(dir: &Path) -> Vec<PathBuf> {
+    settings_files::FILE_NAMES
+        .iter()
+        .filter_map(|name| std::fs::canonicalize(dir.join(name)).ok())
+        .collect()
 }
 
 /// `dir` の設定のファイルと、`history_dir` の履歴のファイルを見張る。履歴のフォルダーが無ければ作ってから見張る
@@ -40,27 +56,21 @@ pub fn start(
     let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let history = real(history_dir);
     let history_watched = history.clone();
-    // symlink にした設定のファイル（stow など）は、先のファイルを直すと先のフォルダーにだけ知らせが来るので、そこも見張る。
-    // 先のファイルは名前が違うこと（`ln -s ~/dotfiles/mawok.toml settings.toml`）があるので、先のパスでも選ぶ
+    // symlink の先のフォルダーも見張り、先のファイルはパスで選ぶ（docs/config.md「ほかで変わったとき」）
     let settings_dir = real(dir);
-    let mut targets = Vec::new();
+    let targets = targets(dir);
     let mut watched = vec![settings_dir.clone()];
-    for name in settings_files::FILE_NAMES {
-        let Ok(target) = std::fs::canonicalize(dir.join(name)) else {
-            continue;
-        };
-        if let Some(parent) = target.parent().map(Path::to_path_buf) {
-            if !watched.contains(&parent) {
-                watched.push(parent);
-            }
+    for parent in targets.iter().filter_map(|target| target.parent()) {
+        if !watched.iter().any(|dir| dir == parent) {
+            watched.push(parent.to_path_buf());
         }
-        targets.push(target);
     }
+    let classified = targets.clone();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         let Ok(event) = event else {
             return;
         };
-        let changed = classify(&settings_dir, &targets, &history, &event.paths);
+        let changed = classify(&settings_dir, &classified, &history, &event.paths);
         if changed != Changed::default() {
             let _ = sender.send(changed);
         }
@@ -81,7 +91,10 @@ pub fn start(
             on_change(changed);
         }
     });
-    Ok(Watch { _watcher: watcher })
+    Ok(Watch {
+        _watcher: watcher,
+        targets,
+    })
 }
 
 fn classify(
