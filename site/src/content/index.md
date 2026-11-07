@@ -28,6 +28,10 @@ status: coming-soon
 
 <video src="/flow.mp4" autoplay loop muted playsinline width="1492" height="720" aria-label="チャットの画面でホットキーを押すとテキストウィンドウが出て、「来週の打ち合わせの案内を、丁寧なメールの文にしてください。」と書く。コピーするとウィンドウが閉じ、チャットの入力欄に同じ文が貼り付けられる（まだ送っていない）" style="max-width:100%;height:auto"></video>
 
+音声入力などで書いた文に混ざる全角の英数字や「，．」、「えー」のような言葉も、コピーのときに揃えたり取り除いたりできます。
+
+<video src="/cleanup.mp4" autoplay loop muted playsinline width="1492" height="720" aria-label="テキストウィンドウに「えー、来週のＭＴＧは１０時からで，あのー、資料はＡ４で３部お願いします．」が入り、「えー、」と「あのー、」に色が付いている。コピーしてチャットの入力欄に貼り付けると「来週のMTGは10時からで、資料はA4で3部お願いします。」になっている" style="max-width:100%;height:auto"></video>
+
 ## スクリーンショット
 
 「コピーの整え」で、コピーのときに揃える文字の種類と、置き換える語句を決められます。
