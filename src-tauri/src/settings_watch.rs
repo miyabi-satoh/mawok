@@ -239,7 +239,15 @@ mod tests {
             Duration::from_millis(10),
             sender,
         );
-        let next = || receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        // 書き込みは切り詰めと書き足しの2回の変化に見えることがあるので、アプリと同じく続けて届いた分をまとめる
+        let next = || {
+            let mut changed = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+            while let Ok(more) = receiver.recv_timeout(Duration::from_millis(100)) {
+                changed.settings |= more.settings;
+                changed.history |= more.history;
+            }
+            changed
+        };
         // 同じ長さの中身に書き換えても、更新時刻で気づく
         std::fs::write(dir.join(settings_files::SETTINGS), "a = 2").unwrap();
         assert_eq!(
