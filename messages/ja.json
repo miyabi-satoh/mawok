@@ -195,7 +195,7 @@
 	"settings_folder_use_existing": "このフォルダーの設定を使う",
 	"settings_folder_overwrite": "このデバイスの設定で上書きする",
 	"settings_folder_unreadable": "このフォルダーにある設定のファイルを読めないため、変更できませんでした。",
-	"settings_folder_link_missing": "このフォルダーにある設定のファイルの symlink の先が見つからないため、変更できませんでした。",
+	"settings_folder_link_missing": "このフォルダーか、中にある設定のファイルの symlink の先が見つからないため、変更できませんでした。",
 	"settings_file_unreadable": "設定のファイルを読めないため、保存できませんでした。",
 	"settings_folder_unavailable": "設定の置き場が見つからないため、保存できませんでした。"
 }
