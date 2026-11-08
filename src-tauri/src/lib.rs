@@ -1816,7 +1816,7 @@ async fn ask_access(app: &AppHandle, target: &Path) -> Result<bool, String> {
             .dialog()
             .file()
             .set_directory(folder_access::grant_start(target))
-            .set_title(lang.grant_access_prompt(&shown));
+            .set_title(lang.grant_access_prompt());
         // 設定の窓に結び付ける。結び付けないと、窓を開いたままボタンをもう一度押せて、2つ目が開く
         if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
             picker = picker.set_parent(&window);

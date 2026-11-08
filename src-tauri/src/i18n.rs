@@ -128,10 +128,10 @@ impl Lang {
 
     /// symlink の先を読む許可を求める、OS のフォルダーの窓の案内（macOS では窓の上に出る）。窓は先の入っている
     /// フォルダーで開くので、押すのは「開く」だけ
-    pub fn grant_access_prompt(self, target: &str) -> String {
+    pub fn grant_access_prompt(self) -> &'static str {
         match self {
-            Lang::En => format!("Click Open to allow Mawok to read {target}."),
-            Lang::Ja => format!("「開く」を押すと、{target} を読めるようになります。"),
+            Lang::En => "Click Open to allow access.",
+            Lang::Ja => "「開く」でアクセスを許可します。",
         }
     }
 
