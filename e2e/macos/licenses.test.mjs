@@ -100,19 +100,19 @@ test.describe('macOS: 第三者のソフトウェア', () => {
 		);
 	});
 
-	test('ring の行を開くと、ソースの置き場所と ISC・Apache-2.0・MIT の条文が出る', async () => {
+	test('brotli の行を開くと、ソースの置き場所と BSD-3-Clause・MIT の条文が出る', async () => {
 		await openLicenses();
-		await pressWindowElement(LICENSES_TITLE, 'AXDisclosureTriangle', 'ring ');
+		await pressWindowElement(LICENSES_TITLE, 'AXDisclosureTriangle', 'brotli ');
 		const contents = await waitFor(
-			async () => rowContents(await windowElements(LICENSES_TITLE), 'ring '),
+			async () => rowContents(await windowElements(LICENSES_TITLE), 'brotli '),
 			(elements) => elements.some(({ role }) => role === 'AXHeading'),
-			{ label: 'ring の行の中身' }
+			{ label: 'brotli の行の中身' }
 		);
 		const headings = contents.filter(({ role }) => role === 'AXHeading').map(({ name }) => name);
 		assert.deepEqual(
 			[...headings].sort(),
-			['Apache License 2.0', 'ISC License', 'MIT License'],
-			'3つのライセンスの条文の見出し'
+			['BSD 3-Clause "New" or "Revised" License', 'MIT License'],
+			'2つのライセンスの条文の見出し'
 		);
 		assert.ok(
 			contents.some(({ role, name }) => role === 'AXLink' && name.startsWith('https://')),
