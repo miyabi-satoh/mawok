@@ -41,15 +41,7 @@ updated: 2026-11-08
 
 ## このサイトのアクセス解析
 
-このサイト（mawok.amiiby.com）は、Cloudflare, Inc. のアクセス解析サービス「Cloudflare Web Analytics」を使います。
-Cloudflare Web Analytics は、Cookie などのブラウザーに保存する仕組みを使わず、受け取った IP アドレスを記録に残さず、訪問者を個人として識別しません。集めた情報は、このサイトの利用状況を知り、改善するために使います。Cloudflare での扱いは、[Cloudflare のプライバシーポリシー](https://www.cloudflare.com/privacypolicy/)をご覧ください。
-
-このサイトのページを表示すると、ブラウザーから次の事業者に情報が送られます（電気通信事業法の外部送信規律に基づく表示）。
-
-- **Cloudflare Web Analytics**（このサイトのすべてのページ）
-  - 送信先: Cloudflare, Inc.
-  - 送られる情報: 閲覧したページの URL、IP アドレス、参照元、ページの表示にかかった時間、ブラウザーや端末の種類
-  - 目的: このサイトの利用状況を知るため
+このサイト（mawok.amiiby.com）は、利用状況を知るために、Cloudflare, Inc. の「Cloudflare Web Analytics」を使っています。Cookie を使わず、訪問者を個人として識別しません。詳しくは、[Cloudflare のプライバシーポリシー](https://www.cloudflare.com/privacypolicy/)をご覧ください。
 
 ## このポリシーの変更
 
