@@ -1,8 +1,6 @@
 .DS_Store
 node_modules/
 dist/
-# 紹介と規約類 (site/) の Astro が作るもの
-.astro/
 /build
 /.svelte-kit
 /package

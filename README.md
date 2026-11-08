@@ -22,7 +22,7 @@
 ## ライセンス
 
 ソースコードは [PolyForm Strict License 1.0.0](LICENSE) で公開しています。非営利の目的と、個人の学習・研究での利用だけを許し、配布と改変は許しません。
-配布しているアプリは、このライセンスではなく [利用規約](https://mawok.amiiby.com/terms/) で扱います。
+配布しているアプリは、このライセンスではなく [利用規約](https://amiiby.com/apps/mawok/terms/) で扱います。
 「Mawok」の名前とアイコンは、このライセンスでは使えません。
 
 開発の手順は [DEVELOPMENT.md](DEVELOPMENT.md)、脆弱性の知らせ方は [SECURITY.md](SECURITY.md) にあります。

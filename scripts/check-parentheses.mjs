@@ -9,7 +9,7 @@ const tight =
 	/[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}ー]\(|\)[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}ー]/gu;
 
 const violations = [];
-for (const { file, line, text } of wordingLines((target) => target.parentheses)) {
+for (const { file, line, text } of wordingLines()) {
 	for (const match of [...text.matchAll(fullWidth), ...text.matchAll(tight)]) {
 		violations.push(`${file}:${line}: ${match[0]}`);
 	}

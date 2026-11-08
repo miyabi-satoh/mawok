@@ -23,17 +23,11 @@ dev:
 fmt:
     cargo fmt --manifest-path {{ cargo_manifest }}
     pnpm run format
-    cd account-server && pnpm run format
 
-# CI (.github/workflows/ci.yml) が PR ごとに macOS で流す
+# CI (.github/workflows/ci.yml) が PR ごとに macOS・Windows・Linux で流す
 [doc('CI と同じ検査をまとめて流す (整形・lint・型検査・生成物・テスト)')]
 [group('検査')]
-ci: ci-app site-check account-server-check
-
-# 紹介のサイトとその置き場 (account-server/) は OS によらない中身なので、CI は Windows と Linux ではこちらだけを流す
-[doc('アプリの検査だけを流す (ci から紹介のサイトとその置き場を除いたもの)')]
-[group('検査')]
-ci-app: fmt-check lint check licenses-check pinned-deps-check test bindings-check
+ci: fmt-check lint check licenses-check pinned-deps-check test bindings-check
 
 [doc('Rust の整形の崩れを見る (書き換えない)')]
 [group('検査')]
@@ -80,21 +74,6 @@ pinned-deps-check:
 [group('検査')]
 licenses-check:
     node scripts/check-rust-licenses.mjs
-
-# 初めてのときは先に `cd account-server && pnpm install`。
-# 置く前の確かめ (wrangler deploy --dry-run) は site/dist を読むので、ci では site-check の後に流す
-[doc('紹介のサイトの置き場 (account-server/) の Worker の設定を検査する (整形・置く前の確かめ)')]
-[group('検査')]
-account-server-check:
-    cd account-server && pnpm run lint
-    cd account-server && pnpm run check
-
-# 初めてのときは先に `cd site && pnpm install`
-[doc('紹介と規約類 (site/) を検査してビルドする')]
-[group('検査')]
-site-check:
-    cd site && pnpm run check
-    cd site && pnpm run build
 
 # tauri-driver + WebdriverIO。既定では、インストーラー抜き・LTO なしでビルドし直してから回す
 # (e2e/run.mjs が、画面を点けたままビルドとテストを続けて行う)。
@@ -150,14 +129,13 @@ msix *args:
     pnpm tauri build --no-bundle
     node scripts/msix.mjs {{ args }}
 
-# build でユニバーサル版を署名・公証し、確認先の JSON と一緒に src-tauri/target/release-mac/<版>/ に並べる。
-# 版の番号の変更を main に入れてから、main で publish を流す。GitHub Releases に上げ、JSON を site/ に置いてサイトごと置き直す。
-# 要: Developer ID の証明書と環境変数 TAURI_SIGNING_PRIVATE_KEY・APPLE_ID (→ docs/platform.md「Mac 版の配る版」)
-[doc('Mac 版の配る版を作る (build) ・出す (publish)')]
+# ユニバーサル版を署名・公証し、DMG を src-tauri/target/release-mac/<版>/ に置く。
+# 要: Developer ID の証明書と環境変数 APPLE_ID (→ docs/platform.md「Mac 版の配る版」)
+[doc('Mac 版の配る版を作る')]
 [group('ビルド')]
 [macos]
-release-mac step:
-    node scripts/release-mac.mjs {{ step }}
+release-mac:
+    node scripts/release-mac.mjs
 
 # デスクトップ専用なので Android・iOS 用は消す
 [doc('アイコンを src-tauri/assets の SVG から作り直す')]

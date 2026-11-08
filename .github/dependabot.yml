@@ -43,24 +43,6 @@ updates:
         update-types: ['minor', 'patch']
 
   - package-ecosystem: 'npm'
-    directory: '/account-server'
-    schedule:
-      interval: 'monthly'
-    groups:
-      account-server-minor-patch:
-        patterns: ['*']
-        update-types: ['minor', 'patch']
-
-  - package-ecosystem: 'npm'
-    directory: '/site'
-    schedule:
-      interval: 'monthly'
-    groups:
-      site-minor-patch:
-        patterns: ['*']
-        update-types: ['minor', 'patch']
-
-  - package-ecosystem: 'npm'
     directory: '/e2e'
     schedule:
       interval: 'monthly'

@@ -32,9 +32,3 @@ bun.lockb
 
 # CodeGraph の索引 (作っては消す一時ファイルを読みにいき、消えた瞬間に当たると落ちる)
 /.codegraph/
-
-# 紹介のサイトの置き場 (account-server/) は自分の設定で検査する (→ just account-server-check)
-/account-server/
-
-# 紹介と規約類 (site/) は自分の設定で検査する (→ just site-check)
-/site/

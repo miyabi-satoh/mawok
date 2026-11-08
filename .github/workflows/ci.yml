@@ -1,6 +1,6 @@
 name: CI
 
-# PR ごとに `just ci` (Windows と Linux では、OS によらない検査を除いた `just ci-app`) を流し、通ることを main へのマージの条件にする (ブランチの保護の必須のチェック)。
+# PR ごとに `just ci` を流し、通ることを main へのマージの条件にする (ブランチの保護の必須のチェック)。
 # スカッシュマージ後の main への push では流さない。pull_request は main の先端とのマージ結果に対して走り、
 # マージの前に main へ追いつくことも保護で求めるので、同じ内容をもう一度確かめても情報が増えない。
 on:
@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # ルートの prettier は .md を見ないので、just ci が読む .md (使い方の窓のマニュアル・紹介サイトの文章) のほかは、変わっても just ci の結果が変わらない。
+      # ルートの prettier は .md を見ないので、just ci が読む .md (使い方の窓のマニュアル) のほかは、変わっても just ci の結果が変わらない。
       - uses: dorny/paths-filter@v4
         id: changes
         if: github.event_name == 'pull_request'
@@ -42,8 +42,6 @@ jobs:
               - '!**/*.md'
             read_md:
               - 'docs/manual/**'
-              - 'site/**'
-              - 'account-server/**'
 
       - name: Decide whether to run the checks
         id: scope
@@ -86,26 +84,19 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            account-server/pnpm-lock.yaml
-            site/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       # Windows の既定の pwsh は途中のコマンドが落ちても止まらないので、bash で流す
       - name: Install dependencies
         if: steps.scope.outputs.run == 'true'
         shell: bash
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir account-server install --frozen-lockfile
-          pnpm --dir site install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       # 画面の部品テスト (vitest の browser モード) が chromium で動くため。
       - name: Install Playwright browser (chromium)
         if: steps.scope.outputs.run == 'true'
         run: pnpm exec playwright install chromium
 
-      # 紹介のサイトとその置き場は OS によらない中身 (Astro と Cloudflare の Worker の設定) なので、macOS でだけ見る
       - name: Run CI checks
         if: steps.scope.outputs.run == 'true'
-        run: just ${{ runner.os == 'macOS' && 'ci' || 'ci-app' }}
+        run: just ci
