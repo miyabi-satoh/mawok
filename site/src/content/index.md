@@ -1,10 +1,10 @@
 ---
 name: Mawok
 tagline: 送る前に、一呼吸。
-description: Mawok は、ホットキーで呼び出す常駐型の入力ウィンドウです。書いた文章をコピーすると、同時にウィンドウが閉じて元のアプリに戻るので、Ctrl+V などですぐに貼り付けられます。Windows・Mac・Linux に対応しています。
+description: Mawok は、ホットキーで呼び出す常駐型の入力ウィンドウです。書いた文章をコピーすると、同時にウィンドウが閉じて元のアプリに戻るので、Ctrl+V（Mac は ⌘V）などですぐに貼り付けられます。Windows・Mac・Linux に対応しています。
 lead: |
   ホットキーで呼び出す、常駐型の入力ウィンドウです。
-  書いた文章をコピーすると、同時にウィンドウが閉じて元のアプリに戻るので、Ctrl+V などですぐに貼り付けられます。
+  書いた文章をコピーすると、同時にウィンドウが閉じて元のアプリに戻るので、Ctrl+V（Mac は ⌘V）などですぐに貼り付けられます。
 badges: [無料, Windows, Mac, Linux]
 hero:
   - src: ./images/draft.png
@@ -24,13 +24,13 @@ status: coming-soon
 
 ## 紹介動画
 
-ホットキーでテキストウィンドウを出して書き、コピーすると、ウィンドウが閉じて元のアプリに戻ります。あとは Ctrl+V などで貼り付けます。
+ホットキーでテキストウィンドウを出して書き、コピーすると、ウィンドウが閉じて元のアプリに戻ります。あとは Ctrl+V（Mac は ⌘V）などで貼り付けます。
 
-<video src="/flow.mp4" autoplay loop muted playsinline width="1492" height="720" aria-label="チャットの画面でホットキーを押すとテキストウィンドウが出て、「来週の打ち合わせの案内を、丁寧なメールの文にしてください。」と書く。コピーするとウィンドウが閉じ、チャットの入力欄に同じ文が貼り付けられる（まだ送っていない）" style="max-width:100%;height:auto"></video>
+<video src="/flow.mp4" autoplay loop muted playsinline controls width="1492" height="720" aria-label="チャットの画面でホットキーを押すとテキストウィンドウが出て、「来週の打ち合わせの案内を、丁寧なメールの文にしてください。」と書く。コピーするとウィンドウが閉じ、チャットの入力欄に同じ文が貼り付けられる（まだ送っていない）" style="max-width:100%;height:auto"></video>
 
 音声入力などで書いた文に混ざる全角の英数字や「，．」、「えー」のような言葉も、コピーのときに揃えたり取り除いたりできます。
 
-<video src="/cleanup.mp4" autoplay loop muted playsinline width="1492" height="720" aria-label="テキストウィンドウに「えー、来週のＭＴＧは１０時からで，あのー、資料はＡ４で３部お願いします．」が入り、「えー、」と「あのー、」に色が付いている。コピーしてチャットの入力欄に貼り付けると「来週のMTGは10時からで、資料はA4で3部お願いします。」になっている" style="max-width:100%;height:auto"></video>
+<video src="/cleanup.mp4" autoplay loop muted playsinline controls width="1492" height="720" aria-label="テキストウィンドウに「えー、来週のＭＴＧは１０時からで，あのー、資料はＡ４で３部お願いします．」が入り、「えー、」と「あのー、」に色が付いている。コピーしてチャットの入力欄に貼り付けると「来週のMTGは10時からで、資料はA4で3部お願いします。」になっている" style="max-width:100%;height:auto"></video>
 
 ## スクリーンショット
 
@@ -54,7 +54,7 @@ status: coming-soon
 
 ### 書いたテキストが、どこかへ送られることは？
 
-ありません。Mawok がインターネットとやり取りするのは、Mac 版の更新の確認だけです。
+ありません。Mawok がインターネットとやり取りするのは、Mac 版の更新の確認と、更新を選んだときのダウンロードだけです。
 
 ### 終了するには？
 
