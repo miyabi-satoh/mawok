@@ -118,10 +118,10 @@ impl Lang {
     pub fn settings_access_denied(self, target: &str) -> String {
         match self {
             Lang::En => format!(
-                "Mawok doesn't have permission to read {target}. Changes aren't saved until you allow it in Settings"
+                "Mawok doesn't have permission to read {target}. Changes aren't saved until you allow access in Settings"
             ),
             Lang::Ja => format!(
-                "{target} を読む許可がありません。設定で許可するまで、変えた設定は保存されません"
+                "{target} を読む許可がありません。設定の画面で許可するまで、変更は保存されません"
             ),
         }
     }

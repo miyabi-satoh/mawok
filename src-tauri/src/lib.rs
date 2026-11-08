@@ -1307,9 +1307,17 @@ fn restore_folder_access(device: &mut device::Device, log_failures: bool) -> boo
 
 /// 書き直したブックマークを device.json に残す。残せなくても、今の許可は持っているので、ログにだけ出す
 fn restore_folder_access_of(state: &AppState, log_failures: bool) {
-    let mut device = state.device.lock().unwrap();
-    if restore_folder_access(&mut device, log_failures) {
-        if let Err(error) = device::save(&state.device_path, &device) {
+    restore_folder_access_and_save(
+        &mut state.device.lock().unwrap(),
+        &state.device_path,
+        log_failures,
+    );
+}
+
+/// 許可を戻し、作り直したブックマークがあれば device.json に書く
+fn restore_folder_access_and_save(device: &mut device::Device, path: &Path, log_failures: bool) {
+    if restore_folder_access(device, log_failures) {
+        if let Err(error) = device::save(path, device) {
             warn!("couldn't save the renewed bookmarks: {error}");
         }
     }
@@ -1984,9 +1992,10 @@ fn set_settings_dir(
     }
     // 先の無い symlink に書くと、普通のファイルに置き換えるので、替えない（docs/config.md「置き場」）。
     // フォルダーそのものが先の無い symlink だと、作るところで OS のエラーになるので、作る前に見る
-    let broken_link = next_dir.is_symlink() && !next_dir.is_dir();
+    if next_dir.is_symlink() && !next_dir.is_dir() {
+        return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string());
+    }
     match settings_files::unreachable_link(&next_dir) {
-        _ if broken_link => return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string()),
         Some(Unreachable::Missing(_)) => {
             return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string())
         }
@@ -3243,11 +3252,7 @@ pub fn run() {
                     }
                 };
             // 置き場を読む前に、サンドボックスで外のフォルダーを読み書きする許可を戻す
-            if restore_folder_access(&mut device, true) {
-                if let Err(error) = device::save(&device_path, &device) {
-                    warn!("couldn't save the renewed bookmarks: {error}");
-                }
-            }
+            restore_folder_access_and_save(&mut device, &device_path, true);
             let settings_dir = device
                 .settings_dir
                 .clone()

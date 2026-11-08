@@ -36,7 +36,9 @@
 	async function resetToDefault() {
 		error = '';
 		// 既定の保存先の symlink の先を読む許可を求められ、取り消したら null
+		busy = true;
 		const target = await call<PickedSettingsDir | null>('default_settings_dir');
+		busy = false;
 		if (target.ok && target.value) ask(null, target.value);
 	}
 
