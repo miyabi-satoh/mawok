@@ -89,7 +89,11 @@
 		if (!requested) return;
 		showCategory(requested);
 		await tick();
-		content?.querySelector('[data-slot="alert"]')?.scrollIntoView({ block: 'nearest' });
+		// 知らせだけでなく、下に並ぶ操作（「アクセスを許可...」など）まで見せるので、知らせの入った行ごと見せる
+		content
+			?.querySelector('[data-slot="alert"]')
+			?.closest('[data-settings-row]')
+			?.scrollIntoView({ block: 'nearest' });
 	}
 	$effect(() => {
 		void showRequestedCategory();
