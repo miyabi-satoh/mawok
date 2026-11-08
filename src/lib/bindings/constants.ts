@@ -18,8 +18,7 @@ export const EVENTS = {
 	SNIPPET_ADDED: "snippet-added",
 	CONFIG_REPLACED: "config-replaced",
 	SHOWN: "shown",
-	HIDE_REQUESTED: "hide-requested",
-	UPDATE_CHANGED: "update-changed"
+	HIDE_REQUESTED: "hide-requested"
 } as const;
 
 export const ERROR_CODES = {

@@ -33,12 +33,6 @@ mod text;
 mod toggle;
 #[cfg(target_os = "macos")]
 mod tray_press;
-// 境目の型は、Windows でもテストで書き出す。Windows では書き出すだけで使わない
-#[cfg(any(target_os = "macos", test))]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod update_status;
-#[cfg(target_os = "macos")]
-mod updater;
 
 use std::{
     path::{Path, PathBuf},
@@ -77,8 +71,8 @@ const MAIN_WINDOW: &str = "main";
 pub(crate) const APP_NAME: &str = "Mawok";
 /// ログファイルの名前（tauri-plugin-log が既定で使うアプリ名）
 const LOG_FILE_STEM: &str = APP_NAME;
-const TERMS_URL: &str = "https://mawok.amiiby.com/terms/";
-const PRIVACY_URL: &str = "https://mawok.amiiby.com/privacy/";
+const TERMS_URL: &str = "https://amiiby.com/apps/mawok/terms/";
+const PRIVACY_URL: &str = "https://amiiby.com/apps/mawok/privacy/";
 /// 運営者と問い合わせのページ
 const CONTACT_URL: &str = "https://amiiby.com/about/";
 const SETTINGS_WINDOW: &str = "settings";
@@ -1883,15 +1877,6 @@ fn start_daily_backups(app: AppHandle) {
     });
 }
 
-/// OS の通知を出す。文言だけで、押しても何もしない。新しい版を見つけたことを知らせる（updater.rs）
-#[cfg(target_os = "macos")]
-fn show_notification(app: &AppHandle, message: String) {
-    use tauri_plugin_notification::NotificationExt;
-    if let Err(error) = app.notification().builder().title(message).show() {
-        warn!("couldn't show the notification: {error}");
-    }
-}
-
 /// ホットキーをデスクトップのキー設定で割り当てるか。Wayland ではアプリがキーを奪えない。
 /// global-shortcut プラグインは XWayland 越しに登録できてしまうが、キーは XWayland の窓が前面のときしか届かない
 fn hotkey_by_desktop() -> bool {
@@ -2491,21 +2476,11 @@ fn settle_autostart(
 #[cfg(target_os = "macos")]
 const LOCK_FILE_NAME: &str = "mawok.lock";
 
-/// ロックを持っている間、ほかの Mawok は起動できない。プロセスが終われば（落ちても）OS が外す
+/// ロックを持っている間、ほかの Mawok は起動できない。プロセスが終われば（落ちても）OS が外す。
+/// ファイルは読まないが、閉じるとロックが外れるので、アプリの状態として持ち続ける
 #[cfg(target_os = "macos")]
 struct InstanceLock {
-    file: std::fs::File,
-}
-
-/// 多重起動を防ぐロックを、終わる前に放す。再起動で立ち上がる次のプロセスが、まだ終わっていないこのプロセスを
-/// ほかの Mawok と取り違えて終わらないようにする
-#[cfg(target_os = "macos")]
-fn release_single_instance_lock(app: &AppHandle) {
-    if let Some(lock) = app.try_state::<InstanceLock>() {
-        if let Err(error) = lock.file.unlock() {
-            warn!("couldn't release the instance lock: {error}");
-        }
-    }
+    _file: std::fs::File,
 }
 
 /// macOS で多重起動を防ぐ。ほかの Mawok がロックを持っていれば false。
@@ -2526,7 +2501,7 @@ fn lock_single_instance(app: &AppHandle) -> Result<bool, String> {
         .map_err(|error| error.to_string())?;
     match file.try_lock() {
         Ok(()) => {
-            app.manage(InstanceLock { file });
+            app.manage(InstanceLock { _file: file });
             Ok(true)
         }
         Err(std::fs::TryLockError::WouldBlock) => Ok(false),
@@ -2840,8 +2815,6 @@ pub fn run() {
         let _ = args;
         show(app)
     }));
-    #[cfg(target_os = "macos")]
-    let builder = builder.plugin(tauri_plugin_notification::init());
     let builder = builder
         .plugin(diagnostics::log_plugin())
         .plugin(
@@ -2915,15 +2888,7 @@ pub fn run() {
             open_manual_window,
             show_manual_window,
             close_manual_window,
-            open_license_source,
-            #[cfg(target_os = "macos")]
-            updater::update_status,
-            #[cfg(target_os = "macos")]
-            updater::check_for_update,
-            #[cfg(target_os = "macos")]
-            updater::install_update,
-            #[cfg(target_os = "macos")]
-            updater::set_draft_has_text
+            open_license_source
         ])
         .on_window_event(|window, event| match event {
             // 下書きウィンドウは閉じずに、Esc と同じくコピーせずに隠す（書きかけは残る）。設定ウィンドウは普通に閉じる
@@ -3128,8 +3093,6 @@ pub fn run() {
                 wait_for_settings_dir(app.handle().clone());
             }
             start_daily_backups(app.handle().clone());
-            #[cfg(target_os = "macos")]
-            updater::start_periodic_checks(app.handle());
             // 初めての起動では下書きを一度出す。常駐するだけで何も出ないと、入ったのか分からず、
             // 使い方を伝える入力欄の案内も、一度出すまで目に入らないため。
             // 画面の読み込みが終わる前に出すので、入力欄へのフォーカスは page_ready で移す
@@ -3149,13 +3112,10 @@ pub fn run() {
     #[cfg(windows)]
     let builder = builder.plugin(tauri_plugin_autostart::Builder::new().build());
 
-    // 更新は Mac 版だけが自分で行う。Windows は Microsoft Store が受け持つ（docs/platform.md「Mac 版の更新」）
     // tauri-nspanel はテキストウィンドウをパネルにするのに使う（focus.rs の make_draft_panel）
     #[cfg(target_os = "macos")]
     let builder = builder
         .plugin(tauri_nspanel::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(updater::UpdateState::default())
         .on_web_content_process_terminate(diagnostics::web_content_process_terminated)
         .menu(macos_app_menu);
 

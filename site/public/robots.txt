@@ -1,4 +1,0 @@
-User-agent: *
-Disallow:
-
-Sitemap: https://mawok.amiiby.com/sitemap-index.xml

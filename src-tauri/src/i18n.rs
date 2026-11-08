@@ -148,19 +148,6 @@ impl Lang {
             Lang::Ja => "組織のポリシーで決められています。".into(),
         }
     }
-
-    /// Mac 版の新しい版を見つけたときの OS の通知
-    #[cfg(target_os = "macos")]
-    pub fn update_available(self, version: &str) -> String {
-        match self {
-            Lang::En => {
-                format!("Mawok {version} is available. You can update it from About in Settings.")
-            }
-            Lang::Ja => format!(
-                "Mawok {version} があります。設定の「このアプリについて」から更新できます。"
-            ),
-        }
-    }
 }
 
 #[cfg(test)]

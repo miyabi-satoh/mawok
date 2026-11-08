@@ -9,6 +9,3 @@ pub const SNIPPET_ADDED: &str = "snippet-added";
 pub const CONFIG_REPLACED: &str = "config-replaced";
 pub const SHOWN: &str = "shown";
 pub const HIDE_REQUESTED: &str = "hide-requested";
-/// Mac 版の更新の様子か、下書きの書きかけのあるなしが変わった（中身は UpdateView）
-#[cfg(any(target_os = "macos", test))]
-pub const UPDATE_CHANGED: &str = "update-changed";

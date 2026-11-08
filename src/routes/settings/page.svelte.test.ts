@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import { formatKeys } from '$lib/keys';
 import { CONSTANTS, EVENTS } from '$lib/bindings/constants';
-import type { UpdateView } from '$lib/bindings/UpdateView';
 import { draftGuidance } from '$lib/guidance';
 import { m } from '$lib/paraglide/messages';
 import {
@@ -1622,62 +1621,5 @@ describe('設定画面の定型文の編集・絞り込み', () => {
 		await expect
 			.element(screen.getByRole('button', { name: m.settings_row_empty(), exact: true }))
 			.toBeVisible();
-	});
-});
-
-describe('設定画面の更新（Mac）', () => {
-	/** update_status が返す様子 */
-	let current: UpdateView;
-
-	beforeEach(() => {
-		current = { status: { state: 'available', version: '1.0.1' }, draftHasText: false };
-		invoked.mockImplementation((command) =>
-			Promise.resolve(command === 'update_status' ? current : undefined)
-		);
-	});
-
-	it('新しい版があれば「更新して再起動する」で入れる', async () => {
-		const screen = await renderAt(m.settings_category_about);
-
-		await expect
-			.element(screen.getByText(m.settings_update_available({ version: '1.0.1' })))
-			.toBeVisible();
-		await expect.element(screen.getByText(m.settings_update_draft_lost())).not.toBeInTheDocument();
-		await screen.getByRole('button', { name: m.settings_update_install() }).click();
-
-		expect(callsOf(invoked, 'install_update')).toHaveLength(1);
-	});
-
-	it('下書きに書きかけがあるときだけ、再起動で消えることを添える', async () => {
-		current = { ...current, draftHasText: true };
-		const screen = await renderAt(m.settings_category_about);
-
-		await expect.element(screen.getByText(m.settings_update_draft_lost())).toBeVisible();
-	});
-
-	it('Rust 側からの知らせで様子を変え、最新なら確かめ直せる', async () => {
-		const screen = await renderAt(m.settings_category_about);
-		await expect
-			.element(screen.getByText(m.settings_update_available({ version: '1.0.1' })))
-			.toBeVisible();
-
-		emit(listened, EVENTS.UPDATE_CHANGED, { status: { state: 'upToDate' }, draftHasText: false });
-
-		await expect.element(screen.getByText(m.settings_update_up_to_date())).toBeVisible();
-		await screen.getByRole('button', { name: m.settings_update_check() }).click();
-		expect(callsOf(invoked, 'check_for_update')).toHaveLength(1);
-	});
-
-	it('Windows では出さない', async () => {
-		settings.current = { ...view(), platform: 'windows' };
-		const screen = await renderAt(m.settings_category_about);
-
-		await expect
-			.element(screen.getByRole('button', { name: m.settings_reveal_log_windows() }))
-			.toBeVisible();
-		await expect
-			.element(screen.getByText(m.settings_update(), { exact: true }))
-			.not.toBeInTheDocument();
-		expect(callsOf(invoked, 'update_status')).toHaveLength(0);
 	});
 });

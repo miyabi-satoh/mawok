@@ -16,8 +16,6 @@ export default defineConfig(
 		ignores: [
 			'src/lib/components/ui/**',
 			'src/lib/bindings/**',
-			'account-server/**',
-			'site/**',
 			// Claude Code が作る worktree (別のブランチの作業フォルダで、そちらの検査が見る)
 			'.claude/worktrees/**'
 		]

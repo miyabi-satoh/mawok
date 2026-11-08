@@ -3,7 +3,6 @@
 ## 技術スタック
 
 - アプリ: Tauri 2 + SvelteKit（静的出力の SPA）+ Tailwind CSS 4 + shadcn-svelte + Paraglide JS（日本語 / 英語）
-- 紹介・規約類（`site/`）: Astro。Cloudflare Workers の静的アセットで出す（`account-server/` は、その Worker の設定だけを持つ）
 
 ディレクトリ:
 
@@ -31,7 +30,6 @@
 
 ```sh
 pnpm install
-(cd account-server && pnpm install) && (cd site && pnpm install)   # 紹介・規約類と、それを出す Worker (just ci が検査する)
 just hooks-install   # push 時に整形を確かめるフックを入れる
 pnpm exec playwright install chromium   # 画面の部品テストで使うブラウザーを入れる
 ```
@@ -77,16 +75,9 @@ just bundle   # 配布用にビルドする（macOS の DMG は、開いたと�
 # Windows で、Microsoft Store 向けの MSIX を作る（要: Windows SDK と、試しに入れるための証明書。→ docs/platform.md「Windows の MSIX 版」）
 just msix
 
-# macOS で、署名・公証したユニバーサル版を作り、GitHub Releases に出す（要: Developer ID の証明書と更新の鍵。→ docs/platform.md「Mac 版の配る版」）
-just release-mac build
-just release-mac publish
+# macOS で、署名・公証したユニバーサル版の DMG を作る（要: Developer ID の証明書。→ docs/platform.md「Mac 版の配る版」）
+just release-mac
 ```
-
-## デプロイ
-
-紹介・規約類（`site/`）は、Cloudflare Worker の静的アセットで出す。コマンドは `account-server/` で打つ。
-
-- 本番に置く: `pnpm run deploy`（`site/` をビルドしてから置く）。
 
 ## 設定とデータの置き場所
 

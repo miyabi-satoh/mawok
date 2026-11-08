@@ -64,13 +64,6 @@
 	const showButtons = $derived(settings.current?.showTextWindowButtons ?? true);
 
 	let text = $state('');
-	// 書きかけがあるかを Rust 側に知らせる。Mac 版の更新で再起動する前に、消えることを設定の画面で伝えるため。
-	// 空かどうかが変わったときだけ知らせ、中身は渡さない
-	const hasText = $derived(text.trim() !== '');
-	const isMac = $derived(settings.current?.platform === 'macos');
-	$effect(() => {
-		if (isMac) invoke('set_draft_has_text', { hasText }).catch(() => {});
-	});
 	// IME（日本語入力）の変換中か。変換確定前は置き換え辞書のプレビューを求めない
 	let composing = $state(false);
 	const replacementPreview = new ReplacementPreview((text) =>

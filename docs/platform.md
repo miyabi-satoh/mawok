@@ -99,42 +99,12 @@
 - 付けない場合、実行ファイルにリンカーが付けた署名だけになり、`Info.plist` とリソースが署名に含まれない（`codesign -dv` で `Info.plist=not bound`・`Sealed Resources=none`）。ブラウザーで落とした（隔離の印 `com.apple.quarantine` の付いた）DMG からは「壊れているため開けません」となり、システム設定からも開けない。
 - 付けた場合、同じように落とした DMG の中のアプリを開くと、確認できないとして止められるが、システム設定の「プライバシーとセキュリティ」に出る「このまま開く」で開ける。署名の識別子は `com.amiiby.mawok` になり、Tauri の既定で hardened runtime も付く。
 
-## Mac 版の更新
-
-- Mac 版は、新しい版を自分で確かめて入れ替える（tauri-plugin-updater、`src-tauri/src/updater.rs`）。Windows は Microsoft Store、Linux は配ったパッケージの入れ先（apt・AUR）が更新を受け持つので、依存も登録も macOS だけにし、ほかの OS のバイナリには入れない。
-- 確かめる時: 起動して30秒たってからと、常駐している間は前の確認から24時間ごと。待つ時計はスリープの間は進まないので、1時間ごとに壁時計で前の確認からの時間を見る。開発版（`debug_assertions`）は自動では確かめず、設定の「今すぐ確認」を押したときだけ確かめる。開発版は入れ替えない（`.app` の中から動いていないので、入れ替える先を取り違える）。
-- 確認先は静的な JSON `https://mawok.amiiby.com/updates/latest.json`。URL に `{{current_version}}` などの変数を書かないので、送るのは IP アドレスと User-Agent（`tauri-plugin-updater/<版>`）だけ。ダウンロードは JSON の `url` から行う。
-- 見つけたら、OS の通知で知らせる。同じ版を知らせるのは1回だけで、知らせた版を `app_local_data_dir` の `update-notified.txt` に覚える。設定の画面で見つけた版は、知らせたものとして覚えるだけにする。確かめられなかったときはログに残し、設定の「このアプリについて」の更新の行に「確認できませんでした」と出すだけにする。ただし前に見つけた版があれば、その版を入れられる表示のまま残す（つながらない間に確かめ直しが当たっても、入れる手段を消さないため）。確かめられなかった回は確かめた時刻に数えず、次の見回り（1時間後）で確かめ直す。
-- 当てるのは利用者が「更新して再起動する」を押したとき。ダウンロードして署名を確かめ、`.app` を入れ替えて再起動する。テキストの書きかけは再起動で消えるので、書きかけがあるときだけ、ボタンの近くにその旨を出す。書きかけがあるかは、テキストウィンドウが空かどうかが変わったときに Rust へ知らせる（中身は渡さない）。
-  - 再起動で立ち上がる次のプロセスが、終わりかけの前のプロセスを多重起動と取り違えて終わらないよう、再起動の前にロックファイル（`mawok.lock`）を放す。
-- 設定（`pubkey`・`endpoints`・`requireSignedVersion`）は `src-tauri/tauri.macos.conf.json` に置く。`requireSignedVersion` で、JSON の `version` と署名した版が食い違う更新を断る（JSON 自体は署名されないので、古い版の成果物に新しい版の番号を付けて当てさせられるのを防ぐ）。`createUpdaterArtifacts` は設定ファイルに入れず、配る版を作るときに `--config` で足す（入れると、署名の鍵の無い手元のビルドが落ちる）。
-- 署名の秘密鍵とパスワードをなくすと、入っている Mac 版へ更新を届けられなくなる（公開鍵はアプリに埋め込まれているので、鍵を替えた版は手で入れ直してもらうしかない）。
-- 確認先の JSON の形（`platforms` のキーは `darwin-aarch64`・`darwin-x86_64`。`darwin-aarch64-app` のように末尾に `-app` を付けたキーがあれば先に使う）:
-
-  ```json
-  {
-    "version": "1.0.1",
-    "notes": "…",
-    "pub_date": "2026-10-05T00:00:00Z",
-    "platforms": {
-      "darwin-aarch64": { "url": "https://…/Mawok_1.0.1_universal.app.tar.gz", "signature": "<.sig ファイルの中身>" },
-      "darwin-x86_64": { "url": "https://…/Mawok_1.0.1_universal.app.tar.gz", "signature": "<.sig ファイルの中身>" }
-    }
-  }
-  ```
-
-  今動いている版より `version` が新しいときだけ当てる。今の Mac に合う `platforms` のキーが無いと、新しくなくても確かめられなかった扱いになる。
-
 ## Mac 版の配る版
 
-- Intel と Apple Silicon の両方で動くユニバーサル版（`universal-apple-darwin`）を、Developer ID で署名・公証して、GitHub Releases で配る。手元の Mac で `just release-mac build` → `just release-mac publish` の順に流す（`scripts/release-mac.mjs`）。
-- `build`: ビルドし、`.app` が両方の CPU 向けを含み、公証の結果が綴じてあり Gatekeeper が通すことを確かめて、`src-tauri/target/release-mac/<版>/` に DMG・更新用の `.app.tar.gz`・`.sig`・確認先の JSON を並べる。JSON の `platforms` の `darwin-aarch64` と `darwin-x86_64` には、同じユニバーサル版のファイルを書く。
-- `publish`: 版の番号の変更を main に入れた後で、main で流す。Releases に上げてから、JSON を `site/public/updates/latest.json` に置いてサイトごと置き直す（「デプロイ」は DEVELOPMENT.md）。
-  - JSON を Releases に上げる前に `site/` に置かない。その間に誰かがサイトを置き直すと、上がる前の版を見つけた Mac がダウンロードに失敗する。
-  - 出した後、JSON を main に入れる。入れないと、次に誰かがサイトを置き直したときに前の JSON に戻る。
+- Intel と Apple Silicon の両方で動くユニバーサル版（`universal-apple-darwin`）を、Developer ID で署名・公証する。手元の Mac で `just release-mac` を流す（`scripts/release-mac.mjs`）。
+- ビルドし、`.app` が両方の CPU 向けを含み、公証の結果が綴じてあり Gatekeeper が通すことを確かめて、DMG を `src-tauri/target/release-mac/<版>/` に置く。
 - 要るもの:
   - キーチェーンの Developer ID Application の証明書。作れるのは Apple Developer の Account Holder だけで、作り方は Apple の「Create Developer ID certificates」（https://developer.apple.com/help/account/certificates/create-developer-id-certificates/ ）。中間の認証局は G2 Sub-CA を選ぶ。
-  - `TAURI_SIGNING_PRIVATE_KEY`: 更新の鍵のファイルの場所か中身。`TAURI_SIGNING_PRIVATE_KEY_PATH` は読まれない。パスワードは流すときに聞く。
   - `APPLE_ID`: 公証に使う Apple Account のメールアドレス。パスワードは、そのアカウントのアプリ用パスワード（https://account.apple.com の「サインインとセキュリティ」で作る）を流すときに聞く。Tauri は公証のとき、このパスワードを `notarytool` の引数で渡すので、公証を待つ間は同じ Mac のほかのプロセスから見える。
 
 ## Windows の MSIX 版
