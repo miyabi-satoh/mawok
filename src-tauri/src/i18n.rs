@@ -93,12 +93,21 @@ impl Lang {
         }
     }
 
-    /// トレイの ⚠ の項目。設定のファイルを読めない・保存先が無い・読む許可が無いのどれでも、変えた設定が保存されない。
+    /// トレイの ⚠ の項目。保存先が無いか読む許可が無く、変えた設定が保存されない。
     /// 何が起きているかは、選ぶと開く設定画面の「設定の保存先」に出す
     pub fn settings_problem(self) -> &'static str {
         match self {
-            Lang::En => "Settings can't be saved",
+            Lang::En => "Settings Can't Be Saved",
             Lang::Ja => "設定を保存できません",
+        }
+    }
+
+    /// トレイの ⚠ の項目。設定のファイルを読めない（手で書きかけ・形が合わない）。読めたファイルには保存できる。
+    /// どのファイルかは、選ぶと開く設定画面の「設定の保存先」に出す
+    pub fn settings_file_problem(self) -> &'static str {
+        match self {
+            Lang::En => "Couldn't Read a Settings File",
+            Lang::Ja => "設定のファイルを読めません",
         }
     }
 
@@ -126,7 +135,7 @@ impl Lang {
     /// トレイの ⚠ の項目。どのキーかは、選ぶと開く設定画面の「キー操作」に出す。原因（他のアプリとの衝突など）の詳細はログに残す
     pub fn hotkey_problem(self) -> &'static str {
         match self {
-            Lang::En => "Couldn't register the hotkey",
+            Lang::En => "Couldn't Register the Hotkey",
             Lang::Ja => "ホットキーを登録できません",
         }
     }
@@ -134,7 +143,7 @@ impl Lang {
     /// トレイの ⚠ の項目。理由は、選ぶと開く設定画面の「ログイン時に起動」の行に出す
     pub fn autostart_problem(self) -> &'static str {
         match self {
-            Lang::En => "Couldn't set up launch at login",
+            Lang::En => "Couldn't Set Up Launch at Login",
             Lang::Ja => "ログイン時の起動を設定できません",
         }
     }

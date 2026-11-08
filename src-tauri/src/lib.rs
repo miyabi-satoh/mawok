@@ -216,14 +216,11 @@ impl ConfigProblem {
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum SettingsProblem {
     /// 読めなかった設定のファイルの名前
-    Unreadable {
-        files: Vec<String>,
-    },
-    FolderMissing,
+    Unreadable { files: Vec<String> },
+    /// 見つからない、選んだ置き場のフォルダーか設定のファイルの symlink の先
+    FolderMissing { path: String },
     /// 読む許可が要る、設定のファイルの symlink の先（macOS のサンドボックス）。画面は許可を求めるボタンを出す
-    AccessNeeded {
-        path: String,
-    },
+    AccessNeeded { path: String },
 }
 
 impl From<&ConfigProblem> for SettingsProblem {
@@ -232,7 +229,9 @@ impl From<&ConfigProblem> for SettingsProblem {
             ConfigProblem::Unreadable(files) => SettingsProblem::Unreadable {
                 files: files.clone(),
             },
-            ConfigProblem::FolderMissing(_) => SettingsProblem::FolderMissing,
+            ConfigProblem::FolderMissing(path) => {
+                SettingsProblem::FolderMissing { path: path.clone() }
+            }
             ConfigProblem::AccessDenied(target) => SettingsProblem::AccessNeeded {
                 path: target.display().to_string(),
             },
@@ -2914,13 +2913,17 @@ fn open_settings(app: &AppHandle) {
 /// トレイメニューに ⚠ 付きで出す問題の項目
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum TrayProblem {
+    /// 設定のファイルを読めない。読めたファイルには保存できるので、保存できないとは言わない
+    SettingsUnreadable,
+    /// 保存先が無いか、読む許可が無い。何も保存しない
     Settings,
     Hotkey,
     Autostart,
 }
 
 impl TrayProblem {
-    const ALL: [TrayProblem; 3] = [
+    const ALL: [TrayProblem; 4] = [
+        TrayProblem::SettingsUnreadable,
         TrayProblem::Settings,
         TrayProblem::Hotkey,
         TrayProblem::Autostart,
@@ -2928,6 +2931,7 @@ impl TrayProblem {
 
     fn id(self) -> &'static str {
         match self {
+            TrayProblem::SettingsUnreadable => "problem-settings-unreadable",
             TrayProblem::Settings => "problem-settings",
             TrayProblem::Hotkey => "problem-hotkey",
             TrayProblem::Autostart => "problem-autostart",
@@ -2940,6 +2944,7 @@ impl TrayProblem {
 
     fn text(self, lang: Lang) -> &'static str {
         match self {
+            TrayProblem::SettingsUnreadable => lang.settings_file_problem(),
             TrayProblem::Settings => lang.settings_problem(),
             TrayProblem::Hotkey => lang.hotkey_problem(),
             TrayProblem::Autostart => lang.autostart_problem(),
@@ -2949,7 +2954,9 @@ impl TrayProblem {
     /// 選んだときに開く設定画面の分類。「設定の保存先」と「ログイン時に起動」は一般、ホットキーはキー操作にある
     fn category(self) -> SettingsCategory {
         match self {
-            TrayProblem::Settings | TrayProblem::Autostart => SettingsCategory::General,
+            TrayProblem::SettingsUnreadable | TrayProblem::Settings | TrayProblem::Autostart => {
+                SettingsCategory::General
+            }
             TrayProblem::Hotkey => SettingsCategory::Keys,
         }
     }
@@ -2965,8 +2972,10 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let problems = {
         let problems = state.problems.lock().unwrap();
         let mut found = Vec::new();
-        if problems.config.is_some() {
-            found.push(TrayProblem::Settings);
+        match problems.config {
+            Some(ConfigProblem::Unreadable(_)) => found.push(TrayProblem::SettingsUnreadable),
+            Some(_) => found.push(TrayProblem::Settings),
+            None => {}
         }
         if problems.hotkey_unavailable {
             found.push(TrayProblem::Hotkey);
@@ -3526,6 +3535,10 @@ mod tests {
         for id in ["show", "settings", "manual", "quit"] {
             assert_eq!(TrayProblem::from_id(id), None);
         }
+        assert_eq!(
+            TrayProblem::SettingsUnreadable.category(),
+            SettingsCategory::General
+        );
         assert_eq!(TrayProblem::Settings.category(), SettingsCategory::General);
         assert_eq!(TrayProblem::Autostart.category(), SettingsCategory::General);
         assert_eq!(TrayProblem::Hotkey.category(), SettingsCategory::Keys);

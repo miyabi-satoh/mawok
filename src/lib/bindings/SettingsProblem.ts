@@ -3,4 +3,4 @@
 /**
  * 設定画面の「設定の保存先」に出す、設定を保存できない理由（ConfigProblem）
  */
-export type SettingsProblem = { "kind": "unreadable", files: Array<string>, } | { "kind": "folderMissing" } | { "kind": "accessNeeded", path: string, };
+export type SettingsProblem = { "kind": "unreadable", files: Array<string>, } | { "kind": "folderMissing", path: string, } | { "kind": "accessNeeded", path: string, };

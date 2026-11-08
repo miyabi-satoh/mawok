@@ -69,7 +69,7 @@ export function settingsProblemNotice(problem: SettingsProblem): string {
 		case 'unreadable':
 			return m.settings_file_unreadable_notice({ files: problem.files.join(', ') });
 		case 'folderMissing':
-			return m.settings_folder_missing();
+			return m.settings_folder_missing({ path: problem.path });
 		case 'accessNeeded':
 			return m.settings_folder_access_needed({ path: problem.path });
 	}

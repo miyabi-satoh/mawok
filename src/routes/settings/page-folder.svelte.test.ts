@@ -97,9 +97,11 @@ describe('設定の保存先', () => {
 	});
 
 	it('保存先が見つからなければ知らせ、許可を求めるボタンは出さない', async () => {
-		settings.current = settingsView({ settingsProblem: { kind: 'folderMissing' } });
+		settings.current = settingsView({ settingsProblem: { kind: 'folderMissing', path: CLOUD } });
 		const screen = await renderAt(m.settings_category_general);
-		await expect.element(screen.getByText(m.settings_folder_missing())).toBeVisible();
+		await expect
+			.element(screen.getByText(m.settings_folder_missing({ path: CLOUD })))
+			.toBeVisible();
 		expect(
 			screen.getByRole('button', { name: m.settings_folder_grant_access() }).elements()
 		).toEqual([]);

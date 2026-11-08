@@ -83,7 +83,9 @@ describe('settingsProblemNotice', () => {
 	});
 
 	it('保存先が無いときと、読む許可が無いときは、それぞれの知らせにする', () => {
-		expect(settingsProblemNotice({ kind: 'folderMissing' })).toBe(m.settings_folder_missing());
+		expect(settingsProblemNotice({ kind: 'folderMissing', path: '/a/Mawok' })).toBe(
+			m.settings_folder_missing({ path: '/a/Mawok' })
+		);
 		expect(settingsProblemNotice({ kind: 'accessNeeded', path: '/a/settings.toml' })).toBe(
 			m.settings_folder_access_needed({ path: '/a/settings.toml' })
 		);
