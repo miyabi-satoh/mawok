@@ -100,7 +100,7 @@ Mac 版は Mac App Store で配るので、どのビルドもサンドボック�
 - `com.apple.security.app-sandbox`: サンドボックスで動かす。`~/Library` はコンテナ（`~/Library/Containers/com.amiiby.mawok/Data/Library/`）に回され、設定・ログ・バックアップ・ロックファイルはその中に置かれる。コンテナは署名の識別子で決まるので、プロファイル（「プロファイル」）を付けても同じコンテナの中で、フォルダー名だけが分かれる。
 - `com.apple.security.files.user-selected.read-write`: フォルダーの窓で選んだ設定の保存先と、symlink の先のフォルダーを読み書きする。
 - `com.apple.security.files.bookmarks.app-scope`: 選んだフォルダーの許可を、起動し直しても戻せるようにブックマークに残す（docs/config.md「macOS のサンドボックス」）。
-- `com.apple.security.network.client` は付けない。アプリは外へつながず、画面はアプリの中のスキーム（`tauri://`・`ipc://`）で読み、ページやマニュアルのリンクは OS（NSWorkspace）に開かせるため。
+- `com.apple.security.network.client` を付ける。アプリは外へつながないが、無いと WKWebView の中身のプロセスが起動のたびに落ち、画面が出ない（サンドボックスの版で確かめた）。
 - ホットキー（`RegisterEventHotKey`）・ログイン項目（`SMAppService`）・クリップボード・パネルの窓は、サンドボックスでも権限が要らない。
 
 ## macOS の手元のビルドの署名
