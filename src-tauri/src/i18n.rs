@@ -114,6 +114,39 @@ impl Lang {
         }
     }
 
+    /// macOS のサンドボックスが、設定のファイルの symlink の先を読ませない。設定の画面で許可したら消す
+    pub fn settings_access_denied(self, target: &str) -> String {
+        match self {
+            Lang::En => format!(
+                "Mawok doesn't have permission to read {target}. Changes aren't saved until you allow it in Settings"
+            ),
+            Lang::Ja => format!(
+                "{target} を読む許可がありません。設定で許可するまで、変えた設定は保存されません"
+            ),
+        }
+    }
+
+    /// symlink の先を読む許可を求める、OS のフォルダーの窓の案内（macOS では窓の上に出る）。窓は先の入っている
+    /// フォルダーで開くので、押すのは「開く」だけ
+    pub fn grant_access_prompt(self, target: &str) -> String {
+        match self {
+            Lang::En => format!("Click Open to allow Mawok to read {target}."),
+            Lang::Ja => format!("「開く」を押すと、{target} を読めるようになります。"),
+        }
+    }
+
+    /// 許可を求める窓で、symlink の先を含まないフォルダーを選んだ。閉じたら窓を出し直す
+    pub fn grant_access_wrong_folder(self, target: &str) -> String {
+        match self {
+            Lang::En => format!(
+                "The folder you chose doesn't contain {target}. Choose the folder that contains it."
+            ),
+            Lang::Ja => format!(
+                "選んだフォルダーに {target} が含まれていません。これを含むフォルダーを選んでください。"
+            ),
+        }
+    }
+
     /// 原因（他のアプリとの衝突など）の詳細はログに残す
     pub fn hotkey_unavailable(self, hotkey: &str) -> String {
         match self {

@@ -56,10 +56,10 @@ opt-level = 3
 panic = "abort"
 strip = true
 
-# トレイのメニューを開いている間を知るため（menu_tracking.rs）と、テキストウィンドウの見た目と Space の扱いを読み書きするため（focus.rs）。Tauri（tray-icon）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
+# トレイのメニューを開いている間を知るため（menu_tracking.rs）と、テキストウィンドウの見た目と Space の扱いを読み書きするため（focus.rs）、サンドボックスでフォルダーを読む許可をブックマークに残すため（folder_access.rs）。Tauri（tray-icon）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
-objc2-foundation = { version = "0.3.2", features = ["NSError", "NSNotification", "NSOperation", "NSString", "block2"] }
+objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSData", "NSError", "NSNotification", "NSOperation", "NSString", "NSURL", "block2"] }
 # メニューバーのアイコンのボタンに、押されたときの action を付ける（tray_press.rs）。tray-icon と同じ版にして、NSStatusItem を受け渡す
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSButton", "NSControl", "NSMenu", "NSResponder", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow"] }

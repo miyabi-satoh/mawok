@@ -35,7 +35,7 @@
 
 - 不具合の原因を後から追えるように、動作をログファイルに残す。記録するのは、起動、表示、非表示、ウィンドウの破棄、終了、WebView のプロセスの異常終了、画面側で起きた想定外のエラー、CSP に止められた読み込み（止めた指令と読み込み先だけ）、設定の読み込みやホットキーの登録などの失敗の詳細。
 - 入力内容はログに残さない。
-- 置き場所は OS 標準のログフォルダ（macOS は `~/Library/Logs/<identifier>/`、Windows は `%LOCALAPPDATA%\<identifier>\logs\`、Linux は `~/.local/share/<identifier>/logs/`）。時刻は UTC。
+- 置き場所は OS 標準のログフォルダ（macOS は `~/Library/Logs/<identifier>/` をコンテナに回した先の `~/Library/Containers/com.amiiby.mawok/Data/Library/Logs/<identifier>/`、Windows は `%LOCALAPPDATA%\<identifier>\logs\`、Linux は `~/.local/share/<identifier>/logs/`）。時刻は UTC。
 
 ## プロファイル
 
@@ -92,6 +92,16 @@
 - 入力欄の案内は、placeholder でなく、入力欄の裏の置き換えのハイライトの層に描く。WebKitGTK は placeholder を入力欄より1文字ほど広い幅で折り返し、右端が見切れるため。
 - ログイン時の起動は、XDG autostart の `~/.config/autostart/Mawok.desktop` を自分で読み書きする。デスクトップの設定で切ると `Hidden=true` や `X-GNOME-Autostart-enabled=false` が書かれ、tauri-plugin-autostart はそれを読まずに有効に戻してしまうため（上の「常駐」の決まり）。
 - トレイは StatusNotifierItem で出し、`libayatana-appindicator3` を実行時に読み込む（無いと起動できない）。押すとメニューが出るだけで、押したことは受け取れない。メニューの項目にホットキーは添わない（muda はウィンドウに付かないメニューにキーを付けない）。GNOME は AppIndicator の拡張が要る（Ubuntu には最初から入っている）。
+
+## macOS のサンドボックス
+
+Mac 版は Mac App Store で配るので、どのビルドもサンドボックスで動かす。権限は `src-tauri/Entitlements.plist` に置き、`tauri.conf.json` の `bundle.macOS.entitlements` で、Tauri が署名するときに付ける（`just bundle` の ad-hoc 署名と `just release-mac` の Developer ID の署名の両方）。`pnpm tauri dev` の開発版は署名しないので、サンドボックスの外で動く。
+
+- `com.apple.security.app-sandbox`: サンドボックスで動かす。`~/Library` はコンテナ（`~/Library/Containers/com.amiiby.mawok/Data/Library/`）に回され、設定・ログ・バックアップ・ロックファイルはその中に置かれる。コンテナは署名の識別子で決まるので、プロファイル（「プロファイル」）を付けても同じコンテナの中で、フォルダー名だけが分かれる。
+- `com.apple.security.files.user-selected.read-write`: フォルダーの窓で選んだ設定の保存先と、symlink の先のフォルダーを読み書きする。
+- `com.apple.security.files.bookmarks.app-scope`: 選んだフォルダーの許可を、起動し直しても戻せるようにブックマークに残す（docs/config.md「macOS のサンドボックス」）。
+- `com.apple.security.network.client` は付けない。アプリは外へつながず、画面はアプリの中のスキーム（`tauri://`・`ipc://`）で読み、ページやマニュアルのリンクは OS（NSWorkspace）に開かせるため。
+- ホットキー（`RegisterEventHotKey`）・ログイン項目（`SMAppService`）・クリップボード・パネルの窓は、サンドボックスでも権限が要らない。
 
 ## macOS の手元のビルドの署名
 

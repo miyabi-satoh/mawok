@@ -49,6 +49,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		inputGuidance: null,
 		settingsDir: '/Users/me/Library/Application Support/com.amiiby.mawok',
 		settingsDirIsDefault: true,
+		settingsAccessNeeded: null,
 		version: '0.1.0',
 		locale: 'ja',
 		platform: 'macos',

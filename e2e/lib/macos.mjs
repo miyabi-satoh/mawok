@@ -39,13 +39,16 @@ const REGULAR_APP = '/Applications/Mawok.app';
 const APP_BUNDLE = process.env.MAWOK_APP ?? REGULAR_APP;
 const PROCESS_NAME = 'mawok';
 
-const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', PROFILE_IDENTIFIER);
+// サンドボックスで動くので、~/Library はアプリのコンテナの中に回される (docs/platform.md「macOS のサンドボックス」)。
+// コンテナは署名の識別子で決まり、プロファイルを付けても常用の版と同じコンテナになる
+const LIBRARY = path.join(os.homedir(), 'Library', 'Containers', APP_IDENTIFIER, 'Data', 'Library');
+const DATA_DIR = path.join(LIBRARY, 'Application Support', PROFILE_IDENTIFIER);
 // `open` は自分の環境変数を渡さないので、起動のたびに渡す
 const OPEN_APP = ['--env', `${PROFILE_ENV}=${PROFILE}`, APP_BUNDLE];
 // テストは置き場を選ばずに回すので、設定のファイルと履歴 (history フォルダー) も DATA_DIR に置かれる (settings-files.mjs)
-const REGULAR_DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', APP_IDENTIFIER);
-const REGULAR_LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', APP_IDENTIFIER, 'Mawok.log');
-const LOG_PATH = path.join(os.homedir(), 'Library', 'Logs', PROFILE_IDENTIFIER, 'Mawok.log');
+const REGULAR_DATA_DIR = path.join(LIBRARY, 'Application Support', APP_IDENTIFIER);
+const REGULAR_LOG_PATH = path.join(LIBRARY, 'Logs', APP_IDENTIFIER, 'Mawok.log');
+const LOG_PATH = path.join(LIBRARY, 'Logs', PROFILE_IDENTIFIER, 'Mawok.log');
 
 // 控えのフォルダー。次に回したときに残っていれば、先に戻す
 const BACKUP_DIR = recordPath('.macos-backup');

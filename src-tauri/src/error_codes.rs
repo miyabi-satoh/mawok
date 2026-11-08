@@ -6,6 +6,9 @@ pub const BACKUP_RESTORE_PARTIAL: &str = "backup.restore_partial";
 pub const SETTINGS_FILE_UNREADABLE: &str = "settings.file_unreadable";
 /// 選んだ置き場のフォルダーが無いので、設定を書けなかった。現れたら書ける
 pub const SETTINGS_FOLDER_UNAVAILABLE: &str = "settings.folder_unavailable";
+/// macOS のサンドボックスが設定のファイルの symlink の先を読ませないので、設定を書けなかった・置き場を替えなかった。
+/// 許可されたら書ける
+pub const SETTINGS_ACCESS_DENIED: &str = "settings.access_denied";
 /// キーを割り当てられない理由（`draft_keys::Rejection::code`）
 pub const KEYS_INVALID: &str = "keys.invalid";
 pub const KEYS_EDITING: &str = "keys.editing";

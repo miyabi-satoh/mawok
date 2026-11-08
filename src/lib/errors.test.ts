@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ERROR_CODES } from '$lib/bindings/constants';
 import { m } from '$lib/paraglide/messages';
-import { describeError, errorCode, settingsSaveProblem } from './errors';
+import { describeError, errorCode, settingsFolderProblem, settingsSaveProblem } from './errors';
 
 function errorWithStack(message: string, stack: string | undefined) {
 	const error = new TypeError(message);
@@ -48,5 +48,23 @@ describe('settingsSaveProblem', () => {
 			m.settings_file_unreadable()
 		);
 		expect(settingsSaveProblem(ERROR_CODES.KEYS_INVALID)).toBeUndefined();
+	});
+});
+
+describe('settingsFolderProblem', () => {
+	it('置き場の都合で替えなかった符号を、それぞれの理由の文にする', () => {
+		expect(settingsFolderProblem(ERROR_CODES.SETTINGS_FILE_UNREADABLE)).toBe(
+			m.settings_folder_unreadable()
+		);
+		expect(settingsFolderProblem(ERROR_CODES.SETTINGS_FOLDER_UNAVAILABLE)).toBe(
+			m.settings_folder_link_missing()
+		);
+		expect(settingsFolderProblem(ERROR_CODES.SETTINGS_ACCESS_DENIED)).toBe(
+			m.settings_folder_access_denied()
+		);
+	});
+
+	it('ほかの失敗は、受け取った文を添えて出す', () => {
+		expect(settingsFolderProblem('disk full')).toBe(m.settings_failed({ error: 'disk full' }));
 	});
 });

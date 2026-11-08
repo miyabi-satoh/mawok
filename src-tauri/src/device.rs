@@ -21,6 +21,34 @@ pub struct Device {
     pub settings_dir: Option<PathBuf>,
     /// ログイン時に起動するか。None なら既定（起動する）
     pub autostart: Option<bool>,
+    /// 選んだ置き場を、macOS のサンドボックスで起動し直しても読み書きできるようにするブックマーク（folder_access.rs）。
+    /// 16 進の文字列。macOS 以外は作らない
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings_dir_bookmark: Option<String>,
+    /// 設定のファイルの symlink の先を読むのに、利用者が許可したフォルダー（docs/config.md「macOS のサンドボックス」）
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub granted_folders: Vec<GrantedFolder>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantedFolder {
+    pub path: PathBuf,
+    /// 16 進の文字列にしたブックマーク
+    pub bookmark: String,
+}
+
+impl Device {
+    /// 許可したフォルダーを足す。同じパスがあれば、ブックマークを書き直す
+    pub fn grant(&mut self, path: PathBuf, bookmark: String) {
+        match self
+            .granted_folders
+            .iter_mut()
+            .find(|folder| folder.path == path)
+        {
+            Some(folder) => folder.bookmark = bookmark,
+            None => self.granted_folders.push(GrantedFolder { path, bookmark }),
+        }
+    }
 }
 
 /// 読む。無ければ既定。読めなければ、読めない理由を返す（呼ぶ側は既定で動かし、書き直さずにログに出す）
@@ -71,6 +99,27 @@ mod tests {
         device.settings_dir = Some(dir.join("Dropbox"));
         save(&path, &device).unwrap();
         assert_eq!(load(&path).unwrap(), device);
+        // ブックマークを持たないデバイス（macOS 以外）では、その欄を書かない
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("bookmark") && !text.contains("granted_folders"));
+        device.settings_dir_bookmark = Some("00ab".to_string());
+        device.grant(dir.join("dotfiles"), "01".to_string());
+        save(&path, &device).unwrap();
+        assert_eq!(load(&path).unwrap(), device);
+    }
+
+    #[test]
+    fn grants_a_folder_once_and_renews_its_bookmark() {
+        let mut device = Device::default();
+        device.grant(PathBuf::from("/Users/me/dotfiles"), "01".to_string());
+        device.grant(PathBuf::from("/Users/me/dotfiles"), "02".to_string());
+        assert_eq!(
+            device.granted_folders,
+            vec![GrantedFolder {
+                path: PathBuf::from("/Users/me/dotfiles"),
+                bookmark: "02".to_string()
+            }]
+        );
     }
 
     #[test]

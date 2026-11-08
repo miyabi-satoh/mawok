@@ -10,7 +10,11 @@ use std::{
 use serde_json::{Map, Number, Value};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
-use crate::{atomic_file, config::key};
+use crate::{
+    atomic_file,
+    config::key,
+    folder_access::{self, Reach},
+};
 
 pub const SETTINGS: &str = "settings.toml";
 pub const SNIPPETS: &str = "snippets.toml";
@@ -145,18 +149,44 @@ pub fn write(
     }
 }
 
-/// 先のファイルが無い symlink の、先のパス（dotfiles でそのファイルの無いブランチに切り替えた間など）。
-/// 置き場が無いときと同じく扱う（docs/config.md「置き場」）。既定の値で読み直したり、symlink を普通のファイルに置き換えて
-/// 書いたりしないため
-pub fn dangling_link_target(dir: &Path) -> Option<PathBuf> {
-    FILE_NAMES.iter().find_map(|name| {
+/// 置き場のうち、読めないもの（docs/config.md「置き場」）。現れる・許可されるまで、置き場に何も書かない
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unreachable {
+    /// 無い。パスは、トレイに出す無いもの
+    Missing(PathBuf),
+    /// macOS のサンドボックスが読ませない。パスは、読む許可が要る symlink の先（docs/config.md「macOS のサンドボックス」）
+    Denied(PathBuf),
+}
+
+/// 先を読めない、設定のファイルか履歴のフォルダーの symlink。先が無い（dotfiles でそのファイルの無いブランチに
+/// 切り替えた間など）ものは、置き場が無いときと同じく扱う（docs/config.md「置き場」）。既定の値で読み直したり、
+/// symlink を普通のファイルに置き換えて書いたりしないため。サンドボックスが読ませないものも、許可されるまで同じく扱う
+pub fn unreachable_link(dir: &Path) -> Option<Unreachable> {
+    for name in FILE_NAMES {
         let path = dir.join(name);
-        let is_link = fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink());
-        if !is_link || path.exists() {
-            return None;
+        if !is_link(&path) {
+            continue;
         }
-        Some(dir.join(fs::read_link(&path).ok()?))
-    })
+        match folder_access::file_reach(&path) {
+            Reach::Readable => {}
+            Reach::Missing => {
+                if let Ok(target) = fs::read_link(&path) {
+                    return Some(Unreachable::Missing(dir.join(target)));
+                }
+            }
+            Reach::Denied => return folder_access::link_target(&path).map(Unreachable::Denied),
+        }
+    }
+    // 履歴のフォルダーは、先が無ければ見張りを始めるときに作るので、断られたときだけ見る
+    let history = dir.join(crate::history_store::DIR_NAME);
+    if is_link(&history) && folder_access::dir_reach(&history) == Reach::Denied {
+        return folder_access::link_target(&history).map(Unreachable::Denied);
+    }
+    None
+}
+
+fn is_link(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
 }
 
 /// 書く先。symlink なら、その先のファイルに書く。stow などで張った dotfiles の symlink を、
@@ -434,11 +464,11 @@ mod tests {
         let dir = TempDir::new("settings-files-dangling");
         fs::write(dir.join("mawok.toml"), "").unwrap();
         std::os::unix::fs::symlink("mawok.toml", dir.join(SETTINGS)).unwrap();
-        assert_eq!(dangling_link_target(dir.path()), None);
+        assert_eq!(unreachable_link(dir.path()), None);
         fs::remove_file(dir.join("mawok.toml")).unwrap();
         assert_eq!(
-            dangling_link_target(dir.path()),
-            Some(dir.join("mawok.toml"))
+            unreachable_link(dir.path()),
+            Some(Unreachable::Missing(dir.join("mawok.toml")))
         );
     }
 

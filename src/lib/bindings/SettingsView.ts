@@ -79,7 +79,11 @@ settingsDir: string,
 /**
  * 置き場が OS 標準のアプリ設定フォルダーか。そうでなければ画面は「既定に戻す」を出す
  */
-settingsDirIsDefault: boolean, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
+settingsDirIsDefault: boolean, 
+/**
+ * 読む許可が要る、設定のファイルの symlink の先（macOS のサンドボックス）。画面は許可を求めるボタンを出す
+ */
+settingsAccessNeeded: string | null, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
 /**
  * コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
  */

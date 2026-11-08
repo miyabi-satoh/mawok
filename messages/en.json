@@ -185,5 +185,9 @@
 	"settings_folder_unreadable": "Couldn't change the folder because a settings file in it can't be read.",
 	"settings_folder_link_missing": "Couldn't change the folder because it, or a settings file in it, is a symlink to a missing location.",
 	"settings_file_unreadable": "Couldn't save because a settings file can't be read.",
+	"settings_folder_access_needed": "Mawok doesn't have permission to read {path}. Changes aren't saved until you allow access.",
+	"settings_folder_grant_access": "Allow access...",
+	"settings_folder_access_denied": "Couldn't change the folder because Mawok doesn't have permission to read where a settings file in it links to.",
+	"settings_access_denied": "Couldn't save because Mawok doesn't have permission to read where a settings file links to.",
 	"settings_folder_unavailable": "Couldn't save because the settings folder isn't available."
 }

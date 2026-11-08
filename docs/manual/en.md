@@ -114,6 +114,9 @@ Settings are backed up automatically every day. To go back to earlier settings, 
 :::
 - **“Couldn't read the settings file ...” appears**: There is a mistake from editing it in a text editor. The log shows the line that can't be read. Fix it and save, and Mawok reads it again right away. If you can't fix it, delete the file, or select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
 - **“The settings folder ... isn't available” appears**: The drive with the folder you chose isn't connected, or the folder was deleted. Once it's connected, Mawok reads it again right away. If you deleted the folder, choose it again under “Settings folder” in “General” in Settings. If your settings files are symlinks, this also appears when the file a link points to is missing.
+::: macos
+- **“Mawok doesn't have permission to read ...” appears**: Your settings files are symlinks to a folder outside Mawok. Select “Allow access...” under “Settings folder” in “General” in Settings, then select “Open” in the window that appears.
+:::
 - **Settings changed on another device don't arrive**: Under “Settings folder” in “General” in Settings, check that both devices chose the same folder. If they did, your cloud storage hasn't synced yet. Check its status in your cloud storage app.
 
 When reporting a problem, attach the log. It does not contain your text. Open its location from “About” in Settings.
@@ -134,7 +137,7 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 
 ::: macos
 1. Choose “Quit” in the menu bar menu, then move `/Applications/Mawok.app` to the Trash.
-2. To also remove settings and history, delete `~/Library/Application Support/com.amiiby.mawok/` and `~/Library/Logs/com.amiiby.mawok/`. If you changed the settings folder, also delete the settings files and the `history` folder there.
+2. To also remove settings and history, delete `~/Library/Containers/com.amiiby.mawok/`. If you changed the settings folder, also delete the settings files and the `history` folder there.
 :::
 
 ::: windows
