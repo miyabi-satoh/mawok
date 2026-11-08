@@ -188,6 +188,6 @@
 	"settings_folder_access_needed": "{path} を読む許可がありません。許可するまで、変えた設定は保存されません。",
 	"settings_folder_grant_access": "アクセスを許可...",
 	"settings_folder_access_denied": "このフォルダーにある symlink の先を読む許可が無いため、変更できませんでした。",
-	"settings_access_denied": "読む許可が無いため、保存できませんでした。",
+	"settings_access_denied": "設定を読む許可が無いため、保存できませんでした。",
 	"settings_folder_unavailable": "設定の保存先が見つからないため、保存できませんでした。"
 }

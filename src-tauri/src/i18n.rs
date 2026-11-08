@@ -121,7 +121,7 @@ impl Lang {
                 "Mawok doesn't have permission to read {target}. Changes aren't saved until you allow access in Settings"
             ),
             Lang::Ja => format!(
-                "{target} を読む許可がありません。設定の画面で許可するまで、変更は保存されません"
+                "{target} を読む許可がありません。設定の画面で許可するまで、変えた設定は保存されません"
             ),
         }
     }

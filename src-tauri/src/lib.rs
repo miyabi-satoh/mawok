@@ -1305,16 +1305,7 @@ fn restore_folder_access(device: &mut device::Device, log_failures: bool) -> boo
     renewed
 }
 
-/// 書き直したブックマークを device.json に残す。残せなくても、今の許可は持っているので、ログにだけ出す
-fn restore_folder_access_of(state: &AppState, log_failures: bool) {
-    restore_folder_access_and_save(
-        &mut state.device.lock().unwrap(),
-        &state.device_path,
-        log_failures,
-    );
-}
-
-/// 許可を戻し、作り直したブックマークがあれば device.json に書く
+/// 許可を戻し、作り直したブックマークがあれば device.json に残す。残せなくても、今の許可は持っているので、ログにだけ出す
 fn restore_folder_access_and_save(device: &mut device::Device, path: &Path, log_failures: bool) {
     if restore_folder_access(device, log_failures) {
         if let Err(error) = device::save(path, device) {
@@ -1759,7 +1750,11 @@ fn wait_for_settings_dir(app: AppHandle) {
                 return;
             }
             // 起動のときにつながっていなかったドライブのブックマークは、つながってから戻せる
-            restore_folder_access_of(&state, false);
+            restore_folder_access_and_save(
+                &mut state.device.lock().unwrap(),
+                &state.device_path,
+                false,
+            );
             let chosen = state.device.lock().unwrap().settings_dir.is_some();
             if let Some(place) = unavailable_settings_place(&state.settings_dir(), chosen) {
                 // 無いものが変わった（先が現れたが許可が無い など）ら、トレイと画面の知らせを替える
