@@ -1,0 +1,100 @@
+<!doctype html>
+<!-- 紹介の動画 (site/public/flow.mp4) を撮るための、どこの製品でもないチャット風の画面。サイトには載せない -->
+<html lang="ja">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>チャット</title>
+		<style>
+			:root {
+				--bg: #f7f7f8;
+				--panel: #ffffff;
+				--text: #1f2328;
+				--muted: #6b7280;
+				--line: #d9dce1;
+				--accent: #33358a;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #15161a;
+					--panel: #22242a;
+					--text: #ecedf0;
+					--muted: #9aa0aa;
+					--line: #3a3d45;
+				}
+			}
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				min-height: 100vh;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				gap: 28px;
+				background: var(--bg);
+				color: var(--text);
+				font-family: 'Yu Gothic UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+			}
+			h1 {
+				margin: 0;
+				font-size: 28px;
+				font-weight: 600;
+			}
+			form {
+				width: min(720px, calc(100% - 32px));
+				display: flex;
+				align-items: flex-end;
+				gap: 8px;
+				padding: 10px 10px 10px 20px;
+				background: var(--panel);
+				border: 1px solid var(--line);
+				border-radius: 28px;
+				box-shadow: 0 2px 12px rgb(0 0 0 / 0.06);
+			}
+			textarea {
+				flex: 1;
+				border: 0;
+				outline: 0;
+				resize: none;
+				background: transparent;
+				color: inherit;
+				font: inherit;
+				font-size: 17px;
+				line-height: 1.6;
+				padding: 8px 0;
+				min-height: 44px;
+				field-sizing: content;
+				max-height: 240px;
+			}
+			textarea::placeholder {
+				color: var(--muted);
+			}
+			button {
+				flex: none;
+				width: 40px;
+				height: 40px;
+				border: 0;
+				border-radius: 50%;
+				background: var(--accent);
+				color: #fff;
+				font-size: 20px;
+				cursor: default;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>何をお手伝いしましょうか？</h1>
+		<form onsubmit="return false;">
+			<textarea
+				rows="1"
+				placeholder="メッセージを入力"
+				aria-label="メッセージ"
+				autofocus
+			></textarea>
+			<button type="button" aria-label="送信">↑</button>
+		</form>
+	</body>
+</html>
