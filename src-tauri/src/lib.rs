@@ -2855,7 +2855,7 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 texts.push(lang.settings_folder_missing(dir))
             }
             Some(ConfigProblem::AccessDenied(target)) => {
-                texts.push(lang.settings_access_denied(&target.display().to_string()))
+                texts.push(lang.settings_access_needed(&target.display().to_string()))
             }
             None => {}
         }

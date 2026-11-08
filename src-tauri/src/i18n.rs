@@ -115,7 +115,7 @@ impl Lang {
     }
 
     /// macOS のサンドボックスが、設定のファイルの symlink の先を読ませない。設定の画面で許可したら消す
-    pub fn settings_access_denied(self, target: &str) -> String {
+    pub fn settings_access_needed(self, target: &str) -> String {
         match self {
             Lang::En => format!(
                 "Mawok doesn't have permission to read {target}. Changes aren't saved until you allow access in Settings"
