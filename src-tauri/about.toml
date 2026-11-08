@@ -39,11 +39,3 @@ checksum = "6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a"
 path = "LICENSE-LIBM-MIT"
 license = "MIT"
 checksum = "9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997"
-
-# Mac 版の更新（tauri-plugin-updater）が署名を確かめるのに使う。条文には、rust-crypto に由来する部分の ISC の著作権表示も含む
-[minisign-verify.clarify]
-license = "MIT"
-
-[[minisign-verify.clarify.files]]
-path = "LICENSE"
-checksum = "42c8695fbc468866d9756be99af0ba4e37d733f8daa3c8827c8d80b8bec1b2f9"

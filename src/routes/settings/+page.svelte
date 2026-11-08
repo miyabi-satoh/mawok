@@ -17,7 +17,6 @@
 	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
 	import SettingsRow from '$lib/components/settings-row.svelte';
 	import SettingsSection from '$lib/components/settings-section.svelte';
-	import SettingsUpdate from '$lib/components/settings-update.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
@@ -1082,10 +1081,6 @@
 				</Tabs.Content>
 				<Tabs.Content value="about">
 					<SettingsSection>
-						<!-- 更新は Mac 版だけが自分で行うので、Mac だけに出す（docs/platform.md「Mac 版の更新」） -->
-						{#if view.platform === 'macos'}
-							<SettingsUpdate call={callSettings} />
-						{/if}
 						<SettingsRow>
 							<Field.Field orientation="horizontal" class="min-h-8 flex-wrap">
 								<Field.Title>{m.settings_manual()}</Field.Title>

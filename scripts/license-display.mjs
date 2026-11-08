@@ -43,7 +43,7 @@
 const PLACEHOLDER = /<year>|<owner>|<copyright holders>/;
 
 // 本文に紛れ込んだソースコードの印。ライセンスの注釈を頭に持つソースファイルを、抽出の道具が
-// 丸ごと本文として拾うことがある (ring など)。条文の文章に出てこない、コードに特有の形だけを見る。
+// 丸ごと本文として拾うことがある。条文の文章に出てこない、コードに特有の形だけを見る。
 const CODE_LINE =
 	/^\s*(#include\b|#define\b|#ifndef\b|#!\[|\/\/!|use [a-z_]+(::|;)|pub (fn|mod|struct|enum|use|const) |fn [a-z_]+\(|typedef |extern crate )/m;
 

@@ -9,7 +9,6 @@ const root = path.join(import.meta.dirname, '..');
 // ui-preferences の4つ。取り返しの付かない操作の確認・入力の条件・結果が見えにくい設定・外へ送るものの告知
 const allowed = {
 	settings_folder_has_settings_description: '取り返しの付かない操作の確認',
-	settings_update_draft_lost: '取り返しの付かない操作の確認',
 	backup_restore_description: '取り返しの付かない操作の確認',
 	settings_hotkey_recording_description: '入力の条件',
 	settings_keys_recording_description: '入力の条件',

@@ -21,11 +21,6 @@ const ABOUT_CONFIG = 'src-tauri/about.toml';
 //   - dlopen2.txt: OpenByteDev/dlopen2 の LICENSE (cc80e4a)
 //   - objc2.txt: madsmtm/objc2 の LICENSE.md (b4167b5・8852b42・8d214f5・7b1abfd・d7d2fa2 で同じ) と MIT の条文。
 //     上流は MIT で提供すると書くだけで、著作権表示をどこにも掲げていないので、著作権者の行は置かない。
-// - ring: cargo-about がソースファイルを丸ごと本文として拾う (ライセンスの注釈を頭に持つため)。
-//   クレートの LICENSE の案内どおり、新しいコードの ISC (LICENSE-other-bits)、BoringSSL から取った
-//   Apache-2.0 (LICENSE-BoringSSL の Apache の部分。後ろの Go の条文はビルドに入らないテスト用のコードの分)、
-//   once_cell から取った MIT (src/polyfill/once_cell/LICENSE-MIT) を出す。ISC のソースファイルの頭にある
-//   著作権表示 (Google・Intel などを含む41通り) は、ISC の本文の後ろに並べた。
 // 版まで書くのは、新しい版で上流が条文を同梱したり著作権者を変えたりしても、古い条文を黙って当てないため。
 // 表に無い版が現れたら生成を止めるので、その版の条文を確かめてから版を足す。
 const OVERRIDES = {
@@ -37,16 +32,7 @@ const OVERRIDES = {
 	'block2@0.6.2': { texts: [{ id: 'MIT', file: 'objc2.txt' }] },
 	'objc2@0.6.5': { texts: [{ id: 'MIT', file: 'objc2.txt' }] },
 	'objc2-encode@4.1.0': { texts: [{ id: 'MIT', file: 'objc2.txt' }] },
-	'objc2-foundation@0.3.2': { texts: [{ id: 'MIT', file: 'objc2.txt' }] },
-	// 宣言は `Apache-2.0 AND ISC` だが、once_cell から取った MIT の部分もある (クレートの LICENSE の案内)。
-	'ring@0.17.14': {
-		license: 'ISC AND Apache-2.0 AND MIT',
-		texts: [
-			{ id: 'ISC', file: 'ring-isc.txt' },
-			{ id: 'Apache-2.0', file: 'ring-boringssl-apache.txt' },
-			{ id: 'MIT', file: 'ring-once-cell-mit.txt' }
-		]
-	}
+	'objc2-foundation@0.3.2': { texts: [{ id: 'MIT', file: 'objc2.txt' }] }
 };
 const OVERRIDDEN_NAMES = new Set(Object.keys(OVERRIDES).map((key) => key.replace(/@[^@]+$/, '')));
 

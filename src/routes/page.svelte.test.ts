@@ -1263,36 +1263,3 @@ describe('キー操作', () => {
 		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('commit', { text: 'git status' }));
 	});
 });
-
-describe('書きかけのあるなしを知らせる', () => {
-	beforeEach(() => {
-		invoked.mockImplementation(() => Promise.resolve(undefined));
-	});
-
-	const reported = () =>
-		callsOf(invoked, 'set_draft_has_text').map(
-			([, args]) => (args as { hasText: boolean }).hasText
-		);
-
-	it('Mac では、空かどうかが変わったときだけ知らせる', async () => {
-		settings.current = view('macos');
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-
-		await vi.waitFor(() => expect(reported()).toEqual([false]));
-		await textarea.fill('書きかけ');
-		await textarea.fill('書きかけの文');
-		await vi.waitFor(() => expect(reported()).toEqual([false, true]));
-		await textarea.fill('');
-		await vi.waitFor(() => expect(reported()).toEqual([false, true, false]));
-	});
-
-	it('Windows では知らせない', async () => {
-		settings.current = view('windows');
-		const screen = await render(Page);
-
-		await draftField(screen).fill('書きかけ');
-		await tick();
-		expect(reported()).toEqual([]);
-	});
-});

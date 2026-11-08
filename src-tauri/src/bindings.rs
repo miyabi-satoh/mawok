@@ -34,8 +34,7 @@ export const EVENTS = {{\n\
 \tSNIPPET_ADDED: {:?},\n\
 \tCONFIG_REPLACED: {:?},\n\
 \tSHOWN: {:?},\n\
-\tHIDE_REQUESTED: {:?},\n\
-\tUPDATE_CHANGED: {:?}\n\
+\tHIDE_REQUESTED: {:?}\n\
 }} as const;\n\n\
 export const ERROR_CODES = {{\n\
 \tBACKUP_RESTORE_PARTIAL: {:?},\n\
@@ -62,7 +61,6 @@ export const ERROR_CODES = {{\n\
         events::CONFIG_REPLACED,
         events::SHOWN,
         events::HIDE_REQUESTED,
-        events::UPDATE_CHANGED,
         error_codes::BACKUP_RESTORE_PARTIAL,
         error_codes::SETTINGS_FILE_UNREADABLE,
         error_codes::SETTINGS_FOLDER_UNAVAILABLE,

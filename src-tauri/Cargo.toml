@@ -33,7 +33,7 @@ getrandom = "0.4.3"
 serde_json = "1.0.151"
 # 置き換え辞書を、1つに見える文字（書記素）の途中で当てないため（text.rs）。Tauri の依存でもともと入っている
 unicode-segmentation = "1.13.3"
-# 定期の処理（毎日のバックアップ・Mac 版の更新の確認）と、ファイルの変化を落ち着かせてから読み直すのに使う。Tauri の依存でもともと入っている
+# 定期の処理（毎日のバックアップ）と、ファイルの変化を落ち着かせてから読み直すのに使う。Tauri の依存でもともと入っている
 tokio = { version = "1.53.1", features = ["time", "macros", "rt", "sync"] }
 # 設定のファイルを、手で書いたコメントと並びを残して書き換える（settings_files.rs）
 toml_edit = "0.25.15"
@@ -65,12 +65,8 @@ objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSButton", "NSControl", "NSMenu", "NSResponder", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow"] }
 # ログイン時の起動を、ログイン項目（SMAppService）に登録する（autostart.rs）
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
-# 新しい版を確かめて入れ替える（updater.rs）。Windows は Microsoft Store が更新を受け持つので入れない（→ docs/platform.md「Mac 版の更新」）。
-tauri-plugin-updater = "2.14.0"
 # テキストウィンドウを、アプリを前面にしないパネルにする（focus.rs）
 tauri-nspanel = "2.1.1"
-# 新しい版を見つけたことを OS の通知で知らせる（updater.rs）
-tauri-plugin-notification = "2.7.0"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # 多重起動を防ぐ。macOS は開き直しを OS が既存のインスタンスへ知らせるので、lib.rs の lock_single_instance で2つ目を止めるだけにする
