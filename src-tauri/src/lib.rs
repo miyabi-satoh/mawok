@@ -146,6 +146,8 @@ struct AppState {
     problems: Mutex<Problems>,
     /// 設定ウィンドウを作っている最中か。作成は非同期なので、連打で2つ作ろうとするのを止める
     settings_opening: AtomicBool,
+    /// トレイの ⚠ の項目で頼まれた、設定画面に出す分類。画面が取りに来たら空にする（open_settings_at）
+    settings_category: Mutex<Option<SettingsCategory>>,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -178,7 +180,7 @@ impl AppState {
     }
 }
 
-/// トレイメニューに ⚠ 付きで出す問題。表示言語が変わったら文言を作り直すので、原因だけを持つ
+/// トレイメニューに ⚠ 付きで出し、設定画面の該当する行に詳しく出す問題。表示言語が変わったら文言を作り直すので、原因だけを持つ
 #[derive(Default)]
 struct Problems {
     config: Option<ConfigProblem>,
@@ -186,7 +188,7 @@ struct Problems {
     autostart_failed: Option<autostart::SetError>,
 }
 
-/// 設定の置き場についてトレイに出すこと。直して読めたら消す
+/// 設定の置き場についてトレイと設定画面に出すこと。直して読めたら消す
 #[derive(PartialEq)]
 enum ConfigProblem {
     /// 読めなかった設定のファイルの名前。読めたファイルの設定と、読めないファイルは前に読めた設定（起動のときは既定）で動かす
@@ -205,6 +207,47 @@ impl ConfigProblem {
             Unreachable::Denied(path) => ConfigProblem::AccessDenied(path.clone()),
         }
     }
+}
+
+/// 設定画面の「設定の保存先」に出す、設定を保存できない理由（ConfigProblem）
+#[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SettingsProblem {
+    /// 読めなかった設定のファイルの名前
+    Unreadable {
+        files: Vec<String>,
+    },
+    FolderMissing,
+    /// 読む許可が要る、設定のファイルの symlink の先（macOS のサンドボックス）。画面は許可を求めるボタンを出す
+    AccessNeeded {
+        path: String,
+    },
+}
+
+impl From<&ConfigProblem> for SettingsProblem {
+    fn from(problem: &ConfigProblem) -> Self {
+        match problem {
+            ConfigProblem::Unreadable(files) => SettingsProblem::Unreadable {
+                files: files.clone(),
+            },
+            ConfigProblem::FolderMissing(_) => SettingsProblem::FolderMissing,
+            ConfigProblem::AccessDenied(target) => SettingsProblem::AccessNeeded {
+                path: target.display().to_string(),
+            },
+        }
+    }
+}
+
+/// トレイの ⚠ の項目から設定ウィンドウを開くときに出す分類。問題の行のある分類を出す（settings-categories.ts の value）
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+enum SettingsCategory {
+    General,
+    Keys,
 }
 
 impl Problems {
@@ -261,8 +304,12 @@ struct SettingsView {
     settings_dir: String,
     /// 置き場が OS 標準のアプリ設定フォルダーか。そうでなければ画面は「既定に戻す」を出す
     settings_dir_is_default: bool,
-    /// 読む許可が要る、設定のファイルの symlink の先（macOS のサンドボックス）。画面は許可を求めるボタンを出す
-    settings_access_needed: Option<String>,
+    /// 設定を保存できない理由。画面は「設定の保存先」に知らせを出す
+    settings_problem: Option<SettingsProblem>,
+    /// 設定のホットキーを OS に登録できていないか。画面はホットキーの行に知らせを出す
+    hotkey_unavailable: bool,
+    /// ログイン時の起動を OS に設定できなかった理由。画面は「ログイン時に起動」の行に出す
+    autostart_failed: Option<String>,
     punctuation_style: PunctuationStyle,
     char_widths: CharWidths,
     /// コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
@@ -297,9 +344,16 @@ fn settings_view(state: &AppState) -> SettingsView {
     let lang = Lang::resolve(config.language, state.system_lang);
     let settings_dir = state.settings_dir();
     let settings_dir_is_default = state.device.lock().unwrap().settings_dir.is_none();
-    let settings_access_needed = match &state.problems.lock().unwrap().config {
-        Some(ConfigProblem::AccessDenied(target)) => Some(target.display().to_string()),
-        _ => None,
+    let (settings_problem, hotkey_unavailable, autostart_failed) = {
+        let problems = state.problems.lock().unwrap();
+        (
+            problems.config.as_ref().map(SettingsProblem::from),
+            problems.hotkey_unavailable,
+            problems
+                .autostart_failed
+                .as_ref()
+                .map(|error| autostart_error_text(error, lang)),
+        )
     };
     let modified_settings = config::modified_settings(&config);
     #[cfg(target_os = "linux")]
@@ -310,7 +364,9 @@ fn settings_view(state: &AppState) -> SettingsView {
         revision,
         settings_dir: shown_path(state, settings_dir).display().to_string(),
         settings_dir_is_default,
-        settings_access_needed,
+        settings_problem,
+        hotkey_unavailable,
+        autostart_failed,
         locale: lang.code(),
         platform: Platform::current(),
         hotkey: config.hotkey,
@@ -1095,14 +1151,15 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     // 保存できたときだけ OS のログイン項目を変える。順番が逆だと、保存に失敗したときに OS 側だけ変わって残る
     save_config(&app, |config| config.autostart = enabled)?;
     let failed = apply_autostart(&app, enabled);
-    let state = app.state::<AppState>();
-    // 設定は保存できているので、OS への登録に失敗したことはトレイの ⚠ にも出す
-    state.problems.lock().unwrap().autostart_failed = failed.clone();
+    // 設定は保存できているので、OS への登録に失敗したことは失敗として返さず、トレイの ⚠ と画面の行の知らせに出す
+    app.state::<AppState>()
+        .problems
+        .lock()
+        .unwrap()
+        .autostart_failed = failed;
     // 画面とトレイへの反映は、⚠ も決まってから一度だけ行う
     apply_config(&app);
-    failed.map_or(Ok(()), |error| {
-        Err(autostart_error_text(&error, state.lang()))
-    })
+    Ok(())
 }
 
 #[tauri::command]
@@ -1796,7 +1853,7 @@ fn resume_settings_dir(app: &AppHandle) {
         merge_history_from_other_devices(&handle);
         watch_settings_dir(&handle);
         let _ = handle.emit(events::DRAFT_HISTORY_MERGED, ());
-        // 読み直した設定が前と同じでも、画面の許可を求める知らせを消す
+        // 読み直した設定が前と同じでも、トレイと画面の知らせを消す
         apply_config(&handle);
     });
     if let Err(error) = result {
@@ -2169,7 +2226,7 @@ fn ensure_hotkey_registered(app: &AppHandle) {
     show_hotkey_registered(app, registered);
 }
 
-/// 設定のホットキーが登録できているかを、トレイの ⚠ に反映する
+/// 設定のホットキーが登録できているかを、トレイの ⚠ と設定画面に反映する
 fn show_hotkey_registered(app: &AppHandle, registered: bool) {
     let state = app.state::<AppState>();
     let changed = {
@@ -2179,7 +2236,7 @@ fn show_hotkey_registered(app: &AppHandle, registered: bool) {
         changed
     };
     if changed {
-        refresh_tray(app);
+        apply_config(app);
     }
 }
 
@@ -2545,19 +2602,19 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Option<autostart::SetError
     }
 }
 
-/// OS のログイン項目に登録されていて、有効か。読めなければ、トレイの ⚠ に出す理由を返す
+/// OS のログイン項目に登録されていて、有効か。読めなければ、トレイの ⚠ と設定画面に出す理由を返す
 fn read_autostart(app: &AppHandle) -> Result<bool, String> {
     autostart::is_enabled(app).inspect_err(|error| warn!("couldn't read launch at login: {error}"))
 }
 
-/// OS のログイン項目を登録する・外す。登録済みかは呼ぶ側が読んでおく。できなければ、トレイの ⚠ に出す理由を返す
+/// OS のログイン項目を登録する・外す。登録済みかは呼ぶ側が読んでおく。できなければ、トレイの ⚠ と設定画面に出す理由を返す
 fn write_autostart(app: &AppHandle, enabled: bool) -> Option<autostart::SetError> {
     let error = autostart::set(app, enabled).err()?;
     warn!("couldn't configure launch at login: {error:?}");
     Some(error)
 }
 
-/// ログイン項目を設定できなかった理由を、トレイの ⚠ と設定画面に出す文にする
+/// ログイン項目を設定できなかった理由を、設定画面の「ログイン時に起動」の行に出す文にする
 fn autostart_error_text(error: &autostart::SetError, lang: Lang) -> String {
     match error {
         autostart::SetError::Os(error) => error.clone(),
@@ -2663,7 +2720,7 @@ fn reload_config_from_files(app: &AppHandle) {
     };
     if next == current {
         if problem_changed {
-            refresh_tray(app);
+            apply_config(app);
         }
         return;
     }
@@ -2780,6 +2837,21 @@ impl Drop for OpeningGuard {
     }
 }
 
+/// 設定ウィンドウを、指定の分類で開く。開いていれば、その分類に切り替える。
+/// 分類は画面が描き終えてから取りに来る（take_settings_category）。開いている窓へ直に送ると、
+/// 作った直後でまだ受け取れない窓には届かないため、取り置いて知らせだけを送る
+fn open_settings_at(app: &AppHandle, category: SettingsCategory) {
+    *app.state::<AppState>().settings_category.lock().unwrap() = Some(category);
+    let _ = app.emit_to(SETTINGS_WINDOW, events::SETTINGS_CATEGORY_REQUESTED, ());
+    open_settings(app);
+}
+
+/// トレイの ⚠ の項目で頼まれた、設定画面に出す分類を受け取る。頼まれていなければ None
+#[tauri::command]
+fn take_settings_category(state: tauri::State<'_, AppState>) -> Option<SettingsCategory> {
+    state.settings_category.lock().unwrap().take()
+}
+
 fn open_settings(app: &AppHandle) {
     info!("open settings");
     hide_draft_for_settings(app);
@@ -2839,39 +2911,82 @@ fn open_settings(app: &AppHandle) {
     });
 }
 
+/// トレイメニューに ⚠ 付きで出す問題の項目
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TrayProblem {
+    Settings,
+    Hotkey,
+    Autostart,
+}
+
+impl TrayProblem {
+    const ALL: [TrayProblem; 3] = [
+        TrayProblem::Settings,
+        TrayProblem::Hotkey,
+        TrayProblem::Autostart,
+    ];
+
+    fn id(self) -> &'static str {
+        match self {
+            TrayProblem::Settings => "problem-settings",
+            TrayProblem::Hotkey => "problem-hotkey",
+            TrayProblem::Autostart => "problem-autostart",
+        }
+    }
+
+    fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|problem| problem.id() == id)
+    }
+
+    fn text(self, lang: Lang) -> &'static str {
+        match self {
+            TrayProblem::Settings => lang.settings_problem(),
+            TrayProblem::Hotkey => lang.hotkey_problem(),
+            TrayProblem::Autostart => lang.autostart_problem(),
+        }
+    }
+
+    /// 選んだときに開く設定画面の分類。「設定の保存先」と「ログイン時に起動」は一般、ホットキーはキー操作にある
+    fn category(self) -> SettingsCategory {
+        match self {
+            TrayProblem::Settings | TrayProblem::Autostart => SettingsCategory::General,
+            TrayProblem::Hotkey => SettingsCategory::Keys,
+        }
+    }
+}
+
 fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let state = app.state::<AppState>();
     let lang = state.lang();
     let hotkey = state.config.lock().unwrap().hotkey.clone();
     let hotkey_unavailable = state.problems.lock().unwrap().hotkey_unavailable;
-    let problem_texts = {
+    // 項目は短い知らせにして、選ぶとその問題の行がある分類で設定画面を開く（TrayProblem）。
+    // パスや理由まで項目に書くと、折り返せないメニューが横に長く伸びる
+    let problems = {
         let problems = state.problems.lock().unwrap();
-        let mut texts = Vec::new();
-        match &problems.config {
-            Some(ConfigProblem::Unreadable(files)) => {
-                texts.push(lang.settings_unreadable(&files.join(", ")))
-            }
-            Some(ConfigProblem::FolderMissing(dir)) => {
-                texts.push(lang.settings_folder_missing(dir))
-            }
-            Some(ConfigProblem::AccessDenied(target)) => {
-                texts.push(lang.settings_access_needed(&target.display().to_string()))
-            }
-            None => {}
+        let mut found = Vec::new();
+        if problems.config.is_some() {
+            found.push(TrayProblem::Settings);
         }
         if problems.hotkey_unavailable {
-            texts.push(lang.hotkey_unavailable(&hotkey));
+            found.push(TrayProblem::Hotkey);
         }
-        if let Some(error) = &problems.autostart_failed {
-            texts.push(lang.autostart_failed(&autostart_error_text(error, lang)));
+        if problems.autostart_failed.is_some() {
+            found.push(TrayProblem::Autostart);
         }
-        texts
+        found
     };
 
-    let problem_items = problem_texts
+    let problem_items = problems
         .iter()
         .map(|problem| {
-            MenuItem::with_id(app, "problem", format!("⚠ {problem}"), false, None::<&str>)
+            MenuItem::with_id(
+                app,
+                problem.id(),
+                format!("⚠ {}", problem.text(lang)),
+                true,
+                None::<&str>,
+            )
         })
         .collect::<tauri::Result<Vec<_>>>()?;
     let problem_separator = PredefinedMenuItem::separator(app)?;
@@ -2928,7 +3043,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 "settings" => open_settings(app),
                 "manual" => open_manual(app),
                 "quit" => app.exit(0),
-                _ => {}
+                id => {
+                    if let Some(problem) = TrayProblem::from_id(id) {
+                        open_settings_at(app, problem.category());
+                    }
+                }
             }
         })
         .build(app)?;
@@ -3091,6 +3210,7 @@ pub fn run() {
             set_settings_dir,
             reveal_settings_dir,
             open_settings_window,
+            take_settings_category,
             toggle_settings_window,
             close_settings_window,
             show_settings_window,
@@ -3305,6 +3425,7 @@ pub fn run() {
                 config: Mutex::new(config),
                 problems: Mutex::new(problems),
                 settings_opening: AtomicBool::new(false),
+                settings_category: Mutex::new(None),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "linux")]
@@ -3395,6 +3516,20 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tray_problem_items_open_settings_where_their_row_is() {
+        for problem in TrayProblem::ALL {
+            assert_eq!(TrayProblem::from_id(problem.id()), Some(problem));
+        }
+        // ほかの項目の id は、問題の項目と取り違えない
+        for id in ["show", "settings", "manual", "quit"] {
+            assert_eq!(TrayProblem::from_id(id), None);
+        }
+        assert_eq!(TrayProblem::Settings.category(), SettingsCategory::General);
+        assert_eq!(TrayProblem::Autostart.category(), SettingsCategory::General);
+        assert_eq!(TrayProblem::Hotkey.category(), SettingsCategory::Keys);
+    }
 
     #[test]
     fn keeps_launch_at_login_off_when_either_side_turned_it_off() {

@@ -8,7 +8,7 @@
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
-	import { settingsFolderProblem } from '$lib/errors';
+	import { settingsFolderProblem, settingsProblemNotice } from '$lib/errors';
 	import { m } from '$lib/paraglide/messages';
 	import type { SettingsView } from '$lib/settings.svelte';
 
@@ -106,19 +106,22 @@
 	{#if error}
 		<Field.Error>{error}</Field.Error>
 	{/if}
-	<!-- macOS のサンドボックスが symlink の先を読ませない間の知らせ (docs/config.md「macOS のサンドボックス」)。説明でなく今の状態なので、警告として出す -->
-	{#if view.settingsAccessNeeded}
+	<!-- 設定を保存できない間の知らせ。トレイの ⚠ の項目から開いて読む。説明でなく今の状態なので、警告として出す。
+	     読む許可が無いとき (macOS のサンドボックス。docs/config.md「macOS のサンドボックス」) は、許可を求めるボタンも出す -->
+	{#if view.settingsProblem}
 		<Alert.Root variant="destructive">
 			<CircleAlertIcon />
 			<Alert.Title class="wrap-anywhere">
-				{m.settings_folder_access_needed({ path: view.settingsAccessNeeded })}
+				{settingsProblemNotice(view.settingsProblem)}
 			</Alert.Title>
 		</Alert.Root>
-		<div>
-			<Button variant="outline" size="sm" disabled={busy} onclick={grantAccess}>
-				{m.settings_folder_grant_access()}
-			</Button>
-		</div>
+		{#if view.settingsProblem.kind === 'accessNeeded'}
+			<div>
+				<Button variant="outline" size="sm" disabled={busy} onclick={grantAccess}>
+					{m.settings_folder_grant_access()}
+				</Button>
+			</div>
+		{/if}
 	{/if}
 </SettingsRow>
 

@@ -17,6 +17,7 @@ export const EVENTS = {
 	DRAFT_HISTORY_MERGED: "draft-history-merged",
 	SNIPPET_ADDED: "snippet-added",
 	CONFIG_REPLACED: "config-replaced",
+	SETTINGS_CATEGORY_REQUESTED: "settings-category-requested",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested"
 } as const;

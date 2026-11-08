@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ERROR_CODES } from '$lib/bindings/constants';
 import { m } from '$lib/paraglide/messages';
-import { describeError, errorCode, settingsFolderProblem, settingsSaveProblem } from './errors';
+import {
+	describeError,
+	errorCode,
+	settingsFolderProblem,
+	settingsProblemNotice,
+	settingsSaveProblem
+} from './errors';
 
 function errorWithStack(message: string, stack: string | undefined) {
 	const error = new TypeError(message);
@@ -66,5 +72,20 @@ describe('settingsFolderProblem', () => {
 
 	it('ほかの失敗は、受け取った文を添えて出す', () => {
 		expect(settingsFolderProblem('disk full')).toBe(m.settings_failed({ error: 'disk full' }));
+	});
+});
+
+describe('settingsProblemNotice', () => {
+	it('読めないファイルは、名前を並べて出す', () => {
+		expect(
+			settingsProblemNotice({ kind: 'unreadable', files: ['settings.toml', 'snippets.toml'] })
+		).toBe(m.settings_file_unreadable_notice({ files: 'settings.toml, snippets.toml' }));
+	});
+
+	it('保存先が無いときと、読む許可が無いときは、それぞれの知らせにする', () => {
+		expect(settingsProblemNotice({ kind: 'folderMissing' })).toBe(m.settings_folder_missing());
+		expect(settingsProblemNotice({ kind: 'accessNeeded', path: '/a/settings.toml' })).toBe(
+			m.settings_folder_access_needed({ path: '/a/settings.toml' })
+		);
 	});
 });

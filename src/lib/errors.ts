@@ -1,4 +1,5 @@
 import { ERROR_CODES } from '$lib/bindings/constants';
+import type { SettingsProblem } from '$lib/bindings/SettingsProblem';
 import { m } from '$lib/paraglide/messages';
 
 /** ログに残すために、エラーを1つの文字列にする。スタックトレースがあれば含める。 */
@@ -59,5 +60,17 @@ export function settingsFolderProblem(error: unknown): string {
 			return m.settings_folder_access_denied();
 		default:
 			return m.settings_failed({ error: code });
+	}
+}
+
+/** 「設定の保存先」に出す、設定を保存できない今の状態の知らせ */
+export function settingsProblemNotice(problem: SettingsProblem): string {
+	switch (problem.kind) {
+		case 'unreadable':
+			return m.settings_file_unreadable_notice({ files: problem.files.join(', ') });
+		case 'folderMissing':
+			return m.settings_folder_missing();
+		case 'accessNeeded':
+			return m.settings_folder_access_needed({ path: problem.path });
 	}
 }

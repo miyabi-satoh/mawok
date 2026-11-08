@@ -33,6 +33,7 @@ export const EVENTS = {{\n\
 \tDRAFT_HISTORY_MERGED: {:?},\n\
 \tSNIPPET_ADDED: {:?},\n\
 \tCONFIG_REPLACED: {:?},\n\
+\tSETTINGS_CATEGORY_REQUESTED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?}\n\
 }} as const;\n\n\
@@ -60,6 +61,7 @@ export const ERROR_CODES = {{\n\
         events::DRAFT_HISTORY_MERGED,
         events::SNIPPET_ADDED,
         events::CONFIG_REPLACED,
+        events::SETTINGS_CATEGORY_REQUESTED,
         events::SHOWN,
         events::HIDE_REQUESTED,
         error_codes::BACKUP_RESTORE_PARTIAL,

@@ -5,6 +5,7 @@ import type { Language } from "./Language";
 import type { Platform } from "./Platform";
 import type { PunctuationStyle } from "./PunctuationStyle";
 import type { Replacement } from "./Replacement";
+import type { SettingsProblem } from "./SettingsProblem";
 import type { Snippet } from "./Snippet";
 import type { Theme } from "./Theme";
 
@@ -81,9 +82,17 @@ settingsDir: string,
  */
 settingsDirIsDefault: boolean, 
 /**
- * 読む許可が要る、設定のファイルの symlink の先（macOS のサンドボックス）。画面は許可を求めるボタンを出す
+ * 設定を保存できない理由。画面は「設定の保存先」に知らせを出す
  */
-settingsAccessNeeded: string | null, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
+settingsProblem: SettingsProblem | null, 
+/**
+ * 設定のホットキーを OS に登録できていないか。画面はホットキーの行に知らせを出す
+ */
+hotkeyUnavailable: boolean, 
+/**
+ * ログイン時の起動を OS に設定できなかった理由。画面は「ログイン時に起動」の行に出す
+ */
+autostartFailed: string | null, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
 /**
  * コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
  */

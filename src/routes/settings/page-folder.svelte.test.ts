@@ -96,9 +96,18 @@ describe('設定の保存先', () => {
 		await expect.element(screen.getByText(m.settings_folder_unreadable())).toBeVisible();
 	});
 
+	it('保存先が見つからなければ知らせ、許可を求めるボタンは出さない', async () => {
+		settings.current = settingsView({ settingsProblem: { kind: 'folderMissing' } });
+		const screen = await renderAt(m.settings_category_general);
+		await expect.element(screen.getByText(m.settings_folder_missing())).toBeVisible();
+		expect(
+			screen.getByRole('button', { name: m.settings_folder_grant_access() }).elements()
+		).toEqual([]);
+	});
+
 	it('symlink の先を読む許可が無ければ知らせ、ボタンで許可を求める', async () => {
 		const target = '/Users/me/dotfiles/mawok/settings.toml';
-		settings.current = settingsView({ settingsAccessNeeded: target });
+		settings.current = settingsView({ settingsProblem: { kind: 'accessNeeded', path: target } });
 		answer(null);
 		const screen = await renderAt(m.settings_category_general);
 		await expect

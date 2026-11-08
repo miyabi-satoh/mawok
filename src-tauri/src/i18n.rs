@@ -85,14 +85,6 @@ impl Lang {
         }
     }
 
-    /// 設定のファイルを読めない（手で書きかけ・形が合わない）。直して保存すれば読み直すので、消えるまで出す
-    pub fn settings_unreadable(self, files: &str) -> String {
-        match self {
-            Lang::En => format!("Couldn't read the settings file {files}. Changes aren't saved to it until it's fixed"),
-            Lang::Ja => format!("設定のファイル {files} を読めません。直すまで、変えた設定はこのファイルに保存されません"),
-        }
-    }
-
     /// 設定の置き場にするフォルダーを選ぶ、OS のフォルダーの窓の題
     pub fn pick_settings_folder(self) -> &'static str {
         match self {
@@ -101,28 +93,12 @@ impl Lang {
         }
     }
 
-    /// 選んだ置き場のフォルダーか、設定のファイルの symlink の先が無い（クラウドストレージのドライブがつながっていない・
-    /// フォルダーを消した・dotfiles でファイルの無いブランチに切り替えた など）。現れたら消す
-    pub fn settings_folder_missing(self, dir: &str) -> String {
+    /// トレイの ⚠ の項目。設定のファイルを読めない・保存先が無い・読む許可が無いのどれでも、変えた設定が保存されない。
+    /// 何が起きているかは、選ぶと開く設定画面の「設定の保存先」に出す
+    pub fn settings_problem(self) -> &'static str {
         match self {
-            Lang::En => format!(
-                "The settings folder {dir} isn't available. Changes aren't saved until it is"
-            ),
-            Lang::Ja => format!(
-                "設定の保存先 {dir} が見つかりません。見つかるまで、変えた設定は保存されません"
-            ),
-        }
-    }
-
-    /// macOS のサンドボックスが、設定のファイルの symlink の先を読ませない。設定の画面で許可したら消す
-    pub fn settings_access_needed(self, target: &str) -> String {
-        match self {
-            Lang::En => format!(
-                "Mawok doesn't have permission to read {target}. Changes aren't saved until you allow access in Settings"
-            ),
-            Lang::Ja => format!(
-                "{target} を読む許可がありません。設定の画面で許可するまで、変えた設定は保存されません"
-            ),
+            Lang::En => "Settings can't be saved",
+            Lang::Ja => "設定を保存できません",
         }
     }
 
@@ -147,22 +123,23 @@ impl Lang {
         }
     }
 
-    /// 原因（他のアプリとの衝突など）の詳細はログに残す
-    pub fn hotkey_unavailable(self, hotkey: &str) -> String {
+    /// トレイの ⚠ の項目。どのキーかは、選ぶと開く設定画面の「キー操作」に出す。原因（他のアプリとの衝突など）の詳細はログに残す
+    pub fn hotkey_problem(self) -> &'static str {
         match self {
-            Lang::En => format!("Couldn't register the hotkey {hotkey}"),
-            Lang::Ja => format!("ホットキー {hotkey} を登録できません"),
+            Lang::En => "Couldn't register the hotkey",
+            Lang::Ja => "ホットキーを登録できません",
         }
     }
 
-    pub fn autostart_failed(self, error: &str) -> String {
+    /// トレイの ⚠ の項目。理由は、選ぶと開く設定画面の「ログイン時に起動」の行に出す
+    pub fn autostart_problem(self) -> &'static str {
         match self {
-            Lang::En => format!("Couldn't configure launch at login: {error}"),
-            Lang::Ja => format!("ログイン時の自動起動を設定できません: {error}"),
+            Lang::En => "Couldn't set up launch at login",
+            Lang::Ja => "ログイン時の起動を設定できません",
         }
     }
 
-    /// `autostart_failed` と設定画面の失敗に差し込む理由（Windows の MSIX 版）
+    /// 設定画面の「ログイン時に起動」の行に出す、設定できなかった理由（Windows の MSIX 版）
     pub fn autostart_turned_off_in_windows(self) -> String {
         match self {
             Lang::En => {
