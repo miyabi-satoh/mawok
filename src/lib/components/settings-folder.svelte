@@ -106,13 +106,13 @@
 	{#if error}
 		<Field.Error>{error}</Field.Error>
 	{/if}
-	<!-- 設定を保存できない間の知らせ。トレイの ⚠ の項目から開いて読む。説明でなく今の状態なので、警告として出す。
+	<!-- 設定の保存先の問題の知らせ。トレイの ⚠ の項目から開いて読む。説明でなく今の状態なので、警告として出す。
 	     読む許可が無いとき (macOS のサンドボックス。docs/config.md「macOS のサンドボックス」) は、許可を求めるボタンも出す -->
 	{#if view.settingsProblem}
 		<Alert.Root variant="destructive">
 			<CircleAlertIcon />
 			<Alert.Title class="wrap-anywhere">
-				{settingsProblemNotice(view.settingsProblem)}
+				{settingsProblemNotice(view.settingsProblem, view.settingsDir)}
 			</Alert.Title>
 		</Alert.Root>
 		{#if view.settingsProblem.kind === 'accessNeeded'}

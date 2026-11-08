@@ -63,13 +63,18 @@ export function settingsFolderProblem(error: unknown): string {
 	}
 }
 
-/** 「設定の保存先」に出す、設定を保存できない今の状態の知らせ */
-export function settingsProblemNotice(problem: SettingsProblem): string {
+/**
+ * 「設定の保存先」に出す、設定の保存先の今の問題の知らせ。見つからないのが行に出している保存先そのものなら、
+ * パスを繰り返さない。symlink の先が無いときだけ、そのパスを出す
+ */
+export function settingsProblemNotice(problem: SettingsProblem, settingsDir: string): string {
 	switch (problem.kind) {
 		case 'unreadable':
 			return m.settings_file_unreadable_notice({ files: problem.files.join(', ') });
 		case 'folderMissing':
-			return m.settings_folder_missing({ path: problem.path });
+			return problem.path === settingsDir
+				? m.settings_folder_dir_missing()
+				: m.settings_folder_missing({ path: problem.path });
 		case 'accessNeeded':
 			return m.settings_folder_access_needed({ path: problem.path });
 	}

@@ -82,7 +82,7 @@ settingsDir: string,
  */
 settingsDirIsDefault: boolean, 
 /**
- * 設定を保存できない理由。画面は「設定の保存先」に知らせを出す
+ * 設定の保存先の問題。画面は「設定の保存先」に知らせを出す
  */
 settingsProblem: SettingsProblem | null, 
 /**

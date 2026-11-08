@@ -76,17 +76,28 @@ describe('settingsFolderProblem', () => {
 });
 
 describe('settingsProblemNotice', () => {
+	const dir = '/a/Mawok';
+
 	it('読めないファイルは、名前を並べて出す', () => {
 		expect(
-			settingsProblemNotice({ kind: 'unreadable', files: ['settings.toml', 'snippets.toml'] })
+			settingsProblemNotice({ kind: 'unreadable', files: ['settings.toml', 'snippets.toml'] }, dir)
 		).toBe(m.settings_file_unreadable_notice({ files: 'settings.toml, snippets.toml' }));
 	});
 
-	it('保存先が無いときと、読む許可が無いときは、それぞれの知らせにする', () => {
-		expect(settingsProblemNotice({ kind: 'folderMissing', path: '/a/Mawok' })).toBe(
-			m.settings_folder_missing({ path: '/a/Mawok' })
+	it('見つからないのが保存先そのものなら、パスを繰り返さない', () => {
+		expect(settingsProblemNotice({ kind: 'folderMissing', path: dir }, dir)).toBe(
+			m.settings_folder_dir_missing()
 		);
-		expect(settingsProblemNotice({ kind: 'accessNeeded', path: '/a/settings.toml' })).toBe(
+	});
+
+	it('見つからないのが symlink の先なら、そのパスを出す', () => {
+		expect(
+			settingsProblemNotice({ kind: 'folderMissing', path: '/a/dotfiles/settings.toml' }, dir)
+		).toBe(m.settings_folder_missing({ path: '/a/dotfiles/settings.toml' }));
+	});
+
+	it('読む許可が無いときは、許可が要るパスを出す', () => {
+		expect(settingsProblemNotice({ kind: 'accessNeeded', path: '/a/settings.toml' }, dir)).toBe(
 			m.settings_folder_access_needed({ path: '/a/settings.toml' })
 		);
 	});

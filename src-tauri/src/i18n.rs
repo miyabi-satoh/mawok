@@ -73,7 +73,7 @@ impl Lang {
     /// メニューの項目と、使い方のウィンドウのタイトル
     pub fn manual(self) -> &'static str {
         match self {
-            Lang::En => "User guide",
+            Lang::En => "User Guide",
             Lang::Ja => "使い方",
         }
     }

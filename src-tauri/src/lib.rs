@@ -209,7 +209,7 @@ impl ConfigProblem {
     }
 }
 
-/// 設定画面の「設定の保存先」に出す、設定を保存できない理由（ConfigProblem）
+/// 設定画面の「設定の保存先」に出す、設定の保存先の問題（ConfigProblem）
 #[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(export))]
@@ -217,21 +217,22 @@ impl ConfigProblem {
 enum SettingsProblem {
     /// 読めなかった設定のファイルの名前
     Unreadable { files: Vec<String> },
-    /// 見つからない、選んだ置き場のフォルダーか設定のファイルの symlink の先
+    /// 見つからない、選んだ置き場のフォルダーか symlink の先。置き場そのものなら、画面は settings_dir と同じ書き方で
+    /// 受け取り、パスを繰り返さずに出す
     FolderMissing { path: String },
     /// 読む許可が要る、設定のファイルの symlink の先（macOS のサンドボックス）。画面は許可を求めるボタンを出す
     AccessNeeded { path: String },
 }
 
-impl From<&ConfigProblem> for SettingsProblem {
-    fn from(problem: &ConfigProblem) -> Self {
+impl SettingsProblem {
+    fn new(problem: &ConfigProblem, state: &AppState) -> Self {
         match problem {
             ConfigProblem::Unreadable(files) => SettingsProblem::Unreadable {
                 files: files.clone(),
             },
-            ConfigProblem::FolderMissing(path) => {
-                SettingsProblem::FolderMissing { path: path.clone() }
-            }
+            ConfigProblem::FolderMissing(path) => SettingsProblem::FolderMissing {
+                path: shown_path(state, PathBuf::from(path)).display().to_string(),
+            },
             ConfigProblem::AccessDenied(target) => SettingsProblem::AccessNeeded {
                 path: target.display().to_string(),
             },
@@ -303,7 +304,7 @@ struct SettingsView {
     settings_dir: String,
     /// 置き場が OS 標準のアプリ設定フォルダーか。そうでなければ画面は「既定に戻す」を出す
     settings_dir_is_default: bool,
-    /// 設定を保存できない理由。画面は「設定の保存先」に知らせを出す
+    /// 設定の保存先の問題。画面は「設定の保存先」に知らせを出す
     settings_problem: Option<SettingsProblem>,
     /// 設定のホットキーを OS に登録できていないか。画面はホットキーの行に知らせを出す
     hotkey_unavailable: bool,
@@ -346,7 +347,10 @@ fn settings_view(state: &AppState) -> SettingsView {
     let (settings_problem, hotkey_unavailable, autostart_failed) = {
         let problems = state.problems.lock().unwrap();
         (
-            problems.config.as_ref().map(SettingsProblem::from),
+            problems
+                .config
+                .as_ref()
+                .map(|problem| SettingsProblem::new(problem, state)),
             problems.hotkey_unavailable,
             problems
                 .autostart_failed
@@ -1317,7 +1321,10 @@ fn unavailable_settings_place(dir: &Path, chosen: bool) -> Option<Unreachable> {
     if chosen || dir.is_symlink() {
         match folder_access::dir_reach(dir) {
             Reach::Readable => {}
-            Reach::Missing => return Some(Unreachable::Missing(dir.to_path_buf())),
+            Reach::Missing => {
+                let target = folder_access::link_target(dir).unwrap_or_else(|| dir.to_path_buf());
+                return Some(Unreachable::Missing(target));
+            }
             Reach::Denied => {
                 let target = folder_access::link_target(dir).unwrap_or_else(|| dir.to_path_buf());
                 return Some(Unreachable::Denied(target));
@@ -3525,6 +3532,21 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// stow がフォルダーごと張った既定の置き場の先が無ければ、`..` を畳んだ先を無いものとして返す
+    #[cfg(unix)]
+    #[test]
+    fn names_the_normalized_target_of_a_missing_settings_folder_link() {
+        let dir = test_support::TempDir::new("lib-missing-folder-link");
+        let config = dir.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        let settings_dir = config.join("mawok");
+        std::os::unix::fs::symlink("../dotfiles/mawok", &settings_dir).unwrap();
+        assert_eq!(
+            unavailable_settings_place(&settings_dir, false),
+            Some(Unreachable::Missing(dir.join("dotfiles/mawok")))
+        );
+    }
 
     #[test]
     fn tray_problem_items_open_settings_where_their_row_is() {

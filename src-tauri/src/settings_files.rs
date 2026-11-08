@@ -152,7 +152,7 @@ pub fn write(
 /// 置き場のうち、読めないもの（docs/config.md「置き場」）。現れる・許可されるまで、置き場に何も書かない
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unreachable {
-    /// 無い。パスは、トレイに出す無いもの
+    /// 無い。パスは、設定画面に出す無いもの。symlink なら、`..` を畳んだその先
     Missing(PathBuf),
     /// macOS のサンドボックスが読ませない。パスは、読む許可が要る symlink の先（docs/config.md「macOS のサンドボックス」）
     Denied(PathBuf),
@@ -170,9 +170,8 @@ pub fn unreachable_link(dir: &Path) -> Option<Unreachable> {
         match folder_access::file_reach(&path) {
             Reach::Readable => {}
             Reach::Missing => {
-                if let Ok(target) = fs::read_link(&path) {
-                    return Some(Unreachable::Missing(dir.join(target)));
-                }
+                let target = folder_access::link_target(&path).unwrap_or(path);
+                return Some(Unreachable::Missing(target));
             }
             Reach::Denied => return folder_access::link_target(&path).map(Unreachable::Denied),
         }
@@ -469,6 +468,26 @@ mod tests {
         assert_eq!(
             unreachable_link(dir.path()),
             Some(Unreachable::Missing(dir.join("mawok.toml")))
+        );
+    }
+
+    /// stow が張るような相対の symlink は、`..` を畳んだ先を無いものとして返す。画面にそのまま出すため
+    #[cfg(unix)]
+    #[test]
+    fn names_the_normalized_target_of_a_relative_link() {
+        let dir = TempDir::new("settings-files-relative-dangling");
+        let settings_dir = dir.join("config/mawok");
+        fs::create_dir_all(&settings_dir).unwrap();
+        std::os::unix::fs::symlink(
+            "../../dotfiles/mawok/settings.toml",
+            settings_dir.join(SETTINGS),
+        )
+        .unwrap();
+        assert_eq!(
+            unreachable_link(&settings_dir),
+            Some(Unreachable::Missing(
+                dir.join("dotfiles/mawok/settings.toml")
+            ))
         );
     }
 
