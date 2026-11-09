@@ -36,6 +36,7 @@ mod toggle;
 mod tray_press;
 
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -2309,6 +2310,10 @@ fn hotkey_by_desktop() -> bool {
 /// global-shortcut プラグインでホットキーを登録・解除する。デスクトップのキー設定で割り当てるときは、何も登録せず、登録できている扱いにする
 struct PluginRegistrar<'a>(&'a AppHandle);
 
+/// 設定のホットキーから、実際に登録した形（registered_form）。解除と確かめには、登録したときの形を使う。
+/// そのたびに今の配列で作り直すと、途中で配列を切り替えたときに、登録したキーを見つけられず解除できない
+static REGISTERED_AS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
 impl hotkey::Registrar for PluginRegistrar<'_> {
     fn register(&mut self, hotkey: &str) -> Result<(), String> {
         if hotkey_by_desktop() {
@@ -2322,7 +2327,12 @@ impl hotkey::Registrar for PluginRegistrar<'_> {
         self.0
             .global_shortcut()
             .register(registered.as_str())
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        REGISTERED_AS
+            .lock()
+            .unwrap()
+            .insert(hotkey.to_string(), registered);
+        Ok(())
     }
 
     // 起動時に登録できなかったキーや、記録のために止めているキーは、解除するものがないので成功として扱う
@@ -2330,20 +2340,26 @@ impl hotkey::Registrar for PluginRegistrar<'_> {
         if hotkey_by_desktop() || !self.is_registered(hotkey) {
             return Ok(());
         }
-        let Some(registered) = registered_form(hotkey) else {
+        let Some(registered) = REGISTERED_AS.lock().unwrap().get(hotkey).cloned() else {
             return Ok(());
         };
         self.0
             .global_shortcut()
             .unregister(registered.as_str())
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        REGISTERED_AS.lock().unwrap().remove(hotkey);
+        Ok(())
     }
 
     fn is_registered(&self, hotkey: &str) -> bool {
         hotkey_by_desktop()
-            || registered_form(hotkey).is_some_and(|registered| {
-                self.0.global_shortcut().is_registered(registered.as_str())
-            })
+            || REGISTERED_AS
+                .lock()
+                .unwrap()
+                .get(hotkey)
+                .is_some_and(|registered| {
+                    self.0.global_shortcut().is_registered(registered.as_str())
+                })
     }
 }
 
