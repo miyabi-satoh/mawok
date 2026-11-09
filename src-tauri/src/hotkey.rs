@@ -68,49 +68,84 @@ pub fn change(
     (result, registered)
 }
 
-/// 記号のキーの、位置の名前（設定に残す形）・US 配列での走査コード・US 配列で出す仮想キー
-const SYMBOL_KEYS: [(&str, u32, u32); 11] = [
+/// 置かれる文字が配列で変わるキーの、位置の名前（設定に残す形）・US 配列での走査コード・US 配列で出す仮想キー。
+/// global-hotkey（Windows）は、この名前をこの仮想キーに決め打ちで読み替えて登録する
+const LAYOUT_KEYS: [(&str, u32, u32); 47] = [
+    ("Digit1", 0x02, 0x31),
+    ("Digit2", 0x03, 0x32),
+    ("Digit3", 0x04, 0x33),
+    ("Digit4", 0x05, 0x34),
+    ("Digit5", 0x06, 0x35),
+    ("Digit6", 0x07, 0x36),
+    ("Digit7", 0x08, 0x37),
+    ("Digit8", 0x09, 0x38),
+    ("Digit9", 0x0A, 0x39),
+    ("Digit0", 0x0B, 0x30),
     ("Minus", 0x0C, 0xBD),
     ("Equal", 0x0D, 0xBB),
+    ("KeyQ", 0x10, 0x51),
+    ("KeyW", 0x11, 0x57),
+    ("KeyE", 0x12, 0x45),
+    ("KeyR", 0x13, 0x52),
+    ("KeyT", 0x14, 0x54),
+    ("KeyY", 0x15, 0x59),
+    ("KeyU", 0x16, 0x55),
+    ("KeyI", 0x17, 0x49),
+    ("KeyO", 0x18, 0x4F),
+    ("KeyP", 0x19, 0x50),
     ("BracketLeft", 0x1A, 0xDB),
     ("BracketRight", 0x1B, 0xDD),
+    ("KeyA", 0x1E, 0x41),
+    ("KeyS", 0x1F, 0x53),
+    ("KeyD", 0x20, 0x44),
+    ("KeyF", 0x21, 0x46),
+    ("KeyG", 0x22, 0x47),
+    ("KeyH", 0x23, 0x48),
+    ("KeyJ", 0x24, 0x4A),
+    ("KeyK", 0x25, 0x4B),
+    ("KeyL", 0x26, 0x4C),
     ("Semicolon", 0x27, 0xBA),
     ("Quote", 0x28, 0xDE),
     ("Backquote", 0x29, 0xC0),
     ("Backslash", 0x2B, 0xDC),
+    ("KeyZ", 0x2C, 0x5A),
+    ("KeyX", 0x2D, 0x58),
+    ("KeyC", 0x2E, 0x43),
+    ("KeyV", 0x2F, 0x56),
+    ("KeyB", 0x30, 0x42),
+    ("KeyN", 0x31, 0x4E),
+    ("KeyM", 0x32, 0x4D),
     ("Comma", 0x33, 0xBC),
     ("Period", 0x34, 0xBE),
     ("Slash", 0x35, 0xBF),
 ];
 
 /// 登録に渡すホットキーを、今のキー配列に合わせて書き換える。設定のキーは押した位置の名前で残るが、
-/// Windows の global-hotkey は位置の名前を US 配列の仮想キーに決め打ちで読み替えて登録する。
-/// JIS 配列では記号のキーの仮想キーが US 配列と違い、Ctrl+Alt+; が : のキーで登録される。
-/// `vk_at` は走査コードから今の配列の仮想キーを返す。その仮想キーへ読み替えられる位置の名前に替える
+/// global-hotkey は位置の名前を US 配列の仮想キーとして登録するので、配列によっては別の位置のキーになる
+/// （JIS 配列の Ctrl+Alt+; が : のキーになる、ドイツ語の配列の Z と Y が入れ替わる など）。
+/// `vk_at` は走査コードから今の配列の仮想キーを返す。その仮想キーを登録する名前に替える。
+/// 押した位置のキーの仮想キーを登録できる名前が無ければ（JIS の半角/全角のキーなど）、別のキーを登録しないよう `None` を返す
 #[cfg_attr(not(windows), allow(dead_code))]
-pub fn for_layout(hotkey: &str, vk_at: impl Fn(u32) -> u32) -> String {
+pub fn for_layout(hotkey: &str, vk_at: impl Fn(u32) -> u32) -> Option<String> {
     let (modifiers, key) = hotkey.rsplit_once('+').unwrap_or(("", hotkey));
-    let Some(&(_, scan_code, us_vk)) = SYMBOL_KEYS.iter().find(|(name, ..)| *name == key) else {
-        return hotkey.to_string();
+    let Some(&(_, scan_code, us_vk)) = LAYOUT_KEYS.iter().find(|(name, ..)| *name == key) else {
+        return Some(hotkey.to_string());
     };
     let vk = vk_at(scan_code);
     if vk == us_vk {
-        return hotkey.to_string();
+        return Some(hotkey.to_string());
     }
-    // US 配列のどのキーにも無い仮想キー（JIS の \ _ のキーなど）は、読み替えずに元のまま登録する
-    let Some(&(name, ..)) = SYMBOL_KEYS.iter().find(|(.., us)| *us == vk) else {
-        return hotkey.to_string();
-    };
-    if modifiers.is_empty() {
+    let &(name, ..) = LAYOUT_KEYS.iter().find(|(.., us)| *us == vk)?;
+    Some(if modifiers.is_empty() {
         name.to_string()
     } else {
         format!("{modifiers}+{name}")
-    }
+    })
 }
 
 /// [`for_layout`] を、このスレッドの今のキー配列で行う
 #[cfg(windows)]
-pub fn for_current_layout(hotkey: &str) -> String {
+pub fn for_current_layout(hotkey: &str) -> Option<String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyboardLayout, MapVirtualKeyExW, MAPVK_VSC_TO_VK,
     };
@@ -122,10 +157,12 @@ pub fn for_current_layout(hotkey: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    /// JIS 配列（kbd106）の、記号のキーの走査コードから仮想キー
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// JIS 配列（kbd106）の、記号のキーの走査コードから仮想キー。ほかは US 配列と同じ
     fn jis(scan_code: u32) -> u32 {
         match scan_code {
-            0x0C => 0xBD,
             0x0D => 0xDE,
             0x1A => 0xC0,
             0x1B => 0xDB,
@@ -133,47 +170,65 @@ mod tests {
             0x28 => 0xBA,
             0x29 => 0xF3,
             0x2B => 0xDD,
-            0x33 => 0xBC,
-            0x34 => 0xBE,
-            0x35 => 0xBF,
-            _ => 0,
+            _ => us(scan_code),
+        }
+    }
+
+    /// ドイツ語の配列（QWERTZ）。Y と Z の位置が入れ替わる
+    fn german(scan_code: u32) -> u32 {
+        match scan_code {
+            0x15 => 0x5A,
+            0x2C => 0x59,
+            _ => us(scan_code),
         }
     }
 
     fn us(scan_code: u32) -> u32 {
-        SYMBOL_KEYS
+        LAYOUT_KEYS
             .iter()
             .find(|(_, scan, _)| *scan == scan_code)
             .map_or(0, |(.., vk)| *vk)
     }
 
     #[test]
-    fn rewrites_symbol_keys_to_the_name_the_layout_registers_as() {
+    fn rewrites_keys_to_the_name_the_layout_registers_as() {
         assert_eq!(
-            for_layout("CommandOrControl+Alt+Semicolon", jis),
-            "CommandOrControl+Alt+Equal"
+            for_layout("CommandOrControl+Alt+Semicolon", jis).as_deref(),
+            Some("CommandOrControl+Alt+Equal")
         );
-        assert_eq!(for_layout("Alt+BracketLeft", jis), "Alt+Backquote");
-        assert_eq!(for_layout("Alt+Quote", jis), "Alt+Semicolon");
+        assert_eq!(
+            for_layout("Alt+BracketLeft", jis).as_deref(),
+            Some("Alt+Backquote")
+        );
+        assert_eq!(
+            for_layout("Alt+Quote", jis).as_deref(),
+            Some("Alt+Semicolon")
+        );
+        assert_eq!(
+            for_layout("Control+Alt+KeyY", german).as_deref(),
+            Some("Control+Alt+KeyZ")
+        );
     }
 
     #[test]
     fn keeps_keys_that_register_as_pressed() {
         assert_eq!(
-            for_layout("CommandOrControl+Alt+Semicolon", us),
-            "CommandOrControl+Alt+Semicolon"
+            for_layout("CommandOrControl+Alt+Semicolon", us).as_deref(),
+            Some("CommandOrControl+Alt+Semicolon")
         );
         assert_eq!(
-            for_layout("CommandOrControl+Shift+Space", jis),
-            "CommandOrControl+Shift+Space"
+            for_layout("CommandOrControl+Shift+Space", jis).as_deref(),
+            Some("CommandOrControl+Shift+Space")
         );
-        assert_eq!(for_layout("Alt+Comma", jis), "Alt+Comma");
-        // 半角/全角のキーの仮想キーは、US 配列のどのキーにも無い
-        assert_eq!(for_layout("Alt+Backquote", jis), "Alt+Backquote");
+        assert_eq!(for_layout("Alt+Comma", jis).as_deref(), Some("Alt+Comma"));
+        assert_eq!(for_layout("Alt+KeyY", jis).as_deref(), Some("Alt+KeyY"));
     }
 
-    use super::*;
-    use std::collections::BTreeSet;
+    #[test]
+    fn refuses_keys_whose_layout_key_has_no_name_to_register() {
+        // 半角/全角のキーの仮想キーは、US 配列のどのキーにも無い。元の名前のままだと @ のキーを登録してしまう
+        assert_eq!(for_layout("Alt+Backquote", jis), None);
+    }
 
     /// 登録済みのキーを覚えておく。`taken` のキーは、ほかのアプリが使っているものとして登録を断り、
     /// `stuck` のキーは解除できないものとして扱う

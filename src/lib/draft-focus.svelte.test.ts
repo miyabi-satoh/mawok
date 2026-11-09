@@ -22,4 +22,13 @@ describe('keepsDraftFocus', () => {
 		expect(keepsDraftFocus(element('<div role="option">x</div>'))).toBe(false);
 		expect(keepsDraftFocus(null)).toBe(false);
 	});
+
+	it('知らせとエラーは、文字を選べるようフォーカスを移す', () => {
+		expect(keepsDraftFocus(element('<p role="status"><span>ab</span></p>').firstElementChild)).toBe(
+			false
+		);
+		expect(keepsDraftFocus(element('<div role="alert"><p>ab</p></div>').firstElementChild)).toBe(
+			false
+		);
+	});
 });

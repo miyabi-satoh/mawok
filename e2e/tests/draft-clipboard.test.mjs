@@ -185,13 +185,20 @@ test.describe('下書き → クリップボード → 貼り付け先', () => {
 			assert.equal(await getClipboard(), SENTINEL);
 			assert.equal(await expectPasted(pasteTarget, SENTINEL), SENTINEL);
 		} finally {
-			// 下書きは隠れているので、使い方の窓は覆われずに押せる
-			await clickWindow(manualHwnd);
-			await waitFor(getForegroundWindowHandle, (handle) => handle === manualHwnd, {
-				label: '使い方のウィンドウを前面に戻す (後片付け)'
-			});
-			await sendKeySequence([[VK.ESCAPE]]);
-			await waitForWindowCount(client, 1);
+			// 使い方の窓を閉じる。テストが途中で落ちて下書きが出たままだと閉じられないことがあるが、
+			// ここで投げると本当の失敗を隠すので、跡だけ残す (残った窓はアプリの終了で閉じる)
+			try {
+				await clickWindow(manualHwnd);
+				await waitFor(getForegroundWindowHandle, (handle) => handle === manualHwnd, {
+					label: '使い方のウィンドウを前面に戻す (後片付け)'
+				});
+				await sendKeySequence([[VK.ESCAPE]]);
+				await waitForWindowCount(client, 1);
+			} catch (error) {
+				console.warn(
+					`[e2e] 使い方のウィンドウを閉じられませんでした: ${error instanceof Error ? error.message : error}`
+				);
+			}
 		}
 	});
 
