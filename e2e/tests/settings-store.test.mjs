@@ -28,7 +28,7 @@ import { waitFor } from '../lib/wait.mjs';
 
 // 再起動と設定の置き場 (docs/config.md)。設定の変更は、設定画面の表の操作 (部品テストで見ている) ではなく、
 // 設定画面と同じコマンドで行う。起動した後の設定は、画面が読むのと同じ get_settings で読む。
-// トレイに出る警告の文言は、トレイのメニューの、選べない「⚠ …」の項目で見る (`lib.rs` の tray_menu)
+// トレイに出る警告の文言は、トレイのメニューの「⚠ …」の項目で見る (`lib.rs` の tray_menu)
 
 const suite = createSuite();
 const REPLACEMENTS = [{ from: 'E2E前', to: 'E2E後', enabled: true }];
