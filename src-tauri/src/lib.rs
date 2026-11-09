@@ -894,6 +894,11 @@ fn hide_on_blur(app: &AppHandle) {
             && !check.focused
             && !check.settings_focused
             && !check.settings_opening
+            // 自分のほかの窓（ライセンス・使い方）へ移ったときは、戻り先にしない
+            && !app
+                .webview_windows()
+                .values()
+                .any(|other| other.is_focused().unwrap_or(false))
         {
             *app.state::<DraftState>().return_target.lock().unwrap() = focus::capture(&window);
         }

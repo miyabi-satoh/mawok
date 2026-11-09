@@ -350,7 +350,11 @@ fn set_or_remove(
     let empty_object = Value::Object(Map::new());
     let empty_array = Value::Array(Vec::new());
     let value = match (value, table.get(name)) {
-        (None, Some(Item::Table(_))) if changed_only => Some(&empty_object),
+        (None, Some(Item::Table(_) | Item::Value(toml_edit::Value::InlineTable(_))))
+            if changed_only =>
+        {
+            Some(&empty_object)
+        }
         (None, Some(Item::ArrayOfTables(_))) if changed_only => Some(&empty_array),
         (value, _) => value,
     };
@@ -392,6 +396,38 @@ fn set_or_remove(
         }
         if existing.is_empty() {
             table.remove(name);
+        }
+        return;
+    }
+    // 1行の表（`macos = { copy = "…" }`）も、同じく項目ごとに入れ替える。入れ替えると、知らない項目が消えるため
+    if let (Some(Item::Value(toml_edit::Value::InlineTable(existing))), Value::Object(object)) =
+        (table.get_mut(name), value)
+    {
+        let previous_object = previous.and_then(Value::as_object);
+        let gone: Vec<String> = existing
+            .iter()
+            .map(|(key, _)| key.to_string())
+            .filter(|key| !object.contains_key(key))
+            .filter(|key| !changed_only || previous_object.is_some_and(|p| p.contains_key(key)))
+            .collect();
+        for key in &gone {
+            existing.remove(key);
+        }
+        let mut added = false;
+        for (key, value) in object {
+            if previous_object.and_then(|p| p.get(key)) == Some(value)
+                || existing.get(key).and_then(value_to_json).as_ref() == Some(value)
+            {
+                continue;
+            }
+            if let Some(new) = to_value(value) {
+                added |= existing.insert(key, new).is_none();
+            }
+        }
+        if existing.is_empty() {
+            table.remove(name);
+        } else if added || !gone.is_empty() {
+            existing.fmt();
         }
         return;
     }
@@ -1027,5 +1063,33 @@ mod tests {
         let (_, error) = &read.unreadable[0];
         assert!(error.starts_with("line 3, column "), "{error}");
         assert!(!error.contains("secret"), "{error}");
+    }
+
+    /// 1行の表で書いたキー操作も、知らない操作を残す
+    #[test]
+    fn keeps_unknown_keys_of_an_inline_table_when_writing_changes() {
+        let dir = TempDir::new("settings-files-inline-keys");
+        fs::write(
+            dir.join(SETTINGS),
+            "[text_window_keys]\nmacos = { copy = \"Mod+KeyJ\", new_action = \"Mod+KeyN\" }\n",
+        )
+        .unwrap();
+        let before = entries(&[("text_window_keys", json!({ "copy": "Mod+KeyJ" }))]);
+        let next = entries(&[("text_window_keys", json!({ "copy": "Mod+KeyK" }))]);
+        write(dir.path(), "macos", MANAGED, Scope::Changed(&before), &next).unwrap();
+        let settings = fs::read_to_string(dir.join(SETTINGS)).unwrap();
+        assert!(settings.contains("copy = \"Mod+KeyK\""), "{settings}");
+        assert!(settings.contains("new_action = \"Mod+KeyN\""), "{settings}");
+        write(
+            dir.path(),
+            "macos",
+            MANAGED,
+            Scope::Changed(&next),
+            &entries(&[]),
+        )
+        .unwrap();
+        let settings = fs::read_to_string(dir.join(SETTINGS)).unwrap();
+        assert!(!settings.contains("copy"), "{settings}");
+        assert!(settings.contains("new_action = \"Mod+KeyN\""), "{settings}");
     }
 }

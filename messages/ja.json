@@ -15,7 +15,7 @@
 	"draft_guidance_write": "ここに書いて {copy} を押すと、コピーして元のアプリに戻ります。あとは貼るだけです。",
 	"draft_guidance_write_no_copy": "ここに書いてコピーすると、元のアプリに戻ります。あとは貼るだけです。",
 	"draft_guidance_summon": "{hotkey} でいつでも呼び出せます。",
-	"draft_guidance_hotkey_unavailable": "ホットキー ({hotkey}) を登録できません。",
+	"draft_guidance_hotkey_unavailable": "ホットキー ({hotkey}) を登録できません。設定の「キー操作」で別のキーにします。",
 	"draft_guidance_change": "この案内は設定 ({settings}) で変えたり消したりできます。",
 	"draft_guidance_change_no_settings": "この案内は設定で変えたり消したりできます。",
 	"settings_category_general": "一般",

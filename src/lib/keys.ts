@@ -254,7 +254,6 @@ const MODIFIER_CODES = new Set([
 /** ホットキーとして登録できる KeyboardEvent.code。Rust 側が生成した集合を使う */
 const SUPPORTED_CODES = new Set<string>(CONSTANTS.SUPPORTED_CODES);
 
-/** 押したキーの組み合わせを、ホットキーの設定に書く文字列（例: CommandOrControl+Shift+Space）にする */
 /**
  * キーの記録に使えないキーか（¥・変換・無変換など、ホットキーにもキー操作にも登録できないキー）。修飾キーは本体のキーを待つので含めない。
  * 押しても何も起きないと、ほかのアプリが使っているのと見分けが付かないので、画面は使えないことを出す
@@ -263,6 +262,7 @@ export function isUnsupportedKey(event: Pick<KeyboardEvent, 'code'>): boolean {
 	return !MODIFIER_CODES.has(event.code) && !SUPPORTED_CODES.has(event.code);
 }
 
+/** 押したキーの組み合わせを、ホットキーの設定に書く文字列（例: CommandOrControl+Shift+Space）にする */
 export function toAccelerator(event: KeyCombo, platform: Platform): string | null {
 	// 修飾キーを押し始めただけのときは、本体のキーが押されるのを待つ
 	if (MODIFIER_CODES.has(event.code)) return null;

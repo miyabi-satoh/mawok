@@ -146,6 +146,9 @@
 
 	async function stopRecording() {
 		recording = null;
+		// 記録の途中に出した「使えません」は、やめた後には当たらない
+		hotkeyError = '';
+		keyError = null;
 		await invoke('resume_hotkey');
 	}
 
@@ -184,6 +187,7 @@
 			await setHotkey(accelerator);
 			return;
 		}
+		keyError = null;
 		try {
 			await invoke('set_draft_key', { action: target, key: accelerator });
 		} catch (e) {
