@@ -35,6 +35,7 @@
 		returnsFocusToDraft,
 		type DraftAction
 	} from '$lib/keys';
+	import { keepsDraftFocus } from '$lib/draft-focus';
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
 	import { coalescedSaver } from '$lib/saver';
@@ -495,6 +496,17 @@
 		return event.ctrlKey && ['KeyP', 'KeyF', 'KeyG'].includes(event.code);
 	}
 
+	// 打っている最中に余白などを押しても、入力欄からフォーカスを外さない（draft-focus.ts）
+	function onWindowMousedown(event: MouseEvent) {
+		if (
+			event.button === 0 &&
+			document.activeElement === textarea &&
+			keepsDraftFocus(event.target)
+		) {
+			event.preventDefault();
+		}
+	}
+
 	/**
 	 * 入力欄の外で押したキー。入力欄と一覧は自分で受けるので、そこで止めなかったものだけがここへ届く。
 	 * 一覧を開いている間は、下書きの操作のキーを止めるだけにする（一覧は修飾キー付きのキーを使わず、
@@ -627,7 +639,7 @@
 </script>
 
 <!-- 文字色はテーマごとに変数で渡し、下の style で .dark かどうかに合わせて選ぶ。空なら変数を当てず、標準の文字色に任せる -->
-<svelte:window onkeydown={onWindowKeydown} />
+<svelte:window onkeydown={onWindowKeydown} onmousedown={onWindowMousedown} />
 
 <main
 	class="relative flex h-screen flex-col gap-2 p-2"

@@ -6,19 +6,29 @@ import {
 	typeIntoDraft,
 	hideDraft,
 	hideDraftWithoutCopy,
-	waitDraftHidden
+	waitDraftHidden,
+	waitForWindowCount
 } from '../lib/app.mjs';
+import { MANUAL_TITLE, TRAY_MENU_JA } from '../lib/app-conf.mjs';
 import {
 	getClipboard,
 	setClipboard,
 	isDraftWindowVisible,
 	getDraftWindowHandle,
-	getForegroundWindowHandle
+	getForegroundWindowHandle,
+	findVisibleMawokWindow,
+	getMawokProcessId
 } from '../lib/os.mjs';
+import {
+	clickTrayMenuItem,
+	closeLeftoverTrayMenu,
+	closeTrayOverflow,
+	openTrayMenu
+} from '../lib/tray.mjs';
 import { waitFor } from '../lib/wait.mjs';
 import { beginTestConfig } from '../lib/config.mjs';
 import { launchPasteTarget, expectPasted } from '../lib/paste-target.mjs';
-import { clickWindow } from '../lib/input.mjs';
+import { clickWindow, sendKeySequence, VK } from '../lib/input.mjs';
 
 // 貼り付け先を前面にする → ホットキー → 入力 → Ctrl+Enter → クリップボード → 貼り付け先へ
 // フォーカスが戻り、Ctrl+V で届く、の一番基本的な流れ。
@@ -33,6 +43,17 @@ import { clickWindow } from '../lib/input.mjs';
 
 const suite = createSuite();
 const SENTINEL = 'e2e-sentinel-before';
+// 戻り先を替えるまでの待ち (lib.rs の HIDE_ON_BLUR_DELAY、150 ms) より十分に長く、ほかの窓に留まる時間
+const STAY_AWAY_MS = 600;
+
+/** ほかの窓に移った後、下書きを押して前面に戻す */
+async function returnToDraft() {
+	const draftHwnd = await getDraftWindowHandle();
+	await clickWindow(draftHwnd);
+	await waitFor(getForegroundWindowHandle, (handle) => handle === draftHwnd, {
+		label: 'クリックで下書きへ戻る'
+	});
+}
 
 test.describe('下書き → クリップボード → 貼り付け先', () => {
 	let testConfig;
@@ -63,8 +84,11 @@ test.describe('下書き → クリップボード → 貼り付け先', () => {
 
 	let client;
 	let pasteTarget;
+	let pid;
 	test.beforeEach(async () => {
+		pid = null;
 		client = await suite.newClient();
+		pid = await getMawokProcessId();
 		assert.equal(await isDraftWindowVisible(), false, '起動直後は下書きが非表示のはず');
 		// 下書きを出す前に前面だったアプリが戻り先になるので、貼り付け先を前面にしておく
 		pasteTarget = await launchPasteTarget();
@@ -72,6 +96,9 @@ test.describe('下書き → クリップボード → 貼り付け先', () => {
 	});
 	test.afterEach(async () => {
 		try {
+			// トレイのメニューと、メニューを出すために開いた「非表示のアイコン」を残さない (tray.test.mjs と同じ)
+			await closeLeftoverTrayMenu(pid);
+			await closeTrayOverflow();
 			await pasteTarget?.close();
 		} finally {
 			await suite.closeClient(client);
@@ -95,51 +122,78 @@ test.describe('下書き → クリップボード → 貼り付け先', () => {
 		assert.equal(await expectPasted(pasteTarget, text), text);
 	});
 
-	// 下書きを隠すだけでも、OS は直前にアクティブだったウィンドウを前面にする。上下のテストでは
-	// それがたまたま貼り付け先なので、戻り先へフォーカスを戻す処理 (focus.rs の SetForegroundWindow) を
-	// 外しても通ってしまう (実際に外して確かめた)。下書きを出したままほかのウィンドウをアクティブにして
-	// から下書きへ戻り、直前にアクティブだったウィンドウと戻り先を食い違わせて、戻す処理そのものを見る
-	for (const { key, hide, copies } of [
-		{ key: 'Ctrl+Enter', hide: hideDraft, copies: true },
-		{ key: 'Esc', hide: hideDraftWithoutCopy, copies: false }
-	]) {
-		test(`下書きを出したままほかのウィンドウに移って戻っても、${key} で出したときの戻り先へフォーカスが戻る`, async () => {
-			const bystander = await launchPasteTarget({
-				title: 'Mawok E2E 間に挟むウィンドウ',
-				left: 560,
-				top: 40
-			});
-			try {
-				// 起動したウィンドウに前面を取られていると戻り先がずれるので、貼り付け先を前面にし直す
-				await pasteTarget.activate();
-				await setClipboard(SENTINEL);
-				const text = `e2e return target ${Date.now()}`;
-
-				await showDraftAndWaitVisible();
-				await typeIntoDraft(client, text);
-
-				await bystander.activate();
-				assert.equal(
-					await isDraftWindowVisible(),
-					true,
-					'hideTextWindowOnBlur をオフにしているので出たままのはず'
-				);
-				const draftHwnd = await getDraftWindowHandle();
-				await clickWindow(draftHwnd);
-				await waitFor(getForegroundWindowHandle, (handle) => handle === draftHwnd, {
-					label: 'クリックで下書きへ戻る'
-				});
-
-				await hide(client);
-				await waitDraftHidden(`下書きウィンドウの非表示 (${key} 後)`);
-				const expected = copies ? text : SENTINEL;
-				await waitFor(getClipboard, (value) => value === expected, { label: 'クリップボード' });
-				assert.equal(await expectPasted(pasteTarget, expected), expected);
-			} finally {
-				await bystander.close();
-			}
+	// 下書きを出したままほかのアプリへ移ったら、戻り先はそのアプリに替わる (lib.rs の hide_on_blur)。
+	// 替えるのはフォーカスが外れてから HIDE_ON_BLUR_DELAY (150 ms) 待った後なので、それより長く留まってから戻る
+	test('下書きを出したままほかのアプリに移って戻ると、Ctrl+Enter でそのアプリへ戻る', async () => {
+		const bystander = await launchPasteTarget({
+			title: 'Mawok E2E 間に挟むウィンドウ',
+			left: 560,
+			top: 40
 		});
-	}
+		try {
+			// 起動したウィンドウに前面を取られていると戻り先がずれるので、貼り付け先を前面にし直す
+			await pasteTarget.activate();
+			await setClipboard(SENTINEL);
+			const text = `e2e return target ${Date.now()}`;
+
+			await showDraftAndWaitVisible();
+			await typeIntoDraft(client, text);
+
+			await bystander.activate();
+			await new Promise((resolve) => setTimeout(resolve, STAY_AWAY_MS));
+			assert.equal(
+				await isDraftWindowVisible(),
+				true,
+				'hideTextWindowOnBlur をオフにしているので出たままのはず'
+			);
+			await returnToDraft();
+
+			await hideDraft(client);
+			await waitDraftHidden('下書きウィンドウの非表示 (Ctrl+Enter 後)');
+			await waitFor(getClipboard, (value) => value === text, { label: 'クリップボード' });
+			assert.equal(await expectPasted(bystander, text), text);
+		} finally {
+			await bystander.close();
+		}
+	});
+
+	// 下書きを隠すだけでも、OS は直前にアクティブだったウィンドウを前面にする。ほかのテストでは
+	// それがたまたま戻り先なので、戻り先へフォーカスを戻す処理 (focus.rs の SetForegroundWindow) を
+	// 外しても通ってしまう。自分の使い方の窓 (戻り先にしない) を経由して、直前にアクティブだったウィンドウと
+	// 戻り先を食い違わせ、戻す処理そのものを見る
+	test('下書きを出したまま使い方の窓に移って戻っても、Esc で出したときの戻り先へフォーカスが戻る', async () => {
+		await setClipboard(SENTINEL);
+		await showDraftAndWaitVisible();
+		await typeIntoDraft(client, `e2e return target ${Date.now()}`);
+
+		const { hwnd: menuHwnd } = await openTrayMenu(pid);
+		await clickTrayMenuItem(menuHwnd, TRAY_MENU_JA.manual);
+		const manualHwnd = await waitFor(
+			() => findVisibleMawokWindow(MANUAL_TITLE),
+			(found) => found !== null,
+			{ label: 'トレイの「使い方」で出る使い方のウィンドウ' }
+		);
+		try {
+			await waitFor(getForegroundWindowHandle, (handle) => handle === manualHwnd, {
+				label: '使い方のウィンドウが前面になる'
+			});
+			await new Promise((resolve) => setTimeout(resolve, STAY_AWAY_MS));
+			await returnToDraft();
+
+			await hideDraftWithoutCopy(client);
+			await waitDraftHidden('下書きウィンドウの非表示 (Esc 後)');
+			assert.equal(await getClipboard(), SENTINEL);
+			assert.equal(await expectPasted(pasteTarget, SENTINEL), SENTINEL);
+		} finally {
+			// 下書きは隠れているので、使い方の窓は覆われずに押せる
+			await clickWindow(manualHwnd);
+			await waitFor(getForegroundWindowHandle, (handle) => handle === manualHwnd, {
+				label: '使い方のウィンドウを前面に戻す (後片付け)'
+			});
+			await sendKeySequence([[VK.ESCAPE]]);
+			await waitForWindowCount(client, 1);
+		}
+	});
 
 	test('末尾の改行・空白が取り除かれ、貼り付け先にも末尾の改行が入らない', async () => {
 		await setClipboard(SENTINEL);

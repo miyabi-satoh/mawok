@@ -2316,7 +2316,7 @@ impl hotkey::Registrar for PluginRegistrar<'_> {
         }
         self.0
             .global_shortcut()
-            .register(hotkey)
+            .register(registered_form(hotkey).as_str())
             .map_err(|error| error.to_string())
     }
 
@@ -2327,13 +2327,25 @@ impl hotkey::Registrar for PluginRegistrar<'_> {
         }
         self.0
             .global_shortcut()
-            .unregister(hotkey)
+            .unregister(registered_form(hotkey).as_str())
             .map_err(|error| error.to_string())
     }
 
     fn is_registered(&self, hotkey: &str) -> bool {
-        hotkey_by_desktop() || self.0.global_shortcut().is_registered(hotkey)
+        hotkey_by_desktop()
+            || self
+                .0
+                .global_shortcut()
+                .is_registered(registered_form(hotkey).as_str())
     }
+}
+
+/// 登録に渡すホットキー。Windows では、記号のキーを今のキー配列で押した位置のキーに合わせる（hotkey::for_layout）
+fn registered_form(hotkey: &str) -> String {
+    #[cfg(windows)]
+    return hotkey::for_current_layout(hotkey);
+    #[cfg(not(windows))]
+    hotkey.to_string()
 }
 
 /// 設定のホットキーが登録されている状態にし、登録できているかをトレイの ⚠ に反映する

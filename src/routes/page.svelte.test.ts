@@ -1313,6 +1313,17 @@ describe('キー操作', () => {
 		expect(document.activeElement).toBe(textarea.element());
 	});
 
+	it('打っている最中に余白を押しても、入力欄からフォーカスを外さない', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.click();
+
+		const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+		document.querySelector('main')!.dispatchEvent(press);
+
+		expect(press.defaultPrevented).toBe(true);
+	});
+
 	it('余白をクリックしてフォーカスが外れた後に打った文字は、入力欄に入る', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
