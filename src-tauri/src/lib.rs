@@ -2310,9 +2310,26 @@ fn hotkey_by_desktop() -> bool {
 /// global-shortcut プラグインでホットキーを登録・解除する。デスクトップのキー設定で割り当てるときは、何も登録せず、登録できている扱いにする
 struct PluginRegistrar<'a>(&'a AppHandle);
 
-/// 設定のホットキーから、実際に登録した形（registered_form）。解除と確かめには、登録したときの形を使う。
-/// そのたびに今の配列で作り直すと、途中で配列を切り替えたときに、登録したキーを見つけられず解除できない
+/// 設定のホットキーから、実際に登録した形（registered_form）。途中でキー配列を切り替えると今の配列で作る形が変わるので、
+/// 解除には登録したときの形を使い、登録できているかは今の配列の形と同じときだけにする（ずれていれば登録し直させる）
 static REGISTERED_AS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
+impl PluginRegistrar<'_> {
+    /// 前に登録した形が、今も登録されていれば解除する
+    fn unregister_saved_form(&self, hotkey: &str) -> Result<(), String> {
+        let Some(saved) = REGISTERED_AS.lock().unwrap().get(hotkey).cloned() else {
+            return Ok(());
+        };
+        let shortcuts = self.0.global_shortcut();
+        if shortcuts.is_registered(saved.as_str()) {
+            shortcuts
+                .unregister(saved.as_str())
+                .map_err(|error| error.to_string())?;
+        }
+        REGISTERED_AS.lock().unwrap().remove(hotkey);
+        Ok(())
+    }
+}
 
 impl hotkey::Registrar for PluginRegistrar<'_> {
     fn register(&mut self, hotkey: &str) -> Result<(), String> {
@@ -2324,6 +2341,8 @@ impl hotkey::Registrar for PluginRegistrar<'_> {
                 "no key on the current keyboard layout registers as {hotkey}"
             ));
         };
+        // 配列を切り替える前の形が残っていれば、先に外す
+        self.unregister_saved_form(hotkey)?;
         self.0
             .global_shortcut()
             .register(registered.as_str())
@@ -2337,29 +2356,21 @@ impl hotkey::Registrar for PluginRegistrar<'_> {
 
     // 起動時に登録できなかったキーや、記録のために止めているキーは、解除するものがないので成功として扱う
     fn unregister(&mut self, hotkey: &str) -> Result<(), String> {
-        if hotkey_by_desktop() || !self.is_registered(hotkey) {
+        if hotkey_by_desktop() {
             return Ok(());
         }
-        let Some(registered) = REGISTERED_AS.lock().unwrap().get(hotkey).cloned() else {
-            return Ok(());
-        };
-        self.0
-            .global_shortcut()
-            .unregister(registered.as_str())
-            .map_err(|error| error.to_string())?;
-        REGISTERED_AS.lock().unwrap().remove(hotkey);
-        Ok(())
+        self.unregister_saved_form(hotkey)
     }
 
     fn is_registered(&self, hotkey: &str) -> bool {
-        hotkey_by_desktop()
-            || REGISTERED_AS
-                .lock()
-                .unwrap()
-                .get(hotkey)
-                .is_some_and(|registered| {
-                    self.0.global_shortcut().is_registered(registered.as_str())
-                })
+        if hotkey_by_desktop() {
+            return true;
+        }
+        let Some(current) = registered_form(hotkey) else {
+            return false;
+        };
+        REGISTERED_AS.lock().unwrap().get(hotkey) == Some(&current)
+            && self.0.global_shortcut().is_registered(current.as_str())
     }
 }
 
