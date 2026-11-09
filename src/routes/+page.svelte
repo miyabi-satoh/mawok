@@ -32,7 +32,6 @@
 		isDismissKey,
 		isTabKey,
 		keyHint,
-		returnsFocusToDraft,
 		type DraftAction
 	} from '$lib/keys';
 	import { keepsDraftFocus } from '$lib/draft-focus';
@@ -511,7 +510,7 @@
 	 * 入力欄の外で押したキー。入力欄と一覧は自分で受けるので、そこで止めなかったものだけがここへ届く。
 	 * 一覧を開いている間は、下書きの操作のキーを止めるだけにする（一覧は修飾キー付きのキーを使わず、
 	 * 止めないと WebView2 の Ctrl+J のダウンロードの一覧や macOS のメニューのキーに届く）。
-	 * どちらも開いていなければ、余白や帯をクリックしてフォーカスが入力欄から外れたので、入力欄と同じく Esc と操作のキーを効かせる
+	 * どちらも開いていなければ、ボタンを押してフォーカスが入力欄から外れたので、入力欄と同じく Esc と操作のキーを効かせる
 	 */
 	function onWindowKeydown(event: KeyboardEvent) {
 		const handled = event.defaultPrevented;
@@ -523,17 +522,6 @@
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
 		if (snippetsOpen) {
 			if (action) event.preventDefault();
-			return;
-		}
-		// 余白やボタンをクリックした後に打った文字は、入力欄へ戻して入れる。既定のままだとどこにも入らない。
-		// keydown のうちにフォーカスを移すと、そのキーの文字（と IME の変換）は入力欄に入る
-		if (
-			!action &&
-			textarea &&
-			returnsFocusToDraft(event, event.target instanceof HTMLButtonElement)
-		) {
-			if (event.key === 'Tab') event.preventDefault();
-			textarea.focus();
 			return;
 		}
 		// ボタンにフォーカスがあるときの Enter や Space は、ボタンの操作なので横取りしない

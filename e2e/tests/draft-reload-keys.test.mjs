@@ -82,13 +82,18 @@ test.describe('読み込み直すキー', () => {
 		}
 	});
 
-	test('余白を押して入力欄からフォーカスを外したとき', async () => {
+	test('入力欄からフォーカスが外れているとき', async () => {
 		const hwnd = await getDraftWindowHandle();
 		const { scale } = await readWindow(hwnd);
-		// 下書きの左上の余白 (main の p-2 の中) を本物のマウスで押す
+		// 余白を本物のマウスで押しても、入力欄からフォーカスは外れない (draft-focus.ts)
 		await clickClientPoint(hwnd, 3 * scale, 3 * scale);
-		const focused = await client.execute(() => document.activeElement?.tagName);
-		assert.notEqual(focused, 'TEXTAREA', '余白を押すと入力欄からフォーカスが外れるはず');
+		assert.equal(
+			await client.execute(() => document.activeElement?.tagName),
+			'TEXTAREA',
+			'余白を押しても入力欄にフォーカスが残るはず'
+		);
+		// ボタンを押した後と同じく入力欄の外にフォーカスがある状態にする。ボタンを押すと操作が動くので、外すだけにする
+		await client.execute(() => /** @type {HTMLElement} */ (document.activeElement)?.blur());
 		for (const [name, combo] of RELOAD_KEYS) {
 			await mark(client);
 			await sendKeySequence([combo]);

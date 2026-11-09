@@ -1288,7 +1288,7 @@ describe('キー操作', () => {
 		expect(commandsCalled()).not.toContain('toggle_settings_window');
 	});
 
-	it('余白をクリックして入力欄からフォーカスが外れても、Esc で隠し、操作のキーでコピーする', async () => {
+	it('ボタンを押して入力欄からフォーカスが外れても、Esc で隠し、操作のキーでコピーする', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('git status');
@@ -1322,17 +1322,5 @@ describe('キー操作', () => {
 		document.querySelector('main')!.dispatchEvent(press);
 
 		expect(press.defaultPrevented).toBe(true);
-	});
-
-	it('余白をクリックしてフォーカスが外れた後に打った文字は、入力欄に入る', async () => {
-		const screen = await render(Page);
-		const textarea = draftField(screen);
-		await textarea.fill('git');
-		(document.activeElement as HTMLElement).blur();
-
-		await userEvent.keyboard(' status');
-
-		await expect.element(textarea).toHaveValue('git status');
-		expect(document.activeElement).toBe(textarea.element());
 	});
 });

@@ -41,27 +41,6 @@ export function isTabKey(
 	return event.key === 'Tab' && hasNoModifiers(event) && !isImeKey(event);
 }
 
-/**
- * 入力欄の外にフォーカスがあるときに、入力欄へ戻して打たせるキーか。文字のキー・IME が受けたキー・Backspace・Delete と、
- * フォーカスの外れる Tab（Shift+Tab も）。修飾キー付きのキーは操作のキーなので戻さない。
- * ボタンの上の Space はボタンを押す操作なので戻さない
- */
-export function returnsFocusToDraft(
-	event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing' | 'keyCode'>,
-	onButton: boolean
-): boolean {
-	if (event.metaKey || event.ctrlKey || event.altKey) return false;
-	if (onButton && event.key === ' ') return false;
-	return (
-		event.key.length === 1 ||
-		isImeKey(event) ||
-		event.key === 'Process' ||
-		event.key === 'Backspace' ||
-		event.key === 'Delete' ||
-		event.key === 'Tab'
-	);
-}
-
 export type Platform = GeneratedPlatform;
 
 /** 下書きウィンドウでキーで呼べる操作（Rust 側の draft_keys::DraftAction）。並びは、キーが重なったときに先の操作にキーを残す順 */

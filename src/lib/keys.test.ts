@@ -14,7 +14,6 @@ import {
 	isKeyRejection,
 	keyRejectionMessage,
 	platformFromUrl,
-	returnsFocusToDraft,
 	toAccelerator
 } from './keys';
 
@@ -154,41 +153,6 @@ describe('isTabKey', () => {
 			isTabKey({ key: 'Tab', ...noModifiers, ctrlKey: true, isComposing: false, keyCode: 9 })
 		).toBe(false);
 		expect(isTabKey({ key: 'Tab', ...noModifiers, isComposing: true, keyCode: 229 })).toBe(false);
-	});
-});
-
-describe('returnsFocusToDraft', () => {
-	const key = (key: string, extra: Partial<KeyboardEvent> = {}) => ({
-		key,
-		...noModifiers,
-		isComposing: false,
-		keyCode: 0,
-		...extra
-	});
-
-	it('文字・IME が受けたキー・Backspace・Delete・Tab で入力欄へ戻す', () => {
-		for (const event of [
-			key('a'),
-			key('あ'),
-			key('Process', { keyCode: 229 }),
-			key('Backspace'),
-			key('Delete'),
-			key('Tab')
-		]) {
-			expect(returnsFocusToDraft(event, false)).toBe(true);
-		}
-	});
-
-	it('修飾キー付きのキーと、文字を入れないキーでは戻さない', () => {
-		expect(returnsFocusToDraft(key('c', { ctrlKey: true }), false)).toBe(false);
-		expect(returnsFocusToDraft(key('c', { metaKey: true }), false)).toBe(false);
-		expect(returnsFocusToDraft(key('ArrowUp'), false)).toBe(false);
-		expect(returnsFocusToDraft(key('Shift'), false)).toBe(false);
-	});
-
-	it('ボタンの上の Space はボタンの操作なので戻さない', () => {
-		expect(returnsFocusToDraft(key(' '), true)).toBe(false);
-		expect(returnsFocusToDraft(key(' '), false)).toBe(true);
 	});
 });
 
