@@ -9,7 +9,7 @@
 <script lang="ts" generics="T extends { name: string }">
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
-	import { dragHandle, dragHandleZone, type DndEvent } from 'svelte-dnd-action';
+	import { dragHandle, dragHandleZone, TRIGGERS, type DndEvent } from 'svelte-dnd-action';
 	import { flip } from 'svelte/animate';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import type { SvelteSet } from 'svelte/reactivity';
@@ -64,12 +64,25 @@
 	const matched = $derived(matchedKeys(() => list.rows, query, searchText));
 	const shown = $derived(shownRows(list.rows, matched));
 
+	/** ドラッグの途中か。途中の Esc はドラッグの取り消しで、設定画面を閉じるキーにしない */
+	let dragging = false;
+
 	function consider(e: CustomEvent<DndEvent<Row<T>>>) {
+		if (e.detail.info.trigger === TRIGGERS.DRAG_STARTED) dragging = true;
 		list.consider(e.detail.items);
 	}
 
 	function finalize(e: CustomEvent<DndEvent<Row<T>>>) {
+		dragging = false;
 		list.finalize(e.detail.items);
+	}
+
+	/**
+	 * キーボードでつかんだ行を Esc で放すとき、設定画面が閉じないよう既定の動作を止めた印を付ける
+	 * （設定画面は、部品が受け持った Esc では閉じない）。svelte-dnd-action は Esc で放すだけで印を付けない
+	 */
+	function onKeydownCapture(event: KeyboardEvent) {
+		if (dragging && event.key === 'Escape') event.preventDefault();
 	}
 
 	/** 行の並び。消した後に、隣の行の「…」へフォーカスを移すのに使う */
@@ -110,6 +123,7 @@
 		}}
 		onconsider={consider}
 		onfinalize={finalize}
+		onkeydowncapture={onKeydownCapture}
 	>
 		{#each shown as row (row.key)}
 			{@const index = list.rows.indexOf(row)}

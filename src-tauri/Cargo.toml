@@ -76,7 +76,7 @@ tauri-plugin-single-instance = "2.5.4"
 # ログイン時の起動（autostart.rs）。macOS はログイン項目（SMAppService）、Linux は XDG autostart を直接使う
 tauri-plugin-autostart = "2.7.0"
 # ApplicationModel・Win32_Storage_Packaging_Appx は、MSIX 版かを見分けて（package.rs）、ログイン時の起動を StartupTask で行うため（autostart.rs）
-windows = { version = "0.62.2", features = ["ApplicationModel", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Storage_Packaging_Appx", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62.2", features = ["ApplicationModel", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Storage_Packaging_Appx", "Win32_System_Recovery", "Win32_UI_WindowsAndMessaging"] }
 # WebView2 のイベントを受け取るため。Tauri（wry）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
 webview2-com = "0.39.1"
 windows-core = "0.62.2"

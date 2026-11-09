@@ -15,7 +15,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '$lib/font';
-	import { draftGuidance } from '$lib/guidance';
+	import { draftGuidance, guidanceHotkey } from '$lib/guidance';
 	import { errorCode, settingsSaveProblem } from '$lib/errors';
 	import { insertAsTyped } from '$lib/insert-text';
 	import {
@@ -26,7 +26,15 @@
 	} from '$lib/history.svelte';
 	import { caretLine } from '$lib/caret-line';
 	import { clamp } from '$lib/clamp';
-	import { draftActionFor, formatKeys, isDismissKey, keyHint, type DraftAction } from '$lib/keys';
+	import {
+		draftActionFor,
+		formatKeys,
+		isDismissKey,
+		isTabKey,
+		keyHint,
+		returnsFocusToDraft,
+		type DraftAction
+	} from '$lib/keys';
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
 	import { coalescedSaver } from '$lib/saver';
@@ -46,12 +54,10 @@
 		settings.current
 			? draftGuidance(
 					settings.current.inputGuidance,
-					// デスクトップで割り当てるときは、portal で付いて読めたキーだけを書く。キー設定から呼ぶ形では、どのキーかを Mawok は知らない
-					settings.current.hotkeyByDesktop
-						? (settings.current.desktopHotkeyKeys ?? '')
-						: settings.current.hotkey,
+					guidanceHotkey(settings.current),
 					settings.current.textWindowKeys,
-					settings.current.platform
+					settings.current.platform,
+					settings.current.hotkeyUnavailable
 				)
 			: ''
 	);
@@ -466,14 +472,27 @@
 			runAction(action);
 			return;
 		}
+		// Tab は入力欄の中でタブ文字にする。既定のままだと入力欄の外へフォーカスが移り、打てなくなる
+		if (isTabKey(event) && event.target === textarea && textarea) {
+			event.preventDefault();
+			insertAsTyped(textarea, '\t');
+			return;
+		}
 		const direction = historyDirection(event);
 		if (direction && textarea) recallHistory(event, direction, textarea);
 	}
 
-	/** ブラウザーとして読み込み直すキー（F5・Ctrl+R と、Shift や Ctrl を足したもの） */
-	function isReloadKey(event: KeyboardEvent): boolean {
+	/**
+	 * WebView のブラウザーとしてのキー。読み込み直す（F5・Ctrl+R）と書きかけが消え、
+	 * 印刷（Ctrl+P）・ページ内検索（Ctrl+F・Ctrl+G・F3）・キャレットブラウズ（F7）は、窓やバーを出して入力欄からフォーカスを奪う。
+	 * Shift や Ctrl を足したものも同じ。読み込み直す以外は WebView2 のキーで、macOS では Ctrl+F・Ctrl+P が入力欄のカーソル移動なので Windows だけ止める
+	 */
+	function isBrowserKey(event: KeyboardEvent): boolean {
 		if (event.altKey || event.metaKey) return false;
-		return event.key === 'F5' || (event.ctrlKey && event.code === 'KeyR');
+		if (event.key === 'F5' || (event.ctrlKey && event.code === 'KeyR')) return true;
+		if (settings.current?.platform !== 'windows') return false;
+		if (['F3', 'F7'].includes(event.key)) return true;
+		return event.ctrlKey && ['KeyP', 'KeyF', 'KeyG'].includes(event.code);
 	}
 
 	/**
@@ -484,14 +503,25 @@
 	 */
 	function onWindowKeydown(event: KeyboardEvent) {
 		const handled = event.defaultPrevented;
-		// WebView2 は F5 や Ctrl+R で画面を読み込み直し、書きかけが消える。どこにフォーカスがあっても既定の動作を止める。
+		// WebView2 のブラウザーとしてのキー（F5 で読み込み直す・Ctrl+P で印刷する など）は、どこにフォーカスがあっても既定の動作を止める。
 		// 操作に割り当てたキーなら、止めたうえで下で操作を呼ぶ
-		if (isReloadKey(event)) event.preventDefault();
+		if (isBrowserKey(event)) event.preventDefault();
 		if (handled || event.target === textarea) return;
 		const view = settings.current;
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
 		if (snippetsOpen) {
 			if (action) event.preventDefault();
+			return;
+		}
+		// 余白やボタンをクリックした後に打った文字は、入力欄へ戻して入れる。既定のままだとどこにも入らない。
+		// keydown のうちにフォーカスを移すと、そのキーの文字（と IME の変換）は入力欄に入る
+		if (
+			!action &&
+			textarea &&
+			returnsFocusToDraft(event, event.target instanceof HTMLButtonElement)
+		) {
+			if (event.key === 'Tab') event.preventDefault();
+			textarea.focus();
 			return;
 		}
 		// ボタンにフォーカスがあるときの Enter や Space は、ボタンの操作なので横取りしない

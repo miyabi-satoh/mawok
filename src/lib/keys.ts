@@ -28,6 +28,40 @@ export function isDismissKey(
 	return event.key === 'Escape' && !isImeKey(event);
 }
 
+/**
+ * 下書きの入力欄でタブ文字を入れるキーか（修飾キーの無い Tab）。WebView の既定ではフォーカスが入力欄の外へ移り、
+ * ボタンは Tab の順から外してあるので、戻る先が無く打てなくなる
+ */
+export function isTabKey(
+	event: Pick<
+		KeyboardEvent,
+		'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'isComposing' | 'keyCode'
+	>
+): boolean {
+	return event.key === 'Tab' && hasNoModifiers(event) && !isImeKey(event);
+}
+
+/**
+ * 入力欄の外にフォーカスがあるときに、入力欄へ戻して打たせるキーか。文字のキー・IME が受けたキー・Backspace・Delete と、
+ * フォーカスの外れる Tab（Shift+Tab も）。修飾キー付きのキーは操作のキーなので戻さない。
+ * ボタンの上の Space はボタンを押す操作なので戻さない
+ */
+export function returnsFocusToDraft(
+	event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing' | 'keyCode'>,
+	onButton: boolean
+): boolean {
+	if (event.metaKey || event.ctrlKey || event.altKey) return false;
+	if (onButton && event.key === ' ') return false;
+	return (
+		event.key.length === 1 ||
+		isImeKey(event) ||
+		event.key === 'Process' ||
+		event.key === 'Backspace' ||
+		event.key === 'Delete' ||
+		event.key === 'Tab'
+	);
+}
+
 export type Platform = GeneratedPlatform;
 
 /** 下書きウィンドウでキーで呼べる操作（Rust 側の draft_keys::DraftAction）。並びは、キーが重なったときに先の操作にキーを残す順 */
@@ -221,6 +255,14 @@ const MODIFIER_CODES = new Set([
 const SUPPORTED_CODES = new Set<string>(CONSTANTS.SUPPORTED_CODES);
 
 /** 押したキーの組み合わせを、ホットキーの設定に書く文字列（例: CommandOrControl+Shift+Space）にする */
+/**
+ * キーの記録に使えないキーか（¥・変換・無変換など、ホットキーにもキー操作にも登録できないキー）。修飾キーは本体のキーを待つので含めない。
+ * 押しても何も起きないと、ほかのアプリが使っているのと見分けが付かないので、画面は使えないことを出す
+ */
+export function isUnsupportedKey(event: Pick<KeyboardEvent, 'code'>): boolean {
+	return !MODIFIER_CODES.has(event.code) && !SUPPORTED_CODES.has(event.code);
+}
+
 export function toAccelerator(event: KeyCombo, platform: Platform): string | null {
 	// 修飾キーを押し始めただけのときは、本体のキーが押されるのを待つ
 	if (MODIFIER_CODES.has(event.code)) return null;

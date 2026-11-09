@@ -363,6 +363,24 @@ pub fn trim_trailing_whitespace(text: &str) -> &str {
     text.trim_end()
 }
 
+/// 行末を CR+LF にする（もとから CR+LF の所はそのまま）。Windows のクリップボードのテキストは行末を CR+LF にする取り決めで、
+/// LF だけだと、古い作りの複数行の欄（Win32 のエディット コントロール）に貼ったときに 1 行につながるため
+pub fn crlf_line_endings(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains('\n') {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut converted = String::with_capacity(text.len() + text.len() / 16);
+    let mut previous = None;
+    for c in text.chars() {
+        if c == '\n' && previous != Some('\r') {
+            converted.push('\r');
+        }
+        converted.push(c);
+        previous = Some(c);
+    }
+    std::borrow::Cow::Owned(converted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,6 +778,16 @@ mod tests {
         assert!(matches!(
             convert_widths(text, &CharWidths::default()),
             std::borrow::Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn makes_line_endings_crlf_without_doubling_existing_ones() {
+        assert_eq!(crlf_line_endings("a\nb\r\nc\n"), "a\r\nb\r\nc\r\n");
+        assert_eq!(crlf_line_endings("\n\n"), "\r\n\r\n");
+        assert!(matches!(
+            crlf_line_endings("one line"),
+            std::borrow::Cow::Borrowed("one line")
         ));
     }
 }

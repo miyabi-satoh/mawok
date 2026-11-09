@@ -29,7 +29,8 @@ pub struct Changed {
 
 /// 見張りを止めるには手放す
 pub struct Watch {
-    _watcher: RecommendedWatcher,
+    /// OS の知らせ。始められなかった（Linux の inotify の上限に達したなど）ときは None で、見に行く分だけで気づく
+    _watcher: Option<RecommendedWatcher>,
     /// 手放すと、見に行くスレッドが止まる
     _stop_polling: mpsc::Sender<()>,
     targets: Vec<PathBuf>,
@@ -73,21 +74,31 @@ pub fn start(
     }
     let classified = targets.clone();
     let notified = sender.clone();
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        let Ok(event) = event else {
-            return;
-        };
-        let changed = classify(&settings_dir, &classified, &history, &event.paths);
-        if changed != Changed::default() {
-            let _ = notified.send(changed);
+    let watcher = (|| {
+        let mut watcher =
+            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+                let Ok(event) = event else {
+                    return;
+                };
+                if !is_change(&event.kind) {
+                    return;
+                }
+                let changed = classify(&settings_dir, &classified, &history, &event.paths);
+                if changed != Changed::default() {
+                    let _ = notified.send(changed);
+                }
+            })?;
+        // まだ無いファイルは見張れないので、フォルダーを見張って名前で選ぶ
+        // 比べるのと同じ実体のパスで見張る。Windows と Linux は、見張ったパスに名前を付けたパスで知らせるため
+        for settings_dir in &watched {
+            watcher.watch(settings_dir, RecursiveMode::NonRecursive)?;
         }
-    })?;
-    // まだ無いファイルは見張れないので、フォルダーを見張って名前で選ぶ
-    // 比べるのと同じ実体のパスで見張る。Windows と Linux は、見張ったパスに名前を付けたパスで知らせるため
-    for settings_dir in &watched {
-        watcher.watch(settings_dir, RecursiveMode::NonRecursive)?;
-    }
-    watcher.watch(&history_watched, RecursiveMode::NonRecursive)?;
+        watcher.watch(&history_watched, RecursiveMode::NonRecursive)?;
+        notify::Result::Ok(watcher)
+    })()
+    // 見張れなくても、見に行く分で気づける。止めると、起動し直すまでほかのデバイスの変更を読まない
+    .inspect_err(|error| log::warn!("couldn't watch the settings folder; polling only: {error}"))
+    .ok();
     // OS の知らせが来ない置き場（docs/config.md「ほかで変わったとき」）でも気づけるよう、見にも行く
     let stop_polling = poll(dir.to_path_buf(), history_watched.clone(), POLL, sender);
     thread::spawn(move || {
@@ -105,6 +116,17 @@ pub fn start(
         _stop_polling: stop_polling,
         targets,
     })
+}
+
+/// 中身が変わったかもしれない知らせか。開いた・読んだ（Linux の inotify が知らせる）は除く。除かないと、
+/// 変わったときの読み直しがまた知らせを呼び、読み直し続けるため。書いて閉じたのは、その場で書き換えるエディターのために拾う
+fn is_change(kind: &notify::EventKind) -> bool {
+    use notify::event::{AccessKind, AccessMode, EventKind};
+    match kind {
+        EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
+        EventKind::Access(_) => false,
+        _ => true,
+    }
 }
 
 /// ファイルの属性の控え。中身は読まない。置き場がクラウドストレージなら、読むとファイルを落とすことになるため
@@ -291,5 +313,21 @@ mod tests {
             changed("/sync/Mawok/history/a1b2.broken-20261107-000000.json"),
             Changed::default()
         );
+    }
+
+    #[test]
+    fn ignores_opening_and_reading_but_not_writing() {
+        use notify::event::{AccessKind, AccessMode, CreateKind, EventKind, ModifyKind};
+        assert!(!is_change(&EventKind::Access(AccessKind::Open(
+            AccessMode::Any
+        ))));
+        assert!(!is_change(&EventKind::Access(AccessKind::Close(
+            AccessMode::Read
+        ))));
+        assert!(is_change(&EventKind::Access(AccessKind::Close(
+            AccessMode::Write
+        ))));
+        assert!(is_change(&EventKind::Modify(ModifyKind::Any)));
+        assert!(is_change(&EventKind::Create(CreateKind::File)));
     }
 }
