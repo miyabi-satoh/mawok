@@ -22,7 +22,7 @@ import { waitFor } from '../lib/wait.mjs';
 // macOS で見る。既定値で動くこと・読めないファイルを書き換えないことは、両 OS に共通の作りなので Windows の E2E
 // (tests/settings-store.test.mjs) に任せ、ここではメニューバーのメニューと Finder の側だけを見る
 
-/** メニューバーのメニューの、選べない「⚠ …」の項目の文言 */
+/** メニューバーのメニューの「⚠ …」の項目の文言 */
 async function readWarnings() {
 	return (await readTrayMenu())
 		.filter((name) => name?.startsWith('⚠ '))

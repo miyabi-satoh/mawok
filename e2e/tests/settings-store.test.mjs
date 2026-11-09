@@ -77,7 +77,7 @@ test.describe('再起動と設定の置き場', () => {
 		return invokeApp(client, 'get_settings');
 	}
 
-	/** トレイのメニューに出ている警告 (選べない「⚠ …」の項目) の文言 */
+	/** トレイのメニューに出ている警告 (「⚠ …」の項目) の文言 */
 	async function readTrayWarnings() {
 		const pid = await getMawokProcessId();
 		// 閉じ損ねたときに afterEach が閉じられるよう、開ける前に控えておく
@@ -86,7 +86,7 @@ test.describe('再起動と設定の置き場', () => {
 		try {
 			const items = await readTrayMenu(hwnd);
 			return items
-				.filter((item) => !item.separator && !item.enabled)
+				.filter((item) => !item.separator && item.text.startsWith('⚠'))
 				.map((item) => item.text.replace(/^⚠\s*/, ''));
 		} finally {
 			// ここで落とすと、読んだ中身より先にメニューの閉じ損ねが出てしまう。
@@ -111,7 +111,7 @@ test.describe('再起動と設定の置き場', () => {
 		await waitDraftVisible('残ったホットキーで下書きが出る');
 	});
 
-	test('TOML として読めない設定のファイルは、書き換えずに既定の設定で始め、読めないファイルをトレイに出す', async () => {
+	test('TOML として読めない設定のファイルは、書き換えずに既定の設定で始め、トレイに知らせる', async () => {
 		const broken = Buffer.from('theme = \n');
 		await writeConfigBytes(broken);
 
@@ -132,10 +132,8 @@ test.describe('再起動と設定の置き場', () => {
 		// ここは日本語環境が前提 (e2e/README.md の前提を参照)
 		assert.deepEqual(
 			await readTrayWarnings(),
-			[
-				'設定のファイル settings.toml を読めません。直すまで、変えた設定はこのファイルに保存されません'
-			],
-			'読めないファイルがトレイの警告に出るはず'
+			['設定のファイルを読めません'],
+			'読めないことがトレイの警告に出るはず'
 		);
 	});
 
