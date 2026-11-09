@@ -33,6 +33,7 @@ export const EVENTS = {{\n\
 \tDRAFT_HISTORY_MERGED: {:?},\n\
 \tSNIPPET_ADDED: {:?},\n\
 \tCONFIG_REPLACED: {:?},\n\
+\tSETTINGS_CATEGORY_REQUESTED: {:?},\n\
 \tSHOWN: {:?},\n\
 \tHIDE_REQUESTED: {:?}\n\
 }} as const;\n\n\
@@ -40,6 +41,7 @@ export const ERROR_CODES = {{\n\
 \tBACKUP_RESTORE_PARTIAL: {:?},\n\
 \tSETTINGS_FILE_UNREADABLE: {:?},\n\
 \tSETTINGS_FOLDER_UNAVAILABLE: {:?},\n\
+\tSETTINGS_ACCESS_DENIED: {:?},\n\
 \tKEYS_INVALID: {:?},\n\
 \tKEYS_EDITING: {:?},\n\
 \tKEYS_HOTKEY: {:?},\n\
@@ -59,11 +61,13 @@ export const ERROR_CODES = {{\n\
         events::DRAFT_HISTORY_MERGED,
         events::SNIPPET_ADDED,
         events::CONFIG_REPLACED,
+        events::SETTINGS_CATEGORY_REQUESTED,
         events::SHOWN,
         events::HIDE_REQUESTED,
         error_codes::BACKUP_RESTORE_PARTIAL,
         error_codes::SETTINGS_FILE_UNREADABLE,
         error_codes::SETTINGS_FOLDER_UNAVAILABLE,
+        error_codes::SETTINGS_ACCESS_DENIED,
         error_codes::KEYS_INVALID,
         error_codes::KEYS_EDITING,
         error_codes::KEYS_HOTKEY,

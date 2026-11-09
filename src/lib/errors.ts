@@ -1,4 +1,5 @@
 import { ERROR_CODES } from '$lib/bindings/constants';
+import type { SettingsProblem } from '$lib/bindings/SettingsProblem';
 import { m } from '$lib/paraglide/messages';
 
 /** ログに残すために、エラーを1つの文字列にする。スタックトレースがあれば含める。 */
@@ -39,7 +40,42 @@ export function settingsSaveProblem(error: unknown): string | undefined {
 			return m.settings_file_unreadable();
 		case ERROR_CODES.SETTINGS_FOLDER_UNAVAILABLE:
 			return m.settings_folder_unavailable();
+		// macOS のサンドボックスが symlink の先を読ませない間も、symlink を普通のファイルに置き換えないよう何も書かない
+		case ERROR_CODES.SETTINGS_ACCESS_DENIED:
+			return m.settings_access_denied();
 		default:
 			return undefined;
+	}
+}
+
+/** 設定の保存先を替えられなかったときの文。置き場の都合でなければ、符号を添えた失敗の文にする */
+export function settingsFolderProblem(error: unknown): string {
+	const code = errorCode(error);
+	switch (code) {
+		case ERROR_CODES.SETTINGS_FILE_UNREADABLE:
+			return m.settings_folder_unreadable();
+		case ERROR_CODES.SETTINGS_FOLDER_UNAVAILABLE:
+			return m.settings_folder_link_missing();
+		case ERROR_CODES.SETTINGS_ACCESS_DENIED:
+			return m.settings_folder_access_denied();
+		default:
+			return m.settings_failed({ error: code });
+	}
+}
+
+/**
+ * 「設定の保存先」に出す、設定の保存先の今の問題の知らせ。見つからないのが行に出している保存先そのものなら、
+ * パスを繰り返さない。symlink の先が無いときだけ、そのパスを出す
+ */
+export function settingsProblemNotice(problem: SettingsProblem, settingsDir: string): string {
+	switch (problem.kind) {
+		case 'unreadable':
+			return m.settings_file_unreadable_notice({ files: problem.files.join(', ') });
+		case 'folderMissing':
+			return problem.path === settingsDir
+				? m.settings_folder_dir_missing()
+				: m.settings_folder_missing({ path: problem.path });
+		case 'accessNeeded':
+			return m.settings_folder_access_needed({ path: problem.path });
 	}
 }

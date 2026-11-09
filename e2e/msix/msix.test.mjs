@@ -293,10 +293,8 @@ describe('EXE 版のファイルがある環境', () => {
 				warning,
 				`トレイのメニューに ⚠ がありません: ${items.map((item) => item.text).join(', ')}`
 			);
-			assert.ok(
-				warning.text.includes(TURNED_OFF_IN_WINDOWS),
-				`⚠ の理由が違います: ${warning.text}`
-			);
+			// 理由は上の設定画面の知らせで見た。トレイは短い項目だけを出す
+			assert.equal(warning.text, '⚠ ログイン時の起動を設定できません');
 		} finally {
 			await closeTrayMenu(pid);
 		}

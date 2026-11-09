@@ -22,7 +22,7 @@ import { waitFor } from '../lib/wait.mjs';
 // macOS で見る。既定値で動くこと・読めないファイルを書き換えないことは、両 OS に共通の作りなので Windows の E2E
 // (tests/settings-store.test.mjs) に任せ、ここではメニューバーのメニューと Finder の側だけを見る
 
-/** メニューバーのメニューの、選べない「⚠ …」の項目の文言 */
+/** メニューバーのメニューの「⚠ …」の項目の文言 */
 async function readWarnings() {
 	return (await readTrayMenu())
 		.filter((name) => name?.startsWith('⚠ '))
@@ -38,14 +38,12 @@ test.describe('macOS: 設定の置き場', () => {
 		await restoreUserState();
 	});
 
-	test('TOML として読めない設定のファイルでは、メニューに読めないファイルの警告が出る', async () => {
+	test('TOML として読めない設定のファイルでは、メニューに読めないことの警告が出る', async () => {
 		await quitMawok();
 		await writeConfigBytes(Buffer.from('theme = \n'));
 		await launchMawok();
 		// 読めないと language も読めないので、文言の言語は OS の言語に従う。ここは日本語の macOS が前提
-		assert.deepEqual(await readWarnings(), [
-			'設定のファイル settings.toml を読めません。直すまで、変えた設定はこのファイルに保存されません'
-		]);
+		assert.deepEqual(await readWarnings(), ['設定のファイルを読めません']);
 	});
 
 	test('設定の「ログを Finder で表示」で、ログのフォルダーが Finder で開き、ログが選ばれている', async () => {

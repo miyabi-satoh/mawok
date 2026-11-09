@@ -5,6 +5,7 @@ import type { Language } from "./Language";
 import type { Platform } from "./Platform";
 import type { PunctuationStyle } from "./PunctuationStyle";
 import type { Replacement } from "./Replacement";
+import type { SettingsProblem } from "./SettingsProblem";
 import type { Snippet } from "./Snippet";
 import type { Theme } from "./Theme";
 
@@ -79,7 +80,19 @@ settingsDir: string,
 /**
  * 置き場が OS 標準のアプリ設定フォルダーか。そうでなければ画面は「既定に戻す」を出す
  */
-settingsDirIsDefault: boolean, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
+settingsDirIsDefault: boolean, 
+/**
+ * 設定の保存先の問題。画面は「設定の保存先」に知らせを出す
+ */
+settingsProblem: SettingsProblem | null, 
+/**
+ * 設定のホットキーを OS に登録できていないか。画面はホットキーの行に知らせを出す
+ */
+hotkeyUnavailable: boolean, 
+/**
+ * ログイン時の起動を OS に設定できなかった理由。画面は「ログイン時に起動」の行に出す
+ */
+autostartFailed: string | null, punctuationStyle: PunctuationStyle, charWidths: CharWidths, 
 /**
  * コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
  */

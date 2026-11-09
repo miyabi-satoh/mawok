@@ -1,13 +1,14 @@
 <script lang="ts">
+	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import { invoke } from '@tauri-apps/api/core';
-	import { ERROR_CODES } from '$lib/bindings/constants';
 	import type { PickedSettingsDir } from '$lib/bindings/PickedSettingsDir';
 	import type { Call } from '$lib/call';
 	import SettingsRow from '$lib/components/settings-row.svelte';
+	import * as Alert from '$lib/components/ui/alert';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
-	import { errorCode } from '$lib/errors';
+	import { settingsFolderProblem, settingsProblemNotice } from '$lib/errors';
 	import { m } from '$lib/paraglide/messages';
 	import type { SettingsView } from '$lib/settings.svelte';
 
@@ -34,8 +35,11 @@
 
 	async function resetToDefault() {
 		error = '';
-		const target = await call<PickedSettingsDir>('default_settings_dir');
-		if (target.ok) ask(null, target.value);
+		// 既定の保存先の symlink の先を読む許可を求められ、取り消したら null
+		busy = true;
+		const target = await call<PickedSettingsDir | null>('default_settings_dir');
+		busy = false;
+		if (target.ok && target.value) ask(null, target.value);
 	}
 
 	/** 替え先に設定が無ければ、聞かずにこのデバイスの設定を書いて替える */
@@ -50,16 +54,18 @@
 		try {
 			await invoke('set_settings_dir', { path, useExisting });
 		} catch (e) {
-			const code = errorCode(e);
-			error =
-				code === ERROR_CODES.SETTINGS_FILE_UNREADABLE
-					? m.settings_folder_unreadable()
-					: code === ERROR_CODES.SETTINGS_FOLDER_UNAVAILABLE
-						? m.settings_folder_link_missing()
-						: m.settings_failed({ error: code });
+			error = settingsFolderProblem(e);
 		} finally {
 			busy = false;
 		}
+	}
+
+	/** symlink の先を読む許可を、先の入っているフォルダーで開く窓で求める。許可したら settings-changed で知らせが消える */
+	async function grantAccess() {
+		error = '';
+		busy = true;
+		await call('grant_settings_access');
+		busy = false;
 	}
 </script>
 
@@ -99,6 +105,23 @@
 	</Field.Field>
 	{#if error}
 		<Field.Error>{error}</Field.Error>
+	{/if}
+	<!-- 設定の保存先の問題の知らせ。トレイの ⚠ の項目から開いて読む。説明でなく今の状態なので、警告として出す。
+	     読む許可が無いとき (macOS のサンドボックス。docs/config.md「macOS のサンドボックス」) は、許可を求めるボタンも出す -->
+	{#if view.settingsProblem}
+		<Alert.Root variant="destructive">
+			<CircleAlertIcon />
+			<Alert.Title class="wrap-anywhere">
+				{settingsProblemNotice(view.settingsProblem, view.settingsDir)}
+			</Alert.Title>
+		</Alert.Root>
+		{#if view.settingsProblem.kind === 'accessNeeded'}
+			<div>
+				<Button variant="outline" size="sm" disabled={busy} onclick={grantAccess}>
+					{m.settings_folder_grant_access()}
+				</Button>
+			</div>
+		{/if}
 	{/if}
 </SettingsRow>
 

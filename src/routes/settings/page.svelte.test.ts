@@ -1090,6 +1090,15 @@ describe('設定画面のホットキー', () => {
 		return screen;
 	}
 
+	it('ホットキーを登録できていなければ、その行に知らせる', async () => {
+		settings.current = settingsView({ hotkeyUnavailable: true });
+		const screen = await renderAt(m.settings_category_keys);
+
+		await expect
+			.element(screen.getByText(m.settings_hotkey_unregistered({ keys: '⌘⇧Space' })))
+			.toBeVisible();
+	});
+
 	it('デスクトップのキー設定で割り当てるときは、記録の代わりに割り当てるコマンドを出す', async () => {
 		settings.current = settingsView({ hotkeyByDesktop: true });
 		const screen = await renderAt(m.settings_category_keys);
@@ -1441,11 +1450,44 @@ describe('設定画面のサイドバー', () => {
 		await expect.element(screen.getByRole('button', { name: hotkeyButtonName })).toBeVisible();
 	});
 
+	it('トレイの ⚠ の項目から分類を頼まれたら、その分類に切り替える', async () => {
+		let requested: string | null = null;
+		invoked.mockImplementation((command) =>
+			Promise.resolve(command === 'take_settings_category' ? requested : undefined)
+		);
+		const screen = await render(Page);
+		await expect
+			.element(screen.getByRole('tab', { name: m.settings_category_general() }))
+			.toHaveAttribute('aria-selected', 'true');
+
+		requested = 'keys';
+		emit(listened, EVENTS.SETTINGS_CATEGORY_REQUESTED);
+
+		await expect
+			.element(screen.getByRole('tab', { name: m.settings_category_keys() }))
+			.toHaveAttribute('aria-selected', 'true');
+	});
+
 	it('描いたら、設定ウィンドウを1回だけ表示させる', async () => {
 		await render(Page);
 		await tick();
 
 		expect(callsOf(invoked, 'show_settings_window')).toHaveLength(1);
+	});
+});
+
+describe('設定画面のログイン時に起動', () => {
+	it('OS に設定できなかったら、理由を添えてその行に知らせる', async () => {
+		settings.current = settingsView({ autostartFailed: '組織のポリシーで決められています。' });
+		const screen = await render(Page);
+
+		await expect
+			.element(
+				screen.getByText(
+					m.settings_autostart_failed({ error: '組織のポリシーで決められています。' })
+				)
+			)
+			.toBeVisible();
 	});
 });
 

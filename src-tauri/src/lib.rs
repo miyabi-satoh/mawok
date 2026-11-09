@@ -12,6 +12,7 @@ mod draft_keys;
 mod error_codes;
 mod events;
 mod focus;
+mod folder_access;
 mod hex;
 mod history_store;
 mod hotkey;
@@ -62,8 +63,10 @@ use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use crate::{
     config::{Config, Language, Snippet, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
+    folder_access::Reach,
     hotkey::Registrar as _,
     i18n::Lang,
+    settings_files::Unreachable,
     text::{CharWidths, PunctuationStyle, Replacement, ReplacementMatch},
 };
 
@@ -130,6 +133,9 @@ struct AppState {
     settings_dir_available: AtomicBool,
     /// 設定の置き場の見張り。置き場を替えたら張り直す
     watch: Mutex<Option<settings_watch::Watch>>,
+    /// 置き場にするフォルダーの窓で選んだフォルダーと、その直後に作ったブックマーク（folder_access.rs）。
+    /// 置き場を替えると決めたら device.json に残す。ブックマークは、窓で選んだ許可があるうちにしか作れないため
+    picked_bookmark: Mutex<Option<(PathBuf, String)>>,
     /// 設定のバックアップの置き場（backup.rs）。置き場に置くと、同期したほかのデバイスのバックアップと混ざるので、デバイスの手元に置く
     backups_dir: PathBuf,
     /// アプリのバージョン。ログの先頭に出しているものと同じ出どころにして、突き合わせられるようにする
@@ -140,6 +146,8 @@ struct AppState {
     problems: Mutex<Problems>,
     /// 設定ウィンドウを作っている最中か。作成は非同期なので、連打で2つ作ろうとするのを止める
     settings_opening: AtomicBool,
+    /// トレイの ⚠ の項目で頼まれた、設定画面に出す分類。画面が取りに来たら空にする（open_settings_at）
+    settings_category: Mutex<Option<SettingsCategory>>,
     /// メニューを開いている間だけ登録を外しているホットキー（macOS）。閉じたらこれを登録し直す
     #[cfg(target_os = "macos")]
     hotkey_paused_for_menu: Mutex<Option<String>>,
@@ -172,7 +180,7 @@ impl AppState {
     }
 }
 
-/// トレイメニューに ⚠ 付きで出す問題。表示言語が変わったら文言を作り直すので、原因だけを持つ
+/// トレイメニューに ⚠ 付きで出し、設定画面の該当する行に詳しく出す問題。表示言語が変わったら文言を作り直すので、原因だけを持つ
 #[derive(Default)]
 struct Problems {
     config: Option<ConfigProblem>,
@@ -180,13 +188,66 @@ struct Problems {
     autostart_failed: Option<autostart::SetError>,
 }
 
-/// 設定の置き場についてトレイに出すこと。直して読めたら消す
+/// 設定の置き場についてトレイと設定画面に出すこと。直して読めたら消す
 #[derive(PartialEq)]
 enum ConfigProblem {
     /// 読めなかった設定のファイルの名前。読めたファイルの設定と、読めないファイルは前に読めた設定（起動のときは既定）で動かす
     Unreadable(Vec<String>),
-    /// 選んだ置き場のフォルダーか、設定のファイルの symlink の先が無い（`missing_settings_place`）。現れるまで何も書かない
+    /// 選んだ置き場のフォルダーか、設定のファイルの symlink の先が無い（`unavailable_settings_place`）。現れるまで何も書かない
     FolderMissing(String),
+    /// macOS のサンドボックスが、設定のファイルの symlink の先を読ませない。許可されるまで何も書かない
+    /// （docs/config.md「macOS のサンドボックス」）。パスは許可が要る先
+    AccessDenied(PathBuf),
+}
+
+impl ConfigProblem {
+    fn unavailable(place: &Unreachable) -> Self {
+        match place {
+            Unreachable::Missing(path) => ConfigProblem::FolderMissing(path.display().to_string()),
+            Unreachable::Denied(path) => ConfigProblem::AccessDenied(path.clone()),
+        }
+    }
+}
+
+/// 設定画面の「設定の保存先」に出す、設定の保存先の問題（ConfigProblem）
+#[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SettingsProblem {
+    /// 読めなかった設定のファイルの名前
+    Unreadable { files: Vec<String> },
+    /// 見つからない、選んだ置き場のフォルダーか symlink の先。置き場そのものなら、画面は settings_dir と同じ書き方で
+    /// 受け取り、パスを繰り返さずに出す
+    FolderMissing { path: String },
+    /// 読む許可が要る、設定のファイルの symlink の先（macOS のサンドボックス）。画面は許可を求めるボタンを出す
+    AccessNeeded { path: String },
+}
+
+impl SettingsProblem {
+    fn new(problem: &ConfigProblem, state: &AppState) -> Self {
+        match problem {
+            ConfigProblem::Unreadable(files) => SettingsProblem::Unreadable {
+                files: files.clone(),
+            },
+            ConfigProblem::FolderMissing(path) => SettingsProblem::FolderMissing {
+                path: shown_path(state, PathBuf::from(path)).display().to_string(),
+            },
+            ConfigProblem::AccessDenied(target) => SettingsProblem::AccessNeeded {
+                path: target.display().to_string(),
+            },
+        }
+    }
+}
+
+/// トレイの ⚠ の項目から設定ウィンドウを開くときに出す分類。問題の行のある分類を出す（settings-categories.ts の value）
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+enum SettingsCategory {
+    General,
+    Keys,
 }
 
 impl Problems {
@@ -243,6 +304,12 @@ struct SettingsView {
     settings_dir: String,
     /// 置き場が OS 標準のアプリ設定フォルダーか。そうでなければ画面は「既定に戻す」を出す
     settings_dir_is_default: bool,
+    /// 設定の保存先の問題。画面は「設定の保存先」に知らせを出す
+    settings_problem: Option<SettingsProblem>,
+    /// 設定のホットキーを OS に登録できていないか。画面はホットキーの行に知らせを出す
+    hotkey_unavailable: bool,
+    /// ログイン時の起動を OS に設定できなかった理由。画面は「ログイン時に起動」の行に出す
+    autostart_failed: Option<String>,
     punctuation_style: PunctuationStyle,
     char_widths: CharWidths,
     /// コピーするときに、クリップボードの履歴・同期・管理アプリに残さないよう印を付けるか
@@ -277,6 +344,20 @@ fn settings_view(state: &AppState) -> SettingsView {
     let lang = Lang::resolve(config.language, state.system_lang);
     let settings_dir = state.settings_dir();
     let settings_dir_is_default = state.device.lock().unwrap().settings_dir.is_none();
+    let (settings_problem, hotkey_unavailable, autostart_failed) = {
+        let problems = state.problems.lock().unwrap();
+        (
+            problems
+                .config
+                .as_ref()
+                .map(|problem| SettingsProblem::new(problem, state)),
+            problems.hotkey_unavailable,
+            problems
+                .autostart_failed
+                .as_ref()
+                .map(|error| autostart_error_text(error, lang)),
+        )
+    };
     let modified_settings = config::modified_settings(&config);
     #[cfg(target_os = "linux")]
     let desktop_hotkey = state.portal_hotkey.trigger.lock().unwrap().clone();
@@ -286,6 +367,9 @@ fn settings_view(state: &AppState) -> SettingsView {
         revision,
         settings_dir: shown_path(state, settings_dir).display().to_string(),
         settings_dir_is_default,
+        settings_problem,
+        hotkey_unavailable,
+        autostart_failed,
         locale: lang.code(),
         platform: Platform::current(),
         hotkey: config.hotkey,
@@ -908,8 +992,14 @@ fn write_config(state: &AppState, current: &Config, next: &Config) -> Result<(),
     if !state.settings_dir_available.load(Ordering::SeqCst) {
         let mut unchanged = config::stored_entries(current);
         unchanged.remove(config::key::AUTOSTART);
+        let denied = matches!(
+            state.problems.lock().unwrap().config,
+            Some(ConfigProblem::AccessDenied(_))
+        );
         return if unchanged == entries {
             Ok(())
+        } else if denied {
+            Err(error_codes::SETTINGS_ACCESS_DENIED.to_string())
         } else {
             Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string())
         };
@@ -1064,14 +1154,15 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     // 保存できたときだけ OS のログイン項目を変える。順番が逆だと、保存に失敗したときに OS 側だけ変わって残る
     save_config(&app, |config| config.autostart = enabled)?;
     let failed = apply_autostart(&app, enabled);
-    let state = app.state::<AppState>();
-    // 設定は保存できているので、OS への登録に失敗したことはトレイの ⚠ にも出す
-    state.problems.lock().unwrap().autostart_failed = failed.clone();
+    // 設定は保存できているので、OS への登録に失敗したことは失敗として返さず、トレイの ⚠ と画面の行の知らせに出す
+    app.state::<AppState>()
+        .problems
+        .lock()
+        .unwrap()
+        .autostart_failed = failed;
     // 画面とトレイへの反映は、⚠ も決まってから一度だけ行う
     apply_config(&app);
-    failed.map_or(Ok(()), |error| {
-        Err(autostart_error_text(&error, state.lang()))
-    })
+    Ok(())
 }
 
 #[tauri::command]
@@ -1204,34 +1295,86 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
 
 /// 選んだ置き場のフォルダーがあるかを、書く前に確かめる。動いている途中で無くなっていたら（クラウドストレージのドライブが
 /// 外れたなど）、無いものとしてトレイに出し、現れるのを待つ。そのまま書くと、ドライブの場所に普通のフォルダーを作って、
-/// 既定の設定を書くため
+/// 既定の設定を書くため。symlink の先を読む許可が無いときも、許可されるまで同じく待つ
 fn settings_dir_ready(app: &AppHandle) -> bool {
     let state = app.state::<AppState>();
     if !state.settings_dir_available.load(Ordering::SeqCst) {
         return false;
     }
     let chosen = state.device.lock().unwrap().settings_dir.is_some();
-    let Some(missing) = missing_settings_place(&state.settings_dir(), chosen) else {
+    let Some(place) = unavailable_settings_place(&state.settings_dir(), chosen) else {
         return true;
     };
-    warn!("{} went away; waiting for it", missing.display());
+    warn!("{place:?} went away; waiting for it");
     state.settings_dir_available.store(false, Ordering::SeqCst);
-    state.problems.lock().unwrap().config =
-        Some(ConfigProblem::FolderMissing(missing.display().to_string()));
+    state.problems.lock().unwrap().config = Some(ConfigProblem::unavailable(&place));
     *state.watch.lock().unwrap() = None;
-    refresh_tray(app);
+    apply_config(app);
     wait_for_settings_dir(app.clone());
     false
 }
 
-/// 置き場のうち無いもの（docs/config.md「置き場」）。選んだフォルダーが無いか、設定のファイルの symlink の先が無い。
-/// 既定の置き場は、無ければ作ってよい
-fn missing_settings_place(dir: &Path, chosen: bool) -> Option<PathBuf> {
+/// 置き場のうち読めないもの（docs/config.md「置き場」）。選んだフォルダーか、設定のファイルの symlink の先が無いか、
+/// サンドボックスが読ませない。既定の置き場は、無ければ作ってよい
+fn unavailable_settings_place(dir: &Path, chosen: bool) -> Option<Unreachable> {
     // 既定の置き場が、先の無い symlink（stow がフォルダーごと張ったもの）のときも無いとみる
-    if (chosen || dir.is_symlink()) && !dir.is_dir() {
-        return Some(dir.to_path_buf());
+    if chosen || dir.is_symlink() {
+        match folder_access::dir_reach(dir) {
+            Reach::Readable => {}
+            Reach::Missing => {
+                let target = folder_access::link_target(dir).unwrap_or_else(|| dir.to_path_buf());
+                return Some(Unreachable::Missing(target));
+            }
+            Reach::Denied => {
+                let target = folder_access::link_target(dir).unwrap_or_else(|| dir.to_path_buf());
+                return Some(Unreachable::Denied(target));
+            }
+        }
     }
-    settings_files::dangling_link_target(dir)
+    settings_files::unreachable_link(dir)
+}
+
+/// device.json のブックマークから、選んだ置き場と許可したフォルダーを読み書きする許可を戻す（folder_access.rs）。
+/// 古くなっていたブックマークは作り直したものに替え、替えたかを返す（呼ぶ側が device.json に書く）。
+/// 戻せないもの（フォルダーを消した・ドライブがつながっていない など）は飛ばす。そのフォルダーは、無いか許可が無いものとして
+/// 扱われ、現れるのを待つ間に戻し直す。`log_failures` が false なら、戻せないことをログに出さない（5 秒ごとに出さないため）
+fn restore_folder_access(device: &mut device::Device, log_failures: bool) -> bool {
+    let mut renewed = false;
+    let bookmarks = device
+        .settings_dir
+        .clone()
+        .zip(device.settings_dir_bookmark.as_mut())
+        .into_iter()
+        .chain(
+            device
+                .granted_folders
+                .iter_mut()
+                .map(|folder| (folder.path.clone(), &mut folder.bookmark)),
+        );
+    for (path, bookmark) in bookmarks {
+        match folder_access::restore(bookmark) {
+            Ok(Some(next)) => {
+                info!("renewed the bookmark of {}", path.display());
+                *bookmark = next;
+                renewed = true;
+            }
+            Ok(None) => {}
+            Err(error) if log_failures => {
+                warn!("couldn't restore access to {}: {error}", path.display())
+            }
+            Err(_) => {}
+        }
+    }
+    renewed
+}
+
+/// 許可を戻し、作り直したブックマークがあれば device.json に残す。残せなくても、今の許可は持っているので、ログにだけ出す
+fn restore_folder_access_and_save(device: &mut device::Device, path: &Path, log_failures: bool) {
+    if restore_folder_access(device, log_failures) {
+        if let Err(error) = device::save(path, device) {
+            warn!("couldn't save the renewed bookmarks: {error}");
+        }
+    }
 }
 
 /// 置き場のフォルダーが無い間に、画面から届いた履歴の消去と保存。現れたら、この順で書く（消去の後に届いた一覧を保存する）
@@ -1657,7 +1800,7 @@ fn watch_settings_dir(app: &AppHandle) {
     }
 }
 
-/// 選んだ置き場のフォルダーが現れるのを待つ。現れたら読み直して、見張りを始める
+/// 選んだ置き場のフォルダーが現れる（symlink の先を読む許可が戻る）のを待つ。現れたら読み直して、見張りを始める
 fn wait_for_settings_dir(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         // クラウドストレージのドライブは、ログインの後しばらくしてつながる。気づくまでの遅れが気にならず、
@@ -1669,31 +1812,158 @@ fn wait_for_settings_dir(app: AppHandle) {
             if state.settings_dir_available.load(Ordering::SeqCst) {
                 return;
             }
+            // 起動のときにつながっていなかったドライブのブックマークは、つながってから戻せる
+            restore_folder_access_and_save(
+                &mut state.device.lock().unwrap(),
+                &state.device_path,
+                false,
+            );
             let chosen = state.device.lock().unwrap().settings_dir.is_some();
-            if missing_settings_place(&state.settings_dir(), chosen).is_some() {
+            if let Some(place) = unavailable_settings_place(&state.settings_dir(), chosen) {
+                // 無いものが変わった（先が現れたが許可が無い など）ら、トレイと画面の知らせを替える
+                let problem = ConfigProblem::unavailable(&place);
+                let changed = {
+                    let mut problems = state.problems.lock().unwrap();
+                    let changed = problems.config.as_ref() != Some(&problem);
+                    problems.config = Some(problem);
+                    changed
+                };
+                if changed {
+                    apply_config(&app);
+                }
                 continue;
             }
-            info!("the settings folder is available again");
-            let handle = app.clone();
-            let result = app.run_on_main_thread(move || {
-                // 読み直す直前に、メインスレッドで書けるようにする。先に書けるようにすると、その間に届いた設定の保存が、
-                // 起動のときに読めなかったために持っている既定の設定を、置き場のファイルに書く
-                handle
-                    .state::<AppState>()
-                    .settings_dir_available
-                    .store(true, Ordering::SeqCst);
-                reload_config_from_files(&handle);
-                write_pending_history(&handle);
-                merge_history_from_other_devices(&handle);
-                watch_settings_dir(&handle);
-                let _ = handle.emit(events::DRAFT_HISTORY_MERGED, ());
-            });
-            if let Err(error) = result {
-                error!("couldn't reload the settings folder: {error}");
-            }
+            resume_settings_dir(&app);
             return;
         }
     });
+}
+
+/// 置き場が現れた（許可された）ので、読み直して見張りを始め、無い間に控えた履歴を書く
+fn resume_settings_dir(app: &AppHandle) {
+    info!("the settings folder is available again");
+    let handle = app.clone();
+    let result = app.run_on_main_thread(move || {
+        // 読み直す直前に、メインスレッドで書けるようにする。先に書けるようにすると、その間に届いた設定の保存が、
+        // 起動のときに読めなかったために持っている既定の設定を、置き場のファイルに書く。
+        // 待つ間の見回りと許可の窓の両方から来るので、先に書けるようにした方だけが読み直す
+        if handle
+            .state::<AppState>()
+            .settings_dir_available
+            .swap(true, Ordering::SeqCst)
+        {
+            return;
+        }
+        reload_config_from_files(&handle);
+        write_pending_history(&handle);
+        merge_history_from_other_devices(&handle);
+        watch_settings_dir(&handle);
+        let _ = handle.emit(events::DRAFT_HISTORY_MERGED, ());
+        // 読み直した設定が前と同じでも、トレイと画面の知らせを消す
+        apply_config(&handle);
+    });
+    if let Err(error) = result {
+        error!("couldn't reload the settings folder: {error}");
+    }
+}
+
+/// symlink の先を読む許可を、フォルダーの窓で求める（docs/config.md「macOS のサンドボックス」）。窓は先の入っている
+/// フォルダーで開き、利用者は「開く」を押すだけで済むようにする。選んだフォルダーが先を含まなければ、伝えて出し直す。
+/// 許可されたら、そのフォルダーのブックマークを device.json に残して true。取り消されたら false
+async fn ask_access(app: &AppHandle, target: &Path) -> Result<bool, String> {
+    use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
+    let lang = app.state::<AppState>().lang();
+    let shown = target.display().to_string();
+    loop {
+        let mut picker = app
+            .dialog()
+            .file()
+            .set_directory(folder_access::grant_start(target))
+            .set_title(lang.grant_access_prompt());
+        // 設定の窓に結び付ける。結び付けないと、窓を開いたままボタンをもう一度押せて、2つ目が開く
+        if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
+            picker = picker.set_parent(&window);
+        }
+        let Some(picked) = run_blocking(move || picker.blocking_pick_folder()).await? else {
+            return Ok(false);
+        };
+        let folder = picked.into_path().map_err(|error| error.to_string())?;
+        if folder_access::contains(&folder, target) {
+            remember_granted_folder(app, folder);
+            return Ok(true);
+        }
+        info!(
+            "{} doesn't contain {}; asking again",
+            folder.display(),
+            target.display()
+        );
+        let mut message = app
+            .dialog()
+            .message(lang.grant_access_wrong_folder(&shown))
+            .kind(MessageDialogKind::Warning);
+        if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
+            message = message.parent(&window);
+        }
+        run_blocking(move || message.blocking_show()).await?;
+    }
+}
+
+/// 窓で許可されたフォルダーのブックマークを残す。窓で選んだ許可はこのプロセスの間だけなので、起動し直したら
+/// ブックマークから戻す。作れない・残せないときは、今は読めるのでログにだけ出す（次に起動したらまた求める）
+fn remember_granted_folder(app: &AppHandle, folder: PathBuf) {
+    let bookmark = match folder_access::bookmark(&folder) {
+        Ok(Some(bookmark)) => bookmark,
+        Ok(None) => return,
+        Err(error) => {
+            warn!("couldn't bookmark {}: {error}", folder.display());
+            return;
+        }
+    };
+    info!("granted access to {}", folder.display());
+    let state = app.state::<AppState>();
+    let mut device = state.device.lock().unwrap();
+    let mut updated = device.clone();
+    updated.grant(folder, bookmark);
+    match device::save(&state.device_path, &updated) {
+        Ok(()) => *device = updated,
+        Err(error) => warn!("couldn't save the granted folder: {error}"),
+    }
+}
+
+/// `dir` の symlink の先のうち、サンドボックスが読ませないものの許可を、1つずつ求める。読ませないものが残っていなければ
+/// true。取り消されたら false
+async fn grant_access_in(app: &AppHandle, dir: &Path, chosen: bool) -> Result<bool, String> {
+    let mut asked = Vec::new();
+    while let Some(Unreachable::Denied(target)) = unavailable_settings_place(dir, chosen) {
+        // 許可しても読めない（ファイルの権限で断られている など）先に、窓を出し続けないため
+        if asked.contains(&target) {
+            warn!("still can't read {} after granting", target.display());
+            return Ok(false);
+        }
+        if !ask_access(app, &target).await? {
+            return Ok(false);
+        }
+        asked.push(target);
+    }
+    Ok(true)
+}
+
+/// 設定の画面の「アクセスを許可...」。今の置き場の symlink の先を読む許可を求め、読めるようになったら読み直す
+#[tauri::command]
+async fn grant_settings_access(app: AppHandle) -> Result<(), String> {
+    let (dir, chosen) = {
+        let state = app.state::<AppState>();
+        let chosen = state.device.lock().unwrap().settings_dir.is_some();
+        (state.settings_dir(), chosen)
+    };
+    if !grant_access_in(&app, &dir, chosen).await? {
+        return Ok(());
+    }
+    // 許可した後に別の理由（ほかの先が無い など）で読めなければ、待つ間の見回りが知らせを替える
+    if unavailable_settings_place(&dir, chosen).is_none() {
+        resume_settings_dir(&app);
+    }
+    Ok(())
 }
 
 /// 選んだフォルダー。置き場を替える前に、画面がそちらの設定を使うかを聞くのに使う
@@ -1710,7 +1980,8 @@ struct PickedSettingsDir {
     has_settings: bool,
 }
 
-/// 設定の置き場にするフォルダーを、OS のフォルダーの窓で選んでもらう。取り消したら None
+/// 設定の置き場にするフォルダーを、OS のフォルダーの窓で選んでもらう。取り消したら None。
+/// 中の設定のファイルの symlink の先をサンドボックスが読ませなければ、続けて許可を求め、取り消されたら None
 #[tauri::command]
 async fn pick_settings_dir(app: AppHandle) -> Result<Option<PickedSettingsDir>, String> {
     use tauri_plugin_dialog::DialogExt as _;
@@ -1729,14 +2000,27 @@ async fn pick_settings_dir(app: AppHandle) -> Result<Option<PickedSettingsDir>, 
         return Ok(None);
     };
     let path = picked.into_path().map_err(|error| error.to_string())?;
+    let bookmark = folder_access::bookmark(&path).unwrap_or_else(|error| {
+        warn!("couldn't bookmark {}: {error}", path.display());
+        None
+    });
+    *app.state::<AppState>().picked_bookmark.lock().unwrap() =
+        bookmark.map(|bookmark| (path.clone(), bookmark));
+    if !grant_access_in(&app, &path, true).await? {
+        return Ok(None);
+    }
     Ok(Some(picked_dir(&app.state::<AppState>(), path)))
 }
 
-/// 既定の置き場（OS 標準のアプリ設定フォルダー）。戻す前に、画面がそちらの設定を使うかを聞くのに使う
+/// 既定の置き場（OS 標準のアプリ設定フォルダー）。戻す前に、画面がそちらの設定を使うかを聞くのに使う。
+/// 中の設定のファイルの symlink の先をサンドボックスが読ませなければ、許可を求め、取り消されたら None
 #[tauri::command]
-fn default_settings_dir(app: AppHandle) -> PickedSettingsDir {
-    let state = app.state::<AppState>();
-    picked_dir(&state, state.default_settings_dir.clone())
+async fn default_settings_dir(app: AppHandle) -> Result<Option<PickedSettingsDir>, String> {
+    let dir = app.state::<AppState>().default_settings_dir.clone();
+    if !grant_access_in(&app, &dir, false).await? {
+        return Ok(None);
+    }
+    Ok(Some(picked_dir(&app.state::<AppState>(), dir)))
 }
 
 fn picked_dir(state: &AppState, path: PathBuf) -> PickedSettingsDir {
@@ -1766,9 +2050,16 @@ fn set_settings_dir(
     }
     // 先の無い symlink に書くと、普通のファイルに置き換えるので、替えない（docs/config.md「置き場」）。
     // フォルダーそのものが先の無い symlink だと、作るところで OS のエラーになるので、作る前に見る
-    let broken_link = next_dir.is_symlink() && !next_dir.is_dir();
-    if broken_link || settings_files::dangling_link_target(&next_dir).is_some() {
+    if next_dir.is_symlink() && !next_dir.is_dir() {
         return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string());
+    }
+    match settings_files::unreachable_link(&next_dir) {
+        Some(Unreachable::Missing(_)) => {
+            return Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string())
+        }
+        // 許可は、選ぶとき（pick_settings_dir）に求めている。ここに来るのは取り消した後に画面から呼ばれたとき
+        Some(Unreachable::Denied(_)) => return Err(error_codes::SETTINGS_ACCESS_DENIED.to_string()),
+        None => {}
     }
     std::fs::create_dir_all(&next_dir).map_err(|error| error.to_string())?;
     info!(
@@ -1813,8 +2104,18 @@ fn set_settings_dir(
             (Err(error), _) | (_, Err(error)) => warn!("couldn't move the draft history: {error}"),
         }
     }
+    // 窓で選んだ置き場なら、選んだときに作ったブックマークを残す。既定に戻すなら要らない
+    let picked = state.picked_bookmark.lock().unwrap().take();
+    let settings_dir_bookmark = match (&chosen, picked) {
+        (Some(chosen), Some((path, bookmark))) if *chosen == path => Some(bookmark),
+        (Some(chosen), _) if device.settings_dir.as_ref() == Some(chosen) => {
+            device.settings_dir_bookmark.clone()
+        }
+        _ => None,
+    };
     let updated = device::Device {
         settings_dir: chosen,
+        settings_dir_bookmark,
         ..device
     };
     device::save(&state.device_path, &updated).map_err(|error| error.to_string())?;
@@ -1931,7 +2232,7 @@ fn ensure_hotkey_registered(app: &AppHandle) {
     show_hotkey_registered(app, registered);
 }
 
-/// 設定のホットキーが登録できているかを、トレイの ⚠ に反映する
+/// 設定のホットキーが登録できているかを、トレイの ⚠ と設定画面に反映する
 fn show_hotkey_registered(app: &AppHandle, registered: bool) {
     let state = app.state::<AppState>();
     let changed = {
@@ -1941,7 +2242,7 @@ fn show_hotkey_registered(app: &AppHandle, registered: bool) {
         changed
     };
     if changed {
-        refresh_tray(app);
+        apply_config(app);
     }
 }
 
@@ -2307,19 +2608,19 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Option<autostart::SetError
     }
 }
 
-/// OS のログイン項目に登録されていて、有効か。読めなければ、トレイの ⚠ に出す理由を返す
+/// OS のログイン項目に登録されていて、有効か。読めなければ、トレイの ⚠ と設定画面に出す理由を返す
 fn read_autostart(app: &AppHandle) -> Result<bool, String> {
     autostart::is_enabled(app).inspect_err(|error| warn!("couldn't read launch at login: {error}"))
 }
 
-/// OS のログイン項目を登録する・外す。登録済みかは呼ぶ側が読んでおく。できなければ、トレイの ⚠ に出す理由を返す
+/// OS のログイン項目を登録する・外す。登録済みかは呼ぶ側が読んでおく。できなければ、トレイの ⚠ と設定画面に出す理由を返す
 fn write_autostart(app: &AppHandle, enabled: bool) -> Option<autostart::SetError> {
     let error = autostart::set(app, enabled).err()?;
     warn!("couldn't configure launch at login: {error:?}");
     Some(error)
 }
 
-/// ログイン項目を設定できなかった理由を、トレイの ⚠ と設定画面に出す文にする
+/// ログイン項目を設定できなかった理由を、設定画面の「ログイン時に起動」の行に出す文にする
 fn autostart_error_text(error: &autostart::SetError, lang: Lang) -> String {
     match error {
         autostart::SetError::Os(error) => error.clone(),
@@ -2425,7 +2726,7 @@ fn reload_config_from_files(app: &AppHandle) {
     };
     if next == current {
         if problem_changed {
-            refresh_tray(app);
+            apply_config(app);
         }
         return;
     }
@@ -2542,6 +2843,21 @@ impl Drop for OpeningGuard {
     }
 }
 
+/// 設定ウィンドウを、指定の分類で開く。開いていれば、その分類に切り替える。
+/// 分類は画面が描き終えてから取りに来る（take_settings_category）。開いている窓へ直に送ると、
+/// 作った直後でまだ受け取れない窓には届かないため、取り置いて知らせだけを送る
+fn open_settings_at(app: &AppHandle, category: SettingsCategory) {
+    *app.state::<AppState>().settings_category.lock().unwrap() = Some(category);
+    let _ = app.emit_to(SETTINGS_WINDOW, events::SETTINGS_CATEGORY_REQUESTED, ());
+    open_settings(app);
+}
+
+/// トレイの ⚠ の項目で頼まれた、設定画面に出す分類を受け取る。頼まれていなければ None
+#[tauri::command]
+fn take_settings_category(state: tauri::State<'_, AppState>) -> Option<SettingsCategory> {
+    state.settings_category.lock().unwrap().take()
+}
+
 fn open_settings(app: &AppHandle) {
     info!("open settings");
     hide_draft_for_settings(app);
@@ -2601,36 +2917,92 @@ fn open_settings(app: &AppHandle) {
     });
 }
 
+/// トレイメニューに ⚠ 付きで出す問題の項目
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TrayProblem {
+    /// 設定のファイルを読めない。読めたファイルには保存できるので、保存できないとは言わない
+    SettingsUnreadable,
+    /// 保存先が無いか、読む許可が無い。何も保存しない
+    Settings,
+    Hotkey,
+    Autostart,
+}
+
+impl TrayProblem {
+    const ALL: [TrayProblem; 4] = [
+        TrayProblem::SettingsUnreadable,
+        TrayProblem::Settings,
+        TrayProblem::Hotkey,
+        TrayProblem::Autostart,
+    ];
+
+    fn id(self) -> &'static str {
+        match self {
+            TrayProblem::SettingsUnreadable => "problem-settings-unreadable",
+            TrayProblem::Settings => "problem-settings",
+            TrayProblem::Hotkey => "problem-hotkey",
+            TrayProblem::Autostart => "problem-autostart",
+        }
+    }
+
+    fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|problem| problem.id() == id)
+    }
+
+    fn text(self, lang: Lang) -> &'static str {
+        match self {
+            TrayProblem::SettingsUnreadable => lang.settings_file_problem(),
+            TrayProblem::Settings => lang.settings_problem(),
+            TrayProblem::Hotkey => lang.hotkey_problem(),
+            TrayProblem::Autostart => lang.autostart_problem(),
+        }
+    }
+
+    /// 選んだときに開く設定画面の分類。「設定の保存先」と「ログイン時に起動」は一般、ホットキーはキー操作にある
+    fn category(self) -> SettingsCategory {
+        match self {
+            TrayProblem::SettingsUnreadable | TrayProblem::Settings | TrayProblem::Autostart => {
+                SettingsCategory::General
+            }
+            TrayProblem::Hotkey => SettingsCategory::Keys,
+        }
+    }
+}
+
 fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let state = app.state::<AppState>();
     let lang = state.lang();
     let hotkey = state.config.lock().unwrap().hotkey.clone();
     let hotkey_unavailable = state.problems.lock().unwrap().hotkey_unavailable;
-    let problem_texts = {
+    // 項目は短い知らせにして、選ぶとその問題の行がある分類で設定画面を開く（TrayProblem）。
+    // パスや理由まで項目に書くと、折り返せないメニューが横に長く伸びる
+    let problems = {
         let problems = state.problems.lock().unwrap();
-        let mut texts = Vec::new();
-        match &problems.config {
-            Some(ConfigProblem::Unreadable(files)) => {
-                texts.push(lang.settings_unreadable(&files.join(", ")))
-            }
-            Some(ConfigProblem::FolderMissing(dir)) => {
-                texts.push(lang.settings_folder_missing(dir))
-            }
+        let mut found = Vec::new();
+        match problems.config {
+            Some(ConfigProblem::Unreadable(_)) => found.push(TrayProblem::SettingsUnreadable),
+            Some(_) => found.push(TrayProblem::Settings),
             None => {}
         }
         if problems.hotkey_unavailable {
-            texts.push(lang.hotkey_unavailable(&hotkey));
+            found.push(TrayProblem::Hotkey);
         }
-        if let Some(error) = &problems.autostart_failed {
-            texts.push(lang.autostart_failed(&autostart_error_text(error, lang)));
+        if problems.autostart_failed.is_some() {
+            found.push(TrayProblem::Autostart);
         }
-        texts
+        found
     };
 
-    let problem_items = problem_texts
+    let problem_items = problems
         .iter()
         .map(|problem| {
-            MenuItem::with_id(app, "problem", format!("⚠ {problem}"), false, None::<&str>)
+            MenuItem::with_id(
+                app,
+                problem.id(),
+                format!("⚠ {}", problem.text(lang)),
+                true,
+                None::<&str>,
+            )
         })
         .collect::<tauri::Result<Vec<_>>>()?;
     let problem_separator = PredefinedMenuItem::separator(app)?;
@@ -2687,7 +3059,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 "settings" => open_settings(app),
                 "manual" => open_manual(app),
                 "quit" => app.exit(0),
-                _ => {}
+                id => {
+                    if let Some(problem) = TrayProblem::from_id(id) {
+                        open_settings_at(app, problem.category());
+                    }
+                }
             }
         })
         .build(app)?;
@@ -2846,9 +3222,11 @@ pub fn run() {
             restore_settings_backup,
             pick_settings_dir,
             default_settings_dir,
+            grant_settings_access,
             set_settings_dir,
             reveal_settings_dir,
             open_settings_window,
+            take_settings_category,
             toggle_settings_window,
             close_settings_window,
             show_settings_window,
@@ -3004,6 +3382,8 @@ pub fn run() {
                         false
                     }
                 };
+            // 置き場を読む前に、サンドボックスで外のフォルダーを読み書きする許可を戻す
+            restore_folder_access_and_save(&mut device, &device_path, true);
             let settings_dir = device
                 .settings_dir
                 .clone()
@@ -3011,17 +3391,15 @@ pub fn run() {
             info!("settings folder: {}", settings_dir.display());
             // 既定の置き場は作ってよいが、選んだ置き場は作らない。つながっていないドライブの場所に作ると、
             // つながった後のフォルダーと別物になるため
-            let missing = missing_settings_place(&settings_dir, device.settings_dir.is_some());
-            let settings_dir_available = missing.is_none();
-            let (mut config, config_problem) = match missing {
+            let unavailable =
+                unavailable_settings_place(&settings_dir, device.settings_dir.is_some());
+            let settings_dir_available = unavailable.is_none();
+            let (mut config, config_problem) = match unavailable {
                 None => load_config(&settings_dir, &device, &Config::default()),
-                Some(missing) => {
-                    warn!("{} is missing; waiting for it", missing.display());
+                Some(place) => {
+                    warn!("{place:?}; waiting for it");
                     let (config, _) = load_config(&settings_dir, &device, &Config::default());
-                    (
-                        config,
-                        Some(ConfigProblem::FolderMissing(missing.display().to_string())),
-                    )
+                    (config, Some(ConfigProblem::unavailable(&place)))
                 }
             };
             let first_launch = is_first_launch(device_missing, device_saved);
@@ -3056,12 +3434,14 @@ pub fn run() {
                 #[cfg(windows)]
                 local_dir: app.path().local_data_dir()?,
                 watch: Mutex::new(None),
+                picked_bookmark: Mutex::new(None),
                 backups_dir: backup::dir_in(&local_dir),
                 version: app.package_info().version.to_string(),
                 system_lang: Lang::system(),
                 config: Mutex::new(config),
                 problems: Mutex::new(problems),
                 settings_opening: AtomicBool::new(false),
+                settings_category: Mutex::new(None),
                 #[cfg(target_os = "macos")]
                 hotkey_paused_for_menu: Mutex::new(None),
                 #[cfg(target_os = "linux")]
@@ -3152,6 +3532,39 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// stow がフォルダーごと張った既定の置き場の先が無ければ、`..` を畳んだ先を無いものとして返す
+    #[cfg(unix)]
+    #[test]
+    fn names_the_normalized_target_of_a_missing_settings_folder_link() {
+        let dir = test_support::TempDir::new("lib-missing-folder-link");
+        let config = dir.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        let settings_dir = config.join("mawok");
+        std::os::unix::fs::symlink("../dotfiles/mawok", &settings_dir).unwrap();
+        assert_eq!(
+            unavailable_settings_place(&settings_dir, false),
+            Some(Unreachable::Missing(dir.join("dotfiles/mawok")))
+        );
+    }
+
+    #[test]
+    fn tray_problem_items_open_settings_where_their_row_is() {
+        for problem in TrayProblem::ALL {
+            assert_eq!(TrayProblem::from_id(problem.id()), Some(problem));
+        }
+        // ほかの項目の id は、問題の項目と取り違えない
+        for id in ["show", "settings", "manual", "quit"] {
+            assert_eq!(TrayProblem::from_id(id), None);
+        }
+        assert_eq!(
+            TrayProblem::SettingsUnreadable.category(),
+            SettingsCategory::General
+        );
+        assert_eq!(TrayProblem::Settings.category(), SettingsCategory::General);
+        assert_eq!(TrayProblem::Autostart.category(), SettingsCategory::General);
+        assert_eq!(TrayProblem::Hotkey.category(), SettingsCategory::Keys);
+    }
 
     #[test]
     fn keeps_launch_at_login_off_when_either_side_turned_it_off() {

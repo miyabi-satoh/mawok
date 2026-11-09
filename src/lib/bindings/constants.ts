@@ -17,6 +17,7 @@ export const EVENTS = {
 	DRAFT_HISTORY_MERGED: "draft-history-merged",
 	SNIPPET_ADDED: "snippet-added",
 	CONFIG_REPLACED: "config-replaced",
+	SETTINGS_CATEGORY_REQUESTED: "settings-category-requested",
 	SHOWN: "shown",
 	HIDE_REQUESTED: "hide-requested"
 } as const;
@@ -25,6 +26,7 @@ export const ERROR_CODES = {
 	BACKUP_RESTORE_PARTIAL: "backup.restore_partial",
 	SETTINGS_FILE_UNREADABLE: "settings.file_unreadable",
 	SETTINGS_FOLDER_UNAVAILABLE: "settings.folder_unavailable",
+	SETTINGS_ACCESS_DENIED: "settings.access_denied",
 	KEYS_INVALID: "keys.invalid",
 	KEYS_EDITING: "keys.editing",
 	KEYS_HOTKEY: "keys.hotkey",

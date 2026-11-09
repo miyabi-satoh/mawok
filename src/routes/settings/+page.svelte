@@ -6,6 +6,8 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import EraserIcon from '@lucide/svelte/icons/eraser';
 	import { invoke } from '@tauri-apps/api/core';
+	import { tick } from 'svelte';
+	import type { SettingsCategory } from '$lib/bindings/SettingsCategory';
 	import { commandCaller, okValue } from '$lib/call';
 	import { clamp } from '$lib/clamp';
 	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '$lib/color';
@@ -65,6 +67,38 @@
 	const categories = settingsCategories();
 	let category = $state('general');
 	const categoryLabel = $derived(categories.find(({ value }) => value === category)?.label() ?? '');
+	/** 分類の区画。問題の知らせが見えるところまでスクロールする */
+	let content = $state<HTMLElement | null>(null);
+
+	function showCategory(value: string) {
+		// 記録中の表示は「キー操作」の分類の中にしかない。ほかへ移っても記録を続けると、
+		// 見えないままキーを横取りし、止めたホットキーも戻らない
+		if (recording) stopRecording();
+		// 足したまま書かなかった行は、分類を離れたら捨てる。戻ったときに「未入力」の行が残らないように
+		replacements.dropBlanks();
+		snippetsEditor.snippets.dropBlanks();
+		category = value;
+	}
+
+	/**
+	 * トレイの ⚠ の項目から開かれたら、その問題の行がある分類を出し、知らせが見えるところまでスクロールする。
+	 * 頼まれた分類は Rust 側が取り置き、窓を作った直後でも描き終えてから取りに来られるようにしている
+	 */
+	async function showRequestedCategory() {
+		const requested = await invoke<SettingsCategory | null>('take_settings_category');
+		if (!requested) return;
+		showCategory(requested);
+		await tick();
+		// 知らせだけでなく、下に並ぶ操作（「アクセスを許可...」など）まで見せるので、知らせの入った行ごと見せる
+		content
+			?.querySelector('[data-slot="alert"]')
+			?.closest('[data-settings-row]')
+			?.scrollIntoView({ block: 'nearest' });
+	}
+	$effect(() => {
+		void showRequestedCategory();
+		return onEvent(EVENTS.SETTINGS_CATEGORY_REQUESTED, () => void showRequestedCategory());
+	});
 
 	/** 記録しているキー。ホットキーか、下書きウィンドウの操作か。記録していなければ null */
 	let recording = $state<'hotkey' | DraftAction | null>(null);
@@ -449,6 +483,14 @@
 	</div>
 {/snippet}
 
+<!-- トレイの ⚠ の項目から開いて読む、今の問題の知らせ。説明でなく今の状態なので、設定の保存先の知らせと同じく警告として出す -->
+{#snippet problemAlert(text: string)}
+	<Alert.Root variant="destructive">
+		<CircleAlertIcon />
+		<Alert.Title class="wrap-anywhere">{text}</Alert.Title>
+	</Alert.Root>
+{/snippet}
+
 <svelte:window
 	onkeydown={recording ? recordKey : onKeydown}
 	onblur={recording ? stopRecording : undefined}
@@ -496,18 +538,7 @@
 		<Tabs.Root
 			orientation="vertical"
 			class="min-w-0 flex-1 gap-0"
-			bind:value={
-				() => category,
-				(value) => {
-					// 記録中の表示は「キー操作」の分類の中にしかない。ほかへ移っても記録を続けると、
-					// 見えないままキーを横取りし、止めたホットキーも戻らない
-					if (recording) stopRecording();
-					// 足したまま書かなかった行は、分類を離れたら捨てる。戻ったときに「未入力」の行が残らないように
-					replacements.dropBlanks();
-					snippetsEditor.snippets.dropBlanks();
-					category = value;
-				}
-			}
+			bind:value={() => category, showCategory}
 		>
 			<Tabs.List
 				class="w-48 shrink-0 justify-start gap-0.5 rounded-none border-r border-sidebar-border bg-sidebar p-2 group-data-vertical/tabs:h-full"
@@ -526,7 +557,7 @@
 				{/each}
 			</Tabs.List>
 			<!-- 入りきらない分は、ウィンドウを伸ばさずにこの区画の中でスクロールする -->
-			<div class="flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto p-6">
+			<div class="flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto p-6" bind:this={content}>
 				<h1 class="text-lg font-semibold">{categoryLabel}</h1>
 				{#if category === 'about'}
 					<div class="flex flex-col items-center gap-2 text-center">
@@ -581,6 +612,11 @@
 										}
 									/>
 								</Field.Field>
+								{#if view.autostartFailed}
+									{@render problemAlert(
+										m.settings_autostart_failed({ error: view.autostartFailed })
+									)}
+								{/if}
 							</SettingsRow>
 						</SettingsSection>
 						<SettingsSection title={m.settings_section_draft_window()}>
@@ -755,6 +791,10 @@
 								{/if}
 								{#if hotkeyError}
 									<Field.Error>{hotkeyError}</Field.Error>
+								{:else if view.hotkeyUnavailable && view.hotkey && recording !== 'hotkey'}
+									{@render problemAlert(
+										m.settings_hotkey_unregistered({ keys: formatKeys(view.hotkey, view.platform) })
+									)}
 								{/if}
 							</SettingsRow>
 						{/if}

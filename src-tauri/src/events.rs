@@ -7,5 +7,7 @@ pub const DRAFT_HISTORY_MERGED: &str = "draft-history-merged";
 pub const SNIPPET_ADDED: &str = "snippet-added";
 /// 設定のファイルがほかで変わったか、置き場を替えたか、バックアップから戻したことで、設定が替わった。設定画面は、持っている写し（行・打って直す欄）を今の設定から写し直す。
 pub const CONFIG_REPLACED: &str = "config-replaced";
+/// トレイの ⚠ の項目で、設定画面に出す分類を頼んだ。設定画面は take_settings_category で受け取る。
+pub const SETTINGS_CATEGORY_REQUESTED: &str = "settings-category-requested";
 pub const SHOWN: &str = "shown";
 pub const HIDE_REQUESTED: &str = "hide-requested";
