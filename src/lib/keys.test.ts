@@ -7,6 +7,8 @@ import {
 	draftActionFor,
 	isCloseWindowKey,
 	isDismissKey,
+	isTabKey,
+	isUnsupportedKey,
 	keyHint,
 	keyLabels,
 	isKeyRejection,
@@ -124,6 +126,33 @@ describe('isDismissKey', () => {
 
 	it('Esc 以外のキーでは隠さない', () => {
 		expect(isDismissKey({ key: 'Enter', isComposing: false, keyCode: 13 })).toBe(false);
+	});
+});
+
+const noModifiers = { metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
+
+describe('isUnsupportedKey', () => {
+	it('登録できないキーを見分け、修飾キーと登録できるキーは含めない', () => {
+		expect(isUnsupportedKey({ code: 'IntlYen' })).toBe(true);
+		expect(isUnsupportedKey({ code: 'Convert' })).toBe(true);
+		expect(isUnsupportedKey({ code: 'ShiftLeft' })).toBe(false);
+		expect(isUnsupportedKey({ code: 'KeyA' })).toBe(false);
+	});
+});
+
+describe('isTabKey', () => {
+	it('修飾キーの無い Tab でタブ文字を入れる', () => {
+		expect(isTabKey({ key: 'Tab', ...noModifiers, isComposing: false, keyCode: 9 })).toBe(true);
+	});
+
+	it('Shift+Tab・Ctrl+Tab と、変換中の Tab では入れない', () => {
+		expect(
+			isTabKey({ key: 'Tab', ...noModifiers, shiftKey: true, isComposing: false, keyCode: 9 })
+		).toBe(false);
+		expect(
+			isTabKey({ key: 'Tab', ...noModifiers, ctrlKey: true, isComposing: false, keyCode: 9 })
+		).toBe(false);
+		expect(isTabKey({ key: 'Tab', ...noModifiers, isComposing: true, keyCode: 229 })).toBe(false);
 	});
 });
 

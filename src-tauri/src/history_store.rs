@@ -274,6 +274,10 @@ pub fn load(path: &Path) -> Result<History, LoadError> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(History::default()),
+        // 文字コードが壊れたファイルも、書き方の壊れたファイルと同じく、写して退けられるようにする
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            return Err(LoadError::Invalid(ReadProblem::InvalidJson))
+        }
         Err(error) => return Err(LoadError::Io(error.kind())),
     };
     let modified = fs::metadata(path)
@@ -501,6 +505,17 @@ mod tests {
         assert_eq!(
             parse(r#"{"version": 3, "entries": []}"#, 900),
             Err(ReadProblem::UnknownVersion)
+        );
+    }
+
+    #[test]
+    fn treats_a_file_with_broken_encoding_as_invalid() {
+        let dir = TempDir::new("history-broken-encoding");
+        let path = dir.join("a1b2c3d4.json");
+        fs::write(&path, [0xff, 0xfe, b'{']).unwrap();
+        assert_eq!(
+            load(&path),
+            Err(LoadError::Invalid(ReadProblem::InvalidJson))
         );
     }
 

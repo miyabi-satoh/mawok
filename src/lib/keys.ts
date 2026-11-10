@@ -28,6 +28,19 @@ export function isDismissKey(
 	return event.key === 'Escape' && !isImeKey(event);
 }
 
+/**
+ * 下書きの入力欄でタブ文字を入れるキーか（修飾キーの無い Tab）。WebView の既定ではフォーカスが入力欄の外へ移り、
+ * ボタンは Tab の順から外してあるので、戻る先が無く打てなくなる
+ */
+export function isTabKey(
+	event: Pick<
+		KeyboardEvent,
+		'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'isComposing' | 'keyCode'
+	>
+): boolean {
+	return event.key === 'Tab' && hasNoModifiers(event) && !isImeKey(event);
+}
+
 export type Platform = GeneratedPlatform;
 
 /** 下書きウィンドウでキーで呼べる操作（Rust 側の draft_keys::DraftAction）。並びは、キーが重なったときに先の操作にキーを残す順 */
@@ -219,6 +232,14 @@ const MODIFIER_CODES = new Set([
 
 /** ホットキーとして登録できる KeyboardEvent.code。Rust 側が生成した集合を使う */
 const SUPPORTED_CODES = new Set<string>(CONSTANTS.SUPPORTED_CODES);
+
+/**
+ * キーの記録に使えないキーか（¥・変換・無変換など、ホットキーにもキー操作にも登録できないキー）。修飾キーは本体のキーを待つので含めない。
+ * 押しても何も起きないと、ほかのアプリが使っているのと見分けが付かないので、画面は使えないことを出す
+ */
+export function isUnsupportedKey(event: Pick<KeyboardEvent, 'code'>): boolean {
+	return !MODIFIER_CODES.has(event.code) && !SUPPORTED_CODES.has(event.code);
+}
 
 /** 押したキーの組み合わせを、ホットキーの設定に書く文字列（例: CommandOrControl+Shift+Space）にする */
 export function toAccelerator(event: KeyCombo, platform: Platform): string | null {

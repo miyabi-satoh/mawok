@@ -1200,6 +1200,45 @@ describe('キー操作', () => {
 		expect(commandsCalled()).not.toContain('commit');
 	});
 
+	it('Windows では、印刷・ページ内検索・キャレットブラウズのキーの既定の動作を止める', async () => {
+		settings.current = view('windows');
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.fill('draft');
+		const press = (init: KeyboardEventInit) => {
+			const event = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true });
+			textarea.element().dispatchEvent(event);
+			return event.defaultPrevented;
+		};
+
+		for (const init of [
+			{ code: 'KeyP', key: 'p', ctrlKey: true },
+			{ code: 'KeyF', key: 'f', ctrlKey: true },
+			{ code: 'KeyG', key: 'g', ctrlKey: true },
+			{ code: 'F3', key: 'F3' },
+			{ code: 'F7', key: 'F7' }
+		]) {
+			expect(press(init), init.key).toBe(true);
+		}
+	});
+
+	it('macOS では、Ctrl+F・Ctrl+P を入力欄のカーソル移動に残す', async () => {
+		settings.current = view('macos');
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.fill('draft');
+		const event = new KeyboardEvent('keydown', {
+			code: 'KeyF',
+			key: 'f',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true
+		});
+		textarea.element().dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(false);
+	});
+
 	it('読み込み直すキー（F5・Ctrl+R）は、入力欄でも一覧でも既定の動作を止め、下書きを残す', async () => {
 		settings.current = view('windows');
 		const screen = await render(Page);
@@ -1249,7 +1288,7 @@ describe('キー操作', () => {
 		expect(commandsCalled()).not.toContain('toggle_settings_window');
 	});
 
-	it('余白をクリックして入力欄からフォーカスが外れても、Esc で隠し、操作のキーでコピーする', async () => {
+	it('ボタンを押して入力欄からフォーカスが外れても、Esc で隠し、操作のキーでコピーする', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('git status');
@@ -1261,5 +1300,27 @@ describe('キー操作', () => {
 
 		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
 		await vi.waitFor(() => expect(invoked).toHaveBeenCalledWith('commit', { text: 'git status' }));
+	});
+
+	it('入力欄の Tab はタブ文字を入れ、フォーカスを入力欄に残す', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.fill('a');
+
+		await userEvent.keyboard('{Tab}b');
+
+		await expect.element(textarea).toHaveValue('a\tb');
+		expect(document.activeElement).toBe(textarea.element());
+	});
+
+	it('打っている最中に余白を押しても、入力欄からフォーカスを外さない', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.click();
+
+		const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+		document.querySelector('main')!.dispatchEvent(press);
+
+		expect(press.defaultPrevented).toBe(true);
 	});
 });

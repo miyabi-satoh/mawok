@@ -6,6 +6,7 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import EraserIcon from '@lucide/svelte/icons/eraser';
 	import { invoke } from '@tauri-apps/api/core';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { tick } from 'svelte';
 	import type { SettingsCategory } from '$lib/bindings/SettingsCategory';
 	import { commandCaller, okValue } from '$lib/call';
@@ -28,7 +29,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import * as ToggleGroup from '$lib/components/ui/toggle-group';
 	import { DEFAULT_DRAFT_FONT_SIZE, MAX_DRAFT_FONT_SIZE, MIN_DRAFT_FONT_SIZE } from '$lib/font';
-	import { draftGuidance } from '$lib/guidance';
+	import { draftGuidance, guidanceHotkey } from '$lib/guidance';
 	import { focusFirstField } from '$lib/focus-field';
 	import { isBlankReplacement } from '$lib/blank-rows';
 	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '$lib/history.svelte';
@@ -51,6 +52,7 @@
 		isImeKey,
 		isKeyRejection,
 		keyRejectionMessage,
+		isUnsupportedKey,
 		toAccelerator,
 		toDraftKey,
 		type DraftAction
@@ -144,6 +146,9 @@
 
 	async function stopRecording() {
 		recording = null;
+		// 記録の途中に出した「使えません」は、やめた後には当たらない
+		hotkeyError = '';
+		keyError = null;
 		await invoke('resume_hotkey');
 	}
 
@@ -169,13 +174,20 @@
 		}
 		const accelerator =
 			target === 'hotkey' ? toAccelerator(event, view.platform) : toDraftKey(event, view.platform);
-		// 修飾キーだけのときや、登録できないキーのときは、次のキーを待つ
-		if (!accelerator) return;
+		// 修飾キーだけのときや、登録できないキーのときは、次のキーを待つ。登録できないキーは、そう知らせる
+		if (!accelerator) {
+			if (isUnsupportedKey(event)) {
+				if (target === 'hotkey') hotkeyError = m.settings_key_unsupported();
+				else keyError = { action: target, message: m.settings_key_unsupported() };
+			}
+			return;
+		}
 		recording = null;
 		if (target === 'hotkey') {
 			await setHotkey(accelerator);
 			return;
 		}
+		keyError = null;
 		try {
 			await invoke('set_draft_key', { action: target, key: accelerator });
 		} catch (e) {
@@ -262,7 +274,13 @@
 
 	/** フォントの設定。打っている途中に Rust 側からの反映で打ち消されないよう、辞書と同じく画面側で持つ */
 	let fontFamily = $state(settings.current?.textFontFamily ?? '');
-	let fontSize = $state(settings.current?.textFontSize ?? DEFAULT_DRAFT_FONT_SIZE);
+	const initialFontSize = settings.current?.textFontSize ?? DEFAULT_DRAFT_FONT_SIZE;
+	let fontSize = $state(initialFontSize);
+	/**
+	 * 文字の大きさの欄に打っている値。打つたびに範囲へ収めて書き戻すと、20 を打つ途中の 2 が 10 に替わって打てないので、
+	 * 履歴の件数と同じく別に持ち、確定したときに収めて保存する
+	 */
+	let fontSizeInput = $state<number | null>(initialFontSize);
 
 	const saveFont = coalescedSaver(() =>
 		run('set_draft_font', { family: fontFamily, size: fontSize })
@@ -305,8 +323,36 @@
 		historySize = clamp(Math.round(size), 0, MAX_DRAFT_HISTORY_SIZE);
 		historySizeInput = historySize;
 		historySizeChanges++;
-		saveHistorySize();
+		return saveHistorySize();
 	}
+
+	/** 文字の大きさの欄の確定（離れたとき・Enter・上下のボタンと矢印キー）。空のまま離れたら、今の大きさへ戻す */
+	function commitFontSize() {
+		const size = Number(fontSizeInput);
+		if (fontSizeInput == null || String(fontSizeInput) === '' || !Number.isFinite(size)) {
+			fontSizeInput = fontSize;
+			return;
+		}
+		// 画面側でも範囲に収める。Rust 側も収めるが、そちらだけだと画面の表示と実際の値がずれたまま残る。
+		// 整数でない値や u16 に収まらない値は、そもそも invoke が受け取れずに保存が落ちる
+		fontSize = clamp(Math.round(size), MIN_DRAFT_FONT_SIZE, MAX_DRAFT_FONT_SIZE);
+		fontSizeInput = fontSize;
+		return saveFont();
+	}
+
+	// 欄から離れる前に窓を閉じると、確定の change が来ないまま打った値が落ちるので、閉じる前に確定して保存し終えるのを待つ。
+	// Esc（close_settings_window）も OS の閉じるボタンも、この知らせを通る
+	$effect(() => {
+		const unlisten = getCurrentWindow().onCloseRequested(async () => {
+			const saves: Promise<void>[] = [];
+			if (fontSizeInput !== fontSize) saves.push(commitFontSize() ?? Promise.resolve());
+			if (historySizeInput !== historySize) saves.push(commitHistorySize() ?? Promise.resolve());
+			await Promise.all(saves);
+		});
+		return () => {
+			unlisten.then((stop) => stop());
+		};
+	});
 
 	function clearHistory() {
 		run('clear_draft_history');
@@ -319,9 +365,10 @@
 		settings.current
 			? draftGuidance(
 					guidance,
-					settings.current.hotkey,
+					guidanceHotkey(settings.current),
 					settings.current.textWindowKeys,
-					settings.current.platform
+					settings.current.platform,
+					settings.current.hotkeyUnavailable
 				)
 			: ''
 	);
@@ -401,6 +448,7 @@
 			replacements.recopy(view.replacements);
 			snippetsEditor.recopy(view);
 			fontFamily = view.textFontFamily;
+			if (fontSizeInput === fontSize) fontSizeInput = view.textFontSize;
 			fontSize = view.textFontSize;
 			// 保存の前の、打っている途中の値（離れるまで保存しない件数、読めない色）は消さない
 			if (historySizeInput === historySize) historySizeInput = view.textHistorySize;
@@ -735,7 +783,7 @@
 											<Button
 												variant="outline"
 												size="sm"
-												onclick={() => invoke('configure_desktop_hotkey')}
+												onclick={() => run('configure_desktop_hotkey')}
 											>
 												{m.settings_hotkey_configure_desktop()}
 											</Button>
@@ -882,22 +930,8 @@
 										aria-labelledby="draft-font-size-label"
 										min={MIN_DRAFT_FONT_SIZE}
 										max={MAX_DRAFT_FONT_SIZE}
-										bind:value={
-											() => fontSize,
-											(value) => {
-												// 空にした途中の状態では保存しない
-												const size = Number(value);
-												if (!Number.isFinite(size) || size <= 0) return;
-												// 画面側でも範囲に収める。Rust 側も収めるが、そちらだけだと画面の表示と実際の値がずれたまま残る。
-												// 整数でない値や u16 に収まらない値は、そもそも invoke が受け取れずに保存が落ちる
-												fontSize = clamp(
-													Math.round(size),
-													MIN_DRAFT_FONT_SIZE,
-													MAX_DRAFT_FONT_SIZE
-												);
-												saveFont();
-											}
-										}
+										bind:value={fontSizeInput}
+										onchange={commitFontSize}
 									/>
 								</div>
 							</div>
@@ -1184,8 +1218,9 @@
 						</SettingsRow>
 					</SettingsSection>
 				</Tabs.Content>
+				<!-- 長い一覧の下でも見えるよう、知らせは画面の下に留める。打っている途中に置き場が外れると、知らせが画面の外になるため -->
 				{#if error}
-					<Alert.Root variant="destructive">
+					<Alert.Root variant="destructive" class="sticky bottom-0 z-10 shadow-md">
 						<CircleAlertIcon />
 						<Alert.Title>{error}</Alert.Title>
 					</Alert.Root>

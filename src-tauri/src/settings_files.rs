@@ -92,46 +92,98 @@ pub fn exists_in(dir: &Path) -> bool {
     FILE_NAMES.iter().any(|name| dir.join(name).exists())
 }
 
+/// どの項目を書くか
+#[derive(Debug, Clone, Copy)]
+pub enum Scope<'a> {
+    /// `before`（今の設定を書いたときの項目）から変えた項目だけを書く。画面から 1 つ変えたときに、ほかの項目を
+    /// メモリの内容で書き直さないため。ほかのデバイスから届いて、まだ読み込んでいない変更や、読めずに読み飛ばした値
+    /// （新しい版が書いた選択肢・キー・行など）を、変えていない項目まで巻き添えで消さない。表（キー操作）の中の項目と
+    /// 行の並びの中の行も、`before` に無かったもの（読めなかったもの）には触らない
+    Changed(&'a BTreeMap<String, Value>),
+    /// `managed` の項目を全部書く（バックアップから戻す・置き場を替えて今の設定を書く）。
+    /// `set_aside_unreadable` なら、読めないファイルを `<名前>.broken-….toml` に写してから書き直す
+    All { set_aside_unreadable: bool },
+}
+
 /// 項目を置き場のファイルに書く。`managed` は、このアプリが書く項目名（ほかの名前は、新しい版が書いた項目や
-/// 手で書いたものとして残す）。中身が変わらないファイルは書かない。ほかのデバイスで同期しているときに、
-/// 変えていないファイルまで書き換えて衝突のもとにしないため。
-/// 読めないファイルは書き換えない（手で書きかけのものを、画面からの変更で消さないため）。そのときは
+/// 手で書いたものとして残す）。書く項目の無いファイルは読みもしない。中身が変わらないファイルは書かない。
+/// ほかのデバイスで同期しているときに、変えていないファイルまで書き換えて衝突のもとにしないため。
+/// 書く項目のあるファイルが読めなければ書き換えない（手で書きかけのものを、画面からの変更で消さないため）。そのときは
 /// `SETTINGS_FILE_UNREADABLE` の符号を返す（読めるファイルの分は書く）
 pub fn write(
     dir: &Path,
     os: &str,
     managed: &[&str],
+    scope: Scope<'_>,
     entries: &BTreeMap<String, Value>,
 ) -> Result<(), String> {
+    let names: Vec<&str> = match scope {
+        Scope::Changed(before) => managed
+            .iter()
+            .copied()
+            .filter(|name| before.get(*name) != entries.get(*name))
+            .collect(),
+        Scope::All { .. } => managed.to_vec(),
+    };
+    let before = match scope {
+        Scope::Changed(before) => Some(before),
+        Scope::All { .. } => None,
+    };
     let mut unreadable = Vec::new();
     for name in FILE_NAMES {
+        let in_file: Vec<&str> = names
+            .iter()
+            .copied()
+            .filter(|item| file_of(item) == name)
+            .collect();
+        if in_file.is_empty() {
+            continue;
+        }
         let path = dir.join(name);
-        let before = match fs::read_to_string(target(&path)) {
+        let before_text = match fs::read_to_string(target(&path)) {
             Ok(text) => Some(text),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(format!("{name}: {error}")),
         };
-        let mut document = match before.as_deref().map(str::parse::<DocumentMut>) {
+        let mut document = match before_text.as_deref().map(str::parse::<DocumentMut>) {
             Some(Ok(document)) => document,
-            Some(Err(_)) => {
-                unreadable.push(name);
-                continue;
-            }
+            Some(Err(_)) => match scope {
+                Scope::All {
+                    set_aside_unreadable: true,
+                } => {
+                    match atomic_file::back_up(&target(&path), std::time::SystemTime::now()) {
+                        Ok(copy) => log::warn!(
+                            "set aside the unreadable settings file {name} to {}",
+                            copy.map(|copy| copy.display().to_string())
+                                .unwrap_or_default()
+                        ),
+                        Err(error) => return Err(format!("{name}: {error}")),
+                    }
+                    DocumentMut::new()
+                }
+                _ => {
+                    unreadable.push(name);
+                    continue;
+                }
+            },
             None => DocumentMut::new(),
         };
         match name {
-            SETTINGS => update_settings(&mut document, os, managed, entries),
+            SETTINGS => update_settings(&mut document, os, &in_file, before, entries),
             _ => {
-                let (item_name, _) = ROW_FILES
-                    .into_iter()
-                    .find(|(_, file)| *file == name)
-                    .expect("a row file");
-                set_or_remove(document.as_table_mut(), item_name, entries.get(item_name));
+                for item_name in in_file {
+                    set_or_remove(
+                        document.as_table_mut(),
+                        item_name,
+                        before.map(|before| before.get(item_name)),
+                        entries.get(item_name),
+                    );
+                }
             }
         }
         let after = document.to_string();
-        if before.as_deref() == Some(after.as_str())
-            || (before.is_none() && after.trim().is_empty())
+        if before_text.as_deref() == Some(after.as_str())
+            || (before_text.is_none() && after.trim().is_empty())
         {
             continue;
         }
@@ -199,27 +251,42 @@ fn load(path: &Path) -> Result<Option<DocumentMut>, String> {
         Ok(text) => text
             .parse::<DocumentMut>()
             .map(Some)
-            .map_err(|error| error.to_string()),
+            .map_err(|error| parse_error(&text, &error)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// 読めない理由。ログに出すので、行と桁と理由だけにする。toml_edit の文はその行の中身を引き、
+/// 定型文や置き換え辞書の本文がログに残るため（マニュアルの「ログにテキストの中身は残していません」）
+fn parse_error(text: &str, error: &toml_edit::TomlError) -> String {
+    let Some(start) = error.span().map(|span| span.start.min(text.len())) else {
+        return error.message().to_string();
+    };
+    let before = text.get(..start).unwrap_or(text);
+    let line = before.matches('\n').count() + 1;
+    let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+    format!("line {line}, column {column}: {}", error.message())
 }
 
 fn is_row_item(name: &str) -> bool {
     ROW_FILES.iter().any(|(item_name, _)| *item_name == name)
 }
 
+/// `before` は Scope::Changed の前の項目（None なら全部書く）
 fn update_settings(
     document: &mut DocumentMut,
     os: &str,
-    managed: &[&str],
+    names: &[&str],
+    before: Option<&BTreeMap<String, Value>>,
     entries: &BTreeMap<String, Value>,
 ) {
     let table = document.as_table_mut();
-    for &name in managed {
+    for &name in names {
         if is_row_item(name) {
             continue;
         }
+        let previous = before.map(|before| before.get(name));
         if PER_OS.contains(&name) {
             let existing = table.get(name);
             let inline = matches!(
@@ -235,17 +302,17 @@ fn update_settings(
                 // OS の欄でない形で書いてあれば、読むときも読み飛ばしているので、書くときに今の形に直す
                 _ => Table::new(),
             };
-            let before = existing.and_then(to_json);
-            set_or_remove(&mut per_os, os, entries.get(name));
+            let before_json = existing.and_then(to_json);
+            set_or_remove(&mut per_os, os, previous, entries.get(name));
             // この OS の値が変わらなければ、書き方（1行の表・コメント・位置）を残すため触らない
-            if before == Some(table_to_json(per_os.iter())) {
+            if before_json == Some(table_to_json(per_os.iter())) {
                 continue;
             }
             if per_os.is_empty() {
                 table.remove(name);
             } else if inline {
                 // 元の1行の表をその場で書き換える。入れ替えると、行末のコメントと空白（値の装飾）が消えるため
-                let value = entries.get(name).and_then(to_value);
+                let value = per_os.get(os).and_then(to_json).and_then(|v| to_value(&v));
                 if let Some(Item::Value(toml_edit::Value::InlineTable(existing))) =
                     table.get_mut(name)
                 {
@@ -262,13 +329,35 @@ fn update_settings(
                 table.insert(name, Item::Table(per_os));
             }
         } else {
-            set_or_remove(table, name, entries.get(name));
+            set_or_remove(table, name, previous, entries.get(name));
         }
     }
 }
 
-/// 値を入れる。同じ値が書いてあれば、書き方（コメント・引用符の種類など）を残すため触らない。値が無ければ消す
-fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
+/// 値を入れる。同じ値が書いてあれば、書き方（コメント・引用符の種類など）を残すため触らない。値が無ければ消す。
+/// `previous` は Scope::Changed のときの前の値（`Some(None)` は前も無かった）。そのときは、表の中の項目は前にあって
+/// 今は無いものだけを消し、行の並びは読めなかった行を残す。前に無かったもの（読めずに読み飛ばしたもの）に触らないため
+fn set_or_remove(
+    table: &mut Table,
+    name: &str,
+    previous: Option<Option<&Value>>,
+    value: Option<&Value>,
+) {
+    let changed_only = previous.is_some();
+    let previous = previous.flatten();
+    // 変えた分だけ書くときは、無くなった表や並びも、空の表・並びとして中身を比べて書く。丸ごと消すと、
+    // 読めずに読み飛ばした中身まで消すため
+    let empty_object = Value::Object(Map::new());
+    let empty_array = Value::Array(Vec::new());
+    let value = match (value, table.get(name)) {
+        (None, Some(Item::Table(_) | Item::Value(toml_edit::Value::InlineTable(_))))
+            if changed_only =>
+        {
+            Some(&empty_object)
+        }
+        (None, Some(Item::ArrayOfTables(_))) if changed_only => Some(&empty_array),
+        (value, _) => value,
+    };
     let Some(value) = value else {
         table.remove(name);
         return;
@@ -279,24 +368,70 @@ fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
     // 行の並び（`[[snippets]]` など）は、変わった行だけを書き換える。1行を直しただけで、ほかの行に手で書いた
     // コメントや書き方を消さないため
     if let (Some(Item::ArrayOfTables(tables)), Value::Array(rows)) = (table.get_mut(name), value) {
-        if !rows.is_empty() && rows.iter().all(Value::is_object) {
-            update_rows(name, tables, rows);
+        if rows.iter().all(Value::is_object) && (changed_only || !rows.is_empty()) {
+            update_rows(name, tables, rows, changed_only);
+            if tables.is_empty() {
+                table.remove(name);
+            }
             return;
         }
     }
     // 表（`[text_window_keys.macos]` など）は、項目ごとに入れ替える。表ごと入れ替えると、変えていない項目のコメントまで消える
     if let (Some(Item::Table(existing)), Value::Object(object)) = (table.get_mut(name), value) {
+        let previous_object = previous.and_then(Value::as_object);
         let gone: Vec<String> = existing
             .iter()
             .map(|(key, _)| key.to_string())
             .filter(|key| !object.contains_key(key))
+            .filter(|key| !changed_only || previous_object.is_some_and(|p| p.contains_key(key)))
             .collect();
         for key in gone {
             existing.remove(&key);
         }
         for (key, value) in object {
-            set_or_remove(existing, key, Some(value));
+            if previous_object.and_then(|p| p.get(key)) == Some(value) {
+                continue;
+            }
+            set_or_remove(existing, key, None, Some(value));
         }
+        if existing.is_empty() {
+            table.remove(name);
+        }
+        return;
+    }
+    // 1行の表（`macos = { copy = "…" }`）も、同じく項目ごとに入れ替える。入れ替えると、知らない項目が消えるため
+    if let (Some(Item::Value(toml_edit::Value::InlineTable(existing))), Value::Object(object)) =
+        (table.get_mut(name), value)
+    {
+        let previous_object = previous.and_then(Value::as_object);
+        let gone: Vec<String> = existing
+            .iter()
+            .map(|(key, _)| key.to_string())
+            .filter(|key| !object.contains_key(key))
+            .filter(|key| !changed_only || previous_object.is_some_and(|p| p.contains_key(key)))
+            .collect();
+        for key in &gone {
+            existing.remove(key);
+        }
+        let mut added = false;
+        for (key, value) in object {
+            if previous_object.and_then(|p| p.get(key)) == Some(value)
+                || existing.get(key).and_then(value_to_json).as_ref() == Some(value)
+            {
+                continue;
+            }
+            if let Some(new) = to_value(value) {
+                added |= existing.insert(key, new).is_none();
+            }
+        }
+        if existing.is_empty() {
+            table.remove(name);
+        } else if added || !gone.is_empty() {
+            existing.fmt();
+        }
+        return;
+    }
+    if value == &empty_object || value == &empty_array {
         return;
     }
     let Some(item) = to_item(value) else {
@@ -313,15 +448,41 @@ fn set_or_remove(table: &mut Table, name: &str, value: Option<&Value>) {
 
 /// 行の並びを書き換える。中身が同じ行は、元の表（前に付けたコメント・書き方・知らない項目）をそのまま使い、
 /// 位置が変わっても書き直さない。同じ位置で中身の変わった行は、元の表の値だけを書き換えて、コメントと知らない項目を残す。
-/// 比べるときは、書いていない項目を既定の値で埋める（`enabled` を省いた手書きの行を、毎回書き直さないため）
-fn update_rows(item_name: &str, tables: &mut ArrayOfTables, rows: &[Value]) {
-    let existing: Vec<Table> = tables.iter().cloned().collect();
-    let normalized: Vec<Option<Value>> = existing
+/// 比べるときは、書いていない項目を既定の値で埋める（`enabled` を省いた手書きの行を、毎回書き直さないため）。
+/// `keep_unreadable` なら、行として読めない行（新しい版が足した型の行・書き間違えた行）を残す。置くのは、元で次にあった
+/// 読めた行の前（その行が無くなっていれば末尾）。位置は読めた行の中で数える（画面の並びには、読めない行が入っていないため）
+fn update_rows(item_name: &str, tables: &mut ArrayOfTables, rows: &[Value], keep_unreadable: bool) {
+    let all: Vec<Table> = tables.iter().cloned().collect();
+    let all_normalized: Vec<Option<Value>> = all
         .iter()
         .map(|table| crate::config::normalized_row(item_name, &table_to_json(table.iter())))
         .collect();
+    // 読めない行と、元でその次にあった読めた行（existing の中の位置）
+    let (existing, normalized, unreadable) = if keep_unreadable {
+        let mut existing = Vec::new();
+        let mut normalized = Vec::new();
+        let mut waiting = Vec::new();
+        let mut unreadable: Vec<(Option<usize>, Table)> = Vec::new();
+        for (table, row) in all.iter().zip(&all_normalized) {
+            if row.is_some() {
+                for table in waiting.drain(..) {
+                    unreadable.push((Some(existing.len()), table));
+                }
+                existing.push(table.clone());
+                normalized.push(row.clone());
+            } else {
+                waiting.push(table.clone());
+            }
+        }
+        unreadable.extend(waiting.into_iter().map(|table| (None, table)));
+        (existing, normalized, unreadable)
+    } else {
+        (all.clone(), all_normalized, Vec::new())
+    };
     let mut used = vec![false; existing.len()];
-    let mut next = ArrayOfTables::new();
+    let mut next: Vec<Table> = Vec::new();
+    // next の各行が、existing のどの行から来たか
+    let mut sources: Vec<Option<usize>> = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         let Some(object) = row.as_object() else {
             continue;
@@ -329,6 +490,7 @@ fn update_rows(item_name: &str, tables: &mut ArrayOfTables, rows: &[Value]) {
         let wanted = crate::config::normalized_row(item_name, row);
         let same = (0..existing.len())
             .find(|&at| !used[at] && wanted.is_some() && normalized[at] == wanted);
+        let mut source = same;
         let table = match same {
             Some(at) => {
                 used[at] = true;
@@ -342,26 +504,33 @@ fn update_rows(item_name: &str, tables: &mut ArrayOfTables, rows: &[Value]) {
                 }) =>
             {
                 used[index] = true;
+                source = Some(index);
                 let mut table = existing[index].clone();
                 for (name, value) in object {
-                    set_or_remove(&mut table, name, Some(value));
+                    set_or_remove(&mut table, name, None, Some(value));
                 }
                 table
             }
             None => to_table(object),
         };
         next.push(table);
+        sources.push(source);
+    }
+    for (follower, table) in unreadable {
+        let at = follower
+            .and_then(|follower| sources.iter().position(|source| *source == Some(follower)))
+            .unwrap_or(next.len());
+        next.insert(at, table);
+        sources.insert(at, None);
     }
     // 表は、並びでなく文書の中の位置で書き出されるので、新しい並びの順に位置を振り直す
-    let base = existing
-        .iter()
-        .filter_map(Table::position)
-        .min()
-        .unwrap_or(0);
-    for (index, table) in next.iter_mut().enumerate() {
+    let base = all.iter().filter_map(Table::position).min().unwrap_or(0);
+    let mut written = ArrayOfTables::new();
+    for (index, mut table) in next.into_iter().enumerate() {
         table.set_position(Some(base + index as isize));
+        written.push(table);
     }
-    *tables = next;
+    *tables = written;
 }
 
 fn to_json(item: &Item) -> Option<Value> {
@@ -491,6 +660,10 @@ mod tests {
         );
     }
 
+    const ALL: Scope<'static> = Scope::All {
+        set_aside_unreadable: false,
+    };
+
     const MANAGED: &[&str] = &[
         key::HOTKEY,
         key::TEXT_WINDOW_KEYS,
@@ -523,7 +696,7 @@ mod tests {
                 json!([{ "name": "挨拶", "body": "お世話に\nなっております。", "enabled": true }]),
             ),
         ]);
-        write(dir.path(), "macos", MANAGED, &written).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &written).unwrap();
         let read = read(dir.path(), "macos");
         assert!(read.unreadable.is_empty());
         assert_eq!(read.entries, written);
@@ -547,7 +720,7 @@ mod tests {
             ("text_font_size", json!(20)),
             ("hotkey", json!("CommandOrControl+Shift+KeyM")),
         ]);
-        write(dir.path(), "macos", MANAGED, &next).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &next).unwrap();
         let after = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
         assert!(after.contains("# 自分で書いたメモ"), "{after}");
         assert!(after.contains("theme = \"dark\" # 夜に使う"), "{after}");
@@ -561,7 +734,7 @@ mod tests {
             "{after}"
         );
         // 既定に戻した項目は消す
-        write(dir.path(), "macos", MANAGED, &entries(&[])).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &entries(&[])).unwrap();
         let reset = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
         assert!(!reset.contains("theme"), "{reset}");
         assert!(!reset.contains("macos"), "{reset}");
@@ -594,7 +767,7 @@ mod tests {
                 ]),
             ),
         ]);
-        write(dir.path(), "macos", MANAGED, &next).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &next).unwrap();
         let settings = fs::read_to_string(dir.join(SETTINGS)).unwrap();
         assert!(
             settings.contains("windows = \"Control+Space\""),
@@ -618,7 +791,7 @@ mod tests {
             "text_window_keys",
             json!({ "copy": "Mod+Enter", "paste": "Mod+KeyB" }),
         )]);
-        write(dir.path(), "macos", MANAGED, &next).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &next).unwrap();
         assert_eq!(
             fs::read_to_string(dir.join(SETTINGS)).unwrap(),
             before.replace("Mod+KeyV", "Mod+KeyB")
@@ -634,7 +807,7 @@ mod tests {
         )
         .unwrap();
         let next = entries(&[("text_font_size", json!(24))]);
-        write(dir.path(), "macos", MANAGED, &next).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &next).unwrap();
         assert_eq!(
             fs::read_to_string(dir.join(SETTINGS)).unwrap(),
             "# 大きめにする\ntext_font_size = 24 # 会社の画面\n"
@@ -658,7 +831,7 @@ mod tests {
                 { "name": "c", "body": "d", "enabled": true }
             ]),
         );
-        write(dir.path(), "macos", MANAGED, &same).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &same).unwrap();
         assert_eq!(fs::read_to_string(dir.join(SETTINGS)).unwrap(), settings);
         assert_eq!(fs::read_to_string(dir.join(SNIPPETS)).unwrap(), snippets);
         // 並べ替えても、行に付けたコメントは行と一緒に動く
@@ -670,7 +843,7 @@ mod tests {
                 { "name": "a", "body": "b", "enabled": true }
             ]),
         );
-        write(dir.path(), "macos", MANAGED, &moved).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &moved).unwrap();
         let after = fs::read_to_string(dir.join(SNIPPETS)).unwrap();
         let (signature, greeting) = (after.find("# 署名").unwrap(), after.find("# 挨拶").unwrap());
         assert!(signature < greeting, "{after}");
@@ -681,7 +854,7 @@ mod tests {
         // この OS の値を変えても、1行の表の行末のコメントは残る
         let mut hotkey = moved.clone();
         hotkey.insert("hotkey".to_string(), json!("Alt+KeyM"));
-        write(dir.path(), "macos", MANAGED, &hotkey).unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &hotkey).unwrap();
         let written = fs::read_to_string(dir.join(SETTINGS)).unwrap();
         assert!(
             written.starts_with(
@@ -706,7 +879,7 @@ mod tests {
                 json!([{ "name": "a", "body": "b", "enabled": true }]),
             ),
         ]);
-        assert!(write(dir.path(), "macos", MANAGED, &next).is_err());
+        assert!(write(dir.path(), "macos", MANAGED, ALL, &next).is_err());
         assert_eq!(
             fs::read_to_string(dir.path().join(SETTINGS)).unwrap(),
             broken
@@ -729,6 +902,7 @@ mod tests {
             &config,
             "macos",
             MANAGED,
+            ALL,
             &entries(&[("theme", json!("dark"))]),
         )
         .unwrap();
@@ -739,5 +913,183 @@ mod tests {
         assert!(fs::read_to_string(dotfiles.join(SETTINGS))
             .unwrap()
             .contains("theme = \"dark\""));
+    }
+
+    /// 画面から 1 つ変えたときは、その項目だけを書く。ほかのデバイスから届いてまだ読み込んでいない変更と、
+    /// 読めずに読み飛ばした値・キー・行を、メモリの内容で消さない
+    #[test]
+    fn writes_only_the_changed_items_and_keeps_what_was_not_read() {
+        let dir = TempDir::new("settings-files-changed-only");
+        // 読んだ後に、ほかのデバイスが theme を変え、新しい版が足した値・キー・行がある
+        fs::write(
+            dir.join(SETTINGS),
+            "theme = \"light\"\npunctuation_style = \"from_a_newer_version\"\n\n[text_window_keys.macos]\ncopy = \"Mod+KeyJ\"\nnew_action = \"Mod+KeyN\"\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join(SNIPPETS),
+            "[[snippets]]\nname = 'a'\nbody = 'b'\n\n[[snippets]]\nname = 'from_a_newer_version'\nbody = 1\n\n[[snippets]]\nname = 'c'\nbody = 'd'\n",
+        )
+        .unwrap();
+        let before = entries(&[
+            ("theme", json!("dark")),
+            ("text_window_keys", json!({ "copy": "Mod+KeyJ" })),
+            (
+                "snippets",
+                json!([
+                    { "name": "a", "body": "b", "enabled": true },
+                    { "name": "c", "body": "d", "enabled": true }
+                ]),
+            ),
+        ]);
+        // 文字の大きさだけを変える
+        let mut next = before.clone();
+        next.insert("text_font_size".to_string(), json!(20));
+        write(dir.path(), "macos", MANAGED, Scope::Changed(&before), &next).unwrap();
+        let settings = fs::read_to_string(dir.join(SETTINGS)).unwrap();
+        assert!(settings.contains("theme = \"light\""), "{settings}");
+        assert!(settings.contains("from_a_newer_version"), "{settings}");
+        assert!(settings.contains("new_action"), "{settings}");
+        assert!(settings.contains("text_font_size = 20"), "{settings}");
+
+        // キー操作を既定に戻しても、知らない操作は残す
+        let mut keys = next.clone();
+        keys.remove("text_window_keys");
+        write(dir.path(), "macos", MANAGED, Scope::Changed(&next), &keys).unwrap();
+        let settings = fs::read_to_string(dir.join(SETTINGS)).unwrap();
+        assert!(!settings.contains("copy ="), "{settings}");
+        assert!(settings.contains("new_action = \"Mod+KeyN\""), "{settings}");
+
+        // 行を並べ替え・1 行消しても、読めない行は元の位置に残す
+        let mut rows = keys.clone();
+        rows.insert(
+            "snippets".to_string(),
+            json!([{ "name": "c", "body": "d", "enabled": true }]),
+        );
+        write(dir.path(), "macos", MANAGED, Scope::Changed(&keys), &rows).unwrap();
+        let snippets = fs::read_to_string(dir.join(SNIPPETS)).unwrap();
+        assert!(!snippets.contains("name = 'a'"), "{snippets}");
+        assert!(
+            snippets.find("from_a_newer_version").unwrap() < snippets.find("name = 'c'").unwrap(),
+            "{snippets}"
+        );
+        // 全部消しても、読めない行は残す
+        let mut none = rows.clone();
+        none.remove("snippets");
+        write(dir.path(), "macos", MANAGED, Scope::Changed(&rows), &none).unwrap();
+        let snippets = fs::read_to_string(dir.join(SNIPPETS)).unwrap();
+        assert!(snippets.contains("from_a_newer_version"), "{snippets}");
+        assert!(!snippets.contains("name = 'c'"), "{snippets}");
+    }
+
+    /// 読めないファイルがあっても、変えた項目がほかのファイルにあれば書けたとして返す
+    #[test]
+    fn fails_only_when_a_changed_item_is_in_an_unreadable_file() {
+        let dir = TempDir::new("settings-files-unreadable-other");
+        fs::write(dir.join(SNIPPETS), "[[snippets]\n").unwrap();
+        let before = entries(&[]);
+        let theme = entries(&[("theme", json!("dark"))]);
+        write(
+            dir.path(),
+            "macos",
+            MANAGED,
+            Scope::Changed(&before),
+            &theme,
+        )
+        .unwrap();
+        assert!(fs::read_to_string(dir.join(SETTINGS))
+            .unwrap()
+            .contains("theme"));
+        let mut snippets = theme.clone();
+        snippets.insert(
+            "snippets".to_string(),
+            json!([{ "name": "a", "body": "b", "enabled": true }]),
+        );
+        assert!(write(
+            dir.path(),
+            "macos",
+            MANAGED,
+            Scope::Changed(&theme),
+            &snippets
+        )
+        .is_err());
+        assert_eq!(
+            fs::read_to_string(dir.join(SNIPPETS)).unwrap(),
+            "[[snippets]\n"
+        );
+    }
+
+    /// バックアップから戻すときは、読めないファイルを写して除けてから書き直す
+    #[test]
+    fn sets_aside_unreadable_files_when_restoring() {
+        let dir = TempDir::new("settings-files-restore");
+        fs::write(dir.join(SNIPPETS), "[[snippets]\n").unwrap();
+        let restored = entries(&[(
+            "snippets",
+            json!([{ "name": "a", "body": "b", "enabled": true }]),
+        )]);
+        write(
+            dir.path(),
+            "macos",
+            MANAGED,
+            Scope::All {
+                set_aside_unreadable: true,
+            },
+            &restored,
+        )
+        .unwrap();
+        assert_eq!(read(dir.path(), "macos").entries, restored);
+        let set_aside = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("snippets.broken-")
+            });
+        assert!(set_aside);
+    }
+
+    #[test]
+    fn names_only_the_line_and_column_of_an_unreadable_file() {
+        let dir = TempDir::new("settings-files-parse-error");
+        fs::write(
+            dir.join(SNIPPETS),
+            "[[snippets]]\nname = 'a'\nbody = 'secret text\n",
+        )
+        .unwrap();
+        let read = read(dir.path(), "macos");
+        let (_, error) = &read.unreadable[0];
+        assert!(error.starts_with("line 3, column "), "{error}");
+        assert!(!error.contains("secret"), "{error}");
+    }
+
+    /// 1行の表で書いたキー操作も、知らない操作を残す
+    #[test]
+    fn keeps_unknown_keys_of_an_inline_table_when_writing_changes() {
+        let dir = TempDir::new("settings-files-inline-keys");
+        fs::write(
+            dir.join(SETTINGS),
+            "[text_window_keys]\nmacos = { copy = \"Mod+KeyJ\", new_action = \"Mod+KeyN\" }\n",
+        )
+        .unwrap();
+        let before = entries(&[("text_window_keys", json!({ "copy": "Mod+KeyJ" }))]);
+        let next = entries(&[("text_window_keys", json!({ "copy": "Mod+KeyK" }))]);
+        write(dir.path(), "macos", MANAGED, Scope::Changed(&before), &next).unwrap();
+        let settings = fs::read_to_string(dir.join(SETTINGS)).unwrap();
+        assert!(settings.contains("copy = \"Mod+KeyK\""), "{settings}");
+        assert!(settings.contains("new_action = \"Mod+KeyN\""), "{settings}");
+        write(
+            dir.path(),
+            "macos",
+            MANAGED,
+            Scope::Changed(&next),
+            &entries(&[]),
+        )
+        .unwrap();
+        let settings = fs::read_to_string(dir.join(SETTINGS)).unwrap();
+        assert!(!settings.contains("copy"), "{settings}");
+        assert!(settings.contains("new_action = \"Mod+KeyN\""), "{settings}");
     }
 }

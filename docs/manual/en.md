@@ -107,13 +107,13 @@ Settings are backed up automatically every day. To go back to earlier settings, 
 ## If something does not work
 
 - **⚠ appears in the {macos:menu bar}{windows:system tray}{linux:tray} menu**: Select that item to open Settings. The reason appears on the row with the problem.
-- **The hotkey does not work**: {macos:Another}{windows:Another}{linux:If you set it in Mawok's Settings, another} app uses the same key. When this happens, “⚠ Couldn't Register the Hotkey” appears in the menu. Choose a different key under “Keyboard shortcuts” in Settings.
+- **The hotkey does not work**: {macos:Another}{windows:Another}{linux:If you set it in Mawok's Settings, another} app uses the same key.{macos:}{windows: When this happens, “⚠ Couldn't Register the Hotkey” appears in the menu.}{linux: When this happens, “⚠ Couldn't Register the Hotkey” appears in the menu.} Choose a different key under “Keyboard shortcuts” in Settings.
 ::: linux
 - **The key you assigned in your desktop's settings does not work**: Another shortcut on your desktop uses the same key. Choose a different key.
 - **Closing the text window doesn't take you back to the app you came from**: Your desktop decides which window comes forward after it closes. Click the app you came from, then paste.
 - **Mawok's icon does not appear in the tray**: On GNOME, run `gnome-extensions enable ubuntu-appindicators@ubuntu.com` to turn on the extension that shows the tray. On Hyprland, add the tray to your bar's configuration (such as waybar).
 :::
-- **“Couldn't read the settings file ...” appears**: There is a mistake from editing it in a text editor. The log shows the line that can't be read. Fix it and save, and Mawok reads it again right away. If you can't fix it, delete the file, or select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
+- **“Couldn't read the settings file ...” appears**: There is a mistake from editing it in a text editor. The log shows the number of the line that can't be read. Fix it and save, and Mawok reads it again right away. If you can't fix it, delete the file, or select “Restore from backup...” under “About” in Settings to go back to your earlier settings.
 - **“Couldn't find ...” appears**: The drive with the folder you chose isn't connected, or the folder was deleted. Once it's connected, Mawok reads it again right away. If you deleted the folder, choose it again under “Settings folder” in “General” in Settings. If your settings files are symlinks, this also appears when the file a link points to is missing.
 ::: macos
 - **“Mawok doesn't have permission to read ...” appears**: Your settings files are symlinks to a folder outside Mawok. Select “Allow access...” under “Settings folder” in “General” in Settings, then select “Open” in the window that appears.

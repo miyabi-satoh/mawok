@@ -36,6 +36,7 @@ mod toggle;
 mod tray_press;
 
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -692,16 +693,54 @@ fn fit_to_screen(window: &WebviewWindow) {
         areas.retain(|area| *area != primary);
         areas.insert(0, primary);
     }
-    let current = placement::Rect {
+    let outer = placement::Rect {
         x: position.x,
         y: position.y,
         width: size.width as i32,
         height: size.height as i32,
     };
-    let (x, y) = placement::fit(current, &areas);
-    if (x, y) != (current.x, current.y) {
-        let _ = window.set_position(PhysicalPosition::new(x, y));
+    // 見えている枠で収める。Windows の外枠には見えないリサイズの枠（左右と下に数 px）が含まれ、
+    // 外枠で収めると、画面の端に寄せた窓が出すたびに内側へ動くため
+    let visible = visible_frame(window).unwrap_or(outer);
+    let (x, y) = placement::fit(visible, &areas);
+    if (x, y) != (visible.x, visible.y) {
+        let _ = window.set_position(PhysicalPosition::new(
+            x - (visible.x - outer.x),
+            y - (visible.y - outer.y),
+        ));
     }
+}
+
+/// 窓の見えている枠（物理ピクセル）。Windows では DWM の DWMWA_EXTENDED_FRAME_BOUNDS で、見えないリサイズの枠を除く
+#[cfg(windows)]
+fn visible_frame(window: &WebviewWindow) -> Option<placement::Rect> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+
+    let hwnd = window.hwnd().ok()?;
+    let mut rect = RECT::default();
+    // SAFETY: 書き込み先は RECT 1 つ分で、その大きさを渡す
+    unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            (&raw mut rect).cast(),
+            size_of::<RECT>() as u32,
+        )
+    }
+    .ok()?;
+    Some(placement::Rect {
+        x: rect.left,
+        y: rect.top,
+        width: rect.right - rect.left,
+        height: rect.bottom - rect.top,
+    })
+}
+
+/// Windows のほかは、外枠がそのまま見えている枠
+#[cfg(not(windows))]
+fn visible_frame(_window: &WebviewWindow) -> Option<placement::Rect> {
+    None
 }
 
 fn to_rect(area: &PhysicalRect<i32, u32>) -> placement::Rect {
@@ -847,6 +886,23 @@ fn hide_on_blur(app: &AppHandle) {
         settings_opening: state.settings_opening.load(Ordering::Relaxed),
     };
     if !should_hide_on_blur(check) {
+        // 隠さない設定で、ほかのアプリへ移ったなら、戻り先をそのアプリにする。出したときのアプリのままだと、
+        // 別のアプリを経由して戻ってきてコピーしたときに、最初のアプリへ戻ってしまう（Windows）。
+        // macOS と Linux は、戻り先を OS が決める前面の扱いに任せているので触らない
+        if cfg!(windows)
+            && !check.enabled
+            && check.visible
+            && !check.focused
+            && !check.settings_focused
+            && !check.settings_opening
+            // 自分のほかの窓（ライセンス・使い方）へ移ったときは、戻り先にしない
+            && !app
+                .webview_windows()
+                .values()
+                .any(|other| other.is_focused().unwrap_or(false))
+        {
+            *app.state::<DraftState>().return_target.lock().unwrap() = focus::capture(&window);
+        }
         return;
     }
     info!("hide on blur");
@@ -875,7 +931,13 @@ fn hide_draft_and_return(app: &AppHandle, state: &DraftState) -> Result<(), Stri
 /// クリップボードへ文字列を書く。`conceal` のときは、クリップボードの履歴・同期・管理アプリに残さないよう印を付ける。
 /// Tauri のクリップボードのプラグインは印を付けて書けないので、arboard を直接使う
 fn write_clipboard(text: &str, conceal: bool) -> Result<(), arboard::Error> {
-    with_clipboard(|clipboard| write_text(clipboard, text, conceal))
+    // Windows では行末を CR+LF にする（text::crlf_line_endings）。履歴と入力欄は LF のまま持つ
+    let text = if cfg!(windows) {
+        text::crlf_line_endings(text)
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    };
+    with_clipboard(|clipboard| write_text(clipboard, &text, conceal))
 }
 
 fn write_text(
@@ -962,18 +1024,33 @@ fn get_settings(state: tauri::State<'_, AppState>) -> SettingsView {
 
 /// 設定を変えて保存する。保存できなければ何も変えない。画面とトレイへの反映は `apply_config` で行う
 fn save_config(app: &AppHandle, change: impl FnOnce(&mut Config)) -> Result<(), String> {
+    save_config_as(app, false, change)
+}
+
+/// `restoring` なら、変えた項目だけでなく全部の項目を書き、読めないファイルは写して除けてから書き直す（バックアップから戻すとき）
+fn save_config_as(
+    app: &AppHandle,
+    restoring: bool,
+    change: impl FnOnce(&mut Config),
+) -> Result<(), String> {
     settings_dir_ready(app);
     let state = app.state::<AppState>();
     let mut config = state.config.lock().unwrap();
     let mut next = config.clone();
     change(&mut next);
-    write_config(&state, &config, &next)?;
+    write_config(&state, &config, &next, restoring)?;
     *config = next;
     Ok(())
 }
 
-/// 設定をファイルに書く。ログイン時の起動はデバイスの設定に、ほかは置き場の設定のファイルに書く
-fn write_config(state: &AppState, current: &Config, next: &Config) -> Result<(), String> {
+/// 設定をファイルに書く。ログイン時の起動はデバイスの設定に、ほかは置き場の設定のファイルに書く。
+/// 置き場には、ふだんは今の設定から変えた項目だけを書く（settings_files::Scope::Changed）
+fn write_config(
+    state: &AppState,
+    current: &Config,
+    next: &Config,
+    restoring: bool,
+) -> Result<(), String> {
     let autostart = (next.autostart != Config::default().autostart).then_some(next.autostart);
     {
         let mut device = state.device.lock().unwrap();
@@ -989,9 +1066,9 @@ fn write_config(state: &AppState, current: &Config, next: &Config) -> Result<(),
     let mut entries = config::stored_entries(next);
     entries.remove(config::key::AUTOSTART);
     // 置き場の設定と今の設定が同じなら書かない。置き場が無い間に、デバイスの設定（ログイン時の起動）だけを変えたときのため
+    let mut unchanged = config::stored_entries(current);
+    unchanged.remove(config::key::AUTOSTART);
     if !state.settings_dir_available.load(Ordering::SeqCst) {
-        let mut unchanged = config::stored_entries(current);
-        unchanged.remove(config::key::AUTOSTART);
         let denied = matches!(
             state.problems.lock().unwrap().config,
             Some(ConfigProblem::AccessDenied(_))
@@ -1004,10 +1081,18 @@ fn write_config(state: &AppState, current: &Config, next: &Config) -> Result<(),
             Err(error_codes::SETTINGS_FOLDER_UNAVAILABLE.to_string())
         };
     }
+    let scope = if restoring {
+        settings_files::Scope::All {
+            set_aside_unreadable: true,
+        }
+    } else {
+        settings_files::Scope::Changed(&unchanged)
+    };
     settings_files::write(
         &state.settings_dir(),
         &os_name(),
         config::key::IN_FILES,
+        scope,
         &entries,
     )
 }
@@ -1079,7 +1164,7 @@ fn adopt_config(
         }
     }
     let saved = if write {
-        save_config(app, |config| *config = next.clone())
+        save_config_as(app, true, |config| *config = next.clone())
     } else {
         *state.config.lock().unwrap() = next.clone();
         Ok(())
@@ -1399,6 +1484,15 @@ fn write_pending_history(app: &AppHandle) {
         }
     }
     if let Some(texts) = pending.texts {
+        // 画面が持つのは、無くなる前にこのデバイスのファイルへ書いた履歴の続き。そう照らさないと、画面の一覧の全部に
+        // 今の時刻を付け、無い間にほかのデバイスで消した履歴まで、消した時刻より後のものとして戻す
+        let own = app.state::<AppState>().history_path();
+        if let Ok(before) = history_store::load(&own) {
+            HISTORY_FILE_LOCK
+                .lock()
+                .unwrap()
+                .replaced_by_other_devices(before);
+        }
         if let Err(error) = save_draft_history(app.clone(), texts) {
             warn!("couldn't save draft history after the folder appeared: {error}");
         }
@@ -1418,12 +1512,22 @@ fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     let size = draft_history_size(&app);
     let texts = history_store::truncate(entries, size);
-    let merged = history_store::load_merged(&path)
-        .unwrap_or_else(|error| {
-            warn!("couldn't read draft history before saving: {error}");
+    // 読めなかったファイルを空の履歴として扱って書くと、その履歴が届いた 1 件に置き換わる。
+    // 壊れたファイルは写して退けてから書き、読めないだけ（一時的なエラー）なら書かない
+    let merged = match history_store::load_merged(&path) {
+        Ok(history) => history,
+        Err(history_store::LoadError::Invalid(problem)) => {
+            warn!("couldn't read draft history before saving: {problem}");
+            history_store::set_aside(&path, SystemTime::now())
+                .map_err(|error| error.to_string())?;
             history_store::History::default()
-        })
-        .truncated(size);
+        }
+        Err(error) => {
+            warn!("couldn't read draft history before saving: {error}");
+            return Err(error.to_string());
+        }
+    }
+    .truncated(size);
     let next = screen.saved(&merged, texts, size, now_millis());
     // 画面は、読み込んだ履歴をそのまま保存し直すことがある。変わっていなければ書かない。置き場を同期していると、
     // 書くたびにほかのデバイスへ送られるため
@@ -2069,15 +2173,26 @@ fn set_settings_dir(
     let current = state.config.lock().unwrap().clone();
     let device = state.device.lock().unwrap().clone();
     let adopted = if use_existing {
-        let (next, problem) = load_config(&next_dir, &device, &current);
+        let (mut next, problem) = load_config(&next_dir, &device, &current);
         if problem.is_some() {
             return Err(error_codes::SETTINGS_FILE_UNREADABLE.to_string());
         }
+        // ログイン時の起動は置き場に無く、OS への登録に合わせた今の値（起動のときにそろえたもの）を保つ。
+        // デバイスの設定の値を使うと、OS の側で切ってあるのにオンに見える
+        next.autostart = current.autostart;
         Some(next)
     } else {
         let mut entries = config::stored_entries(&current);
         entries.remove(config::key::AUTOSTART);
-        settings_files::write(&next_dir, &os_name(), config::key::IN_FILES, &entries)?;
+        settings_files::write(
+            &next_dir,
+            &os_name(),
+            config::key::IN_FILES,
+            settings_files::Scope::All {
+                set_aside_unreadable: false,
+            },
+            &entries,
+        )?;
         None
     };
     // 履歴は、混ぜた今の履歴を、替えた先の自分のファイルに混ぜて書く
@@ -2095,8 +2210,11 @@ fn set_settings_dir(
                 // 画面が読み直すまでは、前の置き場の履歴を持っている。替えた先のファイルと照らすと、
                 // その間の保存が、替えた先にあった履歴を画面の一覧に合わせて落とす
                 screen.replaced_by_other_devices(old.clone());
-                let merged = history_store::merge(&old, &there)
-                    .truncated(current.text_history_size as usize);
+                // 替えた先の設定を使うなら、その「履歴の件数」で切る
+                let size = adopted
+                    .as_ref()
+                    .map_or(current.text_history_size, |next| next.text_history_size);
+                let merged = history_store::merge(&old, &there).truncated(size as usize);
                 if let Err(error) = history_store::save(&next_history, &merged) {
                     warn!("couldn't move the draft history: {error}");
                 }
@@ -2192,31 +2310,76 @@ fn hotkey_by_desktop() -> bool {
 /// global-shortcut プラグインでホットキーを登録・解除する。デスクトップのキー設定で割り当てるときは、何も登録せず、登録できている扱いにする
 struct PluginRegistrar<'a>(&'a AppHandle);
 
+/// 設定のホットキーから、実際に登録した形（registered_form）。途中でキー配列を切り替えると今の配列で作る形が変わるので、
+/// 解除には登録したときの形を使い、登録できているかは今の配列の形と同じときだけにする（ずれていれば登録し直させる）
+static REGISTERED_AS: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
+impl PluginRegistrar<'_> {
+    /// 前に登録した形が、今も登録されていれば解除する
+    fn unregister_saved_form(&self, hotkey: &str) -> Result<(), String> {
+        let Some(saved) = REGISTERED_AS.lock().unwrap().get(hotkey).cloned() else {
+            return Ok(());
+        };
+        let shortcuts = self.0.global_shortcut();
+        if shortcuts.is_registered(saved.as_str()) {
+            shortcuts
+                .unregister(saved.as_str())
+                .map_err(|error| error.to_string())?;
+        }
+        REGISTERED_AS.lock().unwrap().remove(hotkey);
+        Ok(())
+    }
+}
+
 impl hotkey::Registrar for PluginRegistrar<'_> {
     fn register(&mut self, hotkey: &str) -> Result<(), String> {
         if hotkey_by_desktop() {
             return Ok(());
         }
+        let Some(registered) = registered_form(hotkey) else {
+            return Err(format!(
+                "no key on the current keyboard layout registers as {hotkey}"
+            ));
+        };
+        // 配列を切り替える前の形が残っていれば、先に外す
+        self.unregister_saved_form(hotkey)?;
         self.0
             .global_shortcut()
-            .register(hotkey)
-            .map_err(|error| error.to_string())
+            .register(registered.as_str())
+            .map_err(|error| error.to_string())?;
+        REGISTERED_AS
+            .lock()
+            .unwrap()
+            .insert(hotkey.to_string(), registered);
+        Ok(())
     }
 
     // 起動時に登録できなかったキーや、記録のために止めているキーは、解除するものがないので成功として扱う
     fn unregister(&mut self, hotkey: &str) -> Result<(), String> {
-        if hotkey_by_desktop() || !self.is_registered(hotkey) {
+        if hotkey_by_desktop() {
             return Ok(());
         }
-        self.0
-            .global_shortcut()
-            .unregister(hotkey)
-            .map_err(|error| error.to_string())
+        self.unregister_saved_form(hotkey)
     }
 
     fn is_registered(&self, hotkey: &str) -> bool {
-        hotkey_by_desktop() || self.0.global_shortcut().is_registered(hotkey)
+        if hotkey_by_desktop() {
+            return true;
+        }
+        let Some(current) = registered_form(hotkey) else {
+            return false;
+        };
+        REGISTERED_AS.lock().unwrap().get(hotkey) == Some(&current)
+            && self.0.global_shortcut().is_registered(current.as_str())
     }
+}
+
+/// 登録に渡すホットキー。Windows では、今のキー配列で押した位置のキーに合わせる。合わせられなければ `None`（hotkey::for_layout）
+fn registered_form(hotkey: &str) -> Option<String> {
+    #[cfg(windows)]
+    return hotkey::for_current_layout(hotkey);
+    #[cfg(not(windows))]
+    Some(hotkey.to_string())
 }
 
 /// 設定のホットキーが登録されている状態にし、登録できているかをトレイの ⚠ に反映する
@@ -3341,6 +3504,8 @@ pub fn run() {
             );
             #[cfg(windows)]
             info!("packaged (MSIX): {}", package::packaged());
+            #[cfg(windows)]
+            package::register_restart_after_update();
 
             #[cfg(target_os = "macos")]
             match lock_single_instance(app.handle()) {
@@ -3366,10 +3531,7 @@ pub fn run() {
             let local_dir = app.path().app_local_data_dir()?;
             let device_path = local_dir.join(device::FILE_NAME);
             let device_missing = !device_path.exists();
-            let mut device = device::load(&device_path).unwrap_or_else(|error| {
-                warn!("couldn't read the device settings: {error}");
-                device::Device::default()
-            });
+            let mut device = device::load_or_recover(&device_path);
             let made_id = device::ensure_id(&mut device).unwrap_or_else(|error| {
                 warn!("couldn't make the device id: {error}");
                 false

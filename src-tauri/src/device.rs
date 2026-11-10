@@ -51,12 +51,49 @@ impl Device {
     }
 }
 
-/// 読む。無ければ既定。読めなければ、読めない理由を返す（呼ぶ側は既定で動かし、書き直さずにログに出す）
+/// 読む。無ければ既定。読めなければ、読めない理由を返す（呼ぶ側は load_or_recover を使う）
 pub fn load(path: &Path) -> Result<Device, String> {
     match fs::read_to_string(path) {
         Ok(text) => serde_json::from_str(&text).map_err(|error| error.to_string()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Device::default()),
         Err(error) => Err(error.to_string()),
+    }
+}
+
+/// 読む。読めなければ、上書きする前に `device.broken-….json` へ写し、読める項目だけを拾う。
+/// 拾わないと、選んだ設定の保存先を忘れ、既定の保存先・既定の設定のまま黙って動き続けるため
+pub fn load_or_recover(path: &Path) -> Device {
+    let error = match load(path) {
+        Ok(device) => return device,
+        Err(error) => error,
+    };
+    log::warn!("couldn't read the device settings: {error}");
+    match atomic_file::back_up(path, std::time::SystemTime::now()) {
+        Ok(Some(copy)) => log::warn!("set aside the device settings to {}", copy.display()),
+        Ok(None) => {}
+        Err(error) => log::warn!("couldn't set aside the device settings: {error}"),
+    }
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|value| salvage(&value))
+        .unwrap_or_default()
+}
+
+/// 項目ごとに読む。型の合わない項目だけを既定にする
+fn salvage(value: &serde_json::Value) -> Device {
+    fn field<T: serde::de::DeserializeOwned + Default>(value: &serde_json::Value, name: &str) -> T {
+        value
+            .get(name)
+            .and_then(|field| serde_json::from_value(field.clone()).ok())
+            .unwrap_or_default()
+    }
+    Device {
+        id: field(value, "id"),
+        settings_dir: field(value, "settings_dir"),
+        autostart: field(value, "autostart"),
+        settings_dir_bookmark: field(value, "settings_dir_bookmark"),
+        granted_folders: field(value, "granted_folders"),
     }
 }
 
@@ -130,5 +167,30 @@ mod tests {
         };
         assert!(ensure_id(&mut device).unwrap());
         assert!(valid_id(&device.id));
+    }
+
+    #[test]
+    fn recovers_the_readable_items_and_keeps_a_copy_of_an_unreadable_file() {
+        let dir = crate::test_support::TempDir::new("device-recover");
+        let path = dir.join(FILE_NAME);
+        fs::write(
+            &path,
+            r#"{"id": "a1b2c3d4", "settings_dir": "/Users/me/Dropbox/mawok", "autostart": "yes"}"#,
+        )
+        .unwrap();
+        let device = load_or_recover(&path);
+        assert_eq!(device.id, "a1b2c3d4");
+        assert_eq!(
+            device.settings_dir,
+            Some(PathBuf::from("/Users/me/Dropbox/mawok"))
+        );
+        assert_eq!(device.autostart, None);
+        assert!(fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("device.broken-")));
     }
 }

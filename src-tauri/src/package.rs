@@ -34,6 +34,32 @@ pub fn app_user_model_id() -> Option<&'static str> {
     .as_deref()
 }
 
+/// Store の更新で閉じられたら、更新の後に起動し直してもらう。常駐していたのに、次のログインか手で起動するまで
+/// ホットキーが効かなくなるため（Microsoft Learn「Integrate your desktop app with Windows using packaging extensions」の
+/// 「Restart automatically after receiving an update from the Microsoft Store」）。頼むのは更新される側の版なので、
+/// 版を出す前から入れておく必要がある。落ちた・応答しない・OS の再起動では起動し直さない（ログイン時の起動は別に登録している）
+#[cfg(windows)]
+pub fn register_restart_after_update() {
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Recovery::{
+        RegisterApplicationRestart, RESTART_NO_CRASH, RESTART_NO_HANG, RESTART_NO_REBOOT,
+    };
+
+    if !packaged() {
+        return;
+    }
+    // SAFETY: 起動し直すときの引数は無し（null）。フラグは定数だけ
+    let result = unsafe {
+        RegisterApplicationRestart(
+            PCWSTR::null(),
+            RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT,
+        )
+    };
+    if let Err(error) = result {
+        log::warn!("couldn't register restart after update: {error}");
+    }
+}
+
 /// エクスプローラーで見せるときのパス。MSIX 版では、AppData の下に新しく作ったファイルがパッケージごとの場所に回され、
 /// パッケージの外で動くエクスプローラーからは元のパスでは見えない。回された先にあれば、そちらを返す。
 /// `roaming`・`local` は実際の `%APPDATA%`・`%LOCALAPPDATA%`

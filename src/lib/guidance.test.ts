@@ -42,6 +42,13 @@ describe('draftGuidance', () => {
 		);
 	});
 
+	it('ホットキーを登録できていなければ、呼び出せると書かずに、登録できないことを書く', () => {
+		inLocale('ja');
+		expect(draftGuidance(null, HOTKEY, DEFAULT_DRAFT_KEYS, 'macos', true)).toBe(
+			'ここに書いて ⌘Enter を押すと、コピーして元のアプリに戻ります。あとは貼るだけです。\nホットキー (⌘⇧Space) を登録できません。設定の「キー操作」で別のキーにします。この案内は設定 (⌘,) で変えたり消したりできます。'
+		);
+	});
+
 	it('自分で書いた案内は、キーを差し込まずにそのまま返す。空文字も空のまま', () => {
 		expect(draftGuidance('自分用のメモ {copy}', HOTKEY, DEFAULT_DRAFT_KEYS, 'macos')).toBe(
 			'自分用のメモ {copy}'

@@ -18,6 +18,7 @@ import {
 import { newSnippet } from '$lib/snippets';
 import { callsOf } from '$lib/test-support/calls';
 import { emit } from '$lib/test-support/events';
+import { closeRequested } from '$lib/test-support/window';
 import { DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
 import Page from './+page.svelte';
 import { renderAt } from './render-at';
@@ -25,6 +26,10 @@ import { renderAt } from './render-at';
 // 設定を変えるコマンドは Rust 側にあるので、呼ばれた内容だけを見る
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(undefined)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+vi.mock(
+	'@tauri-apps/api/window',
+	async () => (await import('$lib/test-support/window')).windowModule
+);
 
 const invoked = vi.mocked(invoke);
 const listened = vi.mocked(listen);
@@ -640,10 +645,52 @@ describe('設定画面の下書きのフォント', () => {
 		const screen = await renderAt(m.settings_category_draft);
 
 		await screen.getByLabelText(m.settings_draft_font_size()).fill('22');
+		await userEvent.keyboard('{Tab}');
 
 		await vi.waitFor(() =>
 			expect(invoked).toHaveBeenCalledWith('set_draft_font', { family: 'Menlo', size: 22 })
 		);
+	});
+
+	it('1 文字ずつ打っても、打っている途中の値で欄を書き換えない', async () => {
+		// 打つたびに範囲へ収めると、20 を打つ途中の 2 が 10 に替わり、続く 0 で 100 → 32 になる
+		settings.current = view([], 'keep', { family: 'Menlo', size: 16 });
+		const screen = await renderAt(m.settings_category_draft);
+		const input = screen.getByLabelText(m.settings_draft_font_size());
+
+		await userEvent.tripleClick(input);
+		await userEvent.keyboard('20');
+		await expect.element(input).toHaveValue(20);
+		expect(invoked).not.toHaveBeenCalledWith('set_draft_font', expect.anything());
+		await userEvent.keyboard('{Tab}');
+
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('set_draft_font', { family: 'Menlo', size: 20 })
+		);
+	});
+
+	it('範囲の外の大きさは、確定したときに範囲へ収めて保存し、欄も収めた値にする', async () => {
+		settings.current = view([], 'keep', { family: 'Menlo', size: 16 });
+		const screen = await renderAt(m.settings_category_draft);
+		const input = screen.getByLabelText(m.settings_draft_font_size());
+
+		await input.fill('2');
+		await userEvent.keyboard('{Tab}');
+
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('set_draft_font', { family: 'Menlo', size: 10 })
+		);
+		await expect.element(input).toHaveValue(10);
+	});
+
+	it('打った大きさを、欄から離れずに窓を閉じても保存する', async () => {
+		settings.current = view([], 'keep', { family: 'Menlo', size: 16 });
+		const screen = await renderAt(m.settings_category_draft);
+
+		await screen.getByLabelText(m.settings_draft_font_size()).fill('22');
+		await closeRequested();
+
+		expect(invoked).toHaveBeenCalledWith('set_draft_font', { family: 'Menlo', size: 22 });
 	});
 
 	it('設定のファイルがほかで変わって届いたフォント名を、その後の大きさの保存に使う', async () => {
@@ -653,6 +700,7 @@ describe('設定画面の下書きのフォント', () => {
 		await replaceConfig(view([], 'keep', { family: 'HackGen', size: 16 }));
 		await expect.element(screen.getByLabelText(m.settings_draft_font())).toHaveValue('HackGen');
 		await screen.getByLabelText(m.settings_draft_font_size()).fill('22');
+		await userEvent.keyboard('{Tab}');
 
 		await vi.waitFor(() =>
 			expect(invoked).toHaveBeenCalledWith('set_draft_font', { family: 'HackGen', size: 22 })
@@ -663,9 +711,13 @@ describe('設定画面の下書きのフォント', () => {
 		// 打ち直すために消すと一瞬 0 件になる。そこで保存すると、範囲外の値が飛ぶ
 		const screen = await renderAt(m.settings_category_draft);
 
-		await screen.getByLabelText(m.settings_draft_font_size()).fill('');
+		const input = screen.getByLabelText(m.settings_draft_font_size());
+
+		await input.fill('');
+		await userEvent.keyboard('{Tab}');
 
 		expect(invoked).not.toHaveBeenCalledWith('set_draft_font', expect.anything());
+		await expect.element(input).toHaveValue(16);
 	});
 });
 
@@ -690,6 +742,24 @@ describe('設定画面の履歴の件数', () => {
 		await vi.waitFor(() =>
 			expect(invoked).toHaveBeenCalledWith('set_draft_history_size', { size: 3 })
 		);
+	});
+
+	it('打った件数を、欄から離れずに窓を閉じても保存する', async () => {
+		const screen = await render(Page);
+
+		await screen.getByLabelText(m.settings_draft_history_size()).fill('30');
+		await closeRequested();
+
+		expect(invoked).toHaveBeenCalledWith('set_draft_history_size', { size: 30 });
+	});
+
+	it('何も打たずに窓を閉じたら、件数も大きさも保存し直さない', async () => {
+		await render(Page);
+
+		await closeRequested();
+
+		expect(invoked).not.toHaveBeenCalledWith('set_draft_history_size', expect.anything());
+		expect(invoked).not.toHaveBeenCalledWith('set_draft_font', expect.anything());
 	});
 
 	it('0 は履歴を使わない値として保存する', async () => {

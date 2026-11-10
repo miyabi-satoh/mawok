@@ -43,8 +43,12 @@
 	 */
 	function openSource(event: MouseEvent, url: string) {
 		event.preventDefault();
-		invoke('open_license_source', { url });
+		openFailed = false;
+		invoke('open_license_source', { url }).catch(() => (openFailed = true));
 	}
+
+	/** ソースの置き場所を開けなかったか。押しても何も起きないと、押せていないのと見分けが付かないため */
+	let openFailed = $state(false);
 
 	/** ウィンドウは隠して作られるので、画面を描いてから表示させる */
 	function showWindow() {
@@ -56,6 +60,11 @@
 
 <main class="h-dvh overflow-y-auto px-6 py-6" {@attach showWindow}>
 	<h1 class="text-lg font-semibold">{m.licenses_title()}</h1>
+	{#if openFailed}
+		<p role="alert" class="sticky top-0 mt-2 bg-background py-1 text-sm text-destructive">
+			{m.licenses_open_failed()}
+		</p>
+	{/if}
 
 	{#each sections as section (section.key)}
 		<section class="mt-8">

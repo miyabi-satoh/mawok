@@ -10,6 +10,10 @@ import { renderAt } from './render-at';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(undefined)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+vi.mock(
+	'@tauri-apps/api/window',
+	async () => (await import('$lib/test-support/window')).windowModule
+);
 
 const invoked = vi.mocked(invoke);
 
