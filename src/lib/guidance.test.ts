@@ -19,7 +19,7 @@ describe('draftGuidance', () => {
 		);
 	});
 
-	it('英語では、文の間を空白で区切る。Windows では Ctrl でつないだキーで作る', () => {
+	it('英語でも1文ずつ行を分ける。Windows では Ctrl でつないだキーで作る', () => {
 		inLocale('en');
 		expect(draftGuidance(null, HOTKEY, DEFAULT_DRAFT_KEYS, 'windows')).toBe(
 			'Write here and press Ctrl+Enter to copy it and close.\nBring this back anytime with Ctrl+Shift+Space.\nChange or remove this hint in Settings (Ctrl+,).'

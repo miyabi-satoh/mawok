@@ -28,7 +28,7 @@ export function draftGuidance(
 	const change = keys.settings
 		? m.draft_guidance_change({ settings: formatKeys(keys.settings, platform) })
 		: m.draft_guidance_change_no_settings();
-	// 1文ずつ行を分ける。どの文も既定の窓の幅で1行に収まり、文の切れ目と行の切れ目が揃う
+	// 書く・呼び出す・案内を変える、の3つを1行ずつに分ける。ふつうはどれも既定の窓の幅で1行に収まり、文の切れ目と行の切れ目が揃う
 	return [write, summon, change].filter(Boolean).join('\n');
 }
 
