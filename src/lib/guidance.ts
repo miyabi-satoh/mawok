@@ -1,6 +1,5 @@
 import { formatKeys, type DraftKeys, type Platform } from '$lib/keys';
 import { m } from '$lib/paraglide/messages';
-import { getLocale } from '$lib/paraglide/runtime';
 import type { SettingsView } from '$lib/settings.svelte';
 
 /**
@@ -29,10 +28,8 @@ export function draftGuidance(
 	const change = keys.settings
 		? m.draft_guidance_change({ settings: formatKeys(keys.settings, platform) })
 		: m.draft_guidance_change_no_settings();
-	// 日本語は文の間を空けず、英語は空白で区切る
-	const gap = getLocale() === 'ja' ? '' : ' ';
-	// 1行目はここでできること、2行目はこの欄そのものの扱い
-	return `${write}\n${[summon, change].filter(Boolean).join(gap)}`;
+	// 1文ずつ行を分ける。どの文も既定の窓の幅で1行に収まり、文の切れ目と行の切れ目が揃う
+	return [write, summon, change].filter(Boolean).join('\n');
 }
 
 /**
