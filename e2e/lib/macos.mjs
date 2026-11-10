@@ -1129,12 +1129,8 @@ export async function restoreUserState({ relaunch = true } = {}) {
 		console.warn(`ログイン項目を戻せませんでした: ${error.message}`)
 	);
 	await quitMawok();
-	// 前の版 (settings.db を写していた版) の控えには files.json が無い。今の版のファイルと形が違うので戻さない
-	const held = await fs
-		.readFile(path.join(BACKUP_DIR, 'files.json'), 'utf8')
-		.then(JSON.parse, () => null);
-	if (held) await restoreConfigDir(DATA_DIR, held);
-	else console.warn('前の版の控えなので、設定と履歴のファイルは戻しません');
+	const held = JSON.parse(await fs.readFile(path.join(BACKUP_DIR, 'files.json'), 'utf8'));
+	await restoreConfigDir(DATA_DIR, held);
 	await writePasteboard(state.clipboard);
 	// 戻し終えたら、控えを「起動し直すだけ」に縮めてから起動する。起動の途中で止まっても、次の回は起動し直すだけで、
 	// その間に利用者が変えた設定や履歴を古い控えで上書きしないように

@@ -48,10 +48,6 @@ export const APP_DATA_DIRS = Object.freeze({
 	roaming: CONFIG_DIR,
 	local: path.join(localAppData, PROFILE_IDENTIFIER)
 });
-// window-state プラグインが、下書きと設定ウィンドウの位置と大きさを記録するファイル。位置や大きさを変えるテストが
-// 前のテストの記録に引きずられないよう、設定の置き場と一緒に控えて戻す
-export const WINDOW_STATE_PATH = path.join(CONFIG_DIR, '.window-state.json');
-
 // テストが落ちた・Ctrl+C で中断された場合でも、設定をテスト用のまま残さないための
 // 退避ファイル。テストプロセスの外 (e2e/ 直下) に置き、次回実行時に残骸があれば先に復元する
 const BACKUP_PATH = recordPath('.config-backup.json');
