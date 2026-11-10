@@ -13,7 +13,9 @@ export const MAX_DRAFT_HISTORY_SIZE: number = CONSTANTS.MAX_DRAFT_HISTORY_SIZE;
 export class DraftHistory {
 	// 下書きの前・次のボタンの出し方と押せるかを追えるよう、件数と位置は $state で持つ
 	/** 古いものから順に並べる */
-	#entries = $state<string[]>([]);
+	// 何千件にもなるので、要素ごとに追う深い $state にせず、変えるたびに配列ごと入れ替える。
+	// 深く追うと、上限で古いものを落とすたびに全要素の書き換えを知らせることになる
+	#entries = $state.raw<string[]>([]);
 	/** たどっている位置。たどっていなければ null */
 	#index = $state<number | null>(null);
 	/** 履歴を出す前に打っていた内容。下キーで最後まで戻ったときに入力欄へ戻す */
@@ -54,7 +56,7 @@ export class DraftHistory {
 		this.#size = size;
 		if (this.#entries.length > size) {
 			// 位置がずれるので、たどっている途中ならやめる
-			this.#entries.splice(0, this.#entries.length - size);
+			this.#entries = this.#entries.slice(this.#entries.length - size);
 			this.stopBrowsing();
 		}
 		return changed;
@@ -64,8 +66,8 @@ export class DraftHistory {
 	record(text: string): boolean {
 		this.stopBrowsing();
 		if (this.#size === 0 || this.#entries.at(-1) === text) return false;
-		this.#entries.push(text);
-		if (this.#entries.length > this.#size) this.#entries.shift();
+		const entries = [...this.#entries, text];
+		this.#entries = entries.length > this.#size ? entries.slice(1) : entries;
 		this.#recordedWhileReloading?.push(text);
 		return true;
 	}
@@ -163,10 +165,8 @@ export class DraftHistory {
 		return this.#entries[this.#index];
 	}
 
-	/** 検索の一覧に出す履歴（historyItems） */
-	get searchItems(): HistoryItem[] {
-		return historyItems(this.#entries);
-	}
+	/** 検索の一覧に出す履歴（historyItems）。一覧で打つたびに作り直さないよう、履歴が変わったときだけ求める */
+	readonly searchItems: HistoryItem[] = $derived(historyItems(this.#entries));
 
 	/**
 	 * 検索の一覧で選んだ履歴へ移る。上下キーで出したときと同じく、たどり始めるときは今の入力欄の中身を覚えておき、

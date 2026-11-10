@@ -341,11 +341,10 @@
 
 	/** 検索の一覧で選んだ履歴を、上キーで出したときと同じく入力欄の中身と入れ替える */
 	async function pickHistory(item: HistoryItem) {
-		const current = text;
+		// 一覧を閉じるのを待つ間に、ほかのデバイスの履歴を読み直して位置が替わらないよう、先に移る
+		const entry = draftHistory.jump(item.index, text);
 		const element = await closeHistorySearch();
-		if (!element) return;
-		const entry = draftHistory.jump(item.index, current);
-		if (entry !== null) showHistoryEntry(entry, 'older', element);
+		if (element && entry !== null) showHistoryEntry(entry, 'older', element);
 	}
 
 	/** 一覧を出したときのカーソルの位置に差し込む。範囲を選んでいたら置き換え、カーソルは差し込んだ文の末尾に置く */
@@ -667,7 +666,7 @@
 	-->
 	<!--
 		上の並び。履歴の前・次を左にまとめ、道具を右に寄せる（ブラウザや Finder のツールバーと同じ並び）。設定は、ツールバーの慣れた位置の右端に置く。
-		前・次は、覚えている履歴がなければ使えないので出さない。
+		前・次・履歴の検索は、覚えている履歴がなければ使えないので出さない。
 		列が狭いとき（最小の幅の近く）は、定型文をアイコンだけにする
 	-->
 	{#if showButtons && keys && platform}
