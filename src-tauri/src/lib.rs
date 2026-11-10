@@ -1344,9 +1344,7 @@ static HISTORY_FILE_LOCK: Mutex<history_store::ScreenCopy> =
 
 /// 今の時刻。UNIX のミリ秒。履歴に付ける
 fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_millis() as u64)
+    atomic_file::unix_millis(SystemTime::now()).unwrap_or(0)
 }
 
 fn draft_history_size(app: &AppHandle) -> usize {

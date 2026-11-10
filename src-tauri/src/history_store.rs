@@ -46,9 +46,7 @@ impl History {
 
     /// 新しい方から `max_entries` 件を残す。
     pub fn truncated(mut self, max_entries: usize) -> Self {
-        if self.entries.len() > max_entries {
-            self.entries.drain(..self.entries.len() - max_entries);
-        }
+        self.entries = truncate(self.entries, max_entries);
         self
     }
 
@@ -255,16 +253,12 @@ pub fn format(history: &History) -> String {
     .expect("history entries are serializable")
 }
 
-pub fn truncate(mut entries: Vec<String>, max_entries: usize) -> Vec<String> {
+/// 古い順の一覧から、新しい方の `max_entries` 件を残す
+pub fn truncate<T>(mut entries: Vec<T>, max_entries: usize) -> Vec<T> {
     if entries.len() > max_entries {
         entries.drain(..entries.len() - max_entries);
     }
     entries
-}
-
-fn unix_millis(time: SystemTime) -> Option<u64> {
-    let elapsed = time.duration_since(SystemTime::UNIX_EPOCH).ok()?;
-    u64::try_from(elapsed.as_millis()).ok()
 }
 
 /// ファイルがなければ空を返す。ほかの読み込み失敗は理由の種類だけを
@@ -283,8 +277,8 @@ pub fn load(path: &Path) -> Result<History, LoadError> {
     let modified = fs::metadata(path)
         .and_then(|metadata| metadata.modified())
         .ok()
-        .and_then(unix_millis)
-        .or_else(|| unix_millis(SystemTime::now()))
+        .and_then(atomic_file::unix_millis)
+        .or_else(|| atomic_file::unix_millis(SystemTime::now()))
         .unwrap_or(1);
     let (history, dated) = parse(&text, modified).map_err(LoadError::Invalid)?;
     if dated {
@@ -357,7 +351,7 @@ fn load_other(path: &Path) -> Result<History, LoadError> {
     let modified = fs::metadata(path)
         .and_then(|metadata| metadata.modified())
         .ok()
-        .and_then(unix_millis)
+        .and_then(atomic_file::unix_millis)
         .unwrap_or(1);
     parse(&text, modified)
         .map(|(history, _)| history)

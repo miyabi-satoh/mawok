@@ -1,6 +1,6 @@
 import { untrack } from 'svelte';
 import { reorder } from '$lib/reorder';
-import { coalescedSaver } from '$lib/saver';
+import { coalesced } from '$lib/coalesce';
 
 /** 一覧の1行。key は画面の要素（開いた状態・フォーカス・ドラッグ）を保つためだけに使い、Rust 側へは渡さない。 */
 export type Row<T> = T & { key: string };
@@ -30,7 +30,7 @@ function sameFields<T extends object>(row: Row<T>, item: T): boolean {
  */
 export class RowList<T extends object> {
 	rows = $state<Row<T>[]>([]);
-	/** 行を変えたら呼ぶ。保存が重なっても古い内容で上書きしない（coalescedSaver） */
+	/** 行を変えたら呼ぶ。保存が重なっても古い内容で上書きしない（coalesced） */
 	readonly save: () => Promise<void>;
 	readonly #isBlank: (item: T) => boolean;
 	readonly #name: (item: T) => string;
@@ -48,7 +48,7 @@ export class RowList<T extends object> {
 		this.#name = name;
 		// 前に開いたときに足したまま閉じた空の行は、写さない。次に保存したときに設定からも消える
 		this.rows = items.filter((item) => !isBlank(item)).map(withKey);
-		this.save = coalescedSaver(async () => {
+		this.save = coalesced(async () => {
 			this.#saving = true;
 			await save(this.rows.map(withoutKey)).finally(() => (this.#saving = false));
 		});

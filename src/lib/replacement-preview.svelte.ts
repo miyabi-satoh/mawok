@@ -1,4 +1,4 @@
-import { coalescedSaver } from '$lib/saver';
+import { coalesced } from '$lib/coalesce';
 import type { ReplacementMatch } from '$lib/bindings/ReplacementMatch';
 
 export type { ReplacementMatch } from '$lib/bindings/ReplacementMatch';
@@ -13,27 +13,27 @@ export type PreviewCall = (text: string) => Promise<ReplacementMatch[]>;
 export class ReplacementPreview {
 	matches = $state<ReplacementMatch[]>([]);
 
-	private readonly call: PreviewCall;
-	private latestText = '';
-	private composing = false;
+	readonly #call: PreviewCall;
+	#latestText = '';
+	#composing = false;
 	// update() のたびに進める世代。結果が届いたとき、求めたときと世代が変わっていなければ反映する。
 	// テキストの一致だけで判定すると、同じ本文のまま変換に入った・空にした場合を見分けられない
 	// （本文は変わらなくても、matches を空にすべき状態には変わっている）
-	private generation = 0;
+	#generation = 0;
 
 	constructor(call: PreviewCall) {
-		this.call = call;
+		this.#call = call;
 	}
 
-	private readonly refresh = coalescedSaver(async () => {
-		// coalescedSaver は待っている間の変更をまとめて次の1回に回すので、そのもう1回が始まる時点で
+	readonly #refresh = coalesced(async () => {
+		// coalesced は待っている間の変更をまとめて次の1回に回すので、そのもう1回が始まる時点で
 		// 変換中・空になっていれば、無駄な呼び出しをする前にやめる
-		if (this.composing || this.latestText === '') return;
-		const requestedGeneration = this.generation;
-		const requestedText = this.latestText;
+		if (this.#composing || this.#latestText === '') return;
+		const requestedGeneration = this.#generation;
+		const requestedText = this.#latestText;
 		try {
-			const matches = (await this.call(requestedText)) ?? [];
-			if (requestedGeneration === this.generation) this.matches = matches;
+			const matches = (await this.#call(requestedText)) ?? [];
+			if (requestedGeneration === this.#generation) this.matches = matches;
 		} catch {
 			// 失敗は Rust 側でログに残す。ハイライトが更新されないだけで、下書きの入力自体は続けられる
 		}
@@ -45,14 +45,14 @@ export class ReplacementPreview {
 	 * 変換前の文字位置に対するハイライトが新しい本文の上にずれて出てしまう
 	 */
 	update(text: string, composing: boolean) {
-		this.latestText = text;
-		this.composing = composing;
-		this.generation++;
+		this.#latestText = text;
+		this.#composing = composing;
+		this.#generation++;
 		if (composing || text === '') {
 			this.matches = [];
 			return;
 		}
-		this.refresh();
+		this.#refresh();
 	}
 }
 

@@ -40,7 +40,7 @@
 	import ListFilter from '$lib/components/list-filter.svelte';
 	import { matchedKeys, showsFilter, shownRows } from '$lib/list-filter';
 	import { RowList } from '$lib/row-list.svelte';
-	import { coalescedSaver } from '$lib/saver';
+	import { coalesced } from '$lib/coalesce';
 	import { CHAR_WIDTH_KINDS, LANGUAGES, PUNCTUATION_STYLES, THEMES } from '$lib/setting-options';
 	import { settingsCategories } from '$lib/settings-categories';
 	import {
@@ -282,9 +282,7 @@
 	 */
 	let fontSizeInput = $state<number | null>(initialFontSize);
 
-	const saveFont = coalescedSaver(() =>
-		run('set_draft_font', { family: fontFamily, size: fontSize })
-	);
+	const saveFont = coalesced(() => run('set_draft_font', { family: fontFamily, size: fontSize }));
 
 	/** 履歴の件数。打っている途中に Rust 側からの反映で打ち消されないよう、フォントと同じく画面側で持つ */
 	const initialHistorySize = settings.current?.textHistorySize ?? DEFAULT_DRAFT_HISTORY_SIZE;
@@ -294,7 +292,7 @@
 	/** 件数を保存しに行った回数。保存を待つ間に入れ直されたかを見分ける */
 	let historySizeChanges = 0;
 
-	const saveHistorySize = coalescedSaver(async () => {
+	const saveHistorySize = coalesced(async () => {
 		const change = historySizeChanges;
 		// 保存できなければ、画面の値を Rust 側に残っている今の件数に戻す。戻さないと、保存されていない値が欄に残る。
 		// 保存を待つ間に入れ直されていたら戻さない。その値は、この後の保存し直しで保存する。
@@ -373,7 +371,7 @@
 			: ''
 	);
 
-	const saveGuidance = coalescedSaver(() => run('set_draft_guidance', { guidance }));
+	const saveGuidance = coalesced(() => run('set_draft_guidance', { guidance }));
 
 	function resetGuidance() {
 		guidance = null;
@@ -411,7 +409,7 @@
 	});
 	const textColorErrors = $state<Record<TextColorTheme, string>>({ light: '', dark: '' });
 
-	const saveTextColor = coalescedSaver(() =>
+	const saveTextColor = coalesced(() =>
 		run('set_draft_text_color', { light: textColors.light, dark: textColors.dark })
 	);
 

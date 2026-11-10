@@ -39,7 +39,7 @@
 	import { keepsDraftFocus } from '$lib/draft-focus';
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
-	import { coalescedSaver } from '$lib/saver';
+	import { coalesced } from '$lib/coalesce';
 	import {
 		previewSegments,
 		ReplacementPreview,
@@ -201,7 +201,7 @@
 	let historyReloadPending = false;
 
 	// 保存を待つ間に履歴が変わる（消される）ことがあるので、送る直前の中身を読む
-	const saveHistory = coalescedSaver(async () => {
+	const saveHistory = coalesced(async () => {
 		// 順番を待つ間に読み直しが始まった。読み直す前の一覧は送らず、読み直した後に保存する
 		if (draftHistory.isReloading) {
 			historySavePending = true;
@@ -234,10 +234,8 @@
 			return;
 		}
 		draftHistory.beginReload();
-		const clearedCountAtStart = historyClearedCount;
-		invoke<string[]>('load_draft_history')
-			.then((loaded) => {
-				const entries = clearedCountAtStart === historyClearedCount ? (loaded ?? []) : [];
+		loadHistoryEntries()
+			.then((entries) => {
 				if (draftHistory.finishReload(entries)) historySavePending = true;
 			})
 			.catch(() => draftHistory.cancelReload())
@@ -247,6 +245,13 @@
 				historyReloadPending = false;
 				reloadDraftHistory();
 			});
+	}
+
+	/** 保存した履歴を読む。読んでいる間に履歴を消したら、消す前の履歴を戻さないよう空にする */
+	async function loadHistoryEntries(): Promise<string[]> {
+		const clearedCountAtStart = historyClearedCount;
+		const loaded = await invoke<string[] | undefined>('load_draft_history');
+		return clearedCountAtStart === historyClearedCount ? (loaded ?? []) : [];
 	}
 
 	/** 初めの読み込みが済んだ。待たせていた保存と読み直しを流す */
@@ -270,13 +275,11 @@
 			historySavePending = false;
 			return;
 		}
-		const clearedCountAtStart = historyClearedCount;
-		invoke<string[]>('load_draft_history')
-			.then((loaded) => {
-				const entries = clearedCountAtStart === historyClearedCount ? loaded : [];
-				draftHistory.load(entries ?? []);
+		loadHistoryEntries()
+			.then((entries) => {
+				draftHistory.load(entries);
 				// 読み込み前に record された履歴を、読み込んだ履歴と合わせて保存し直す
-				if ((entries?.length ?? 0) > 0) historySavePending = true;
+				if (entries.length > 0) historySavePending = true;
 				onDraftHistoryReady();
 			})
 			.catch(onDraftHistoryReady);

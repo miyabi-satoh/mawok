@@ -204,10 +204,7 @@ mod imp {
                 .map_or(Ok(()), std::fs::create_dir_all)
                 .and_then(|()| std::fs::write(&file, content))
         } else {
-            match std::fs::remove_file(&file) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                result => result,
-            }
+            crate::atomic_file::remove(&file)
         };
         result.map_err(|error| SetError::Os(error.to_string()))
     }
