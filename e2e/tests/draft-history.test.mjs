@@ -6,6 +6,7 @@ import {
 	invokeApp,
 	listDraftButtons,
 	readDraft,
+	readSnippetPalette,
 	setDraftCaret,
 	setJapanese,
 	showDraftAndWaitVisible,
@@ -93,6 +94,62 @@ test.describe('下書きの履歴', () => {
 				{ label: `${key === VK.UP ? '↑' : '↓'} で「${expected}」` }
 			);
 		}
+	});
+
+	test('既定の Ctrl+R で検索の一覧が出て読み込み直さず、Enter で選んだ履歴を出し、末尾の ↓ で書きかけに戻る', async () => {
+		await copyDraft(client, 'git status');
+		await copyDraft(client, 'git diff');
+		await showDraftAndWaitVisible();
+		await typeIntoDraft(client, '書きかけ');
+		// WebView2 は Ctrl+R で画面を読み込み直す。読み込み直すと window が作り直され、この印が消える
+		await client.execute(() => (window.__e2eNotReloaded = true));
+		// 一覧の行の上にポインターがあると、選んだ行がポインターの下の行へ戻されるので、外へ寄せてから開く
+		await client.action('pointer').move({ x: 1, y: 1 }).perform();
+
+		await sendKeySequence([[VK.CONTROL, VK.R]]);
+		const palette = await waitFor(
+			() => readSnippetPalette(client),
+			(current) => current.open && current.inputFocused,
+			{ label: 'Ctrl+R で検索の一覧が出て、絞り込みの欄にフォーカスがある' }
+		);
+		assert.deepEqual(palette.options, ['git diff', 'git status'], '新しい順に出るはず');
+		// 読み込み直しが始まるまでの間を見逃さないよう、しばらく待ってから見る
+		await settle();
+		assert.deepEqual(
+			await client.execute(() => ({
+				marked: window.__e2eNotReloaded === true,
+				value: document.querySelector('textarea')?.value ?? null
+			})),
+			{ marked: true, value: '書きかけ' },
+			'読み込み直さず、書きかけが残るはず'
+		);
+
+		await sendKeySequence([[VK.ENTER]]);
+		const picked = await waitFor(
+			async () => ({ palette: await readSnippetPalette(client), draft: await readDraft(client) }),
+			({ palette, draft }) => !palette.open && draft.focused && draft.value === 'git diff',
+			{ label: 'Enter で一覧が閉じ、選んだ履歴が入力欄に出る' }
+		);
+		// 上キーで出したときと同じくカーソルは先頭にあるので、1回目の ↓ は末尾へ移るだけ
+		if (picked.draft.selectionStart !== picked.draft.value.length) {
+			await sendKeySequence([[VK.DOWN]]);
+			await waitFor(
+				() => readDraft(client),
+				(d) => d.value === 'git diff' && d.selectionStart === d.value.length,
+				{ label: '↓ で末尾へ移る' }
+			);
+		}
+		await sendKeySequence([[VK.DOWN]]);
+		await waitFor(
+			() => readDraft(client),
+			(d) => d.value === '書きかけ',
+			{ label: '末尾の ↓ で書きかけに戻る' }
+		);
+		assert.equal(
+			await client.execute(() => window.__e2eNotReloaded === true),
+			true,
+			'最後まで読み込み直していないはず'
+		);
 	});
 
 	test('1行目の途中の ↑ は先頭へ移り、もう一度で履歴を出す', async () => {
