@@ -54,6 +54,7 @@ bind = CTRL SHIFT, SPACE, exec, mawok --toggle
 コピーしたテキストは履歴に残ります。
 
 - 入力欄の先頭で `↑` を押すと、前にコピーしたテキストが出ます。押すたびに古い方へさかのぼり、入力欄の末尾で `↓` を押すと新しい方へ戻ります。上の「前」「次」のボタンでも同じです。
+- {macos:`Cmd+R`}{windows:`Ctrl+R`}{linux:`Ctrl+R`} を押すか虫めがねのボタンを押すと、履歴の一覧が出ます。文字を打って絞り込み、`Enter` で選んだテキストを入力欄に出します。
 - 残す件数は設定の「一般」で変えられます。0 にすると履歴を残しません。
 - 履歴を同期しているときは、設定の「履歴を削除する」を押すか件数を 0 にすると、ほかのデバイスの履歴も消えます (「[設定の保存先を変える](#設定の保存先を変える)」を参照)。
 
@@ -91,6 +92,7 @@ bind = CTRL SHIFT, SPACE, exec, mawok --toggle
 | コピーせずに閉じる | `Esc` |
 | 履歴をさかのぼる (入力欄の先頭で)・新しい方へ戻る (入力欄の末尾で) | `↑` / `↓` |
 | 履歴をさかのぼる・新しい方へ戻る (カーソルの位置にかかわらず) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`}{linux:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
+| 履歴を検索 | {macos:`Cmd+R`}{windows:`Ctrl+R`}{linux:`Ctrl+R`} |
 | 定型文の一覧を開く | {macos:`Cmd+K`}{windows:`Ctrl+K`}{linux:`Ctrl+K`} |
 | 設定を開く | {macos:`Cmd+,`}{windows:`Ctrl+,`}{linux:`Ctrl+,`} |
 

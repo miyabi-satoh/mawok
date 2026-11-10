@@ -77,7 +77,7 @@ const DEFAULT_CONFIG = {
 	textWindowAlwaysOnTop: true,
 	hideTextWindowOnBlur: true,
 	showTextWindowButtons: true,
-	textHistorySize: 50,
+	textHistorySize: 10000,
 	trimTrailingWhitespace: true,
 	replacements: [],
 	snippets: [],
@@ -95,7 +95,8 @@ const DEFAULT_DRAFT_KEYS = {
 	settings: 'CommandOrControl+Comma',
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
-	historyNewer: 'CommandOrControl+Alt+ArrowDown'
+	historyNewer: 'CommandOrControl+Alt+ArrowDown',
+	historySearch: 'CommandOrControl+KeyR'
 };
 
 /**

@@ -13,12 +13,18 @@
 
 <script lang="ts" generics="T extends NamedText">
 	import { clamp } from '$lib/clamp';
+
+	/**
+	 * 一度に描く項目の数。履歴は何千件にもなり、全部を描くと打つたびに待たされる（1万件で1文字ごとに約 0.13 秒、
+	 * 2026-11 に Chromium で測った）。窓に収まる数より十分多くし、スクロールか下キーで端に近づいたら続きを描く
+	 */
+	const RENDER_STEP = 100;
 	import PaletteFrame from '$lib/components/palette-frame.svelte';
 	import { hasNoModifiers, isImeKey, toDraftKey, type Platform } from '$lib/keys';
 	import { filterSnippets, snippetLabel, snippetPreview, type NamedText } from '$lib/snippets';
 
 	/**
-	 * 名前と本文の組を選ぶ一覧（定型文の一覧）
+	 * 名前と本文の組を選ぶ一覧（定型文の一覧と、履歴の検索）
 	 */
 	type Props = {
 		items: T[];
@@ -37,6 +43,8 @@
 		 * 一覧の末尾に添える操作の項目（「テキストを定型文に登録」）。絞り込みの文字を受け取り、出さないときは null を返す
 		 */
 		action?: (query: string) => PaletteAction | null;
+		/** 見出しの下に添える1行。なければ定型文の本文の1行目（名前があるときだけ） */
+		preview?: (item: T, query: string) => string;
 		/** 選んだ1件を受け取る */
 		onpick: (item: T) => void;
 		/** 選ばずに閉じる */
@@ -52,6 +60,7 @@
 		emptyMessage,
 		noMatchMessage,
 		action,
+		preview = snippetPreview,
 		onpick,
 		onclose
 	}: Props = $props();
@@ -60,18 +69,20 @@
 	// 出すたびに部品ごと作り直すので、絞り込みは空から始まる
 	let query = $state('');
 	let active = $state(0);
+	let rendered = $state(RENDER_STEP);
 	const usable = $derived(filterSnippets(all, ''));
 	const filtered = $derived(filterSnippets(all, query));
 	type Entry = Omit<PaletteAction, 'run'> & { pick: () => void };
 	// 絞り込んだ項目と、端に添える操作の項目を、選ぶ・描く側からは同じに扱う
 	const items = $derived.by(() => {
-		const entries: Entry[] = filtered.map((item) => ({
+		const entries: Entry[] = filtered.slice(0, rendered).map((item) => ({
 			label: snippetLabel(item),
-			preview: snippetPreview(item),
+			preview: preview(item, query),
 			pick: () => onpick(item)
 		}));
 		const extra = action?.(query);
-		if (!extra) return entries;
+		// 操作の項目は末尾に置くので、描いていない項目が残る間は出さない
+		if (!extra || rendered < filtered.length) return entries;
 		const entry: Entry = { ...extra, pick: extra.run };
 		return [...entries, entry];
 	});
@@ -83,6 +94,10 @@
 	);
 	// 開いている間に設定が変わって件数が減っても、一覧の外を選ばないようにする
 	const selected = $derived(Math.min(active, items.length - 1));
+
+	function renderMore() {
+		if (rendered < filtered.length) rendered += RENDER_STEP;
+	}
 
 	function onKeydown(event: KeyboardEvent) {
 		// IME が処理したキーは、変換の操作なので横取りしない
@@ -107,6 +122,7 @@
 			event.preventDefault();
 			const step = event.key === 'ArrowDown' ? 1 : -1;
 			active = clamp(selected + step, 0, items.length - 1);
+			if (active >= items.length - 1) renderMore();
 		} else if (event.key === 'Enter') {
 			event.preventDefault();
 			items[selected]?.pick();
@@ -129,7 +145,10 @@
 			autocomplete="off"
 			spellcheck="false"
 			bind:value={query}
-			oninput={() => (active = 0)}
+			oninput={() => {
+				active = 0;
+				rendered = RENDER_STEP;
+			}}
 			onkeydown={onKeydown}
 			{@attach (element) => element.focus()}
 		/>
@@ -143,6 +162,11 @@
 			role="listbox"
 			aria-label={listLabel}
 			class="flex min-h-0 flex-col gap-0.5 overflow-y-auto p-1"
+			onscroll={(event) => {
+				const list = event.currentTarget;
+				// 端の1画面分の手前で続きを描き、スクロールが止まって見えないようにする
+				if (list.scrollTop + list.clientHeight * 2 >= list.scrollHeight) renderMore();
+			}}
 		>
 			{#each items as item, index (index)}
 				<!-- キーボードでは絞り込みの欄の ↑↓ と Enter で選ぶので、項目自体はフォーカスを取らない -->

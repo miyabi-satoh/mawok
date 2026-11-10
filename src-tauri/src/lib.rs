@@ -1319,10 +1319,9 @@ fn set_show_draft_buttons(app: AppHandle, enabled: bool) -> Result<(), String> {
     update_config(&app, |config| config.show_text_window_buttons = enabled)
 }
 
-/// 下書きの履歴の件数。0 なら覚えない。範囲の外は上限に収める
+/// 下書きの履歴の件数。0 なら覚えない。上限は型の幅（config::MAX_DRAFT_HISTORY_SIZE）なので、収め直さない
 #[tauri::command]
 fn set_draft_history_size(app: AppHandle, size: u16) -> Result<(), String> {
-    let size = size.min(config::MAX_DRAFT_HISTORY_SIZE);
     info!("set draft history size: {size}");
     let previous = app
         .state::<AppState>()

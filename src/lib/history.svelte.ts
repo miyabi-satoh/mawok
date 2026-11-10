@@ -4,6 +4,7 @@
 
 import { hasNoModifiers, isImeKey } from '$lib/keys';
 import { CONSTANTS } from '$lib/bindings/constants';
+import { historyItems, type HistoryItem } from '$lib/history-search';
 
 /** 件数の既定値と上限。決めるのも収めるのも Rust 側（config.rs）で、ここは入力欄の max と設定が届く前に使う */
 export const DEFAULT_DRAFT_HISTORY_SIZE: number = CONSTANTS.DEFAULT_DRAFT_HISTORY_SIZE;
@@ -160,6 +161,23 @@ export class DraftHistory {
 		}
 		this.#index++;
 		return this.#entries[this.#index];
+	}
+
+	/** 検索の一覧に出す履歴（historyItems） */
+	get searchItems(): HistoryItem[] {
+		return historyItems(this.#entries);
+	}
+
+	/**
+	 * 検索の一覧で選んだ履歴へ移る。上下キーで出したときと同じく、たどり始めるときは今の入力欄の中身を覚えておき、
+	 * そこから上下キーで前後の履歴へ移れる。位置が一覧の外なら null
+	 */
+	jump(index: number, current: string): string | null {
+		const entry = this.#entries[index];
+		if (entry === undefined) return null;
+		if (this.#index === null) this.#draft = current;
+		this.#index = index;
+		return entry;
 	}
 
 	/** たどるのをやめる。出した履歴を書き換えたときは、書き換えた内容を今の書きかけとして扱う */

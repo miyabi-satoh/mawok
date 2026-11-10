@@ -131,9 +131,11 @@ pub const DEFAULT_DRAFT_FONT_SIZE: u16 = 16;
 pub const MIN_DRAFT_FONT_SIZE: u16 = 10;
 pub const MAX_DRAFT_FONT_SIZE: u16 = 32;
 
-/// 下書きの履歴の件数の既定値と上限。ディスクにも保存するが、扱いやすい上限にとどめる
-pub const DEFAULT_DRAFT_HISTORY_SIZE: u16 = 50;
-pub const MAX_DRAFT_HISTORY_SIZE: u16 = 100;
+/// 下書きの履歴の件数の既定値と上限。既定は、何日も前のテキストをたどれるよう、コピーの多い使い方でも
+/// 数か月分が残る件数にする。上限は型の幅で、この件数でも保存・ほかのデバイスの履歴との混ぜ合わせ・読み込みは
+/// 合わせて 0.1 秒に満たない（2026-11 に Mac で測った）ので、それより絞らない
+pub const DEFAULT_DRAFT_HISTORY_SIZE: u16 = 10_000;
+pub const MAX_DRAFT_HISTORY_SIZE: u16 = u16::MAX;
 
 impl Default for Config {
     fn default() -> Self {
@@ -183,6 +185,7 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
     ModifiedSetting::DraftKey(DraftAction::Snippets),
     ModifiedSetting::DraftKey(DraftAction::HistoryOlder),
     ModifiedSetting::DraftKey(DraftAction::HistoryNewer),
+    ModifiedSetting::DraftKey(DraftAction::HistorySearch),
     ModifiedSetting::Value {
         name: key::AUTOSTART,
         differs: |config, defaults| config.autostart != defaults.autostart,
@@ -515,9 +518,8 @@ pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> Option<b
         key::TEXT_WINDOW_ALWAYS_ON_TOP => set(&mut config.text_window_always_on_top, value),
         key::HIDE_TEXT_WINDOW_ON_BLUR => set(&mut config.hide_text_window_on_blur, value),
         key::SHOW_TEXT_WINDOW_BUTTONS => set(&mut config.show_text_window_buttons, value),
-        key::TEXT_HISTORY_SIZE => set_checked(&mut config.text_history_size, value, |size| {
-            *size <= MAX_DRAFT_HISTORY_SIZE
-        }),
+        // 上限は型の幅（MAX_DRAFT_HISTORY_SIZE）なので、読めた値はどれも受け付ける
+        key::TEXT_HISTORY_SIZE => set(&mut config.text_history_size, value),
         key::TRIM_TRAILING_WHITESPACE => set(&mut config.trim_trailing_whitespace, value),
         key::PUNCTUATION_STYLE => set(&mut config.punctuation_style, value),
         key::ALPHABET_WIDTH => set(&mut config.char_widths.alphabet, value),

@@ -17,15 +17,17 @@ pub enum DraftAction {
     Snippets,
     HistoryOlder,
     HistoryNewer,
+    HistorySearch,
 }
 
 impl DraftAction {
-    pub const ALL: [DraftAction; 5] = [
+    pub const ALL: [DraftAction; 6] = [
         DraftAction::Copy,
         DraftAction::Settings,
         DraftAction::Snippets,
         DraftAction::HistoryOlder,
         DraftAction::HistoryNewer,
+        DraftAction::HistorySearch,
     ];
 
     /// 設定のファイルでの項目名
@@ -36,6 +38,7 @@ impl DraftAction {
             DraftAction::Snippets => "snippets",
             DraftAction::HistoryOlder => "history_older",
             DraftAction::HistoryNewer => "history_newer",
+            DraftAction::HistorySearch => "history_search",
         }
     }
 
@@ -48,6 +51,8 @@ impl DraftAction {
             DraftAction::Snippets => "CommandOrControl+KeyK",
             DraftAction::HistoryOlder => "CommandOrControl+Alt+ArrowUp",
             DraftAction::HistoryNewer => "CommandOrControl+Alt+ArrowDown",
+            // シェルや Claude Code の履歴の検索（Ctrl+R）と同じ英字にする。Mac はほかの既定と同じく ⌘ を軸にする
+            DraftAction::HistorySearch => "CommandOrControl+KeyR",
         }
     }
 }
@@ -63,6 +68,7 @@ pub struct DraftKeys {
     pub snippets: String,
     pub history_older: String,
     pub history_newer: String,
+    pub history_search: String,
 }
 
 impl Default for DraftKeys {
@@ -74,6 +80,7 @@ impl Default for DraftKeys {
             snippets: key(DraftAction::Snippets),
             history_older: key(DraftAction::HistoryOlder),
             history_newer: key(DraftAction::HistoryNewer),
+            history_search: key(DraftAction::HistorySearch),
         }
     }
 }
@@ -86,6 +93,7 @@ impl DraftKeys {
             DraftAction::Snippets => &self.snippets,
             DraftAction::HistoryOlder => &self.history_older,
             DraftAction::HistoryNewer => &self.history_newer,
+            DraftAction::HistorySearch => &self.history_search,
         }
     }
 
@@ -96,6 +104,7 @@ impl DraftKeys {
             DraftAction::Snippets => &mut self.snippets,
             DraftAction::HistoryOlder => &mut self.history_older,
             DraftAction::HistoryNewer => &mut self.history_newer,
+            DraftAction::HistorySearch => &mut self.history_search,
         }
     }
 

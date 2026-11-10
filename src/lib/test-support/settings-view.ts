@@ -7,7 +7,8 @@ export const DEFAULT_DRAFT_KEYS: DraftKeys = {
 	settings: 'CommandOrControl+Comma',
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
-	historyNewer: 'CommandOrControl+Alt+ArrowDown'
+	historyNewer: 'CommandOrControl+Alt+ArrowDown',
+	historySearch: 'CommandOrControl+KeyR'
 };
 
 /** テストで Rust 側から届く設定。既定の値に overrides を重ねる */
@@ -29,7 +30,7 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		textWindowAlwaysOnTop: true,
 		hideTextWindowOnBlur: true,
 		showTextWindowButtons: true,
-		textHistorySize: 50,
+		textHistorySize: 10_000,
 		trimTrailingWhitespace: true,
 		excludeFromClipboardHistory: true,
 		replacements: [],
