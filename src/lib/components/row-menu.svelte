@@ -4,7 +4,7 @@
 	import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
 	import ArrowUpToLineIcon from '@lucide/svelte/icons/arrow-up-to-line';
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
-	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import TrashIcon from '@lucide/svelte/icons/trash';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { m } from '$lib/paraglide/messages';
@@ -63,7 +63,7 @@
 			<DropdownMenu.Separator />
 		{/if}
 		<DropdownMenu.Item variant="destructive" onSelect={onremove}>
-			<Trash2Icon />
+			<TrashIcon />
 			{m.settings_row_remove()}
 		</DropdownMenu.Item>
 	</DropdownMenu.Content>

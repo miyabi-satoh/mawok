@@ -3,7 +3,7 @@
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
-	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import TrashIcon from '@lucide/svelte/icons/trash';
 	import EraserIcon from '@lucide/svelte/icons/eraser';
 	import { invoke } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -707,7 +707,7 @@
 									/>
 								</Field.Field>
 								<Button variant="destructive" size="sm" class="mt-2 w-fit" onclick={clearHistory}
-									><Trash2Icon data-icon="inline-start" />{m.settings_draft_history_clear()}</Button
+									><TrashIcon data-icon="inline-start" />{m.settings_draft_history_clear()}</Button
 								>
 							</SettingsRow>
 						</SettingsSection>
@@ -1135,7 +1135,7 @@
 												aria-label={m.settings_replacements_remove()}
 												onclick={() => replacements.remove(replacements.rows.indexOf(replacement))}
 											>
-												<Trash2Icon />
+												<TrashIcon />
 											</Button>
 										</div>
 									{/each}
