@@ -17,13 +17,13 @@ export class SnippetsEditor {
 	readonly expanded = new SvelteSet<string>();
 	filter = $state('');
 
-	readonly call: Call;
+	readonly #call: Call;
 
 	constructor(view: SettingsView | null, call: Call) {
-		this.call = call;
+		this.#call = call;
 		this.snippets = new RowList(
 			view?.snippets ?? [],
-			async (snippets) => okValue(await this.call<Snippet[]>('set_snippets', { snippets })),
+			async (snippets) => okValue(await this.#call<Snippet[]>('set_snippets', { snippets })),
 			isBlankSnippet,
 			(snippet) => snippet.name
 		);

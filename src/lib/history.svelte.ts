@@ -11,10 +11,10 @@ export const DEFAULT_DRAFT_HISTORY_SIZE: number = CONSTANTS.DEFAULT_DRAFT_HISTOR
 export const MAX_DRAFT_HISTORY_SIZE: number = CONSTANTS.MAX_DRAFT_HISTORY_SIZE;
 
 export class DraftHistory {
-	// 下書きの前・次のボタンの出し方と押せるかを追えるよう、件数と位置は $state で持つ
-	/** 古いものから順に並べる */
-	// 何千件にもなるので、要素ごとに追う深い $state にせず、変えるたびに配列ごと入れ替える。
+	// 下書きの前・次のボタンの出し方と押せるかを追えるよう、件数と位置は $state で持つ。
+	// 一覧は何千件にもなるので、要素ごとに追う深い $state にせず、変えるたびに配列ごと入れ替える。
 	// 深く追うと、上限で古いものを落とすたびに全要素の書き換えを知らせることになる
+	/** 古いものから順に並べる */
 	#entries = $state.raw<string[]>([]);
 	/** たどっている位置。たどっていなければ null */
 	#index = $state<number | null>(null);

@@ -22,14 +22,6 @@ export function errorCode(error: unknown): string {
 }
 
 /**
- * 符号を、表（符号 → 文言）にある案内にする。表に無ければ、受け取った文字列をそのまま返す。
- * 表は Object.hasOwn で引く。`toString` のようなオブジェクトの持つ名前を、符号と取り違えないため
- */
-export function codeMessage(messages: Record<string, () => string>, code: string): string {
-	return Object.hasOwn(messages, code) ? messages[code]() : code;
-}
-
-/**
  * 設定を保存するコマンドが、置き場の都合で保存しなかったときの文。ほかの失敗なら undefined。
  * 読めない設定のファイルは、手で書きかけのものを画面からの変更で消さないよう書き換えない。選んだ置き場のフォルダーが
  * 無い間は、つながった後のファイルを既定の設定で上書きしないよう何も書かない

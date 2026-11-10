@@ -794,8 +794,8 @@ mod tests {
                 "settings": 1,
                 "snippets": "",
                 "history_older": "KeyK",
-                "send": "CommandOrControl+KeyL",
-                "send_targets": 1,
+                "future_action": "CommandOrControl+KeyL",
+                "other_future_action": 1,
             })),
             MAC,
         );
@@ -811,7 +811,7 @@ mod tests {
             ]
         );
         assert_eq!(written, [DraftAction::Copy, DraftAction::Snippets]);
-        // 知らない項目（この版に無い操作の `send` など）は、読めない値でも読み捨て、どの操作のキーにもしない
+        // 知らない項目（新しい版で足された操作など）は、読めない値でも読み捨て、どの操作のキーにもしない
         assert_eq!(keys.action_for("CommandOrControl+KeyL"), None);
 
         let parsed = parse(Some(&json!("CommandOrControl+KeyJ")), MAC);

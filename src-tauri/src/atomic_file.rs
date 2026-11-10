@@ -20,6 +20,12 @@ pub fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     write_with(path, contents, true)
 }
 
+/// UNIX 時刻のミリ秒。1970 年より前と、u64 に収まらない時刻は None
+pub fn unix_millis(time: SystemTime) -> Option<u64> {
+    let elapsed = time.duration_since(UNIX_EPOCH).ok()?;
+    u64::try_from(elapsed.as_millis()).ok()
+}
+
 /// ファイルを消す。もう無ければ、消えているので成功にする
 pub fn remove(path: &Path) -> io::Result<()> {
     match fs::remove_file(path) {
@@ -28,7 +34,7 @@ pub fn remove(path: &Path) -> io::Result<()> {
     }
 }
 
-/// 一時ファイルの場所。`history.json` なら `history.json.tmp`
+/// 一時ファイルの場所。`settings.toml` なら `settings.toml.tmp`
 fn temp_path(path: &Path) -> PathBuf {
     match path.extension() {
         Some(extension) => {
@@ -75,7 +81,7 @@ fn write_with(path: &Path, contents: &[u8], private: bool) -> io::Result<()> {
 }
 
 /// そのまま読めなかったファイルを、上書きする前に同じフォルダーの `<名前>.broken-YYYYMMDD-HHMMSS.<拡張子>` へ写す
-/// （設定の置き場なら `settings.broken-….db`、下書きの履歴なら `history.broken-….json`）。
+/// （設定なら `settings.broken-….toml`、下書きの履歴なら `<デバイス>.broken-….json`）。
 /// 写した先を返す。写す元がなければ何もせず None
 pub fn back_up(path: &Path, now: SystemTime) -> io::Result<Option<PathBuf>> {
     let contents = match fs::read(path) {
@@ -159,17 +165,10 @@ mod tests {
     #[test]
     fn names_the_temporary_file_after_the_extension() {
         assert_eq!(
-            temp_path(Path::new("dir/history.json")),
-            Path::new("dir/history.json.tmp")
+            temp_path(Path::new("dir/settings.toml")),
+            Path::new("dir/settings.toml.tmp")
         );
-        assert_eq!(
-            temp_path(Path::new("dir/history.json")),
-            Path::new("dir/history.json.tmp")
-        );
-        assert_eq!(
-            temp_path(Path::new("dir/device-key")),
-            Path::new("dir/device-key.tmp")
-        );
+        assert_eq!(temp_path(Path::new("dir/file")), Path::new("dir/file.tmp"));
     }
 
     #[test]

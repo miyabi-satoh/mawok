@@ -13,15 +13,15 @@
 
 <script lang="ts" generics="T extends NamedText">
 	import { clamp } from '$lib/clamp';
+	import PaletteFrame from '$lib/components/palette-frame.svelte';
+	import { hasNoModifiers, isImeKey, toDraftKey, type Platform } from '$lib/keys';
+	import { filterSnippets, snippetLabel, snippetPreview, type NamedText } from '$lib/snippets';
 
 	/**
 	 * 一度に描く項目の数。履歴は何千件にもなり、全部を描くと打つたびに待たされる（1万件で1文字ごとに約 0.13 秒、
 	 * 2026-11 に Chromium で測った）。窓に収まる数より十分多くし、スクロールか下キーで端に近づいたら続きを描く
 	 */
 	const RENDER_STEP = 100;
-	import PaletteFrame from '$lib/components/palette-frame.svelte';
-	import { hasNoModifiers, isImeKey, toDraftKey, type Platform } from '$lib/keys';
-	import { filterSnippets, snippetLabel, snippetPreview, type NamedText } from '$lib/snippets';
 
 	/**
 	 * 名前と本文の組を選ぶ一覧（定型文の一覧と、履歴の検索）

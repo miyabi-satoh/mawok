@@ -125,8 +125,7 @@ fn name_at(time: SystemTime) -> String {
 
 /// 名前から、作った時刻（UNIX 時刻のミリ秒）を読む。画面は名前でなくこれを書式にして出す
 pub fn created_ms(name: &str) -> Option<u64> {
-    let elapsed = time_of(name)?.duration_since(UNIX_EPOCH).ok()?;
-    u64::try_from(elapsed.as_millis()).ok()
+    atomic_file::unix_millis(time_of(name)?)
 }
 
 fn time_of(name: &str) -> Option<SystemTime> {
@@ -260,7 +259,7 @@ mod tests {
             "../20261017T123456Z.json",
             "20261017T123456Z.toml",
             "2026101xT123456Z.json",
-            "settings.db",
+            "settings.toml",
         ] {
             assert!(!valid_name(name), "{name}");
         }

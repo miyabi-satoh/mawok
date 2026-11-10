@@ -13,7 +13,7 @@
 
 ## 入れ方
 
-どの OS も、配布の準備中です。Windows 版は、公開後に Microsoft Store から入れられるようになります。
+どの OS も、配布の準備中です。公開後は、Windows 版は Microsoft Store、Mac 版は Mac App Store から入れられるようになります。
 
 ## 使い方
 
