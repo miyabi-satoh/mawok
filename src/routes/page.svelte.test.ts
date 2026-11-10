@@ -359,6 +359,8 @@ describe('下書きの履歴', () => {
 
 		await expect.element(textarea).toHaveValue('git status');
 		await expect.element(textarea).toHaveFocus();
+		// 上キーで出したときと同じく、カーソルは先頭に置く
+		await expect.poll(() => (textarea.element() as HTMLTextAreaElement).selectionStart).toBe(0);
 		(textarea.element() as HTMLTextAreaElement).setSelectionRange(10, 10);
 		await userEvent.keyboard('{ArrowDown}');
 		await expect.element(textarea).toHaveValue('git diff');
