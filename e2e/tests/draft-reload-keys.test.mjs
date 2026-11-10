@@ -53,6 +53,8 @@ test.describe('読み込み直すキー', () => {
 		await suite.before();
 		testConfig = await beginTestConfig({
 			hideTextWindowOnBlur: false,
+			// Ctrl+R は既定で履歴を検索するキーなので外し、操作の無いときに読み込み直さないことを見る
+			textWindowKeys: { historySearch: '' },
 			snippets: [{ name: 'かくにん', body: '一つずつ質問してください。' }]
 		});
 	});

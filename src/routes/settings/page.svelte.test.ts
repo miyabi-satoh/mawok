@@ -777,13 +777,13 @@ describe('設定画面の履歴の件数', () => {
 		const screen = await render(Page);
 		const input = screen.getByLabelText(m.settings_draft_history_size());
 
-		await input.fill('500');
+		await input.fill('100000');
 		await userEvent.keyboard('{Tab}');
 
 		await vi.waitFor(() =>
-			expect(invoked).toHaveBeenCalledWith('set_draft_history_size', { size: 100 })
+			expect(invoked).toHaveBeenCalledWith('set_draft_history_size', { size: 65535 })
 		);
-		await expect.element(input).toHaveValue(100);
+		await expect.element(input).toHaveValue(65535);
 	});
 
 	it('保存に失敗したら、その旨を出し、欄を今の件数に戻す', async () => {
@@ -801,7 +801,7 @@ describe('設定画面の履歴の件数', () => {
 		await expect
 			.element(screen.getByText(m.settings_failed({ error: 'Error: disk full' })))
 			.toBeInTheDocument();
-		await expect.element(input).toHaveValue(50);
+		await expect.element(input).toHaveValue(10000);
 	});
 
 	it('保存を待つ間に別の値を入れたら、先の保存が失敗しても、後の値を保存し直す', async () => {
@@ -866,7 +866,7 @@ describe('設定画面の履歴の件数', () => {
 		await tick();
 
 		expect(invoked).not.toHaveBeenCalledWith('set_draft_history_size', expect.anything());
-		await expect.element(input).toHaveValue(50);
+		await expect.element(input).toHaveValue(10000);
 	});
 });
 

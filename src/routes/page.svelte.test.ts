@@ -341,6 +341,70 @@ describe('下書きの履歴', () => {
 		await expect.element(textarea).toHaveValue('書きかけ');
 	});
 
+	it('履歴を検索するキーで一覧を出し、絞り込んで選んだ履歴を入力欄に出す。下キーで打っていた内容に戻る', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await copy(textarea, 'git status');
+		await copy(textarea, 'git diff');
+		await copy(textarea, 'ls');
+		await textarea.fill('書きかけ');
+
+		await userEvent.keyboard('{Meta>}r{/Meta}');
+		const search = screen.getByRole('combobox', { name: m.history_search() });
+		await expect.element(search).toHaveFocus();
+		// 新しいものから並ぶ
+		await expect.element(screen.getByRole('option').first()).toHaveTextContent('ls');
+		await search.fill('git');
+		await userEvent.keyboard('{ArrowDown}{Enter}');
+
+		await expect.element(textarea).toHaveValue('git status');
+		await expect.element(textarea).toHaveFocus();
+		// 上キーで出したときと同じく、カーソルは先頭に置く
+		await expect.poll(() => (textarea.element() as HTMLTextAreaElement).selectionStart).toBe(0);
+		(textarea.element() as HTMLTextAreaElement).setSelectionRange(10, 10);
+		await userEvent.keyboard('{ArrowDown}');
+		await expect.element(textarea).toHaveValue('git diff');
+		(textarea.element() as HTMLTextAreaElement).setSelectionRange(8, 8);
+		await userEvent.keyboard('{ArrowDown}');
+		await expect.element(textarea).toHaveValue('ls');
+		(textarea.element() as HTMLTextAreaElement).setSelectionRange(2, 2);
+		await userEvent.keyboard('{ArrowDown}');
+		await expect.element(textarea).toHaveValue('書きかけ');
+	});
+
+	it('履歴があれば検索のボタンを出し、押すと一覧を出す', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await expect
+			.element(screen.getByRole('button', { name: m.draft_history_search() }))
+			.not.toBeInTheDocument();
+		await copy(textarea, 'git status');
+
+		await screen.getByRole('button', { name: m.draft_history_search() }).click();
+		await expect.element(screen.getByRole('combobox', { name: m.history_search() })).toHaveFocus();
+	});
+
+	it('多い履歴は少しずつ描き、一覧の端までスクロールすると続きを描く', async () => {
+		const entries = Array.from({ length: 250 }, (_, index) => `entry ${index}`);
+		invoked.mockImplementation((command) =>
+			Promise.resolve(command === 'load_draft_history' ? entries : undefined)
+		);
+		const screen = await render(Page);
+		await expect
+			.element(screen.getByRole('button', { name: m.draft_history_search() }))
+			.toBeVisible();
+		await userEvent.keyboard('{Meta>}r{/Meta}');
+		const list = screen.getByRole('listbox', { name: m.history_list() });
+		await expect.element(list).toBeVisible();
+		const options = () => (list.element() as HTMLElement).querySelectorAll('[role=option]').length;
+		expect(options()).toBe(100);
+
+		const element = list.element() as HTMLElement;
+		element.scrollTop = element.scrollHeight;
+		element.dispatchEvent(new Event('scroll'));
+		await vi.waitFor(() => expect(options()).toBe(200));
+	});
+
 	it('同期で履歴が替わった知らせで読み直し、読み直している間にコピーした分を足して保存する', async () => {
 		let finishReload: (entries: string[]) => void = () => {};
 		let loads = 0;
@@ -1240,7 +1304,12 @@ describe('キー操作', () => {
 	});
 
 	it('読み込み直すキー（F5・Ctrl+R）は、入力欄でも一覧でも既定の動作を止め、下書きを残す', async () => {
-		settings.current = view('windows');
+		// Ctrl+R は既定で履歴の検索に割り当ててあるので、外して、操作の無いときに読み込み直さないことを見る
+		const windows = view('windows');
+		settings.current = {
+			...windows,
+			textWindowKeys: { ...windows.textWindowKeys, historySearch: '' }
+		};
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await textarea.fill('draft');

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { historyPreview } from './history-search';
 import { DraftHistory, historyDirection } from './history.svelte';
 
 describe('DraftHistory', () => {
@@ -327,6 +328,58 @@ describe('DraftHistory の移れるかどうか', () => {
 			expect(history.isReloading).toBe(false);
 			expect(history.entries).toEqual(['git status', 'git push']);
 		});
+	});
+});
+
+describe('履歴の検索', () => {
+	it('一覧は新しいものから並べ、同じ本文は新しい方だけを残す', () => {
+		const history = new DraftHistory();
+		for (const text of ['git status', 'git diff', 'git status', 'git log']) history.record(text);
+
+		expect(history.searchItems).toEqual([
+			{ name: '', body: 'git log', index: 3 },
+			{ name: '', body: 'git status', index: 2 },
+			{ name: '', body: 'git diff', index: 1 }
+		]);
+	});
+
+	it('選んだ履歴へ移り、そこから上下キーでたどり、最後まで戻ると打っていた内容を返す', () => {
+		const history = new DraftHistory();
+		for (const text of ['a', 'b', 'c']) history.record(text);
+
+		expect(history.jump(1, '書きかけ')).toBe('b');
+		expect(history.older('b')).toBe('a');
+		expect(history.newer()).toBe('b');
+		expect(history.newer()).toBe('c');
+		expect(history.newer()).toBe('書きかけ');
+	});
+
+	it('たどっている途中で選んでも、たどり始める前の内容を覚えたまま', () => {
+		const history = new DraftHistory();
+		for (const text of ['a', 'b', 'c']) history.record(text);
+
+		history.older('書きかけ');
+		expect(history.jump(0, 'c')).toBe('a');
+		expect(history.newer()).toBe('b');
+		expect(history.newer()).toBe('c');
+		expect(history.newer()).toBe('書きかけ');
+	});
+
+	it('一覧の外の位置では移らない', () => {
+		const history = new DraftHistory();
+		history.record('a');
+
+		expect(history.jump(1, '')).toBeNull();
+		expect(history.isBrowsing).toBe(false);
+	});
+
+	it('見出しの行に当たらず、ほかの行に当たったときだけ、その行を添える', () => {
+		const body = 'コミットして\n\n  git push origin main\nPR を作る';
+
+		expect(historyPreview(body, '')).toBe('');
+		expect(historyPreview(body, 'コミット')).toBe('');
+		expect(historyPreview(body, 'PUSH')).toBe('git push origin main');
+		expect(historyPreview(body, 'PR')).toBe('PR を作る');
 	});
 });
 

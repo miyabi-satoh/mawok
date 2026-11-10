@@ -17,8 +17,8 @@ pub const DIR_NAME: &str = "history";
 /// 本文だけを置いていた版。時刻は、読むときに付ける（docs/config.md「履歴」）。
 const TEXT_ONLY_VERSION: u8 = 1;
 const VERSION: u8 = 2;
-/// 混ぜた履歴の件数の上限。どのデバイスの件数の設定も、これより多くはできない（config::MAX_DRAFT_HISTORY_SIZE）
-pub const MAX_MERGED_ENTRIES: usize = 100;
+/// 混ぜた履歴の件数の上限。どのデバイスの件数の設定も、これより多くはできない
+pub const MAX_MERGED_ENTRIES: usize = crate::config::MAX_DRAFT_HISTORY_SIZE as usize;
 
 /// 履歴の1件（docs/config.md「履歴」）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -718,9 +718,11 @@ mod tests {
     }
 
     #[test]
-    fn merging_keeps_the_newest_hundred() {
+    fn merging_keeps_the_newest_up_to_the_limit() {
+        // 2つを合わせると上限を超える件数にする
+        let count = MAX_MERGED_ENTRIES * 4 / 5;
         let side = |offset: u64| History {
-            entries: (0..80)
+            entries: (0..count as u64)
                 .map(|index| Entry {
                     text: format!("{offset}-{index}"),
                     at: index * 2 + offset,
@@ -730,9 +732,10 @@ mod tests {
         };
         let merged = merge(&side(1), &side(2));
         assert_eq!(merged.entries.len(), MAX_MERGED_ENTRIES);
-        // 160 件のうち、古い 60 件を落とす
-        assert_eq!(merged.entries[0].at, 61);
-        assert_eq!(merged.entries[99].at, 160);
+        // 時刻は 1 から 2 * count まで並ぶので、古い方から上限を超えた分を落とす
+        let total = (count * 2) as u64;
+        assert_eq!(merged.entries[0].at, total - MAX_MERGED_ENTRIES as u64 + 1);
+        assert_eq!(merged.entries.last().unwrap().at, total);
         assert!(merged
             .entries
             .windows(2)
@@ -742,10 +745,11 @@ mod tests {
     #[test]
     fn merging_does_not_depend_on_which_side_is_local() {
         // 同じ時刻の履歴は本文の順に並べ、切り詰めで落とす履歴も、どちらを手元にしても同じ
+        let count = MAX_MERGED_ENTRIES as u64 * 3 / 5;
         let side = |name: &str| History {
-            entries: (1..=60)
+            entries: (1..=count)
                 .map(|at| Entry {
-                    text: format!("{name}{at}"),
+                    text: format!("{name}{at:06}"),
                     at,
                 })
                 .collect(),
@@ -754,8 +758,14 @@ mod tests {
         let merged = merge(&side("a"), &side("b"));
         assert_eq!(merged, merge(&side("b"), &side("a")));
         assert_eq!(merged.entries.len(), MAX_MERGED_ENTRIES);
-        assert_eq!(merged.entries[0].text, "a11");
-        assert_eq!(merged.entries[1].text, "b11");
+        // 時刻、同じ時刻なら本文の順に並べたうちの、新しい方の上限の件数を残す
+        let mut all: Vec<Entry> = side("a")
+            .entries
+            .into_iter()
+            .chain(side("b").entries)
+            .collect();
+        all.sort_by(|a, b| (a.at, &a.text).cmp(&(b.at, &b.text)));
+        assert_eq!(merged.entries, all[all.len() - MAX_MERGED_ENTRIES..]);
         // 混ぜた結果は、どのデバイスの手元と混ぜ直しても変わらない
         assert_eq!(merge(&side("a").truncated(50), &merged), merged);
         assert_eq!(merge(&merged, &merged), merged);

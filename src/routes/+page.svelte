@@ -4,6 +4,7 @@
 	import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import SearchIcon from '@lucide/svelte/icons/search';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import TextQuoteIcon from '@lucide/svelte/icons/text-quote';
 	import { invoke } from '@tauri-apps/api/core';
@@ -24,6 +25,7 @@
 		historyDirection,
 		type HistoryDirection
 	} from '$lib/history.svelte';
+	import { historyPreview, type HistoryItem } from '$lib/history-search';
 	import { caretLine } from '$lib/caret-line';
 	import { clamp } from '$lib/clamp';
 	import {
@@ -312,6 +314,8 @@
 
 	// 定型文の一覧を出しているか
 	let snippetsOpen = $state(false);
+	// 履歴の検索の一覧を出しているか。一覧は一度に1つしか出さない
+	let historySearchOpen = $state(false);
 
 	function openSnippets(): boolean {
 		if (!rememberSelection()) return false;
@@ -322,6 +326,25 @@
 	async function closeSnippets(): Promise<HTMLTextAreaElement | null> {
 		snippetsOpen = false;
 		return restoreSelection();
+	}
+
+	function openHistorySearch(): boolean {
+		if (!rememberSelection()) return false;
+		historySearchOpen = true;
+		return true;
+	}
+
+	async function closeHistorySearch(): Promise<HTMLTextAreaElement | null> {
+		historySearchOpen = false;
+		return restoreSelection();
+	}
+
+	/** 検索の一覧で選んだ履歴を、上キーで出したときと同じく入力欄の中身と入れ替える */
+	async function pickHistory(item: HistoryItem) {
+		// 一覧を閉じるのを待つ間に、ほかのデバイスの履歴を読み直して位置が替わらないよう、先に移る
+		const entry = draftHistory.jump(item.index, text);
+		const element = await closeHistorySearch();
+		if (element && entry !== null) showHistoryEntry(entry, 'older', element);
 	}
 
 	/** 一覧を出したときのカーソルの位置に差し込む。範囲を選んでいたら置き換え、カーソルは差し込んだ文の末尾に置く */
@@ -433,6 +456,7 @@
 		shownCount++;
 		// 一覧を出したまま隠れていたら、出し直したときは入力欄から始める
 		snippetsOpen = false;
+		historySearchOpen = false;
 		// 前に出していたときの知らせは、出し直したら要らない
 		notice = '';
 		// 変換中に隠れて compositionend が届かなかった場合に備え、出し直すたびに変換中の扱いを解く
@@ -520,7 +544,7 @@
 		if (handled || event.target === textarea) return;
 		const view = settings.current;
 		const action = view ? draftActionFor(event, view.textWindowKeys, view.platform) : null;
-		if (snippetsOpen) {
+		if (snippetsOpen || historySearchOpen) {
 			if (action) event.preventDefault();
 			return;
 		}
@@ -546,6 +570,8 @@
 			case 'historyNewer':
 				stepHistory(action === 'historyOlder' ? 'older' : 'newer');
 				return true;
+			case 'historySearch':
+				return openHistorySearch();
 		}
 	}
 
@@ -640,7 +666,7 @@
 	-->
 	<!--
 		上の並び。履歴の前・次を左にまとめ、道具を右に寄せる（ブラウザや Finder のツールバーと同じ並び）。設定は、ツールバーの慣れた位置の右端に置く。
-		前・次は、覚えている履歴がなければ使えないので出さない。
+		前・次・履歴の検索は、覚えている履歴がなければ使えないので出さない。
 		列が狭いとき（最小の幅の近く）は、定型文をアイコンだけにする
 	-->
 	{#if showButtons && keys && platform}
@@ -671,6 +697,16 @@
 				>
 					{m.draft_history_newer()}
 					<ChevronRightIcon data-icon="inline-end" />
+				</Button>
+				<Button
+					tabindex={-1}
+					variant="ghost"
+					size="icon-sm"
+					aria-label={m.draft_history_search()}
+					title={keyHint(m.draft_history_search(), keys.historySearch, platform)}
+					onclick={openHistorySearch}
+				>
+					<SearchIcon />
 				</Button>
 			{/if}
 			<div class="ml-auto flex items-center gap-1">
@@ -799,6 +835,20 @@
 			action={registerSnippetAction}
 			onpick={pickSnippet}
 			onclose={closeSnippets}
+		/>
+	{/if}
+	{#if historySearchOpen && settings.current}
+		<TextPalette
+			items={draftHistory.searchItems}
+			platform={settings.current.platform}
+			toggleKey={settings.current.textWindowKeys.historySearch}
+			listLabel={m.history_list()}
+			searchLabel={m.history_search()}
+			emptyMessage={m.history_empty()}
+			noMatchMessage={m.history_no_match()}
+			preview={(item, query) => historyPreview(item.body, query)}
+			onpick={pickHistory}
+			onclose={closeHistorySearch}
 		/>
 	{/if}
 </main>
