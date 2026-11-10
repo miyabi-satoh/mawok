@@ -94,6 +94,13 @@
 - ログイン時の起動は、XDG autostart の `~/.config/autostart/Mawok.desktop` を自分で読み書きする。デスクトップの設定で切ると `Hidden=true` や `X-GNOME-Autostart-enabled=false` が書かれ、tauri-plugin-autostart はそれを読まずに有効に戻してしまうため（上の「常駐」の決まり）。
 - トレイは StatusNotifierItem で出し、`libayatana-appindicator3` を実行時に読み込む（無いと起動できない）。押すとメニューが出るだけで、押したことは受け取れない。メニューの項目にホットキーは添わない（muda はウィンドウに付かないメニューにキーを付けない）。GNOME は AppIndicator の拡張が要る（Ubuntu には最初から入っている）。
 
+## macOS の窓の位置と大きさ
+
+- 窓（テキストウィンドウ・設定・ライセンス・使い方）の位置と大きさは、window-state プラグインでなく、AppKit の frame autosave（`setFrameUsingName`・`setFrameAutosaveName`。`window_frame.rs`）で記録して戻す。Mac のふつうのアプリと同じ仕組みで、記録はアプリの defaults に置かれる。
+- プラグインは物理ピクセルで記録し、戻すときに窓のその時点の倍率でポイントに直す。作った直後の窓はまだ画面に載っておらず倍率が 1.0 と返ることがあり、Retina の画面では時々2倍の大きさで開いて、その大きさが記録される（[plugins-workspace#3521](https://github.com/tauri-apps/plugins-workspace/issues/3521)）。倍率の違う画面をまたいでも、同じ理由でずれる。AppKit はどの画面にも共通のポイントで記録するので、倍率に左右されない。
+- 窓は Tauri に中央に置かせずに作り、記録が無いときだけ AppKit の `center` で置く。Tauri の中央に置く指定は、作った後に `tao` が後回し（メインキューへの非同期）で当てるので、先に戻した位置を上書きするため。テキストウィンドウも `tauri.conf.json` では作らせず（`create: false`）、setup でその設定から作る。
+- 上流は、Windows の座標が物理ピクセルなので、ポイントで記録する直しをプラグインに入れていない。Windows はプラグインのまま。
+
 ## macOS のサンドボックス
 
 Mac 版は Mac App Store で配るので、どのビルドもサンドボックスで動かす。権限は `src-tauri/Entitlements.plist` に置き、`tauri.conf.json` の `bundle.macOS.entitlements` で、Tauri が署名するときに付ける（`just bundle` の ad-hoc 署名と `just release-mac` の Developer ID の署名の両方）。`pnpm tauri dev` の開発版は署名しないので、サンドボックスの外で動く。

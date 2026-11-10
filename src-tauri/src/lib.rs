@@ -34,6 +34,8 @@ mod text;
 mod toggle;
 #[cfg(target_os = "macos")]
 mod tray_press;
+#[cfg(target_os = "macos")]
+mod window_frame;
 
 use std::{
     collections::BTreeMap,
@@ -426,20 +428,22 @@ fn shown_path(state: &AppState, path: PathBuf) -> PathBuf {
     }
 }
 
-/// Linux では位置も大きさも戻さず、毎回既定の大きさで開く（docs/platform.md「Linux のそのほか」）
+/// window-state プラグインに戻させるもの。Windows だけで使う。
+/// macOS では AppKit に任せ（docs/platform.md「macOS の窓の位置と大きさ」）、Linux では位置も大きさも戻さず、毎回既定の大きさで開く（docs/platform.md「Linux のそのほか」）
 fn window_state_flags() -> StateFlags {
-    #[cfg(target_os = "linux")]
-    {
-        StateFlags::empty()
-    }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
     {
         StateFlags::POSITION | StateFlags::SIZE
     }
+    #[cfg(not(windows))]
+    {
+        StateFlags::empty()
+    }
 }
 
-/// ウィンドウの位置と大きさを記録するときの名前。最小の大きさがなかったころの記録（最小より小さいことがある）を戻さないよう、
-/// 名前を変えて記録がない状態から始める。window-state プラグインは記録した大きさを最小と比べずに当てるため。
+/// ウィンドウの位置と大きさを記録するときの名前（window-state プラグインと、macOS の AppKit の frame autosave で使う）。
+/// 最小の大きさがなかったころの記録（最小より小さいことがある）を戻さないよう、
+/// 名前を変えて記録がない状態から始める。どちらも記録した大きさを最小と比べずに当てるため。
 /// 新しい記録は最小の大きさがかかったウィンドウで取るので、最小を割らない。最小の大きさを引き上げたときも、同じく名前を変える
 fn window_state_key(label: &str) -> &str {
     match label {
@@ -909,6 +913,26 @@ fn hide_on_blur(app: &AppHandle) {
     if let Err(error) = hide_draft_in_place(app, &window) {
         error!("hide on blur failed: {error}");
     }
+}
+
+/// 下書きウィンドウの設定（`tauri.conf.json`）。設定では作らせず（`create: false`）、setup でこれから作る。
+/// macOS では中央に置かせない。Tauri は中央の位置を、作った後に後回しで当てるので、AppKit で戻した位置が上書きされる。
+/// 記録が無いときは window_frame が中央に置く
+fn main_window_config(app: &AppHandle) -> Result<tauri::utils::config::WindowConfig, &'static str> {
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN_WINDOW)
+        .cloned()
+        .ok_or("main window config not found")?;
+    #[cfg(target_os = "macos")]
+    {
+        config.center = false;
+    }
+    Ok(config)
 }
 
 /// 下書きウィンドウを、戻り先へフォーカスを戻さずに隠す
@@ -2560,7 +2584,7 @@ fn close_window(app: &AppHandle, label: &str) {
 }
 
 /// 設定・ライセンス・使い方のウィンドウを、隠して作る。表示は、画面を描いてから画面側が show_… のコマンドで行う。
-/// 前回の位置と大きさは window-state プラグインが戻す
+/// 前回の位置と大きさは、window-state プラグイン（macOS は AppKit）が戻す
 fn build_hidden_window(
     app: &AppHandle,
     label: &str,
@@ -2570,18 +2594,27 @@ fn build_hidden_window(
     min_size: (f64, f64),
 ) -> tauri::Result<WebviewWindow> {
     let theme = app.state::<AppState>().config.lock().unwrap().theme;
-    let window = WebviewWindowBuilder::new(app, label, url)
+    let builder = WebviewWindowBuilder::new(app, label, url)
         .title(title)
         .inner_size(size.0, size.1)
         .min_inner_size(min_size.0, min_size.1)
         .visible(false)
         .minimizable(false)
         .maximizable(false)
-        .theme(window_theme(theme))
-        .center()
-        .build()?;
+        .theme(window_theme(theme));
+    // macOS では中央に置かせない（main_window_config）
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.center();
+    let window = builder.build()?;
     // 描画プロセスが落ちたら、下書きと同じく立て直す
     diagnostics::watch_webview_process(&window);
+    // 別のタスクで作ることがあるので、メインスレッドで戻す。表示は画面を描いてからなので、それより先に済む
+    #[cfg(target_os = "macos")]
+    {
+        let target = window.clone();
+        let name = window_state_key(label).to_owned();
+        let _ = window.run_on_main_thread(move || window_frame::restore_and_track(&target, &name));
+    }
     Ok(window)
 }
 
@@ -3520,10 +3553,12 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            match main_window(app.handle()) {
-                Some(window) => diagnostics::watch_webview_process(&window),
-                None => error!("setup: main window not found"),
-            }
+            let main = WebviewWindowBuilder::from_config(
+                app.handle(),
+                &main_window_config(app.handle())?,
+            )?
+            .build()?;
+            diagnostics::watch_webview_process(&main);
 
             let config_dir = app.path().app_config_dir()?;
             // デバイスの手元に置くもの（docs/config.md「デバイスの手元に置くもの」）は、既定の置き場と別のフォルダーに置く。
@@ -3577,7 +3612,10 @@ pub fn run() {
 
             if let Some(window) = main_window(app.handle()) {
                 #[cfg(target_os = "macos")]
-                focus::make_draft_panel(&window);
+                {
+                    focus::make_draft_panel(&window);
+                    window_frame::restore_and_track(&window, window_state_key(MAIN_WINDOW));
+                }
                 let _ = window.set_theme(window_theme(config.theme));
                 // tauri.conf.json では最前面にして作るので、設定でオフにしていれば外す
                 if let Err(error) = window.set_always_on_top(config.text_window_always_on_top) {
