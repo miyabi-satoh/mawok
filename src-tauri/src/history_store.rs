@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn merging_drops_entries_without_a_time() {
-        // 時刻が 0 の履歴は、手で書いたファイルか、時計が 1970 年より前のデバイスにしか無い
+        // このアプリは時刻を 1 以上で書くので、時刻が 0 の履歴は手で書いたファイルにしか無い
         assert_eq!(
             merge(&history(&[("a", 10)], 0), &history(&[("b", 0)], 0)),
             history(&[("a", 10)], 0)
