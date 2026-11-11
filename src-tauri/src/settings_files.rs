@@ -100,15 +100,15 @@ pub enum Scope<'a> {
     /// （新しい版が書いた選択肢・キー・行など）を、変えていない項目まで巻き添えで消さない。表（キー操作）の中の項目と
     /// 行の並びの中の行も、`before` に無かったもの（読めなかったもの）には触らない
     Changed(&'a BTreeMap<String, Value>),
-    /// `managed` の項目を全部書く（バックアップから戻す・置き場を替えて今の設定を書く）。
-    /// `set_aside_unreadable` なら、読めないファイルを `<名前>.broken-….toml` に写してから書き直す
-    All { set_aside_unreadable: bool },
+    /// `managed` の項目を全部書く（バックアップから戻す・置き場を替えて今の設定で上書きする）。
+    /// どちらも利用者が全部を書き直すと選んだ場面なので、読めないファイルは `<名前>.broken-….toml` に写してから書き直す
+    All,
 }
 
 /// 項目を置き場のファイルに書く。`managed` は、このアプリが書く項目名（ほかの名前は、新しい版が書いた項目や
 /// 手で書いたものとして残す）。書く項目の無いファイルは読みもしない。中身が変わらないファイルは書かない。
 /// ほかのデバイスで同期しているときに、変えていないファイルまで書き換えて衝突のもとにしないため。
-/// 書く項目のあるファイルが読めなければ書き換えない（手で書きかけのものを、画面からの変更で消さないため）。そのときは
+/// 書く項目のあるファイルが読めなければ書き換えない（`Scope::All` を除く。手で書きかけのものを、画面からの変更で消さないため）。そのときは
 /// `SETTINGS_FILE_UNREADABLE` の符号を返す（読めるファイルの分は書く）
 pub fn write(
     dir: &Path,
@@ -148,9 +148,7 @@ pub fn write(
         let mut document = match before_text.as_deref().map(str::parse::<DocumentMut>) {
             Some(Ok(document)) => document,
             Some(Err(_)) => match scope {
-                Scope::All {
-                    set_aside_unreadable: true,
-                } => {
+                Scope::All => {
                     match atomic_file::back_up(&target(&path), std::time::SystemTime::now()) {
                         Ok(copy) => log::warn!(
                             "set aside the unreadable settings file {name} to {}",
@@ -660,9 +658,7 @@ mod tests {
         );
     }
 
-    const ALL: Scope<'static> = Scope::All {
-        set_aside_unreadable: false,
-    };
+    const ALL: Scope<'static> = Scope::All;
 
     const MANAGED: &[&str] = &[
         key::HOTKEY,
@@ -879,7 +875,14 @@ mod tests {
                 json!([{ "name": "a", "body": "b", "enabled": true }]),
             ),
         ]);
-        assert!(write(dir.path(), "macos", MANAGED, ALL, &next).is_err());
+        assert!(write(
+            dir.path(),
+            "macos",
+            MANAGED,
+            Scope::Changed(&entries(&[])),
+            &next
+        )
+        .is_err());
         assert_eq!(
             fs::read_to_string(dir.path().join(SETTINGS)).unwrap(),
             broken
@@ -1019,7 +1022,7 @@ mod tests {
         );
     }
 
-    /// バックアップから戻すときは、読めないファイルを写して除けてから書き直す
+    /// 全部を書くとき（バックアップから戻す・置き場を替えて上書きする）は、読めないファイルを写して除けてから書き直す
     #[test]
     fn sets_aside_unreadable_files_when_restoring() {
         let dir = TempDir::new("settings-files-restore");
@@ -1028,16 +1031,7 @@ mod tests {
             "snippets",
             json!([{ "name": "a", "body": "b", "enabled": true }]),
         )]);
-        write(
-            dir.path(),
-            "macos",
-            MANAGED,
-            Scope::All {
-                set_aside_unreadable: true,
-            },
-            &restored,
-        )
-        .unwrap();
+        write(dir.path(), "macos", MANAGED, ALL, &restored).unwrap();
         assert_eq!(read(dir.path(), "macos").entries, restored);
         let set_aside = fs::read_dir(dir.path())
             .unwrap()
@@ -1049,38 +1043,6 @@ mod tests {
                     .starts_with("snippets.broken-")
             });
         assert!(set_aside);
-    }
-
-    #[test]
-    fn overwrite_replaces_readable_and_unreadable_files() {
-        let dir = TempDir::new("settings-files-overwrite");
-        fs::write(dir.join(SETTINGS), "theme = \"light\"\n").unwrap();
-        fs::write(dir.join(SNIPPETS), "[[snippets]\n").unwrap();
-        let current = entries(&[
-            ("theme", json!("dark")),
-            (
-                "snippets",
-                json!([{ "name": "a", "body": "b", "enabled": true }]),
-            ),
-        ]);
-        write(
-            dir.path(),
-            "macos",
-            MANAGED,
-            Scope::All {
-                set_aside_unreadable: true,
-            },
-            &current,
-        )
-        .unwrap();
-        assert_eq!(read(dir.path(), "macos").entries, current);
-        assert!(fs::read_dir(dir.path())
-            .unwrap()
-            .filter_map(Result::ok)
-            .any(|entry| entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("snippets.broken-")));
     }
 
     #[test]

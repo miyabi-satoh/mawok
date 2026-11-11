@@ -194,7 +194,7 @@ fn row_differences<T: Clone + PartialEq>(
             if a != b {
                 differences.push(BackupDifference {
                     // 同じ名前の2行目からは番号を付ける。番号と並び順は区切りを `#` にして、名前にどんな文字があっても
-                    // 1行目の `{list}:{名前}` と重ならないようにする（戻す画面が一覧のキーに使う）
+                    // 1行目の `{list}:{名前}` と重ならないようにする（違いを見分ける名前なので、重なると別の違いと取り違える）
                     id: if index == 0 {
                         format!("{list}:{id}")
                     } else {

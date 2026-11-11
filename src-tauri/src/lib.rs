@@ -1093,9 +1093,7 @@ fn write_config(
         };
     }
     let scope = if restoring {
-        settings_files::Scope::All {
-            set_aside_unreadable: true,
-        }
+        settings_files::Scope::All
     } else {
         settings_files::Scope::Changed(&unchanged)
     };
@@ -1349,6 +1347,10 @@ fn load_draft_history(app: AppHandle) -> Result<Vec<String>, String> {
     if size == 0 {
         clear_draft_history_file(&app, false)?;
         return Ok(Vec::new());
+    }
+    // 無い間に預かった消去が書けないうちは読まない。消す前の履歴を画面に戻すと、次の保存で今の時刻を付けて書き戻すため
+    if settings_dir_ready(&app) {
+        retry_pending_history_clear(&app)?;
     }
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
     if !settings_dir_ready(&app) {
@@ -2218,9 +2220,7 @@ fn set_settings_dir(
             &next_dir,
             &os_name(),
             config::key::IN_FILES,
-            settings_files::Scope::All {
-                set_aside_unreadable: true,
-            },
+            settings_files::Scope::All,
             &entries,
         )?;
         None
