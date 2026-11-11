@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { createSuite } from '../lib/setup.mjs';
 import {
 	DEFAULT_HOTKEY,
@@ -24,6 +27,7 @@ import {
 	writeConfigBytes,
 	writeTestSettings
 } from '../lib/config.mjs';
+import { SETTINGS_FILE } from '../lib/settings-files.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
 // 再起動と設定の置き場 (docs/config.md)。設定の変更は、設定画面の表の操作 (部品テストで見ている) ではなく、
@@ -177,5 +181,55 @@ test.describe('再起動と設定の置き場', () => {
 		await invokeApp(client, 'restore_settings_backup', { name: darkBackup.name });
 		const settings = await invokeApp(client, 'get_settings');
 		assert.equal(settings.theme, 'dark');
+	});
+
+	test('選んだ保存先のフォルダーが無くなると、トレイに知らせて設定を保存できず、戻すと知らせが消えて読み直す', async () => {
+		// クラウドストレージのドライブが外れたときと同じく、動いている間に選んだフォルダーが無くなる。
+		// 見張っているフォルダーは Windows では名前を変えられない (EPERM) ので、選ぶのはジャンクションにして、
+		// それを外して無くし、作り直して戻す。中身は先のフォルダーに残る
+		const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'mawok-e2e-folder-'));
+		const chosen = path.join(parent, 'settings');
+		const target = path.join(parent, 'drive');
+		await fs.mkdir(target);
+		await fs.symlink(target, chosen, 'junction');
+		try {
+			// テーマは既定 (ファイルに書かない) から始める。前のテストの値が残ると、下で変えても書くものが無く、保存できたと返る
+			await writeTestSettings({ autostart: false, language: 'ja' });
+			await launch();
+			await invokeApp(client, 'set_settings_dir', { path: chosen, useExisting: false });
+			await fs.rm(chosen);
+
+			// 無くなったことは、次に書こうとしたときに気づく
+			await assert.rejects(
+				invokeApp(client, 'set_theme', { theme: 'dark' }),
+				/settings\.folder_unavailable/,
+				'保存できなかったと返るはず'
+			);
+			assert.deepEqual(await readTrayWarnings(), ['設定を保存できません']);
+			assert.equal(
+				(await invokeApp(client, 'get_settings')).settingsProblem?.kind,
+				'folderMissing'
+			);
+
+			// 無い間にほかのデバイスが書いた変更を、戻したときに読み直すことを見る
+			const file = path.join(target, SETTINGS_FILE);
+			await fs.writeFile(file, `theme = "light"\n${await fs.readFile(file, 'utf8')}`);
+			await fs.symlink(target, chosen, 'junction');
+			// 見回りは 5 秒ごと (lib.rs の wait_for_settings_dir)
+			await waitFor(
+				() => invokeApp(client, 'get_settings'),
+				(settings) => settings.settingsProblem === null && settings.theme === 'light',
+				{ label: '戻した保存先を読み直し、知らせが消える', timeout: 15_000, interval: 500 }
+			);
+			assert.deepEqual(await readTrayWarnings(), [], 'トレイの知らせも消えるはず');
+		} finally {
+			// 後のテストが選んだ保存先のまま起動しないよう、既定に戻す (device.json はファイルの終わりに戻すが、それまでの分)
+			if (client) {
+				await invokeApp(client, 'set_settings_dir', { path: null, useExisting: false }).catch(
+					() => {}
+				);
+			}
+			await fs.rm(parent, { recursive: true, force: true });
+		}
 	});
 });
