@@ -18,7 +18,7 @@ import {
 } from '../lib/macos.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
-// 設定のファイルを読めないときにメニューバーのメニューに出る警告と、ログを Finder で表示することを
+// 設定のファイルを読めないときにメニューバーのメニューに出る警告と、設定のファイルとログを Finder で表示することを
 // macOS で見る。既定値で動くこと・読めないファイルを書き換えないことは、両 OS に共通の作りなので Windows の E2E
 // (tests/settings-store.test.mjs) に任せ、ここではメニューバーのメニューと Finder の側だけを見る
 
@@ -61,6 +61,27 @@ test.describe('macOS: 設定の置き場', () => {
 					{ label: 'ログのフォルダーの Finder のウィンドウ' }
 				),
 				['Mawok.log']
+			);
+		} finally {
+			if (!openedBefore) await closeFinderWindow(PROFILE_IDENTIFIER);
+		}
+	});
+
+	test('設定の「設定の保存先を Finder で表示」で、保存先のフォルダーが Finder で開き、設定のファイルが選ばれている', async () => {
+		await relaunchWithTestConfig({ language: 'ja' });
+		// 保存先はプロファイルの既定の置き場で、ログと同じ名前のフォルダー
+		const openedBefore = (await finderWindowNames()).includes(PROFILE_IDENTIFIER);
+		await openSettings('一般', '設定の保存先を Finder で表示');
+		await pressInSettings('AXButton', '設定の保存先を Finder で表示');
+		try {
+			await waitFor(frontmostApp, (front) => front === 'Finder', { label: 'Finder が前面に出る' });
+			assert.deepEqual(
+				await waitFor(
+					() => finderSelection(PROFILE_IDENTIFIER),
+					(selected) => selected !== null && selected.length > 0,
+					{ label: '保存先のフォルダーの Finder のウィンドウ' }
+				),
+				['settings.toml']
 			);
 		} finally {
 			if (!openedBefore) await closeFinderWindow(PROFILE_IDENTIFIER);
