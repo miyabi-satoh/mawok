@@ -193,7 +193,8 @@ fn row_differences<T: Clone + PartialEq>(
             let (a, b) = (now.get(index).copied(), then.get(index).copied());
             if a != b {
                 differences.push(BackupDifference {
-                    // 同じ名前の2行目からは番号を付ける。区切りを変えて、名前にどんな文字があっても 1行目の形と重ならないようにする
+                    // 同じ名前の2行目からは番号を付ける。番号と並び順は区切りを `#` にして、名前にどんな文字があっても
+                    // 1行目の `{list}:{名前}` と重ならないようにする（戻す画面が一覧のキーに使う）
                     id: if index == 0 {
                         format!("{list}:{id}")
                     } else {
@@ -208,7 +209,7 @@ fn row_differences<T: Clone + PartialEq>(
     let order = |rows: &[T]| rows.iter().map(&identity).collect::<Vec<_>>();
     if order(current) != order(restored) {
         differences.push(BackupDifference {
-            id: format!("{list}:order"),
+            id: format!("{list}#order"),
             current: BackupValue::Order(list.to_string()),
             restored: BackupValue::Order(list.to_string()),
         });
@@ -226,6 +227,21 @@ mod tests {
             to: to.to_string(),
             ..Replacement::default()
         }
+    }
+
+    #[test]
+    fn row_ids_stay_distinct_from_the_order_change() {
+        let current = vec![replacement("order", "x"), replacement("b", "y")];
+        let restored = vec![replacement("b", "y"), replacement("order", "z")];
+        let differences = row_differences(
+            "replacements",
+            &current,
+            &restored,
+            |row| row.from.clone(),
+            BackupValue::Replacement,
+        );
+        let ids: BTreeSet<_> = differences.iter().map(|change| change.id.clone()).collect();
+        assert_eq!(ids.len(), differences.len());
     }
 
     #[test]
@@ -265,7 +281,7 @@ mod tests {
                 "replacements:a",
                 "replacements:くろーど",
                 "replacements:濃度",
-                "replacements:order"
+                "replacements#order"
             ]
         );
         assert_eq!(changes[2].current, BackupValue::Deleted);
