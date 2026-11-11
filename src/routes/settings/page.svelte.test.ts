@@ -210,10 +210,33 @@ describe('設定画面の置き換え辞書', () => {
 		const filter = screen.getByRole('searchbox', { name: m.settings_replacements_filter() });
 		await filter.fill('濃度');
 
-		await screen.getByRole('button', { name: m.settings_replacements_remove() }).click();
+		await screen
+			.getByRole('button', { name: m.settings_replacements_remove({ from: '濃度' }) })
+			.click();
 
 		await expect.element(screen.getByText(m.settings_filter_no_match())).toBeVisible();
 		await expect.element(filter).toHaveValue('濃度');
+	});
+
+	it('置き換え元を行の操作名に含め、空白だけなら共通名を使う', async () => {
+		settings.current = view([replacement(' 濃度 ', 'x'), replacement('  ', 'y')]);
+		const screen = await renderAt(m.settings_category_copy);
+		await expect
+			.element(
+				screen.getByRole('switch', { name: m.settings_replacements_enabled({ from: '濃度' }) })
+			)
+			.toBeVisible();
+		await expect
+			.element(
+				screen.getByRole('button', { name: m.settings_replacements_remove({ from: '濃度' }) })
+			)
+			.toBeVisible();
+		await expect
+			.element(screen.getByRole('switch', { name: m.settings_replacements_enabled_unnamed() }))
+			.toBeVisible();
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_replacements_remove_unnamed() }))
+			.toBeVisible();
 	});
 
 	it('辞書が空のときは行を出さない', async () => {
@@ -252,7 +275,7 @@ describe('設定画面の置き換え辞書', () => {
 		const screen = await renderAt(m.settings_category_copy);
 
 		// 2行目を切る。1行目を切ってしまう取り違えを見つけるため
-		await screen.getByLabelText(m.settings_replacements_enabled()).nth(1).click();
+		await screen.getByLabelText(m.settings_replacements_enabled({ from: '滑ると' })).click();
 
 		expect(lastSavedReplacements()).toEqual([
 			{ from: '濃度', to: 'Node.js', enabled: true },
@@ -265,7 +288,7 @@ describe('設定画面の置き換え辞書', () => {
 		const screen = await renderAt(m.settings_category_copy);
 
 		// 2行目を消す。1行目を消してしまう取り違えを見つけるため
-		await screen.getByLabelText(m.settings_replacements_remove()).nth(1).click();
+		await screen.getByLabelText(m.settings_replacements_remove({ from: '滑ると' })).click();
 
 		expect(lastSavedReplacements()).toEqual([{ from: '濃度', to: 'Node.js', enabled: true }]);
 		await expect.element(screen.getByLabelText(m.settings_replacements_from())).toHaveValue('濃度');
@@ -1668,6 +1691,15 @@ describe('設定画面の定型文の編集・絞り込み', () => {
 		const saved = savedSnippets();
 		expect(saved.at(-1)).toEqual([newSnippet('要約', '要約してください。')]);
 		expect(saved.every((snippets) => snippets.length === 1)).toBe(true);
+	});
+
+	it('空白だけの名前は本文を見出しと操作名に使う', async () => {
+		settings.current = { ...view(), snippets: [newSnippet('   ', '本文')] };
+		const screen = await renderAt(m.settings_category_snippets);
+		await expect
+			.element(screen.getByRole('button', { name: m.settings_row_menu({ name: '本文' }) }))
+			.toBeVisible();
+		expect(screen.getByText('本文').elements()).toHaveLength(1);
 	});
 
 	it('どの行にもスイッチを出し、切ると、消さずに使わない定型文として保存する', async () => {

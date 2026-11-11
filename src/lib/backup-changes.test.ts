@@ -22,7 +22,7 @@ describe('restoreChangeText', () => {
 				restored: { type: 'replacement', value: { ...replacement, to: '戻した値' } }
 			},
 			{
-				id: 'replacements:order',
+				id: 'replacements#order',
 				current: { type: 'order', value: 'replacements' },
 				restored: { type: 'order', value: 'replacements' }
 			},
@@ -54,12 +54,12 @@ describe('restoreChangeText', () => {
 				restored: { type: 'deleted' }
 			},
 			{
-				id: 'snippets:order',
+				id: 'snippets#order',
 				current: { type: 'order', value: 'snippets' },
 				restored: { type: 'order', value: 'snippets' }
 			},
 			{
-				id: 'replacements:order',
+				id: 'replacements#order',
 				current: { type: 'order', value: 'replacements' },
 				restored: { type: 'order', value: 'replacements' }
 			}

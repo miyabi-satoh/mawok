@@ -332,6 +332,7 @@
 	}
 
 	function openHistorySearch(): boolean {
+		if (!draftHistory.hasEntries) return false;
 		if (!rememberSelection()) return false;
 		historySearchOpen = true;
 		return true;
@@ -468,6 +469,8 @@
 			text = '';
 			clearOnShow = false;
 		}
+		// 隠れている間に置き換え辞書が変わっていても、本文が同じだとプレビューを求め直さないため
+		replacementPreview.refresh();
 		await focusDraft();
 	}
 
@@ -634,6 +637,7 @@
 	onMount(() => {
 		const unlisten = Promise.all([
 			listen(EVENTS.SHOWN, onShown),
+			listen(EVENTS.SETTINGS_CHANGED, () => replacementPreview.refresh()),
 			listen(EVENTS.HIDE_REQUESTED, commit),
 			listen(EVENTS.DRAFT_HISTORY_CLEARED, () => {
 				historyClearedCount += 1;

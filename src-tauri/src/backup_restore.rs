@@ -184,26 +184,32 @@ fn row_differences<T: Clone + PartialEq>(
     identity: impl Fn(&T) -> String,
     wrap: fn(T) -> BackupValue,
 ) -> Vec<BackupDifference> {
-    let find = |rows: &[T], id: &str| rows.iter().find(|row| identity(row) == id).cloned();
     let ids: BTreeSet<String> = current.iter().chain(restored).map(&identity).collect();
-    let mut differences: Vec<_> = ids
-        .into_iter()
-        .filter_map(|id| {
-            let (now, then) = (find(current, &id), find(restored, &id));
-            if now == then {
-                return None;
+    let mut differences = Vec::new();
+    for id in ids {
+        let now: Vec<_> = current.iter().filter(|row| identity(row) == id).collect();
+        let then: Vec<_> = restored.iter().filter(|row| identity(row) == id).collect();
+        for index in 0..now.len().max(then.len()) {
+            let (a, b) = (now.get(index).copied(), then.get(index).copied());
+            if a != b {
+                differences.push(BackupDifference {
+                    // 同じ名前の2行目からは番号を付ける。番号と並び順は区切りを `#` にして、名前にどんな文字があっても
+                    // 1行目の `{list}:{名前}` と重ならないようにする（違いを見分ける名前なので、重なると別の違いと取り違える）
+                    id: if index == 0 {
+                        format!("{list}:{id}")
+                    } else {
+                        format!("{list}#{index}:{id}")
+                    },
+                    current: a.cloned().map_or(BackupValue::Deleted, wrap),
+                    restored: b.cloned().map_or(BackupValue::Deleted, wrap),
+                });
             }
-            Some(BackupDifference {
-                id: format!("{list}:{id}"),
-                current: now.map_or(BackupValue::Deleted, wrap),
-                restored: then.map_or(BackupValue::Deleted, wrap),
-            })
-        })
-        .collect();
+        }
+    }
     let order = |rows: &[T]| rows.iter().map(&identity).collect::<Vec<_>>();
     if order(current) != order(restored) {
         differences.push(BackupDifference {
-            id: format!("{list}:order"),
+            id: format!("{list}#order"),
             current: BackupValue::Order(list.to_string()),
             restored: BackupValue::Order(list.to_string()),
         });
@@ -221,6 +227,35 @@ mod tests {
             to: to.to_string(),
             ..Replacement::default()
         }
+    }
+
+    #[test]
+    fn row_ids_stay_distinct_from_the_order_change() {
+        let current = vec![replacement("order", "x"), replacement("b", "y")];
+        let restored = vec![replacement("b", "y"), replacement("order", "z")];
+        let differences = row_differences(
+            "replacements",
+            &current,
+            &restored,
+            |row| row.from.clone(),
+            BackupValue::Replacement,
+        );
+        let ids: BTreeSet<_> = differences.iter().map(|change| change.id.clone()).collect();
+        assert_eq!(ids.len(), differences.len());
+    }
+
+    #[test]
+    fn detects_changes_to_the_second_replacement_with_the_same_from() {
+        let current = vec![replacement("a", "first"), replacement("a", "old")];
+        let restored = vec![replacement("a", "first"), replacement("a", "new")];
+        let differences = row_differences(
+            "replacements",
+            &current,
+            &restored,
+            |row| row.from.clone(),
+            BackupValue::Replacement,
+        );
+        assert_eq!(differences.len(), 1);
     }
 
     #[test]
@@ -246,7 +281,7 @@ mod tests {
                 "replacements:a",
                 "replacements:くろーど",
                 "replacements:濃度",
-                "replacements:order"
+                "replacements#order"
             ]
         );
         assert_eq!(changes[2].current, BackupValue::Deleted);

@@ -58,6 +58,18 @@ describe('previewSegments', () => {
 });
 
 describe('ReplacementPreview', () => {
+	it('同じ本文でも refresh で辞書を再確認する', async () => {
+		const call = vi
+			.fn()
+			.mockResolvedValueOnce([])
+			.mockResolvedValueOnce([{ start: 0, len: 2, to: '新' }]);
+		const preview = new ReplacementPreview(call);
+		preview.update('濃度', false);
+		await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
+		preview.refresh();
+		await vi.waitFor(() => expect(preview.matches).toEqual([{ start: 0, len: 2, to: '新' }]));
+		expect(call).toHaveBeenCalledTimes(2);
+	});
 	it('呼び出し結果を matches に反映する', async () => {
 		const call = vi.fn().mockResolvedValue([{ start: 0, len: 2, to: 'Node.js' }]);
 		const preview = new ReplacementPreview(call);
