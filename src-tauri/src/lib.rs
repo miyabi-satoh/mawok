@@ -1501,8 +1501,13 @@ fn write_pending_history(app: &AppHandle) {
                 .unwrap()
                 .replaced_by_other_devices(before);
         }
-        if let Err(error) = save_draft_history(app.clone(), texts) {
+        if let Err(error) = save_draft_history(app.clone(), texts.clone()) {
             warn!("couldn't save draft history after the folder appeared: {error}");
+            // 次のフォルダーの出現でやり直す。その間に画面から新しい一覧が届いていれば、そちらを残す
+            let mut pending = PENDING_HISTORY.lock().unwrap();
+            if pending.texts.is_none() {
+                pending.texts = Some(texts);
+            }
         }
     }
 }
