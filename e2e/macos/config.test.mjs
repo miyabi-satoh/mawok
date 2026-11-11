@@ -75,13 +75,11 @@ test.describe('macOS: 設定の置き場', () => {
 		await pressInSettings('AXButton', '設定の保存先を Finder で表示');
 		try {
 			await waitFor(frontmostApp, (front) => front === 'Finder', { label: 'Finder が前面に出る' });
-			assert.deepEqual(
-				await waitFor(
-					() => finderSelection(PROFILE_IDENTIFIER),
-					(selected) => selected !== null && selected.length > 0,
-					{ label: '保存先のフォルダーの Finder のウィンドウ' }
-				),
-				['settings.toml']
+			// ログと同じ名前のフォルダーなので、前のテストのログの選択が残っていれば、それを読み違えないよう選ばれるまで待つ
+			await waitFor(
+				() => finderSelection(PROFILE_IDENTIFIER),
+				(selected) => selected?.length === 1 && selected[0] === 'settings.toml',
+				{ label: '保存先のフォルダーの Finder のウィンドウで、設定のファイルが選ばれる' }
 			);
 		} finally {
 			if (!openedBefore) await closeFinderWindow(PROFILE_IDENTIFIER);
