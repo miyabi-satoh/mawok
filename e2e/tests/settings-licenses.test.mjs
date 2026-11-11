@@ -164,6 +164,11 @@ test.describe('第三者のソフトウェア', () => {
 			['BSD 3-Clause "New" or "Revised" License', 'MIT License'],
 			'2つのライセンスの条文の見出し'
 		);
+		assert.equal(
+			contents.texts.length,
+			contents.headings.length,
+			'見出しごとに条文の本文が出るはず'
+		);
 		for (const text of contents.texts) {
 			assert.ok(text.length > 500, `条文の本文が出るはず: ${text.slice(0, 80)}`);
 		}
