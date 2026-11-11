@@ -163,7 +163,7 @@
 							aria-hidden="true"
 						/>
 						<span class="flex min-w-0 items-center gap-2 {dimmed?.(row) ? 'opacity-50' : ''}">
-							{#if row.name}
+							{#if row.name.trim()}
 								<!-- 名前は縮めず本文の頭から詰めるが、行より長い名前は行の幅で切る -->
 								<span class="max-w-full shrink-0 truncate font-medium">{row.name}</span>
 							{:else if !head}
@@ -175,7 +175,7 @@
 					</button>
 					{@render trailing?.(row)}
 					<RowMenu
-						name={row.name || head}
+						name={row.name.trim() ? row.name : head}
 						{index}
 						count={list.rows.length}
 						reorderable={matched === null}

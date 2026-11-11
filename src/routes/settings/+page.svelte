@@ -1118,7 +1118,9 @@
 												}
 											/>
 											<Switch
-												aria-label={m.settings_replacements_enabled()}
+												aria-label={replacement.from.trim()
+													? m.settings_replacements_enabled({ from: replacement.from.trim() })
+													: m.settings_replacements_enabled_unnamed()}
 												bind:checked={
 													() => replacement.enabled,
 													(enabled) => {
@@ -1130,7 +1132,9 @@
 											<Button
 												variant="ghost"
 												size="icon"
-												aria-label={m.settings_replacements_remove()}
+												aria-label={replacement.from.trim()
+													? m.settings_replacements_remove({ from: replacement.from.trim() })
+													: m.settings_replacements_remove_unnamed()}
 												onclick={() => replacements.remove(replacements.rows.indexOf(replacement))}
 											>
 												<TrashIcon />

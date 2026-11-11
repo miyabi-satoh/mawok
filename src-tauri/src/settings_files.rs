@@ -1052,6 +1052,38 @@ mod tests {
     }
 
     #[test]
+    fn overwrite_replaces_readable_and_unreadable_files() {
+        let dir = TempDir::new("settings-files-overwrite");
+        fs::write(dir.join(SETTINGS), "theme = \"light\"\n").unwrap();
+        fs::write(dir.join(SNIPPETS), "[[snippets]\n").unwrap();
+        let current = entries(&[
+            ("theme", json!("dark")),
+            (
+                "snippets",
+                json!([{ "name": "a", "body": "b", "enabled": true }]),
+            ),
+        ]);
+        write(
+            dir.path(),
+            "macos",
+            MANAGED,
+            Scope::All {
+                set_aside_unreadable: true,
+            },
+            &current,
+        )
+        .unwrap();
+        assert_eq!(read(dir.path(), "macos").entries, current);
+        assert!(fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("snippets.broken-")));
+    }
+
+    #[test]
     fn names_only_the_line_and_column_of_an_unreadable_file() {
         let dir = TempDir::new("settings-files-parse-error");
         fs::write(

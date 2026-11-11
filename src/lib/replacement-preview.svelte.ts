@@ -39,6 +39,11 @@ export class ReplacementPreview {
 		}
 	});
 
+	refresh() {
+		this.#generation++;
+		this.#refresh();
+	}
+
 	/**
 	 * テキストが変わった。IME 変換中は求めない（compositionend で改めて呼ぶこと）。
 	 * 変換中は matches も空にする。残したままだと、変換中に本文の長さが変わったとき、

@@ -129,8 +129,8 @@ test.describe('設定 (置き換え辞書) → 下書きへの反映', () => {
 
 		// 開き直すと「一般」の分類に戻っている
 		await selectCopyCategory(client);
-		const removeButtons = await client.$$('button[aria-label="この行を削除する"]');
-		await removeButtons[removeButtons.length - 1].click();
+		const removeButton = await client.$(`button[aria-label="「${from}」を削除する"]`);
+		await removeButton.click();
 		await waitFor(
 			tryReadConfig,
 			// cfg が undefined (読み取り中の一時的な失敗) のときは「まだ削除できていない」扱いにする。

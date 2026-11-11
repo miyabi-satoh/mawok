@@ -68,16 +68,28 @@ pub fn load_or_recover(path: &Path) -> Device {
         Err(error) => error,
     };
     log::warn!("couldn't read the device settings: {error}");
-    match atomic_file::back_up(path, std::time::SystemTime::now()) {
-        Ok(Some(copy)) => log::warn!("set aside the device settings to {}", copy.display()),
-        Ok(None) => {}
-        Err(error) => log::warn!("couldn't set aside the device settings: {error}"),
-    }
-    fs::read_to_string(path)
+    let backed_up = match atomic_file::back_up(path, std::time::SystemTime::now()) {
+        Ok(Some(copy)) => {
+            log::warn!("set aside the device settings to {}", copy.display());
+            true
+        }
+        Ok(None) => false,
+        Err(error) => {
+            log::warn!("couldn't set aside the device settings: {error}");
+            false
+        }
+    };
+    let device = fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .map(|value| salvage(&value))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if backed_up {
+        if let Err(error) = save(path, &device) {
+            log::warn!("couldn't save the recovered device settings: {error}");
+        }
+    }
+    device
 }
 
 /// 項目ごとに読む。型の合わない項目だけを既定にする
@@ -185,6 +197,10 @@ mod tests {
             Some(PathBuf::from("/Users/me/Dropbox/mawok"))
         );
         assert_eq!(device.autostart, None);
+        assert_eq!(load(&path).unwrap(), device);
+        let count = fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(load_or_recover(&path), device);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), count);
         assert!(fs::read_dir(dir.path())
             .unwrap()
             .filter_map(Result::ok)

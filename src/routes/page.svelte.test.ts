@@ -114,6 +114,26 @@ describe('下書きウィンドウ', () => {
 		return draftField(screen).element().getAttribute('style') ?? '';
 	}
 
+	it('履歴が空なら検索キーで一覧を開かない', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.fill('本文');
+		await userEvent.keyboard('{Meta>}r{/Meta}');
+		await expect.element(textarea).toHaveFocus();
+		expect(screen.getByRole('combobox').elements()).toHaveLength(0);
+	});
+
+	it('ウィンドウを出し直すと置き換えプレビューを再取得する', async () => {
+		const screen = await render(Page);
+		await draftField(screen).fill('濃度');
+		await vi.waitFor(() =>
+			expect(callsOf(invoked, 'preview_replacement_matches').length).toBeGreaterThan(0)
+		);
+		invoked.mockClear();
+		emit(EVENTS.SHOWN);
+		await vi.waitFor(() => expect(callsOf(invoked, 'preview_replacement_matches')).toHaveLength(1));
+	});
+
 	it('設定のフォントと大きさを入力欄に当てる', async () => {
 		settings.current = view('macos', { family: 'HackGen Console NF', size: 22 });
 		const screen = await render(Page);

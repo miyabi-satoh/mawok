@@ -1487,9 +1487,18 @@ static PENDING_HISTORY: Mutex<PendingHistory> = Mutex::new(PendingHistory {
 fn write_pending_history(app: &AppHandle) {
     let pending = std::mem::take(&mut *PENDING_HISTORY.lock().unwrap());
     if let Some(at) = pending.cleared_at {
-        if let Err(error) = clear_history_file_at(app, true, at, true) {
-            warn!("couldn't clear draft history after the folder appeared: {error}");
+        let mut queued = PENDING_HISTORY.lock().unwrap();
+        queued.cleared_at = Some(queued.cleared_at.map_or(at, |other| other.max(at)));
+    }
+    if let Err(error) = retry_pending_history_clear(app) {
+        warn!("couldn't clear draft history after the folder appeared: {error}");
+        if let Some(texts) = pending.texts {
+            let mut queued = PENDING_HISTORY.lock().unwrap();
+            if queued.texts.is_none() {
+                queued.texts = Some(texts);
+            }
         }
+        return;
     }
     if let Some(texts) = pending.texts {
         // 画面が持つのは、無くなる前にこのデバイスのファイルへ書いた履歴の続き。そう照らさないと、画面の一覧の全部に
@@ -1507,6 +1516,20 @@ fn write_pending_history(app: &AppHandle) {
     }
 }
 
+fn retry_pending_history_clear(app: &AppHandle) -> Result<(), String> {
+    static RETRY_LOCK: Mutex<()> = Mutex::new(());
+    let _guard = RETRY_LOCK.lock().unwrap();
+    let at = PENDING_HISTORY.lock().unwrap().cleared_at.take();
+    if let Some(at) = at {
+        if let Err(error) = clear_history_file_at(app, true, at, true) {
+            let mut pending = PENDING_HISTORY.lock().unwrap();
+            pending.cleared_at = Some(pending.cleared_at.map_or(at, |newer| newer.max(at)));
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String> {
     if !settings_dir_ready(&app) {
@@ -1514,6 +1537,7 @@ fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String
         PENDING_HISTORY.lock().unwrap().texts = Some(entries);
         return Ok(());
     }
+    retry_pending_history_clear(&app)?;
     let path = app.state::<AppState>().history_path();
     // 件数の設定は、ロックを取ってから読む。読んだ後に件数 0 へ変えられて消されると、
     // 消した後に古い履歴を書き戻してしまう
@@ -1601,6 +1625,10 @@ fn clear_history_file_at(
 /// 自分のファイルに入れておくと、次に画面から保存するときに、混ぜた履歴と照らして時刻を付けられる
 fn merge_history_from_other_devices(app: &AppHandle) {
     if !settings_dir_ready(app) {
+        return;
+    }
+    if let Err(error) = retry_pending_history_clear(app) {
+        warn!("couldn't clear draft history before merging: {error}");
         return;
     }
     let path = app.state::<AppState>().history_path();
@@ -1731,8 +1759,7 @@ fn set_replacements(
     replacements: Vec<Replacement>,
 ) -> Result<Vec<Replacement>, String> {
     info!("set replacements: {} entries", replacements.len());
-    // 打つたびに呼ばれる。辞書はトレイにも下書きウィンドウにも関わらず、設定画面は自分で表の行を持っているので、
-    // 保存するだけにして、開いているウィンドウとトレイへの反映はしない
+    // 打つたびに保存する。下書きのプレビューはウィンドウを出し直したときに更新する
     save_as_typed(&app, |config| config.replacements = replacements.clone())?;
     Ok(replacements)
 }
@@ -2197,7 +2224,7 @@ fn set_settings_dir(
             &os_name(),
             config::key::IN_FILES,
             settings_files::Scope::All {
-                set_aside_unreadable: false,
+                set_aside_unreadable: true,
             },
             &entries,
         )?;
