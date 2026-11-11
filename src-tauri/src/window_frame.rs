@@ -1,6 +1,7 @@
 //! macOS の窓の位置と大きさの記録。window-state プラグインでなく、AppKit の frame autosave に任せる（docs/platform.md「macOS の窓の位置と大きさ」）
 
-use objc2_app_kit::NSWindow;
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSApplication, NSWindow};
 use objc2_foundation::NSString;
 use tauri::{Runtime, WebviewWindow};
 
@@ -19,11 +20,24 @@ pub fn restore_and_track<R: Runtime>(window: &WebviewWindow<R>, name: &str) {
     if !ns_window.setFrameUsingName(&name) {
         ns_window.center();
     }
-    // 同じ名前の窓がほかに開いていると断られる。閉じた窓の名前は、閉じたときに空く
+    // 同じ名前の窓がアプリの中にほかにあると断られる。閉じた窓は、Tauri が片付けるまで名前を持ったまま残り、
+    // 閉じてすぐ開き直すとその窓が名前を持っているので、先に外す（記録は動かすたびに済んでいる）
+    release_name_held_by_closed_windows(ns_window, &name);
     if !ns_window.setFrameAutosaveName(&name) {
         log::warn!(
             "couldn't keep track of the frame of the {} window",
             window.label()
         );
+    }
+}
+
+fn release_name_held_by_closed_windows(window: &NSWindow, name: &NSString) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    for other in NSApplication::sharedApplication(mtm).windows() {
+        if &*other != window && !other.isVisible() && *other.frameAutosaveName() == *name {
+            other.setFrameAutosaveName(&NSString::from_str(""));
+        }
     }
 }
