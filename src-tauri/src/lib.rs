@@ -441,19 +441,6 @@ fn window_state_flags() -> StateFlags {
     }
 }
 
-/// ウィンドウの位置と大きさを記録するときの名前（window-state プラグインと、macOS の AppKit の frame autosave で使う）。
-/// 最小の大きさがなかったころの記録（最小より小さいことがある）を戻さないよう、
-/// 名前を変えて記録がない状態から始める。どちらも記録した大きさを最小と比べずに当てるため。
-/// 新しい記録は最小の大きさがかかったウィンドウで取るので、最小を割らない。最小の大きさを引き上げたときも、同じく名前を変える
-fn window_state_key(label: &str) -> &str {
-    match label {
-        SETTINGS_WINDOW => "settings-resizable",
-        MAIN_WINDOW => "main-min-size",
-        LICENSES_WINDOW => "licenses-min-480",
-        _ => label,
-    }
-}
-
 fn window_theme(theme: Theme) -> Option<WindowTheme> {
     match theme {
         Theme::System => None,
@@ -2609,7 +2596,7 @@ fn build_hidden_window(
     #[cfg(target_os = "macos")]
     {
         let target = window.clone();
-        let name = window_state_key(label).to_owned();
+        let name = label.to_owned();
         let _ = window.run_on_main_thread(move || window_frame::restore_and_track(&target, &name));
     }
     Ok(window)
@@ -3400,7 +3387,6 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
-                .map_label(window_state_key)
                 .build(),
         )
         .manage(DraftState::default())
@@ -3611,7 +3597,7 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 {
                     focus::make_draft_panel(&window);
-                    window_frame::restore_and_track(&window, window_state_key(MAIN_WINDOW));
+                    window_frame::restore_and_track(&window, MAIN_WINDOW);
                 }
                 let _ = window.set_theme(window_theme(config.theme));
                 // tauri.conf.json では最前面にして作るので、設定でオフにしていれば外す

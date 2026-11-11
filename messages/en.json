@@ -160,7 +160,7 @@
 	"settings_key_historyNewer": "Next in history",
 	"settings_key_historySearch": "Search history",
 	"settings_key_none": "None",
-	"settings_key_change": "Change the key for {action} (now {key})",
+	"settings_key_change": "Change the key for “{action}” (now {key})",
 	"settings_key_reset_action": "Reset to default",
 	"settings_key_clear_action": "Remove",
 	"settings_key_used_by_action": "{keys} is already used for “{action}”.",

@@ -24,8 +24,7 @@ export const APP_VERSION = tauriConf.version;
 
 /** 下書きウィンドウのタイトル */
 export const DRAFT_TITLE = draftWindow.title;
-/** 下書きウィンドウの既定の大きさと最小の大きさ (中身の大きさ、論理ピクセル) */
-export const DRAFT_DEFAULT_SIZE = { width: draftWindow.width, height: draftWindow.height };
+/** 下書きウィンドウの最小の大きさ (中身の大きさ、論理ピクセル) */
 export const DRAFT_MIN_SIZE = { width: draftWindow.minWidth, height: draftWindow.minHeight };
 
 // src-tauri/src/lib.rs の SETTINGS_MIN_SIZE・LICENSES_MIN_SIZE の写し (中身の大きさ、論理ピクセル)

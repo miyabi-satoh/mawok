@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
 import { createSuite } from '../lib/setup.mjs';
 import {
 	APP_PATH,
@@ -30,14 +29,8 @@ import {
 } from '../lib/window.mjs';
 import { dragBottomRightCorner } from '../lib/input.mjs';
 import { countTrayIcons } from '../lib/tray.mjs';
-import { beginTestConfig, WINDOW_STATE_PATH } from '../lib/config.mjs';
-import {
-	DRAFT_DEFAULT_SIZE,
-	DRAFT_MIN_SIZE,
-	PROFILE,
-	PROFILE_ENV,
-	SETTINGS_TITLE
-} from '../lib/app-conf.mjs';
+import { beginTestConfig } from '../lib/config.mjs';
+import { DRAFT_MIN_SIZE, PROFILE, PROFILE_ENV, SETTINGS_TITLE } from '../lib/app-conf.mjs';
 import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
@@ -175,41 +168,6 @@ test.describe('下書きのウィンドウ', () => {
 		const after = await readWindow(hwnd);
 		near(after.client.width / after.scale, DRAFT_MIN_SIZE.width, '小さくした後の中身の幅');
 		near(after.client.height / after.scale, DRAFT_MIN_SIZE.height, '小さくした後の中身の高さ');
-	});
-
-	test('最小の大きさがなかったころの記録が残っていても、読まずに既定の大きさで出る', async () => {
-		// window-state プラグインは、記録した大きさを最小と比べずにそのまま当てる。そこで記録の名前を
-		// "main" から "main-min-size" に変えてある (lib.rs の window_state_key)。古い "main" の記録が
-		// 残っていても読まれないので、既定の大きさで出る
-		await suite.closeClient(client);
-		const old = {
-			width: 162,
-			height: 92,
-			x: 120,
-			y: 120,
-			prev_x: 120,
-			prev_y: 120,
-			maximized: false,
-			visible: true,
-			decorated: true,
-			fullscreen: false
-		};
-		await writeFile(WINDOW_STATE_PATH, JSON.stringify({ main: old }, null, 2), 'utf8');
-
-		client = await suite.newClient();
-		await showDraftAndWaitVisible('古い記録があるときの表示');
-		const draft = await readWindow(await getDraftWindowHandle());
-		// 最小に収めて当てたのではなく、古い記録を読まずに既定の大きさで出たことを見る
-		near(
-			draft.client.width / draft.scale,
-			DRAFT_DEFAULT_SIZE.width,
-			'古い記録があるときの中身の幅'
-		);
-		near(
-			draft.client.height / draft.scale,
-			DRAFT_DEFAULT_SIZE.height,
-			'古い記録があるときの中身の高さ'
-		);
 	});
 
 	test('下書きウィンドウには最小化・最大化のボタンがない', async () => {

@@ -14,9 +14,7 @@ use crate::atomic_file;
 
 /// 設定の置き場の中で、履歴のファイルを置くフォルダー
 pub const DIR_NAME: &str = "history";
-/// 本文だけを置いていた版。時刻は、読むときに付ける（docs/config.md「履歴」）。
-const TEXT_ONLY_VERSION: u8 = 1;
-const VERSION: u8 = 2;
+const VERSION: u8 = 1;
 /// 混ぜた履歴の件数の上限。どのデバイスの件数の設定も、これより多くはできない
 pub const MAX_MERGED_ENTRIES: usize = crate::config::MAX_DRAFT_HISTORY_SIZE as usize;
 
@@ -78,22 +76,6 @@ impl History {
             entries,
             cleared_at: self.cleared_at,
         }
-    }
-
-    /// 時刻の無い（0 の）本文に、次に新しい本文の 1 ms 前の時刻を付ける。いちばん新しい本文なら `newest` を付ける
-    /// （docs/config.md「履歴」）。時刻が 0 のままだと、消していなくても、消した時刻（0）以下として混ぜるときに落ちる。
-    /// 付けた時刻があれば true
-    fn dated(&mut self, newest: u64) -> bool {
-        let mut changed = false;
-        let mut next = newest.saturating_add(1);
-        for entry in self.entries.iter_mut().rev() {
-            if entry.at == 0 {
-                entry.at = next.saturating_sub(1).max(1);
-                changed = true;
-            }
-            next = entry.at;
-        }
-        changed
     }
 
     /// 履歴を消した後の形。消した時刻は、今ある履歴のどれよりも前にならないようにする
@@ -186,11 +168,6 @@ struct Versioned {
     version: u8,
 }
 
-#[derive(Deserialize)]
-struct TextOnlyFormat {
-    entries: Vec<String>,
-}
-
 #[derive(Serialize, Deserialize)]
 struct FileFormat {
     version: u8,
@@ -225,23 +202,12 @@ fn read_json<'a, T: Deserialize<'a>>(text: &'a str) -> Result<T, ReadProblem> {
     })
 }
 
-/// JSON の本文を読む。時刻の無い本文には、`newest`（ファイルの更新時刻）からさかのぼった時刻を付ける。
-/// 付けた時刻があれば、保存し直すものとして true を添える
-pub fn parse(text: &str, newest: u64) -> Result<(History, bool), ReadProblem> {
-    let mut history = match read_json::<Versioned>(text)?.version {
-        TEXT_ONLY_VERSION => History {
-            entries: read_json::<TextOnlyFormat>(text)?
-                .entries
-                .into_iter()
-                .map(|text| Entry { text, at: 0 })
-                .collect(),
-            cleared_at: 0,
-        },
-        VERSION => read_json::<FileFormat>(text)?.history,
-        _ => return Err(ReadProblem::UnknownVersion),
-    };
-    let dated = history.dated(newest);
-    Ok((history, dated))
+/// JSON の本文を読む
+pub fn parse(text: &str) -> Result<History, ReadProblem> {
+    match read_json::<Versioned>(text)?.version {
+        VERSION => Ok(read_json::<FileFormat>(text)?.history),
+        _ => Err(ReadProblem::UnknownVersion),
+    }
 }
 
 /// 履歴を保存用の JSON にする。
@@ -261,9 +227,7 @@ pub fn truncate<T>(mut entries: Vec<T>, max_entries: usize) -> Vec<T> {
     entries
 }
 
-/// ファイルがなければ空を返す。ほかの読み込み失敗は理由の種類だけを
-/// 返す。時刻の無い本文に時刻を付けたら、その場で保存し直す。保存し直さないと、ファイルの更新時刻が
-/// 変わるたびに、同じ本文の時刻が変わる。保存は呼ぶ側の排他の下で行う
+/// ファイルがなければ空を返す。ほかの読み込み失敗は理由の種類だけを返す
 pub fn load(path: &Path) -> Result<History, LoadError> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -274,19 +238,7 @@ pub fn load(path: &Path) -> Result<History, LoadError> {
         }
         Err(error) => return Err(LoadError::Io(error.kind())),
     };
-    let modified = fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-        .and_then(atomic_file::unix_millis)
-        .or_else(|| atomic_file::unix_millis(SystemTime::now()))
-        .unwrap_or(1);
-    let (history, dated) = parse(&text, modified).map_err(LoadError::Invalid)?;
-    if dated {
-        if let Err(error) = save(path, &history) {
-            log::warn!("couldn't save the draft history with times: {error}");
-        }
-    }
-    Ok(history)
+    parse(&text).map_err(LoadError::Invalid)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,17 +297,10 @@ pub fn is_device_file(path: &Path) -> bool {
             .is_some_and(|stem| !stem.to_string_lossy().contains(".broken-"))
 }
 
-/// ほかのデバイスのファイルを読む。時刻の無い本文に時刻を付けても、書き戻さない
+/// ほかのデバイスのファイルを読む
 fn load_other(path: &Path) -> Result<History, LoadError> {
     let text = fs::read_to_string(path).map_err(|error| LoadError::Io(error.kind()))?;
-    let modified = fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-        .and_then(atomic_file::unix_millis)
-        .unwrap_or(1);
-    parse(&text, modified)
-        .map(|(history, _)| history)
-        .map_err(LoadError::Invalid)
+    parse(&text).map_err(LoadError::Invalid)
 }
 
 /// 一時ファイルへ書いてから差し替える。unix では履歴本文を所有者だけが
@@ -409,51 +354,14 @@ mod tests {
     #[test]
     fn round_trips() {
         let saved = history(&[("old", 1), ("new", 2)], 0);
-        assert_eq!(parse(&format(&saved), 900), Ok((saved, false)));
+        assert_eq!(parse(&format(&saved)), Ok(saved));
     }
 
     #[test]
     fn writes_the_times_next_to_the_texts() {
         assert_eq!(
             format(&history(&[("draft", 5)], 3)),
-            r#"{"version":2,"entries":[{"text":"draft","at":5}],"cleared_at":3}"#
-        );
-    }
-
-    #[test]
-    fn the_text_only_version_is_dated_back_from_the_file_time() {
-        assert_eq!(
-            parse(
-                r#"{"version": 1, "entries": ["old", "middle", "new"]}"#,
-                900
-            ),
-            Ok((
-                history(&[("old", 898), ("middle", 899), ("new", 900)], 0),
-                true
-            ))
-        );
-        // 同じ本文が離れて2回あっても、新しい方が新しい時刻になり、混ぜても新しい方が残る
-        let (twice, _) = parse(r#"{"version": 1, "entries": ["s", "d", "s"]}"#, 900).unwrap();
-        assert_eq!(
-            merge(&twice, &History::default()),
-            history(&[("d", 899), ("s", 900)], 0)
-        );
-    }
-
-    #[test]
-    fn entries_without_a_time_are_dated_just_before_the_next_newer_entry() {
-        let text = format(&history(&[("a", 0), ("b", 0), ("c", 500), ("d", 0)], 3));
-        assert_eq!(
-            parse(&text, 900),
-            Ok((
-                history(&[("a", 498), ("b", 499), ("c", 500), ("d", 900)], 3),
-                true
-            ))
-        );
-        // 時刻は 1 より前にしない
-        assert_eq!(
-            parse(r#"{"version": 1, "entries": ["a", "b", "c"]}"#, 2),
-            Ok((history(&[("a", 1), ("b", 1), ("c", 2)], 0), true))
+            r#"{"version":1,"entries":[{"text":"draft","at":5}],"cleared_at":3}"#
         );
     }
 
@@ -463,7 +371,7 @@ mod tests {
         let own = dir.join("own.json");
         save(&own, &history(&[("a", 10), ("b", 30)], 0)).unwrap();
         let other = dir.join("other.json");
-        let other_text = r#"{"version": 2, "entries": [{"text": "c", "at": 20}, {"text": "b", "at": 40}], "cleared_at": 5}"#;
+        let other_text = r#"{"version": 1, "entries": [{"text": "c", "at": 20}, {"text": "b", "at": 40}], "cleared_at": 5}"#;
         fs::write(&other, other_text).unwrap();
         // 書きかけなどで読めないファイルは飛ばす
         fs::write(dir.join("broken.json"), "{").unwrap();
@@ -472,32 +380,15 @@ mod tests {
         assert_eq!(merged, history(&[("a", 10), ("c", 20), ("b", 40)], 5));
         assert_eq!(fs::read_to_string(&other).unwrap(), other_text);
         // ほかのデバイスで消した時刻より前の履歴は、どのデバイスの分も落とす
-        fs::write(&other, r#"{"version": 2, "entries": [], "cleared_at": 25}"#).unwrap();
+        fs::write(&other, r#"{"version": 1, "entries": [], "cleared_at": 25}"#).unwrap();
         assert_eq!(load_merged(&own).unwrap(), history(&[("b", 30)], 25));
     }
 
     #[test]
-    fn loading_the_text_only_version_saves_it_with_times() {
-        let dir = TempDir::new("history-text-only");
-        let path = dir.join("a1b2c3d4.json");
-        fs::write(&path, r#"{"version": 1, "entries": ["old", "new"]}"#).unwrap();
-        let loaded = load(&path).unwrap();
-        assert_eq!(loaded.texts(), texts(&["old", "new"]));
-        assert_eq!(loaded.entries[0].at + 1, loaded.entries[1].at);
-        assert!(loaded.entries[0].at > 0);
-        // 読み直しても、ファイルの更新時刻が変わっても、同じ時刻のまま
-        assert_eq!(
-            parse(&fs::read_to_string(&path).unwrap(), 1),
-            Ok((loaded.clone(), false))
-        );
-        assert_eq!(load(&path), Ok(loaded));
-    }
-
-    #[test]
     fn rejects_broken_json_and_unknown_versions() {
-        assert_eq!(parse("{", 900), Err(ReadProblem::InvalidJson));
+        assert_eq!(parse("{"), Err(ReadProblem::InvalidJson));
         assert_eq!(
-            parse(r#"{"version": 3, "entries": []}"#, 900),
+            parse(r#"{"version": 2, "entries": [], "cleared_at": 0}"#),
             Err(ReadProblem::UnknownVersion)
         );
     }
@@ -516,14 +407,11 @@ mod tests {
     #[test]
     fn rejects_wrong_shape() {
         assert_eq!(
-            parse(r#"{"version": 1, "entries": [1]}"#, 900),
+            parse(r#"{"version": 1, "entries": [1], "cleared_at": 0}"#),
             Err(ReadProblem::InvalidShape)
         );
         assert_eq!(
-            parse(
-                r#"{"version": 2, "entries": ["draft"], "cleared_at": 0}"#,
-                900
-            ),
+            parse(r#"{"version": 1, "entries": ["draft"], "cleared_at": 0}"#),
             Err(ReadProblem::InvalidShape)
         );
     }
@@ -767,7 +655,7 @@ mod tests {
 
     #[test]
     fn merging_drops_entries_without_a_time() {
-        // 読むときに時刻を付けるので、時刻が 0 の履歴は、ほかの版や手で書いたファイルにしか無い
+        // このアプリは時刻を 1 以上で書くので、時刻が 0 の履歴は手で書いたファイルにしか無い
         assert_eq!(
             merge(&history(&[("a", 10)], 0), &history(&[("b", 0)], 0)),
             history(&[("a", 10)], 0)
