@@ -190,9 +190,9 @@ test.describe('再起動と設定の置き場', () => {
 		const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'mawok-e2e-folder-'));
 		const chosen = path.join(parent, 'settings');
 		const target = path.join(parent, 'drive');
-		await fs.mkdir(target);
-		await fs.symlink(target, chosen, 'junction');
 		try {
+			await fs.mkdir(target);
+			await fs.symlink(target, chosen, 'junction');
 			// テーマは既定 (ファイルに書かない) から始める。前のテストの値が残ると、下で変えても書くものが無く、保存できたと返る
 			await writeTestSettings({ autostart: false, language: 'ja' });
 			await launch();
