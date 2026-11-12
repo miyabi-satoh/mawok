@@ -1643,10 +1643,8 @@ fn write_pending_history(app: &AppHandle) {
         warn!("couldn't clear draft history after the folder appeared: {error}");
         return;
     }
-    let (texts, deleted) = {
-        let mut pending = PENDING_HISTORY.lock().unwrap();
-        (pending.texts.take(), std::mem::take(&mut pending.deleted))
-    };
+    // 無い間に消した本文は、預けたまま save_history に取らせる。書けなかったときに預かり直すため
+    let texts = PENDING_HISTORY.lock().unwrap().texts.take();
     if let Some(texts) = texts {
         // 画面が持つのは、無くなる前にこのデバイスのファイルへ書いた履歴の続き。そう照らさないと、画面の一覧の全部に
         // 今の時刻を付け、無い間にほかのデバイスで消した履歴まで、消した時刻より後のものとして戻す
@@ -1657,7 +1655,7 @@ fn write_pending_history(app: &AppHandle) {
                 .unwrap()
                 .replaced_by_other_devices(before);
         }
-        if let Err(error) = save_history(app, texts, deleted) {
+        if let Err(error) = save_history(app, texts, Vec::new()) {
             warn!("couldn't save draft history after the folder appeared: {error}");
         }
     }
