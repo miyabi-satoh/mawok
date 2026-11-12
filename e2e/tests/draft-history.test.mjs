@@ -222,13 +222,17 @@ test.describe('下書きの履歴', () => {
 		client = await suite.newClient();
 		await pasteTarget.activate();
 		await showDraftAndWaitVisible();
-		for (let i = 0; i < 2; i++) await sendKeySequence([[VK.UP]]);
-		await settle();
-		assert.equal(
-			(await readDraft(client)).value,
-			'git status',
-			'起動し直しても、消した履歴は出ないはず'
+		// 消した履歴が戻っていれば、1回目の ↑ で 'git diff' が出る
+		await sendKeySequence([[VK.UP]]);
+		await waitFor(
+			() => readDraft(client),
+			(d) => d.value === 'git status',
+			{ label: '起動し直しても、消した履歴は出ない' }
 		);
+		await sendKeySequence([[VK.UP]]);
+		await expectStays(async () => (await readDraft(client)).value, 'git status', {
+			label: 'それより古い履歴は無い'
+		});
 	});
 
 	test('「非表示後に入力をクリア」が 30 秒後なら、隠して 30 秒たってから出すと空から始まり、↑ で書きかけが戻る', async () => {
@@ -236,6 +240,13 @@ test.describe('下書きの履歴', () => {
 		try {
 			await showDraftAndWaitVisible();
 			await typeIntoDraft(client, '書きかけ');
+			// 時間がたつ前に出し直すと、書きかけは残る（出すたびに空にしていないこと）
+			await sendKeySequence([[VK.ESCAPE]]);
+			await waitDraftHidden('Esc で隠す');
+			await showDraftAndWaitVisible('すぐに出し直す');
+			await expectStays(async () => (await readDraft(client)).value, '書きかけ', {
+				label: '30 秒たつ前は書きかけが残る'
+			});
 			await sendKeySequence([[VK.ESCAPE]]);
 			await waitDraftHidden('Esc で隠す');
 			await new Promise((resolve) => setTimeout(resolve, 31_000));
