@@ -734,6 +734,7 @@ fn move_to_pointer_display(window: &WebviewWindow) {
                 height: monitor.size().height as i32,
             },
             work_area: to_rect(monitor.work_area()),
+            scale: monitor.scale_factor(),
         })
         .collect();
     let outer = placement::Rect {
@@ -782,6 +783,8 @@ fn move_to_pointer_display(window: &WebviewWindow) {
         .map(|screen| placement::Display {
             bounds: rect(screen.frame()),
             work_area: rect(screen.visibleFrame()),
+            // ポイントはどの画面にも共通なので、移しても大きさは変わらない
+            scale: 1.0,
         })
         .collect();
     let mouse = NSEvent::mouseLocation();

@@ -40,10 +40,13 @@ pub fn fit(window: Rect, areas: &[Rect]) -> (i32, i32) {
 }
 
 /// ディスプレイ1枚の、全体と作業領域（タスクバーやメニューバーを除いた所）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Display {
     pub bounds: Rect,
     pub work_area: Rect,
+    /// 拡大率。Windows では窓を拡大率の違うディスプレイへ移すと、OS が左上を保ったまま窓の大きさを変える。
+    /// 移した後の大きさで置かないと、右や下に寄せた窓が端から離れる。AppKit のポイントで置くなら、どれも 1
+    pub scale: f64,
 }
 
 /// `window` を、`point`（マウスポインター）のあるディスプレイへ移した位置を返す。移す先では、作業領域の中の相対的な位置を保つ
@@ -65,19 +68,23 @@ pub fn move_to_display_at(
         return None;
     }
     let to = target.work_area;
+    // 移した先での窓の大きさ
+    let ratio = current.map_or(1.0, |current| target.scale / current.scale);
+    let resized = |length: i32| (f64::from(length) * ratio).round() as i32;
+    let (width, height) = (resized(window.width), resized(window.height));
     let (x, y) = match current {
         Some(current) => {
             let from = current.work_area;
             (
                 relative_axis(
                     window.x,
-                    window.width,
+                    (window.width, width),
                     (from.x, from.width),
                     (to.x, to.width),
                 ),
                 relative_axis(
                     window.y,
-                    window.height,
+                    (window.height, height),
                     (from.y, from.height),
                     (to.y, to.height),
                 ),
@@ -85,13 +92,13 @@ pub fn move_to_display_at(
         }
         // 今どのディスプレイにも載っていなければ、移す先の中央に置く
         None => (
-            to.x + (to.width - window.width).max(0) / 2,
-            to.y + (to.height - window.height).max(0) / 2,
+            to.x + (to.width - width).max(0) / 2,
+            to.y + (to.height - height).max(0) / 2,
         ),
     };
     Some((
-        clamp_axis(x, window.width, to.x, to.width),
-        clamp_axis(y, window.height, to.y, to.height),
+        clamp_axis(x, width, to.x, to.width),
+        clamp_axis(y, height, to.y, to.height),
     ))
 }
 
@@ -99,10 +106,11 @@ fn contains(area: &Rect, (x, y): (i32, i32)) -> bool {
     (area.x..area.x + area.width).contains(&x) && (area.y..area.y + area.height).contains(&y)
 }
 
-/// 作業領域の空き（作業領域の長さから窓の長さを引いた分）のどこにいたかの割合を、移す先の空きに当てる
+/// 作業領域の空き（作業領域の長さから窓の長さを引いた分）のどこにいたかの割合を、移す先の空きに当てる。
+/// `length` は、今と移した先での窓の長さ
 fn relative_axis(
     position: i32,
-    length: i32,
+    (length, to_length): (i32, i32),
     (start, area): (i32, i32),
     (to_start, to_area): (i32, i32),
 ) -> i32 {
@@ -110,7 +118,7 @@ fn relative_axis(
     if room <= 0 {
         return to_start;
     }
-    let to_room = i64::from((to_area - length).max(0));
+    let to_room = i64::from((to_area - to_length).max(0));
     let offset = i64::from(position - start).clamp(0, room);
     to_start + (offset * to_room / room) as i32
 }
@@ -171,7 +179,41 @@ mod tests {
         Display {
             bounds: area,
             work_area: area,
+            scale: 1.0,
         }
+    }
+
+    #[test]
+    fn places_with_the_size_the_window_will_have_on_a_display_of_another_scale() {
+        // 150% の右のディスプレイの右下（600×450）から、100% のメインへ。移すと 400×300 になるので、その大きさで右下に置く
+        let right = Display {
+            scale: 1.5,
+            ..display(RIGHT)
+        };
+        let window = Rect {
+            x: 1920 + 1280 - 600,
+            y: 720 - 450,
+            width: 600,
+            height: 450,
+        };
+        assert_eq!(
+            move_to_display_at(window, &[display(MAIN), right], (100, 100)),
+            Some((1520, 780))
+        );
+        // 逆向きは、大きくなった後の大きさで右下に置く
+        assert_eq!(
+            move_to_display_at(
+                Rect {
+                    x: 1520,
+                    y: 780,
+                    width: 400,
+                    height: 300
+                },
+                &[display(MAIN), right],
+                (2000, 100)
+            ),
+            Some((2600, 270))
+        );
     }
 
     #[test]
@@ -207,6 +249,7 @@ mod tests {
                 height: 680,
                 ..RIGHT
             },
+            scale: 1.0,
         };
         assert_eq!(
             move_to_display_at(window(0, 0), &[display(MAIN), right], (2000, 10)),
