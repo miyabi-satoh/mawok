@@ -58,7 +58,7 @@ Copied text is kept in history.
 - Press `↑` at the start of the text box to show text you copied earlier. Each press goes further back; press `↓` at the end of the text box to go forward again. The “Previous” and “Next” buttons at the top do the same.
 - Press {macos:`Cmd+R`}{windows:`Ctrl+R`}{linux:`Ctrl+R`} or the “Search history” button to list your history. Type to filter it, select one, and press `Enter` to put it in the text box.
 - Delete the text shown from history with the trash button at the top. If the buttons are hidden, assign a key to “Delete from history” under “Keyboard shortcuts” in Settings.
-- Change how many are kept under “General” in Settings. Set it to 0 to keep no history.
+- Change how many are kept under “General” in Settings. Set it to 0 to keep no history; text cleared by “New” or “Clear text box after hiding” then can’t be brought back.
 - While history is synced, selecting “Clear history” in Settings or setting the number to 0 also clears the history on your other devices (see “[Change the settings folder](#change-the-settings-folder)”).
 
 ## Use snippets
