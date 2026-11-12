@@ -37,8 +37,8 @@ import { launchPasteTarget } from '../lib/paste-target.mjs';
 import { isWindowAbove } from '../lib/window.mjs';
 import { waitFor } from '../lib/wait.mjs';
 
-// トレイ。アイコンを押してメニューを出し、「テキストウィンドウを表示／隠す」「設定…」
-// 「使い方」「終了」がそれぞれ効くことと、「テキストウィンドウを表示／隠す」に今のホットキーが添えてあることを見る。
+// トレイ。アイコンを押してメニューを出し、「テキストウィンドウを表示／非表示」「設定…」
+// 「使い方」「終了」がそれぞれ効くことと、「テキストウィンドウを表示／非表示」に今のホットキーが添えてあることを見る。
 // アイコンの見た目は人の目で見るものなので手に残す。
 //
 // アイコンは、タスクバーに常設で出ていることも、「非表示のアイコン」の中に入っていることもある。
@@ -90,7 +90,7 @@ test.describe('トレイ', () => {
 		}
 	});
 
-	test('アイコンを押すと、「テキストウィンドウを表示／隠す」「設定…」「使い方」「終了」のメニューが出る', async () => {
+	test('アイコンを押すと、「テキストウィンドウを表示／非表示」「設定…」「使い方」「終了」のメニューが出る', async () => {
 		const { hwnd, where } = await openTrayMenu(pid);
 		try {
 			// タスクバーに常設で出ていても、「非表示のアイコン」の中にいても押せること
@@ -107,7 +107,7 @@ test.describe('トレイ', () => {
 			assert.deepEqual(
 				items.filter((item) => !item.separator).map((item) => item.accelerator),
 				[DEFAULT_HOTKEY_TEXT, '', '', ''],
-				'「テキストウィンドウを表示／隠す」の右端にだけ、今のホットキーが添えてあるはず'
+				'「テキストウィンドウを表示／非表示」の右端にだけ、今のホットキーが添えてあるはず'
 			);
 			assert.ok(
 				items.some((item) => item.separator),
@@ -123,13 +123,13 @@ test.describe('トレイ', () => {
 		}
 	});
 
-	test('隠れているときに「テキストウィンドウを表示／隠す」を押すと、下書きが出て前面になる', async () => {
+	test('隠れているときに「テキストウィンドウを表示／非表示」を押すと、下書きが出て前面になる', async () => {
 		assert.equal(await isDraftWindowVisible(), false, '起動した直後は下書きは隠れているはず');
 
 		const { hwnd } = await openTrayMenu(pid);
 		await clickTrayMenuItem(hwnd, TRAY_MENU_JA.toggleDraft);
 
-		await waitDraftVisible('トレイの「テキストウィンドウを表示／隠す」で出る下書き');
+		await waitDraftVisible('トレイの「テキストウィンドウを表示／非表示」で出る下書き');
 		const draftHwnd = await getDraftWindowHandle();
 		await waitFor(getForegroundWindowHandle, (handle) => handle === draftHwnd, {
 			label: '出た下書きが前面になる'
@@ -144,7 +144,7 @@ test.describe('トレイ', () => {
 			// それを戻り先にすると、Esc の後にどこにも打てなくなる
 			const { hwnd } = await openTrayMenu(pid);
 			await clickTrayMenuItem(hwnd, TRAY_MENU_JA.toggleDraft);
-			await waitDraftVisible('トレイの「テキストウィンドウを表示／隠す」で出る下書き');
+			await waitDraftVisible('トレイの「テキストウィンドウを表示／非表示」で出る下書き');
 			const draftHwnd = await getDraftWindowHandle();
 			await waitFor(getForegroundWindowHandle, (handle) => handle === draftHwnd, {
 				label: '出た下書きが前面になる'
@@ -158,7 +158,7 @@ test.describe('トレイ', () => {
 		}
 	});
 
-	test('出ているときに「テキストウィンドウを表示／隠す」を押すと、コピーせずに隠れ、ほかのアプリから前面を奪わない', async () => {
+	test('出ているときに「テキストウィンドウを表示／非表示」を押すと、コピーせずに隠れ、ほかのアプリから前面を奪わない', async () => {
 		let appA;
 		let appB;
 		try {
@@ -179,7 +179,7 @@ test.describe('トレイ', () => {
 			const { hwnd } = await openTrayMenu(pid);
 			await clickTrayMenuItem(hwnd, TRAY_MENU_JA.toggleDraft);
 
-			await waitDraftHidden('トレイの「テキストウィンドウを表示／隠す」で隠れる下書き');
+			await waitDraftHidden('トレイの「テキストウィンドウを表示／非表示」で隠れる下書き');
 			// 隠したときに戻り先 (A) へフォーカスを戻すと前面を奪うので、しばらく見る。
 			// 前面は B ではなく、アイコンを押した時点で Mawok のトレイのウィンドウ (tray_icon_app) に移っている。
 			// そこで、前面が A でないことに加えて、重なり順でも A が B の前に出てこないことを見る
@@ -253,7 +253,7 @@ test.describe('トレイ', () => {
 		await showDraftAndWaitVisible();
 		const [draftHandle] = await client.getWindowHandles();
 		const { hwnd } = await openTrayMenu(pid);
-		// テキストウィンドウの「ほかのアプリに移ったら隠す」がオンなので、アイコンを押して下書きからフォーカスが外れた時点で隠れる
+		// テキストウィンドウの「ほかのアプリに移ったら非表示にする」がオンなので、アイコンを押して下書きからフォーカスが外れた時点で隠れる
 		await waitDraftHidden('トレイのアイコンを押して隠れる下書き');
 		await clickTrayMenuItem(hwnd, TRAY_MENU_JA.settings);
 		// 前面になる前の Esc は、設定ウィンドウに届かない

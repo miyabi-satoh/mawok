@@ -1641,7 +1641,7 @@ describe('設定画面のテキストウィンドウの「ボタンを表示」'
 	});
 });
 
-describe('設定画面のテキストウィンドウの「ほかのアプリに移ったら隠す」', () => {
+describe('設定画面のテキストウィンドウの「ほかのアプリに移ったら非表示にする」', () => {
 	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), hideTextWindowOnBlur: false };
 		const screen = await render(Page);
@@ -1660,7 +1660,7 @@ describe('設定画面のテキストウィンドウの「ほかのアプリに�
 	});
 });
 
-describe('設定画面のテキストウィンドウの「表示するディスプレイ」と「入力欄を空にする」', () => {
+describe('設定画面のテキストウィンドウの「表示するディスプレイ」と「非表示後に入力をクリア」', () => {
 	it('選ぶと、その値を保存する', async () => {
 		const screen = await render(Page);
 

@@ -35,7 +35,7 @@
 	"settings_draft_display": "Display",
 	"settings_draft_display_last": "Last position",
 	"settings_draft_display_pointer": "Display with the mouse",
-	"settings_clear_text_after": "Clear text box",
+	"settings_clear_text_after": "Clear text box after hiding",
 	"settings_clear_text_after_never": "Never",
 	"settings_clear_text_after_30s": "After 30 seconds",
 	"settings_clear_text_after_1m": "After 1 minute",

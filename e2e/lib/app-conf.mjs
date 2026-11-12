@@ -43,7 +43,7 @@ export const MANUAL_TITLE = '使い方';
 
 // src-tauri/src/i18n.rs の、トレイ (メニューバー) のメニューの項目の写し (日本語)
 export const TRAY_MENU_JA = {
-	toggleDraft: 'テキストウィンドウを表示／隠す',
+	toggleDraft: 'テキストウィンドウを表示／非表示',
 	settings: '設定…',
 	manual: MANUAL_TITLE,
 	quit: '終了'

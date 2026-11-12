@@ -503,7 +503,7 @@ fn show(app: &AppHandle) {
     show_draft(app, true);
 }
 
-/// トレイの「テキストウィンドウを表示／隠す」。出ていれば、Esc や閉じるボタンと同じくコピーせずに隠し、書きかけは残す。
+/// トレイの「テキストウィンドウを表示／非表示」。出ていれば、Esc や閉じるボタンと同じくコピーせずに隠し、書きかけは残す。
 /// 隠れていれば出す。ほかのウィンドウの裏にあって見えていなくても、出ていれば隠す（切り替えなので、前へは出さない）
 fn toggle_draft(app: &AppHandle) {
     let Some(window) = main_window(app) else {
@@ -944,7 +944,7 @@ const HIDE_ON_BLUR_DELAY: std::time::Duration = std::time::Duration::from_millis
 /// フォーカスが外れた後に、下書きを隠すかを決める材料
 #[derive(Debug, Clone, Copy)]
 struct BlurCheck {
-    /// 設定のテキストウィンドウの「ほかのアプリに移ったら隠す」
+    /// 設定のテキストウィンドウの「ほかのアプリに移ったら非表示にする」
     enabled: bool,
     visible: bool,
     /// 出してから一度でもフォーカスが入ったか。Windows で前面に出せなかったとき（前面の制限）など、

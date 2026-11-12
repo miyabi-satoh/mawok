@@ -46,7 +46,7 @@ test.describe('macOS: メニューバー', () => {
 		await restoreUserState();
 	});
 
-	test('アイコンを押すとメニューが出て、「テキストウィンドウを表示／隠す」に ⌘⇧Space が添えてあり、押すと下書きウィンドウが出る', async () => {
+	test('アイコンを押すとメニューが出て、「テキストウィンドウを表示／非表示」に ⌘⇧Space が添えてあり、押すと下書きウィンドウが出る', async () => {
 		await openTrayMenu();
 		await waitFor(isTrayMenuOpen, Boolean, { label: 'アイコンを押すとメニューが開く' });
 		const items = await trayMenuKeys();
@@ -79,7 +79,7 @@ test.describe('macOS: メニューバー', () => {
 		await hideDraft();
 	});
 
-	test('下書きに書いてからメニューの「テキストウィンドウを表示／隠す」を押すと、隠れてクリップボードは変わらず、出し直すと書きかけが残っている', async () => {
+	test('下書きに書いてからメニューの「テキストウィンドウを表示／非表示」を押すと、隠れてクリップボードは変わらず、出し直すと書きかけが残っている', async () => {
 		await other.activate();
 		await pressTrayMenuItem(TRAY_MENU_JA.toggleDraft);
 		await waitDraftFocused('メニューから出した下書きウィンドウ');
@@ -111,7 +111,7 @@ test.describe('macOS: メニューバー', () => {
 	});
 
 	test('メニューを開いている間に押したホットキーは、閉じた後に届かない', async () => {
-		// 開いたメニューでホットキーを押すと、同じキーを添えた「テキストウィンドウを表示／隠す」が選ばれて、下書きウィンドウが出る。
+		// 開いたメニューでホットキーを押すと、同じキーを添えた「テキストウィンドウを表示／非表示」が選ばれて、下書きウィンドウが出る。
 		// 開いている間もホットキーが登録されたままだと、キーがメニューに届かずに溜まり、メニューは閉じない
 		// (src-tauri/src/menu_tracking.rs)
 		assert.equal(await isDraftVisible(), false, '始める前は、下書きウィンドウが隠れている');
