@@ -1665,7 +1665,7 @@ describe('設定画面のテキストウィンドウの「表示するディス�
 	it('選ぶと、その値を保存する', async () => {
 		const screen = await render(Page);
 
-		await screen.getByLabelText(m.settings_draft_display()).selectOptions('pointer');
+		await screen.getByRole('radio', { name: m.settings_draft_display_pointer() }).click();
 		await screen.getByLabelText(m.settings_clear_text_after()).selectOptions('5m');
 
 		await vi.waitFor(() => {
@@ -1679,7 +1679,9 @@ describe('設定画面のテキストウィンドウの「表示するディス�
 		const screen = await render(Page);
 
 		await expect.element(screen.getByLabelText(m.settings_clear_text_after())).toBeVisible();
-		await expect.element(screen.getByLabelText(m.settings_draft_display())).not.toBeInTheDocument();
+		await expect
+			.element(screen.getByRole('radio', { name: m.settings_draft_display_pointer() }))
+			.not.toBeInTheDocument();
 	});
 });
 

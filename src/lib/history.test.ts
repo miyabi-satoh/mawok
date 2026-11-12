@@ -206,6 +206,18 @@ describe('DraftHistory の1件の削除', () => {
 
 		expect(history.entries).toEqual(['git log']);
 	});
+
+	it('消した後、読み直している間に覚え直した同じ本文は残す', () => {
+		const history = new DraftHistory();
+		history.record('git status');
+		history.older('');
+		history.delete();
+		history.beginReload();
+		history.record('git status');
+		history.finishReload(['git status', 'git log']);
+
+		expect(history.entries).toEqual(['git log', 'git status']);
+	});
 });
 
 describe('DraftHistory の移れるかどうか', () => {

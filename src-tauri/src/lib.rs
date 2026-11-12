@@ -115,13 +115,14 @@ struct DraftState {
     blur: debounce::Debounce,
     /// 下書きを出してから、一度でもフォーカスが入ったか。入っていなければ、フォーカスが外れたとして隠さない
     focused_since_shown: AtomicBool,
-    /// 下書きを最後に隠した時刻。次に出すときに、入力欄を空から始めるか（設定の clear_text_after）を決める
-    hidden_at: Mutex<Option<Instant>>,
+    /// 下書きを最後に隠した時刻（UNIX のミリ秒）。次に出すときに、入力欄を空から始めるか（設定の clear_text_after）を決める。
+    /// Instant でなく時計の時刻にする。macOS と Linux の Instant はスリープの間に進まず、蓋を閉じて離れた時間が数えられないため
+    hidden_at: Mutex<Option<u64>>,
 }
 
 impl DraftState {
     fn mark_hidden(&self) {
-        *self.hidden_at.lock().unwrap() = Some(Instant::now());
+        *self.hidden_at.lock().unwrap() = Some(now_millis());
     }
 }
 
@@ -486,9 +487,6 @@ fn hide_draft_for_settings(app: &AppHandle) {
             info!("hide draft for settings");
             window.hide().is_ok()
         });
-    if hidden {
-        app.state::<DraftState>().mark_hidden();
-    }
     // 立てるだけで、寝かせない。すでに開いている設定を前面に出すときはここを通っても隠す下書きがなく、
     // false で上書きすると、最初に隠したことを忘れて出し直せなくなる。
     // 寝かせるのは、出し直したときと、ユーザーが自分で下書きを出し入れしたとき
@@ -553,12 +551,13 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
         let config = app_state.config.lock().unwrap();
         (config.text_window_display, config.clear_text_after)
     };
-    // 設定を閉じた後の出し直しでは空にしない。設定を見ている間も、書きかけから離れたわけではないため
+    // 設定のために隠したときは時刻を残さないので、設定を開いている間・閉じた後の出し直しでは空にしない。
+    // 設定を見ている間も、書きかけから離れたわけではないため。時計が戻っていれば、たっていないとみる
     let clear_text = capture_return_target
         && !window.is_visible().unwrap_or(true)
         && hidden_at
             .zip(clear_after.duration())
-            .is_some_and(|(at, after)| at.elapsed() >= after);
+            .is_some_and(|(at, after)| now_millis().saturating_sub(at) >= after.as_millis() as u64);
     if capture_return_target {
         *state.return_target.lock().unwrap() = focus::capture(&window);
         // 設定を閉じた後の出し直しは、設定を開く前の位置に戻す
@@ -1708,7 +1707,14 @@ fn save_history(
     }
     retry_pending_history_clear(&app)?;
     // 今届いた一覧のほうが新しいので、無い間に預かった一覧は要らない
-    PENDING_HISTORY.lock().unwrap().texts = None;
+    // 無い間に消した本文は、今届いた一覧の前に消したもの。先に当てる
+    let deleted = {
+        let mut pending = PENDING_HISTORY.lock().unwrap();
+        pending.texts = None;
+        let mut earlier = std::mem::take(&mut pending.deleted);
+        earlier.extend(deleted);
+        earlier
+    };
     let path = app.state::<AppState>().history_path();
     // 件数の設定は、ロックを取ってから読む。読んだ後に件数 0 へ変えられて消されると、
     // 消した後に古い履歴を書き戻してしまう

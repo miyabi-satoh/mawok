@@ -136,8 +136,8 @@ export class DraftHistory {
 	finishReload(entries: string[]): boolean {
 		const recorded = this.#recordedWhileReloading ?? [];
 		this.#recordedWhileReloading = null;
-		// 消してまだ保存していない本文は、読み直した履歴に残っているので除く
-		this.#reloaded = [...entries, ...recorded].filter((entry) => !this.#deleted.includes(entry));
+		// 消してまだ保存していない本文は、読み直した履歴に残っているので除く。消した後に覚え直した分（recorded）は残す
+		this.#reloaded = [...entries.filter((entry) => !this.#deleted.includes(entry)), ...recorded];
 		if (this.#index === null) this.#applyReloaded();
 		return recorded.length > 0;
 	}

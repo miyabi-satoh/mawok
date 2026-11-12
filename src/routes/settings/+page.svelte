@@ -718,14 +718,28 @@
 							)}
 							<!-- Linux では窓の位置をアプリが決められない（Wayland）ので、出すディスプレイは選べない -->
 							{#if view.platform !== 'linux'}
-								{@render selectRow(
-									'text_window_display',
-									'draft-display',
-									m.settings_draft_display(),
-									view.textWindowDisplay,
-									DRAFT_DISPLAYS,
-									(display) => run('set_draft_display', { display })
-								)}
+								<SettingsRow modified={modifiedName(view, 'text_window_display')}>
+									<Field.Field orientation="horizontal" class="flex-wrap">
+										<div class="flex flex-auto items-center gap-1">
+											<Field.Title id="draft-display">{m.settings_draft_display()}</Field.Title>
+										</div>
+										<ToggleGroup.Root
+											type="single"
+											variant="outline"
+											aria-labelledby="draft-display"
+											bind:value={
+												() => view.textWindowDisplay,
+												(display) => {
+													if (display) run('set_draft_display', { display });
+												}
+											}
+										>
+											{#each DRAFT_DISPLAYS as { value, name } (value)}
+												<ToggleGroup.Item {value}>{name()}</ToggleGroup.Item>
+											{/each}
+										</ToggleGroup.Root>
+									</Field.Field>
+								</SettingsRow>
 							{/if}
 							{@render selectRow(
 								'clear_text_after',

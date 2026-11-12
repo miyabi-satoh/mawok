@@ -224,6 +224,8 @@ impl ScreenCopy {
         // 新しく覚えた本文は、届いた履歴と消した時刻より後にする。ほかのデバイスの時計が進んでいても、
         // 今覚えた本文が、消したはずの履歴として落ちたり、届いた履歴より古い方へ入ったりしないため
         seen.cleared_at = file.cleared_at;
+        // 1件ずつ消した記録も今のファイルに合わせる。新しく覚えた本文を、ほかのデバイスで消した時刻より後にするため
+        seen.deleted = file.deleted.clone();
         let newest = file.entries.last().map_or(0, |entry| entry.at);
         let seen = seen.restamped(texts, now.max(newest.saturating_add(1)));
         let next = merge(&seen, file).truncated(max_entries);
@@ -816,6 +818,16 @@ mod tests {
         // 次の入れ替えがあっても、画面が持つ履歴は先のまま
         screen.replaced_by_other_devices(next.clone());
         assert_eq!(screen.saved(&next, texts(&["a", "c", "e"]), 50, 900), next);
+    }
+
+    #[test]
+    fn a_save_from_a_screen_that_has_not_reread_stays_after_a_deletion_that_arrived() {
+        // ほかのデバイスが、このデバイスの今より後の時刻で "c" を消した。画面は読み直す前にまた "c" をコピーした
+        let mut screen = stale_screen(history(&[("a", 10)], 0));
+        let file = history(&[("a", 10), ("c", 20)], 0).without("c", 700);
+        let next = screen.saved(&file, texts(&["a", "c"]), 50, 500);
+        assert_eq!(next.texts(), texts(&["a", "c"]));
+        assert_eq!(next.entries[1].at, 701);
     }
 
     #[test]
