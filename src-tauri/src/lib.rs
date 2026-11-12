@@ -1708,18 +1708,30 @@ fn save_history(
     retry_pending_history_clear(&app)?;
     // 今届いた一覧のほうが新しいので、無い間に預かった一覧は要らない
     // 無い間に消した本文は、今届いた一覧の前に消したもの。先に当てる
-    let deleted = {
+    let earlier = {
         let mut pending = PENDING_HISTORY.lock().unwrap();
         pending.texts = None;
-        let mut earlier = std::mem::take(&mut pending.deleted);
-        earlier.extend(deleted);
-        earlier
+        std::mem::take(&mut pending.deleted)
     };
+    let all = earlier.iter().cloned().chain(deleted).collect();
+    write_history(&app, entries, all).inspect_err(|_| {
+        // 書けなければ、無い間に消した本文は預かり直す。画面は自分で渡した分だけを戻すので、ここで戻さないと消える
+        let mut pending = PENDING_HISTORY.lock().unwrap();
+        pending.deleted.splice(0..0, earlier);
+    })
+}
+
+/// 画面の一覧を、`deleted` を消してから照らして、このデバイスのファイルに書く
+fn write_history(
+    app: &AppHandle,
+    entries: Vec<String>,
+    deleted: Vec<(String, u64)>,
+) -> Result<(), String> {
     let path = app.state::<AppState>().history_path();
     // 件数の設定は、ロックを取ってから読む。読んだ後に件数 0 へ変えられて消されると、
     // 消した後に古い履歴を書き戻してしまう
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
-    let size = draft_history_size(&app);
+    let size = draft_history_size(app);
     let texts = history_store::truncate(entries, size);
     // 読めなかったファイルを空の履歴として扱って書くと、その履歴が届いた 1 件に置き換わる。
     // 壊れたファイルは写して退けてから書き、読めないだけ（一時的なエラー）なら書かない
