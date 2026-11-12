@@ -545,7 +545,8 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
     };
     info!("show");
     let state = app.state::<DraftState>();
-    let hidden_at = state.hidden_at.lock().unwrap().take();
+    // 出せたときに消す。出せなければ、次に出すときも隠した時刻から数える
+    let hidden_at = *state.hidden_at.lock().unwrap();
     let (display, clear_after) = {
         let app_state = app.state::<AppState>();
         let config = app_state.config.lock().unwrap();
@@ -581,6 +582,7 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
             .hidden_for_settings
             .store(false, Ordering::Relaxed);
     }
+    *app.state::<DraftState>().hidden_at.lock().unwrap() = None;
     let _ = app.emit(events::SHOWN, Shown { clear_text });
     true
 }
