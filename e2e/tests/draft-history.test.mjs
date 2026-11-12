@@ -10,9 +10,15 @@ import {
 	setDraftCaret,
 	setJapanese,
 	showDraftAndWaitVisible,
-	typeIntoDraft
+	typeIntoDraft,
+	waitDraftHidden
 } from '../lib/app.mjs';
 import { sendKeySequence, VK } from '../lib/input.mjs';
+import {
+	getDraftWindowHandle,
+	getForegroundWindowHandle,
+	listVisibleMawokTreeWindows
+} from '../lib/os.mjs';
 import { cancelComposition, startComposingInDraft, turnImeOff } from '../lib/ime.mjs';
 import { beginTestConfig, clearHistory, historyEntryCount } from '../lib/config.mjs';
 import { launchPasteTarget } from '../lib/paste-target.mjs';
@@ -150,6 +156,106 @@ test.describe('下書きの履歴', () => {
 			true,
 			'最後まで読み込み直していないはず'
 		);
+	});
+
+	test('既定の Ctrl+N で入力欄が空になり、↑ で書きかけが戻る。WebView2 の新しいウィンドウは開かない', async () => {
+		await showDraftAndWaitVisible();
+		await typeIntoDraft(client, '書きかけ');
+		const draftHwnd = await getDraftWindowHandle();
+		// WebView2 は Ctrl+N で新しいウィンドウを開く。開いた窓はトップレベルにならないこともあるので、子ウィンドウまで比べる
+		const before = await listVisibleMawokTreeWindows({ includeChildren: true });
+
+		await sendKeySequence([[VK.CONTROL, VK.N]]);
+		await waitFor(
+			() => readDraft(client),
+			(d) => d.value === '' && d.focused,
+			{ label: 'Ctrl+N で入力欄が空になり、フォーカスが残る' }
+		);
+		await settle();
+		assert.deepEqual(
+			await listVisibleMawokTreeWindows({ includeChildren: true }),
+			before,
+			'ウィンドウも子ウィンドウも増えないはず'
+		);
+		assert.equal(await getForegroundWindowHandle(), draftHwnd, '下書きが前面のまま');
+
+		await sendKeySequence([[VK.UP]]);
+		await waitFor(
+			() => readDraft(client),
+			(d) => d.value === '書きかけ',
+			{ label: '↑ で書きかけが戻る' }
+		);
+	});
+
+	test('履歴を出して「履歴から削除」を押すと、その履歴が消えて書きかけに戻り、起動し直しても出ない', async () => {
+		await copyDraft(client, 'git status');
+		await copyDraft(client, 'git diff');
+		await waitFor(historyEntryCount, (count) => count === 2, { label: '履歴がファイルに入る' });
+		await showDraftAndWaitVisible();
+		await typeIntoDraft(client, '書きかけ');
+		await setDraftCaret(client, 0);
+		await sendKeySequence([[VK.UP]]);
+		await waitFor(
+			() => readDraft(client),
+			(d) => d.value === 'git diff',
+			{ label: '↑ で新しい方の履歴が出る' }
+		);
+
+		await client.$('button[aria-label="履歴から削除"]').click();
+		await waitFor(
+			() => readDraft(client),
+			(d) => d.value === '書きかけ',
+			{ label: '消すと書きかけに戻る' }
+		);
+		await waitFor(historyEntryCount, (count) => count === 1, {
+			label: '消した履歴がファイルから消える'
+		});
+		await setDraftCaret(client, 0);
+		await sendKeySequence([[VK.UP]]);
+		await waitFor(
+			() => readDraft(client),
+			(d) => d.value === 'git status',
+			{ label: '↑ で消していない方が出る' }
+		);
+
+		await suite.closeClient(client);
+		client = await suite.newClient();
+		await pasteTarget.activate();
+		await showDraftAndWaitVisible();
+		for (let i = 0; i < 2; i++) await sendKeySequence([[VK.UP]]);
+		await settle();
+		assert.equal(
+			(await readDraft(client)).value,
+			'git status',
+			'起動し直しても、消した履歴は出ないはず'
+		);
+	});
+
+	test('「非表示後に入力をクリア」が 30 秒後なら、隠して 30 秒たってから出すと空から始まり、↑ で書きかけが戻る', async () => {
+		await invokeApp(client, 'set_clear_draft_after', { after: '30s' });
+		try {
+			await showDraftAndWaitVisible();
+			await typeIntoDraft(client, '書きかけ');
+			await sendKeySequence([[VK.ESCAPE]]);
+			await waitDraftHidden('Esc で隠す');
+			await new Promise((resolve) => setTimeout(resolve, 31_000));
+
+			await showDraftAndWaitVisible('30 秒たってから出す');
+			await waitFor(
+				() => readDraft(client),
+				(d) => d.value === '' && d.focused,
+				{ label: '空から始まる' }
+			);
+			await sendKeySequence([[VK.UP]]);
+			await waitFor(
+				() => readDraft(client),
+				(d) => d.value === '書きかけ',
+				{ label: '↑ で書きかけが戻る' }
+			);
+		} finally {
+			// 設定の置き場に書かれ、このファイルのほかのテスト (起動し直す) に残るので戻す
+			await invokeApp(client, 'set_clear_draft_after', { after: 'never' });
+		}
 	});
 
 	test('1行目の途中の ↑ は先頭へ移り、もう一度で履歴を出す', async () => {

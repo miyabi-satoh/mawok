@@ -73,6 +73,8 @@ const DEFAULT_CONFIG = {
 	textWindowAlwaysOnTop: true,
 	hideTextWindowOnBlur: true,
 	showTextWindowButtons: true,
+	textWindowDisplay: 'last',
+	clearTextAfter: 'never',
 	textHistorySize: 10000,
 	trimTrailingWhitespace: true,
 	replacements: [],
@@ -92,7 +94,9 @@ const DEFAULT_DRAFT_KEYS = {
 	snippets: 'CommandOrControl+KeyK',
 	historyOlder: 'CommandOrControl+Alt+ArrowUp',
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	historySearch: 'CommandOrControl+KeyR'
+	historySearch: 'CommandOrControl+KeyR',
+	new: 'CommandOrControl+KeyN',
+	delete: ''
 };
 
 /**
