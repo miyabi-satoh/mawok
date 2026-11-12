@@ -30,6 +30,8 @@ export function settingsView(overrides: Partial<SettingsView> = {}): SettingsVie
 		textWindowAlwaysOnTop: true,
 		hideTextWindowOnBlur: true,
 		showTextWindowButtons: true,
+		textWindowDisplay: 'last',
+		clearTextAfter: 'never',
 		textHistorySize: 10_000,
 		trimTrailingWhitespace: true,
 		excludeFromClipboardHistory: true,

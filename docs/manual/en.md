@@ -47,6 +47,7 @@ On other desktops, also assign a key to `mawok --toggle` in the keyboard setting
 - Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`} or click “Copy” to copy the text and return to the app you came from.
 - Pressing the hotkey while the text window is in front also copies and returns.
 - To return without copying, press `Esc`. Your unfinished text is still there the next time you bring up the text window.
+- Choose a time for “Clear text box” under “General” in Settings to start with an empty text box once that time has passed since the window was hidden. Your unfinished text goes to history, so press `↑` to get it back.
 - Clicking another app also hides the window without copying, and your unfinished text remains (you can turn this off under “General” in Settings).
 
 ## Use text you copied earlier

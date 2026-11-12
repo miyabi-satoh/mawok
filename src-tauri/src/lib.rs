@@ -64,7 +64,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use crate::{
-    config::{Config, Language, Snippet, Theme},
+    config::{ClearTextAfter, Config, Language, Snippet, TextWindowDisplay, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     folder_access::Reach,
     hotkey::Registrar as _,
@@ -115,6 +115,24 @@ struct DraftState {
     blur: debounce::Debounce,
     /// 下書きを出してから、一度でもフォーカスが入ったか。入っていなければ、フォーカスが外れたとして隠さない
     focused_since_shown: AtomicBool,
+    /// 下書きを最後に隠した時刻。次に出すときに、入力欄を空から始めるか（設定の clear_text_after）を決める
+    hidden_at: Mutex<Option<Instant>>,
+}
+
+impl DraftState {
+    fn mark_hidden(&self) {
+        *self.hidden_at.lock().unwrap() = Some(Instant::now());
+    }
+}
+
+/// 下書きを出したときの知らせ（events::SHOWN）
+#[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+struct Shown {
+    /// 隠してから設定の時間がたったので、入力欄を空から始める。画面は書きかけを履歴に入れてから空にする
+    clear_text: bool,
 }
 
 /// 設定と、トレイに出す問題。設定画面から変えると、ここと設定のファイルの両方を更新する
@@ -297,6 +315,10 @@ struct SettingsView {
     hide_text_window_on_blur: bool,
     /// 下書きの入力欄の上下に、操作のボタンを出すか
     show_text_window_buttons: bool,
+    /// 下書きウィンドウを出すディスプレイ。Linux では選べない（画面は行を出さない）
+    text_window_display: TextWindowDisplay,
+    /// 隠してからこれだけたったら、次に出すときに入力欄を空から始める
+    clear_text_after: ClearTextAfter,
     /// 下書きの履歴の件数。0 なら覚えない
     text_history_size: u16,
     trim_trailing_whitespace: bool,
@@ -398,6 +420,8 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_window_always_on_top: config.text_window_always_on_top,
         hide_text_window_on_blur: config.hide_text_window_on_blur,
         show_text_window_buttons: config.show_text_window_buttons,
+        text_window_display: config.text_window_display,
+        clear_text_after: config.clear_text_after,
         text_history_size: config.text_history_size,
         trim_trailing_whitespace: config.trim_trailing_whitespace,
         replacements: config.replacements,
@@ -462,6 +486,9 @@ fn hide_draft_for_settings(app: &AppHandle) {
             info!("hide draft for settings");
             window.hide().is_ok()
         });
+    if hidden {
+        app.state::<DraftState>().mark_hidden();
+    }
     // 立てるだけで、寝かせない。すでに開いている設定を前面に出すときはここを通っても隠す下書きがなく、
     // false で上書きすると、最初に隠したことを忘れて出し直せなくなる。
     // 寝かせるのは、出し直したときと、ユーザーが自分で下書きを出し入れしたとき
@@ -519,8 +546,25 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
         return false;
     };
     info!("show");
+    let state = app.state::<DraftState>();
+    let hidden_at = state.hidden_at.lock().unwrap().take();
+    let (display, clear_after) = {
+        let app_state = app.state::<AppState>();
+        let config = app_state.config.lock().unwrap();
+        (config.text_window_display, config.clear_text_after)
+    };
+    // 設定を閉じた後の出し直しでは空にしない。設定を見ている間も、書きかけから離れたわけではないため
+    let clear_text = capture_return_target
+        && !window.is_visible().unwrap_or(true)
+        && hidden_at
+            .zip(clear_after.duration())
+            .is_some_and(|(at, after)| at.elapsed() >= after);
     if capture_return_target {
-        *app.state::<DraftState>().return_target.lock().unwrap() = focus::capture(&window);
+        *state.return_target.lock().unwrap() = focus::capture(&window);
+        // 設定を閉じた後の出し直しは、設定を開く前の位置に戻す
+        if display == TextWindowDisplay::Pointer {
+            move_to_pointer_display(&window);
+        }
     }
     fit_to_screen(&window);
     // 出した後にフォーカスが入ったかを、ここから数え直す
@@ -538,7 +582,7 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
             .hidden_for_settings
             .store(false, Ordering::Relaxed);
     }
-    let _ = app.emit(events::SHOWN, ());
+    let _ = app.emit(events::SHOWN, Shown { clear_text });
     true
 }
 
@@ -666,6 +710,94 @@ fn is_settings_focused(app: &AppHandle) -> bool {
     app.get_webview_window(SETTINGS_WINDOW)
         .is_some_and(|settings| settings.is_focused().unwrap_or(false))
 }
+
+/// 下書きを、マウスポインターのあるディスプレイへ移す（設定の text_window_display）。移す先での位置は placement::move_to_display_at
+#[cfg(windows)]
+fn move_to_pointer_display(window: &WebviewWindow) {
+    let (Ok(pointer), Ok(position), Ok(size), Ok(monitors)) = (
+        window.cursor_position(),
+        window.outer_position(),
+        window.outer_size(),
+        window.available_monitors(),
+    ) else {
+        warn!("couldn't read the pointer or the displays");
+        return;
+    };
+    let displays: Vec<placement::Display> = monitors
+        .iter()
+        .map(|monitor| placement::Display {
+            bounds: placement::Rect {
+                x: monitor.position().x,
+                y: monitor.position().y,
+                width: monitor.size().width as i32,
+                height: monitor.size().height as i32,
+            },
+            work_area: to_rect(monitor.work_area()),
+        })
+        .collect();
+    let outer = placement::Rect {
+        x: position.x,
+        y: position.y,
+        width: size.width as i32,
+        height: size.height as i32,
+    };
+    // fit_to_screen と同じく、見えている枠で置く
+    let visible = visible_frame(window).unwrap_or(outer);
+    if let Some((x, y)) =
+        placement::move_to_display_at(visible, &displays, (pointer.x as i32, pointer.y as i32))
+    {
+        info!("move the draft to the display with the pointer");
+        let _ = window.set_position(PhysicalPosition::new(
+            x - (visible.x - outer.x),
+            y - (visible.y - outer.y),
+        ));
+    }
+}
+
+/// macOS では AppKit のポイントで置く。tao の物理ピクセルは画面ごとの倍率で換算するので、倍率の違う画面をまたぐとずれるため
+#[cfg(target_os = "macos")]
+fn move_to_pointer_display(window: &WebviewWindow) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSEvent, NSScreen, NSWindow};
+    use objc2_foundation::{NSPoint, NSRect};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        warn!("move to the pointer display: not on the main thread");
+        return;
+    };
+    let Ok(pointer) = window.ns_window() else {
+        return;
+    };
+    // SAFETY: Tauri が返す NSWindow を、メインスレッドで、窓が生きている間に読む
+    let ns_window = unsafe { &*pointer.cast::<NSWindow>() };
+    let rect = |frame: NSRect| placement::Rect {
+        x: frame.origin.x.round() as i32,
+        y: frame.origin.y.round() as i32,
+        width: frame.size.width.round() as i32,
+        height: frame.size.height.round() as i32,
+    };
+    let displays: Vec<placement::Display> = NSScreen::screens(mtm)
+        .iter()
+        .map(|screen| placement::Display {
+            bounds: rect(screen.frame()),
+            work_area: rect(screen.visibleFrame()),
+        })
+        .collect();
+    let mouse = NSEvent::mouseLocation();
+    let frame = ns_window.frame();
+    if let Some((x, y)) = placement::move_to_display_at(
+        rect(frame),
+        &displays,
+        (mouse.x.floor() as i32, mouse.y.floor() as i32),
+    ) {
+        info!("move the draft to the display with the pointer");
+        ns_window.setFrameOrigin(NSPoint::new(f64::from(x), f64::from(y)));
+    }
+}
+
+/// Linux では選べない。Wayland ではアプリが窓の位置を決められない（docs/platform.md「Linux のそのほか」）
+#[cfg(target_os = "linux")]
+fn move_to_pointer_display(_window: &WebviewWindow) {}
 
 fn fit_to_screen(window: &WebviewWindow) {
     let (Ok(position), Ok(size), Ok(monitors)) = (
@@ -926,6 +1058,7 @@ fn main_window_config(app: &AppHandle) -> Result<tauri::utils::config::WindowCon
 fn hide_draft_in_place(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
     let _ = app.save_window_state(window_state_flags());
     window.hide()?;
+    app.state::<DraftState>().mark_hidden();
     Ok(())
 }
 
@@ -936,7 +1069,9 @@ fn hide_draft_and_return(app: &AppHandle, state: &DraftState) -> Result<(), Stri
     state.hidden_for_settings.store(false, Ordering::Relaxed);
     let window = main_window(app).ok_or("main window not found")?;
     let target = *state.return_target.lock().unwrap();
-    focus::hide_and_return(app, &window, target).map_err(|error| error.to_string())
+    focus::hide_and_return(app, &window, target).map_err(|error| error.to_string())?;
+    state.mark_hidden();
+    Ok(())
 }
 
 /// クリップボードへ文字列を書く。`conceal` のときは、クリップボードの履歴・同期・管理アプリに残さないよう印を付ける。
@@ -1302,6 +1437,18 @@ fn set_hide_draft_on_blur(app: AppHandle, enabled: bool) -> Result<(), String> {
 fn set_show_draft_buttons(app: AppHandle, enabled: bool) -> Result<(), String> {
     info!("set show draft buttons: {enabled}");
     update_config(&app, |config| config.show_text_window_buttons = enabled)
+}
+
+#[tauri::command]
+fn set_draft_display(app: AppHandle, display: TextWindowDisplay) -> Result<(), String> {
+    info!("set draft display: {display:?}");
+    update_config(&app, |config| config.text_window_display = display)
+}
+
+#[tauri::command]
+fn set_clear_draft_after(app: AppHandle, after: ClearTextAfter) -> Result<(), String> {
+    info!("set clear draft after: {after:?}");
+    update_config(&app, |config| config.clear_text_after = after)
 }
 
 /// 下書きの履歴の件数。0 なら覚えない。上限は型の幅（config::MAX_DRAFT_HISTORY_SIZE）なので、収め直さない
@@ -3437,6 +3584,8 @@ pub fn run() {
             set_draft_always_on_top,
             set_hide_draft_on_blur,
             set_show_draft_buttons,
+            set_draft_display,
+            set_clear_draft_after,
             set_draft_history_size,
             load_draft_history,
             save_draft_history,

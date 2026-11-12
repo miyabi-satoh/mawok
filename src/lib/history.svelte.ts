@@ -72,6 +72,16 @@ export class DraftHistory {
 		return true;
 	}
 
+	/**
+	 * 入力欄を空から始めるときに、書きかけを覚える。たどっている途中なら、入力欄に出ているのは覚えている履歴なので、
+	 * たどり始める前に打っていた内容を覚える。空白だけのものは覚えない。覚えて保存が要るかを返す
+	 */
+	setAside(current: string): boolean {
+		const draft = this.#index === null ? current : this.#draft;
+		this.stopBrowsing();
+		return draft.trim() !== '' && this.record(draft);
+	}
+
 	/** ほかのデバイスの履歴を混ぜて替わった履歴を読み直している途中か。途中の一覧は古いので、保存しない */
 	get isReloading(): boolean {
 		return this.#recordedWhileReloading !== null;

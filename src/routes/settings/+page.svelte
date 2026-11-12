@@ -24,6 +24,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Field from '$lib/components/ui/field';
 	import { Input } from '$lib/components/ui/input';
+	import * as NativeSelect from '$lib/components/ui/native-select';
 	import { Switch } from '$lib/components/ui/switch';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -41,7 +42,14 @@
 	import { matchedKeys, showsFilter, shownRows } from '$lib/list-filter';
 	import { RowList } from '$lib/row-list.svelte';
 	import { coalesced } from '$lib/coalesce';
-	import { CHAR_WIDTH_KINDS, LANGUAGES, PUNCTUATION_STYLES, THEMES } from '$lib/setting-options';
+	import {
+		CHAR_WIDTH_KINDS,
+		CLEAR_TEXT_AFTER,
+		DRAFT_DISPLAYS,
+		LANGUAGES,
+		PUNCTUATION_STYLES,
+		THEMES
+	} from '$lib/setting-options';
 	import { settingsCategories } from '$lib/settings-categories';
 	import {
 		DRAFT_ACTIONS_IN_SETTINGS,
@@ -580,6 +588,27 @@
 			{/if}
 		</SettingsRow>
 	{/snippet}
+	{#snippet selectRow(
+		name: string,
+		id: string,
+		label: string,
+		value: string,
+		options: { value: string; name: () => string }[],
+		select: (value: string) => void
+	)}
+		<SettingsRow modified={modifiedName(view, name)}>
+			<Field.Field orientation="horizontal" class="min-h-8">
+				<div class="flex-auto">
+					<Field.Label class="inline" for={id}>{label}</Field.Label>
+				</div>
+				<NativeSelect.Root {id} bind:value={() => value, select}>
+					{#each options as option (option.value)}
+						<NativeSelect.Option value={option.value}>{option.name()}</NativeSelect.Option>
+					{/each}
+				</NativeSelect.Root>
+			</Field.Field>
+		</SettingsRow>
+	{/snippet}
 	<main class="settings-page flex h-dvh" {@attach showWindow}>
 		<Tabs.Root
 			orientation="vertical"
@@ -686,6 +715,25 @@
 								m.settings_draft_buttons(),
 								view.showTextWindowButtons,
 								'set_show_draft_buttons'
+							)}
+							<!-- Linux では窓の位置をアプリが決められない（Wayland）ので、出すディスプレイは選べない -->
+							{#if view.platform !== 'linux'}
+								{@render selectRow(
+									'text_window_display',
+									'draft-display',
+									m.settings_draft_display(),
+									view.textWindowDisplay,
+									DRAFT_DISPLAYS,
+									(display) => run('set_draft_display', { display })
+								)}
+							{/if}
+							{@render selectRow(
+								'clear_text_after',
+								'clear-text-after',
+								m.settings_clear_text_after(),
+								view.clearTextAfter,
+								CLEAR_TEXT_AFTER,
+								(after) => run('set_clear_draft_after', { after })
 							)}
 							<SettingsRow modified={modifiedName(view, 'text_history_size')}>
 								<Field.Field orientation="horizontal" class="min-h-8">

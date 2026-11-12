@@ -1660,6 +1660,28 @@ describe('設定画面のテキストウィンドウの「ほかのアプリに�
 	});
 });
 
+describe('設定画面のテキストウィンドウの「表示するディスプレイ」と「入力欄を空にする」', () => {
+	it('選ぶと、その値を保存する', async () => {
+		const screen = await render(Page);
+
+		await screen.getByLabelText(m.settings_draft_display()).selectOptions('pointer');
+		await screen.getByLabelText(m.settings_clear_text_after()).selectOptions('5m');
+
+		await vi.waitFor(() => {
+			expect(invoked).toHaveBeenCalledWith('set_draft_display', { display: 'pointer' });
+			expect(invoked).toHaveBeenCalledWith('set_clear_draft_after', { after: '5m' });
+		});
+	});
+
+	it('Linux では、表示するディスプレイを選べない', async () => {
+		settings.current = { ...view(), platform: 'linux' };
+		const screen = await render(Page);
+
+		await expect.element(screen.getByLabelText(m.settings_clear_text_after())).toBeVisible();
+		await expect.element(screen.getByLabelText(m.settings_draft_display())).not.toBeInTheDocument();
+	});
+});
+
 describe('設定画面の定型文の編集・絞り込み', () => {
 	beforeEach(() => {
 		invoked.mockImplementation((command, args) => Promise.resolve(savedRows(command, args)));

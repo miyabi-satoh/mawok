@@ -153,6 +153,24 @@ describe('DraftHistory', () => {
 		expect(history.hasEntries).toBe(false);
 		expect(history.older('')).toBeNull();
 	});
+
+	it('空から始めるときは、書きかけを覚える。空白だけなら覚えない', () => {
+		const history = new DraftHistory();
+
+		expect(history.setAside('  \n')).toBe(false);
+		expect(history.setAside('書きかけ')).toBe(true);
+		expect(history.entries).toEqual(['書きかけ']);
+	});
+
+	it('たどっている途中に空から始めるときは、たどり始める前に打っていた内容を覚え、たどるのをやめる', () => {
+		const history = new DraftHistory();
+		history.record('git status');
+		history.older('書きかけ');
+
+		expect(history.setAside('git status')).toBe(true);
+		expect(history.entries).toEqual(['git status', '書きかけ']);
+		expect(history.isBrowsing).toBe(false);
+	});
 });
 
 describe('DraftHistory の移れるかどうか', () => {

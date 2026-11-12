@@ -39,6 +39,7 @@
 	import { keepsDraftFocus } from '$lib/draft-focus';
 	import { m } from '$lib/paraglide/messages';
 	import { EVENTS } from '$lib/bindings/constants';
+	import type { Shown } from '$lib/bindings/Shown';
 	import { coalesced } from '$lib/coalesce';
 	import {
 		previewSegments,
@@ -456,7 +457,7 @@
 		}
 	}
 
-	async function onShown() {
+	async function onShown(shown?: Shown) {
 		shownCount++;
 		// 一覧を出したまま隠れていたら、出し直したときは入力欄から始める
 		snippetsOpen = false;
@@ -468,6 +469,11 @@
 		if (clearOnShow) {
 			text = '';
 			clearOnShow = false;
+		}
+		// 隠してから設定の時間がたった。書きかけは履歴に入れ、「前」で戻せるようにしてから空にする
+		if (shown?.clearText) {
+			if (draftHistory.setAside(text)) saveDraftHistory();
+			text = '';
 		}
 		// 隠れている間に置き換え辞書が変わっていても、本文が同じだとプレビューを求め直さないため
 		replacementPreview.refresh();
@@ -636,7 +642,7 @@
 
 	onMount(() => {
 		const unlisten = Promise.all([
-			listen(EVENTS.SHOWN, onShown),
+			listen<Shown>(EVENTS.SHOWN, (event) => onShown(event.payload)),
 			listen(EVENTS.SETTINGS_CHANGED, () => replacementPreview.refresh()),
 			listen(EVENTS.HIDE_REQUESTED, commit),
 			listen(EVENTS.DRAFT_HISTORY_CLEARED, () => {
