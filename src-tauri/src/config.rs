@@ -36,6 +36,52 @@ pub enum Theme {
     Dark,
 }
 
+/// テキストウィンドウを出すディスプレイ。Last は前回の位置のまま、Pointer はマウスポインターのあるディスプレイ
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "lowercase")]
+pub enum TextWindowDisplay {
+    #[default]
+    Last,
+    Pointer,
+}
+
+/// 隠してからどれだけたったら、次に出すときに入力欄を空から始めるか。Never なら空にしない。
+/// 選べる長さは、ホットキーで出すメモのアプリ（Drafts の New Draft After）と同じ幅にする
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+pub enum ClearTextAfter {
+    #[default]
+    #[serde(rename = "never")]
+    Never,
+    #[serde(rename = "30s")]
+    Seconds30,
+    #[serde(rename = "1m")]
+    Minutes1,
+    #[serde(rename = "5m")]
+    Minutes5,
+    #[serde(rename = "15m")]
+    Minutes15,
+    #[serde(rename = "1h")]
+    Hours1,
+}
+
+impl ClearTextAfter {
+    pub fn duration(self) -> Option<std::time::Duration> {
+        let seconds = match self {
+            Self::Never => return None,
+            Self::Seconds30 => 30,
+            Self::Minutes1 => 60,
+            Self::Minutes5 => 5 * 60,
+            Self::Minutes15 => 15 * 60,
+            Self::Hours1 => 60 * 60,
+        };
+        Some(std::time::Duration::from_secs(seconds))
+    }
+}
+
 /// 定型文の1件。下書きで定型文のキーで出す一覧から選ぶと、本文を挿入する
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -78,6 +124,10 @@ pub struct Config {
     pub hide_text_window_on_blur: bool,
     /// 下書きの入力欄の上下に、操作のボタンを出すか
     pub show_text_window_buttons: bool,
+    /// 下書きウィンドウを出すディスプレイ
+    pub text_window_display: TextWindowDisplay,
+    /// 隠してからこれだけたったら、次に出すときに入力欄を空から始める
+    pub clear_text_after: ClearTextAfter,
     /// 下書きの履歴の件数。0 なら覚えない（docs/config.md「履歴」）
     pub text_history_size: u16,
     /// クリップボードへ渡すときに、末尾の空白文字を取り除くか
@@ -149,6 +199,8 @@ impl Default for Config {
             text_window_always_on_top: true,
             hide_text_window_on_blur: true,
             show_text_window_buttons: true,
+            text_window_display: TextWindowDisplay::default(),
+            clear_text_after: ClearTextAfter::default(),
             text_history_size: DEFAULT_DRAFT_HISTORY_SIZE,
             trim_trailing_whitespace: true,
             replacements: Vec::new(),
@@ -186,6 +238,8 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
     ModifiedSetting::DraftKey(DraftAction::HistoryOlder),
     ModifiedSetting::DraftKey(DraftAction::HistoryNewer),
     ModifiedSetting::DraftKey(DraftAction::HistorySearch),
+    ModifiedSetting::DraftKey(DraftAction::New),
+    ModifiedSetting::DraftKey(DraftAction::Delete),
     ModifiedSetting::Value {
         name: key::AUTOSTART,
         differs: |config, defaults| config.autostart != defaults.autostart,
@@ -207,6 +261,14 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
         differs: |config, defaults| {
             config.show_text_window_buttons != defaults.show_text_window_buttons
         },
+    },
+    ModifiedSetting::Value {
+        name: key::TEXT_WINDOW_DISPLAY,
+        differs: |config, defaults| config.text_window_display != defaults.text_window_display,
+    },
+    ModifiedSetting::Value {
+        name: key::CLEAR_TEXT_AFTER,
+        differs: |config, defaults| config.clear_text_after != defaults.clear_text_after,
     },
     ModifiedSetting::Value {
         name: key::TEXT_HISTORY_SIZE,
@@ -307,6 +369,8 @@ pub mod key {
     pub const TEXT_WINDOW_ALWAYS_ON_TOP: &str = "text_window_always_on_top";
     pub const HIDE_TEXT_WINDOW_ON_BLUR: &str = "hide_text_window_on_blur";
     pub const SHOW_TEXT_WINDOW_BUTTONS: &str = "show_text_window_buttons";
+    pub const TEXT_WINDOW_DISPLAY: &str = "text_window_display";
+    pub const CLEAR_TEXT_AFTER: &str = "clear_text_after";
     pub const TEXT_HISTORY_SIZE: &str = "text_history_size";
     pub const TRIM_TRAILING_WHITESPACE: &str = "trim_trailing_whitespace";
     pub const REPLACEMENTS: &str = "replacements";
@@ -334,6 +398,8 @@ pub mod key {
         TEXT_WINDOW_ALWAYS_ON_TOP,
         HIDE_TEXT_WINDOW_ON_BLUR,
         SHOW_TEXT_WINDOW_BUTTONS,
+        TEXT_WINDOW_DISPLAY,
+        CLEAR_TEXT_AFTER,
         TEXT_HISTORY_SIZE,
         TRIM_TRAILING_WHITESPACE,
         REPLACEMENTS,
@@ -374,6 +440,8 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     field!(key::TEXT_WINDOW_ALWAYS_ON_TOP, text_window_always_on_top);
     field!(key::HIDE_TEXT_WINDOW_ON_BLUR, hide_text_window_on_blur);
     field!(key::SHOW_TEXT_WINDOW_BUTTONS, show_text_window_buttons);
+    field!(key::TEXT_WINDOW_DISPLAY, text_window_display);
+    field!(key::CLEAR_TEXT_AFTER, clear_text_after);
     field!(key::TEXT_HISTORY_SIZE, text_history_size);
     field!(key::TRIM_TRAILING_WHITESPACE, trim_trailing_whitespace);
     field!(key::REPLACEMENTS, replacements);
@@ -518,6 +586,8 @@ pub fn apply_setting(config: &mut Config, name: &str, value: &Value) -> Option<b
         key::TEXT_WINDOW_ALWAYS_ON_TOP => set(&mut config.text_window_always_on_top, value),
         key::HIDE_TEXT_WINDOW_ON_BLUR => set(&mut config.hide_text_window_on_blur, value),
         key::SHOW_TEXT_WINDOW_BUTTONS => set(&mut config.show_text_window_buttons, value),
+        key::TEXT_WINDOW_DISPLAY => set(&mut config.text_window_display, value),
+        key::CLEAR_TEXT_AFTER => set(&mut config.clear_text_after, value),
         // 上限は型の幅（MAX_DRAFT_HISTORY_SIZE）なので、読めた値はどれも受け付ける
         key::TEXT_HISTORY_SIZE => set(&mut config.text_history_size, value),
         key::TRIM_TRAILING_WHITESPACE => set(&mut config.trim_trailing_whitespace, value),
@@ -595,6 +665,8 @@ mod tests {
             text_window_always_on_top: false,
             hide_text_window_on_blur: false,
             show_text_window_buttons: false,
+            text_window_display: TextWindowDisplay::Pointer,
+            clear_text_after: ClearTextAfter::Minutes5,
             text_history_size: 0,
             trim_trailing_whitespace: false,
             replacements: vec![Replacement::default()],
@@ -636,6 +708,8 @@ mod tests {
             autostart: false,
             language: Language::En,
             theme: Theme::Dark,
+            text_window_display: TextWindowDisplay::Pointer,
+            clear_text_after: ClearTextAfter::Seconds30,
             text_history_size: 0,
             replacements: vec![Replacement {
                 from: "濃度".to_string(),
@@ -659,6 +733,7 @@ mod tests {
         assert_eq!(round_trip(&config), config);
         let entries = stored_entries(&config);
         assert_eq!(entries["digit_width"], json!("half"));
+        assert_eq!(entries["clear_text_after"], json!("30s"));
         assert!(!entries.contains_key("alphabet_width"));
     }
 

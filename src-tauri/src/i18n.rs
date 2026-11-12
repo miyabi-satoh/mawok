@@ -37,7 +37,7 @@ impl Lang {
     pub fn toggle_draft(self) -> &'static str {
         match self {
             Lang::En => "Show/Hide Text Window",
-            Lang::Ja => "テキストウィンドウを表示／隠す",
+            Lang::Ja => "テキストウィンドウを表示／非表示",
         }
     }
 

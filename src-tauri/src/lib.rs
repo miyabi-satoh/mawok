@@ -64,7 +64,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 use crate::{
-    config::{Config, Language, Snippet, Theme},
+    config::{ClearTextAfter, Config, Language, Snippet, TextWindowDisplay, Theme},
     draft_keys::{DraftAction, DraftKeys, Platform},
     folder_access::Reach,
     hotkey::Registrar as _,
@@ -115,6 +115,25 @@ struct DraftState {
     blur: debounce::Debounce,
     /// 下書きを出してから、一度でもフォーカスが入ったか。入っていなければ、フォーカスが外れたとして隠さない
     focused_since_shown: AtomicBool,
+    /// 下書きを最後に隠した時刻（UNIX のミリ秒）。次に出すときに、入力欄を空から始めるか（設定の clear_text_after）を決める。
+    /// Instant でなく時計の時刻にする。macOS と Linux の Instant はスリープの間に進まず、蓋を閉じて離れた時間が数えられないため
+    hidden_at: Mutex<Option<u64>>,
+}
+
+impl DraftState {
+    fn mark_hidden(&self) {
+        *self.hidden_at.lock().unwrap() = Some(now_millis());
+    }
+}
+
+/// 下書きを出したときの知らせ（events::SHOWN）
+#[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(export))]
+#[serde(rename_all = "camelCase")]
+struct Shown {
+    /// 隠してから設定の時間がたったので、入力欄を空から始める。画面は書きかけを履歴に入れてから空にする
+    clear_text: bool,
 }
 
 /// 設定と、トレイに出す問題。設定画面から変えると、ここと設定のファイルの両方を更新する
@@ -297,6 +316,10 @@ struct SettingsView {
     hide_text_window_on_blur: bool,
     /// 下書きの入力欄の上下に、操作のボタンを出すか
     show_text_window_buttons: bool,
+    /// 下書きウィンドウを出すディスプレイ。Linux では選べない（画面は行を出さない）
+    text_window_display: TextWindowDisplay,
+    /// 隠してからこれだけたったら、次に出すときに入力欄を空から始める
+    clear_text_after: ClearTextAfter,
     /// 下書きの履歴の件数。0 なら覚えない
     text_history_size: u16,
     trim_trailing_whitespace: bool,
@@ -398,6 +421,8 @@ fn settings_view(state: &AppState) -> SettingsView {
         text_window_always_on_top: config.text_window_always_on_top,
         hide_text_window_on_blur: config.hide_text_window_on_blur,
         show_text_window_buttons: config.show_text_window_buttons,
+        text_window_display: config.text_window_display,
+        clear_text_after: config.clear_text_after,
         text_history_size: config.text_history_size,
         trim_trailing_whitespace: config.trim_trailing_whitespace,
         replacements: config.replacements,
@@ -476,7 +501,7 @@ fn show(app: &AppHandle) {
     show_draft(app, true);
 }
 
-/// トレイの「テキストウィンドウを表示／隠す」。出ていれば、Esc や閉じるボタンと同じくコピーせずに隠し、書きかけは残す。
+/// トレイの「テキストウィンドウを表示／非表示」。出ていれば、Esc や閉じるボタンと同じくコピーせずに隠し、書きかけは残す。
 /// 隠れていれば出す。ほかのウィンドウの裏にあって見えていなくても、出ていれば隠す（切り替えなので、前へは出さない）
 fn toggle_draft(app: &AppHandle) {
     let Some(window) = main_window(app) else {
@@ -519,8 +544,27 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
         return false;
     };
     info!("show");
+    let state = app.state::<DraftState>();
+    // 出せたときに消す。出せなければ、次に出すときも隠した時刻から数える
+    let hidden_at = *state.hidden_at.lock().unwrap();
+    let (display, clear_after) = {
+        let app_state = app.state::<AppState>();
+        let config = app_state.config.lock().unwrap();
+        (config.text_window_display, config.clear_text_after)
+    };
+    // 設定のために隠したときは時刻を残さないので、設定を開いている間・閉じた後の出し直しでは空にしない。
+    // 設定を見ている間も、書きかけから離れたわけではないため。時計が戻っていれば、たっていないとみる
+    let clear_text = capture_return_target
+        && !window.is_visible().unwrap_or(true)
+        && hidden_at
+            .zip(clear_after.duration())
+            .is_some_and(|(at, after)| now_millis().saturating_sub(at) >= after.as_millis() as u64);
     if capture_return_target {
-        *app.state::<DraftState>().return_target.lock().unwrap() = focus::capture(&window);
+        *state.return_target.lock().unwrap() = focus::capture(&window);
+        // 設定を閉じた後の出し直しは、設定を開く前の位置に戻す
+        if display == TextWindowDisplay::Pointer {
+            move_to_pointer_display(&window);
+        }
     }
     fit_to_screen(&window);
     // 出した後にフォーカスが入ったかを、ここから数え直す
@@ -538,7 +582,8 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
             .hidden_for_settings
             .store(false, Ordering::Relaxed);
     }
-    let _ = app.emit(events::SHOWN, ());
+    *app.state::<DraftState>().hidden_at.lock().unwrap() = None;
+    let _ = app.emit(events::SHOWN, Shown { clear_text });
     true
 }
 
@@ -666,6 +711,105 @@ fn is_settings_focused(app: &AppHandle) -> bool {
     app.get_webview_window(SETTINGS_WINDOW)
         .is_some_and(|settings| settings.is_focused().unwrap_or(false))
 }
+
+/// 下書きを、マウスポインターのあるディスプレイへ移す（設定の text_window_display）。移す先での位置は placement::move_to_display_at
+#[cfg(windows)]
+fn move_to_pointer_display(window: &WebviewWindow) {
+    let (Ok(pointer), Ok(position), Ok(size), Ok(monitors)) = (
+        window.cursor_position(),
+        window.outer_position(),
+        window.outer_size(),
+        window.available_monitors(),
+    ) else {
+        warn!("couldn't read the pointer or the displays");
+        return;
+    };
+    let displays: Vec<placement::Display> = monitors
+        .iter()
+        .map(|monitor| placement::Display {
+            bounds: placement::Rect {
+                x: monitor.position().x,
+                y: monitor.position().y,
+                width: monitor.size().width as i32,
+                height: monitor.size().height as i32,
+            },
+            work_area: to_rect(monitor.work_area()),
+            scale: monitor.scale_factor(),
+        })
+        .collect();
+    let outer = placement::Rect {
+        x: position.x,
+        y: position.y,
+        width: size.width as i32,
+        height: size.height as i32,
+    };
+    // fit_to_screen と同じく、見えている枠で置く
+    let visible = visible_frame(window).unwrap_or(outer);
+    if let Some((x, y)) =
+        placement::move_to_display_at(visible, &displays, (pointer.x as i32, pointer.y as i32))
+    {
+        info!("move the draft to the display with the pointer");
+        // 見えない縁も拡大率に合わせて変わるので、移した先の拡大率での縁の幅を引く
+        let ratio = window
+            .monitor_from_point(pointer.x, pointer.y)
+            .ok()
+            .flatten()
+            .zip(window.scale_factor().ok())
+            .map_or(1.0, |(target, current)| target.scale_factor() / current);
+        let border = |offset: i32| (f64::from(offset) * ratio).round() as i32;
+        let _ = window.set_position(PhysicalPosition::new(
+            x - border(visible.x - outer.x),
+            y - border(visible.y - outer.y),
+        ));
+    }
+}
+
+/// macOS では AppKit のポイントで置く。tao の物理ピクセルは画面ごとの倍率で換算するので、倍率の違う画面をまたぐとずれるため
+#[cfg(target_os = "macos")]
+fn move_to_pointer_display(window: &WebviewWindow) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSEvent, NSScreen, NSWindow};
+    use objc2_foundation::{NSPoint, NSRect};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        warn!("move to the pointer display: not on the main thread");
+        return;
+    };
+    let Ok(pointer) = window.ns_window() else {
+        return;
+    };
+    // SAFETY: Tauri が返す NSWindow を、メインスレッドで、窓が生きている間に読む
+    let ns_window = unsafe { &*pointer.cast::<NSWindow>() };
+    let rect = |frame: NSRect| placement::Rect {
+        x: frame.origin.x.round() as i32,
+        y: frame.origin.y.round() as i32,
+        width: frame.size.width.round() as i32,
+        height: frame.size.height.round() as i32,
+    };
+    let displays: Vec<placement::Display> = NSScreen::screens(mtm)
+        .iter()
+        .map(|screen| placement::Display {
+            bounds: rect(screen.frame()),
+            work_area: rect(screen.visibleFrame()),
+            // ポイントはどの画面にも共通なので、移しても大きさは変わらない
+            scale: 1.0,
+        })
+        .collect();
+    let mouse = NSEvent::mouseLocation();
+    let frame = ns_window.frame();
+    if let Some((x, y)) = placement::move_to_display_at(
+        rect(frame),
+        &displays,
+        (mouse.x.floor() as i32, mouse.y.floor() as i32),
+    ) {
+        info!("move the draft to the display with the pointer");
+        ns_window.setFrameOrigin(NSPoint::new(f64::from(x), f64::from(y)));
+    }
+}
+
+/// Linux では選べない。Wayland ではアプリが窓の位置を決められない（docs/platform.md「Linux のそのほか」）
+#[cfg(target_os = "linux")]
+fn move_to_pointer_display(_window: &WebviewWindow) {}
 
 fn fit_to_screen(window: &WebviewWindow) {
     let (Ok(position), Ok(size), Ok(monitors)) = (
@@ -812,7 +956,7 @@ const HIDE_ON_BLUR_DELAY: std::time::Duration = std::time::Duration::from_millis
 /// フォーカスが外れた後に、下書きを隠すかを決める材料
 #[derive(Debug, Clone, Copy)]
 struct BlurCheck {
-    /// 設定のテキストウィンドウの「ほかのアプリに移ったら隠す」
+    /// 設定のテキストウィンドウの「ほかのアプリに移ったら非表示にする」
     enabled: bool,
     visible: bool,
     /// 出してから一度でもフォーカスが入ったか。Windows で前面に出せなかったとき（前面の制限）など、
@@ -926,6 +1070,7 @@ fn main_window_config(app: &AppHandle) -> Result<tauri::utils::config::WindowCon
 fn hide_draft_in_place(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
     let _ = app.save_window_state(window_state_flags());
     window.hide()?;
+    app.state::<DraftState>().mark_hidden();
     Ok(())
 }
 
@@ -936,7 +1081,9 @@ fn hide_draft_and_return(app: &AppHandle, state: &DraftState) -> Result<(), Stri
     state.hidden_for_settings.store(false, Ordering::Relaxed);
     let window = main_window(app).ok_or("main window not found")?;
     let target = *state.return_target.lock().unwrap();
-    focus::hide_and_return(app, &window, target).map_err(|error| error.to_string())
+    focus::hide_and_return(app, &window, target).map_err(|error| error.to_string())?;
+    state.mark_hidden();
+    Ok(())
 }
 
 /// クリップボードへ文字列を書く。`conceal` のときは、クリップボードの履歴・同期・管理アプリに残さないよう印を付ける。
@@ -1304,6 +1451,18 @@ fn set_show_draft_buttons(app: AppHandle, enabled: bool) -> Result<(), String> {
     update_config(&app, |config| config.show_text_window_buttons = enabled)
 }
 
+#[tauri::command]
+fn set_draft_display(app: AppHandle, display: TextWindowDisplay) -> Result<(), String> {
+    info!("set draft display: {display:?}");
+    update_config(&app, |config| config.text_window_display = display)
+}
+
+#[tauri::command]
+fn set_clear_draft_after(app: AppHandle, after: ClearTextAfter) -> Result<(), String> {
+    info!("set clear draft after: {after:?}");
+    update_config(&app, |config| config.clear_text_after = after)
+}
+
 /// 下書きの履歴の件数。0 なら覚えない。上限は型の幅（config::MAX_DRAFT_HISTORY_SIZE）なので、収め直さない
 #[tauri::command]
 fn set_draft_history_size(app: AppHandle, size: u16) -> Result<(), String> {
@@ -1478,11 +1637,14 @@ struct PendingHistory {
     /// 消した時刻。現れたときの時刻で消すと、ほかのデバイスがその間に覚えた履歴まで見せなくなる
     cleared_at: Option<u64>,
     texts: Option<Vec<String>>,
+    /// 1件ずつ消した本文と、消した時刻。現れたときの時刻で消すと、ほかのデバイスがその間に覚え直した同じ本文まで見せなくなる
+    deleted: Vec<(String, u64)>,
 }
 
 static PENDING_HISTORY: Mutex<PendingHistory> = Mutex::new(PendingHistory {
     cleared_at: None,
     texts: None,
+    deleted: Vec::new(),
 });
 
 /// 置き場のフォルダーが現れたときに、無い間に届いた履歴の消去と保存を書く
@@ -1492,6 +1654,7 @@ fn write_pending_history(app: &AppHandle) {
         warn!("couldn't clear draft history after the folder appeared: {error}");
         return;
     }
+    // 無い間に消した本文は、預けたまま save_history に取らせる。書けなかったときに預かり直すため
     let texts = PENDING_HISTORY.lock().unwrap().texts.take();
     if let Some(texts) = texts {
         // 画面が持つのは、無くなる前にこのデバイスのファイルへ書いた履歴の続き。そう照らさないと、画面の一覧の全部に
@@ -1503,7 +1666,7 @@ fn write_pending_history(app: &AppHandle) {
                 .unwrap()
                 .replaced_by_other_devices(before);
         }
-        if let Err(error) = save_draft_history(app.clone(), texts) {
+        if let Err(error) = save_history(app, texts, Vec::new()) {
             warn!("couldn't save draft history after the folder appeared: {error}");
         }
     }
@@ -1525,21 +1688,61 @@ fn retry_pending_history_clear(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 画面が持つ履歴を保存する。`deleted` は、前に保存してから画面で1件ずつ消した本文（docs/config.md「履歴」）
 #[tauri::command]
-fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String> {
+fn save_draft_history(
+    app: AppHandle,
+    entries: Vec<String>,
+    deleted: Vec<String>,
+) -> Result<(), String> {
+    let now = now_millis();
+    save_history(
+        &app,
+        entries,
+        deleted.into_iter().map(|text| (text, now)).collect(),
+    )
+}
+
+fn save_history(
+    app: &AppHandle,
+    entries: Vec<String>,
+    deleted: Vec<(String, u64)>,
+) -> Result<(), String> {
+    let app = app.clone();
     if !settings_dir_ready(&app) {
         // 画面の一覧はそのまま使え、現れたときに書く（write_pending_history）
-        PENDING_HISTORY.lock().unwrap().texts = Some(entries);
+        let mut pending = PENDING_HISTORY.lock().unwrap();
+        pending.texts = Some(entries);
+        pending.deleted.extend(deleted);
         return Ok(());
     }
     retry_pending_history_clear(&app)?;
     // 今届いた一覧のほうが新しいので、無い間に預かった一覧は要らない
-    PENDING_HISTORY.lock().unwrap().texts = None;
+    // 無い間に消した本文は、今届いた一覧の前に消したもの。先に当てる
+    let earlier = {
+        let mut pending = PENDING_HISTORY.lock().unwrap();
+        pending.texts = None;
+        std::mem::take(&mut pending.deleted)
+    };
+    let all = earlier.iter().cloned().chain(deleted).collect();
+    write_history(&app, entries, all).inspect_err(|_| {
+        // 書けなければ、無い間に消した本文は預かり直す。画面は自分で渡した分だけを戻すので、ここで戻さないと消える
+        let mut pending = PENDING_HISTORY.lock().unwrap();
+        pending.deleted.splice(0..0, earlier);
+    })
+}
+
+/// 画面の一覧を、`deleted` を消してから照らして、このデバイスのファイルに書く
+fn write_history(
+    app: &AppHandle,
+    entries: Vec<String>,
+    deleted: Vec<(String, u64)>,
+) -> Result<(), String> {
     let path = app.state::<AppState>().history_path();
     // 件数の設定は、ロックを取ってから読む。読んだ後に件数 0 へ変えられて消されると、
     // 消した後に古い履歴を書き戻してしまう
     let mut screen = HISTORY_FILE_LOCK.lock().unwrap();
-    let size = draft_history_size(&app);
+    let size = draft_history_size(app);
     let texts = history_store::truncate(entries, size);
     // 読めなかったファイルを空の履歴として扱って書くと、その履歴が届いた 1 件に置き換わる。
     // 壊れたファイルは写して退けてから書き、読めないだけ（一時的なエラー）なら書かない
@@ -1557,7 +1760,11 @@ fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String
         }
     }
     .truncated(size);
-    let next = screen.saved(&merged, texts, size, now_millis());
+    // 消してから照らす。画面の一覧は、消した本文を除いた後のものなので
+    let file = deleted.iter().fold(merged.clone(), |history, (text, at)| {
+        history.without(text, *at)
+    });
+    let next = screen.saved(&file, texts, size, now_millis());
     // 画面は、読み込んだ履歴をそのまま保存し直すことがある。変わっていなければ書かない。置き場を同期していると、
     // 書くたびにほかのデバイスへ送られるため
     if next == merged {
@@ -3437,6 +3644,8 @@ pub fn run() {
             set_draft_always_on_top,
             set_hide_draft_on_blur,
             set_show_draft_buttons,
+            set_draft_display,
+            set_clear_draft_after,
             set_draft_history_size,
             load_draft_history,
             save_draft_history,

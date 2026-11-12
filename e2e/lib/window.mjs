@@ -129,6 +129,94 @@ export async function isWindowAbove(upper, lower) {
 	return stdout.trim() === 'True';
 }
 
+const MONITOR_TYPE = `
+Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class E2EMonitor {
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int Size; public RECT Monitor; public RECT Work; public uint Flags; }
+    delegate bool EnumProc(IntPtr monitor, IntPtr dc, IntPtr rect, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, EnumProc proc, IntPtr data);
+    [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+
+    // 各ディスプレイの全体・作業領域 (物理ピクセル)・拡大率・メインか
+    public static string List() {
+        var rows = new List<string>();
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (monitor, dc, rect, data) => {
+            var info = new MONITORINFO { Size = Marshal.SizeOf(typeof(MONITORINFO)) };
+            GetMonitorInfo(monitor, ref info);
+            uint dpiX, dpiY;
+            GetDpiForMonitor(monitor, 0, out dpiX, out dpiY);
+            rows.Add(string.Format("{0},{1},{2},{3},{4},{5},{6},{7},{8},{9}",
+                info.Monitor.Left, info.Monitor.Top, info.Monitor.Right, info.Monitor.Bottom,
+                info.Work.Left, info.Work.Top, info.Work.Right, info.Work.Bottom, dpiX, info.Flags & 1));
+            return true;
+        }, IntPtr.Zero);
+        return string.Join(";", rows);
+    }
+
+    // 影を除いた、見えている枠 (DWMWA_EXTENDED_FRAME_BOUNDS)
+    public static string VisibleFrame(IntPtr hWnd) {
+        RECT r;
+        DwmGetWindowAttribute(hWnd, 9, out r, Marshal.SizeOf(typeof(RECT)));
+        return string.Format("{0},{1},{2},{3}", r.Left, r.Top, r.Right, r.Bottom);
+    }
+}
+"@
+`;
+
+const rectOf = ([left, top, right, bottom]) => ({
+	x: left,
+	y: top,
+	width: right - left,
+	height: bottom - top
+});
+
+/**
+ * つながっているディスプレイの一覧 (物理ピクセル)。メインのディスプレイを先頭にする
+ *
+ * @returns {Promise<Array<{ bounds: { x: number, y: number, width: number, height: number }, workArea: { x: number, y: number, width: number, height: number }, scale: number, primary: boolean }>>}
+ */
+export async function listMonitors() {
+	const stdout = await runPowerShell(`${WINDOW_TYPE}${MONITOR_TYPE}\n[E2EMonitor]::List()`);
+	return stdout
+		.trim()
+		.split(';')
+		.filter(Boolean)
+		.map((row) => {
+			const values = row.split(',').map(Number);
+			return {
+				bounds: rectOf(values.slice(0, 4)),
+				workArea: rectOf(values.slice(4, 8)),
+				scale: values[8] / 96,
+				primary: values[9] === 1
+			};
+		})
+		.sort((a, b) => Number(b.primary) - Number(a.primary));
+}
+
+/** 影を除いた、見えている枠 (物理ピクセル)。アプリが画面に収めるときに使う枠と同じ (lib.rs の fit_to_screen) */
+export async function readVisibleFrame(hwnd) {
+	const stdout = await runPowerShell(
+		`${WINDOW_TYPE}${MONITOR_TYPE}\n[E2EMonitor]::VisibleFrame([IntPtr][long]$args[0])`,
+		[String(BigInt(hwnd))]
+	);
+	return rectOf(stdout.trim().split(',').map(Number));
+}
+
+/** マウスポインターを画面の座標 (物理ピクセル) へ動かす。クリックはしないので、前面もフォーカスも変えない */
+export async function setCursorPosition(x, y) {
+	await runPowerShell(
+		`${WINDOW_TYPE}${MONITOR_TYPE}\n[void][E2EMonitor]::SetCursorPos([int]$args[0], [int]$args[1])`,
+		[Math.round(x), Math.round(y)]
+	);
+}
+
 /**
  * ウィンドウの中に、名前が `name` の要素があるかを UI Automation で見る。WebView2 の画面の中も見える。
  * 描画プロセスが落ちた後の窓は WebDriver から読めなくなる ("tab crashed" のまま) ので、そのときの描き直しを見るのに使う

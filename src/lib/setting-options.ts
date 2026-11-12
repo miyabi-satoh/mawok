@@ -1,4 +1,6 @@
+import type { ClearTextAfter } from '$lib/bindings/ClearTextAfter';
 import type { Language } from '$lib/bindings/Language';
+import type { TextWindowDisplay } from '$lib/bindings/TextWindowDisplay';
 import type { Theme } from '$lib/bindings/Theme';
 import type { WidthStyle } from '$lib/bindings/WidthStyle';
 import { m } from '$lib/paraglide/messages';
@@ -18,6 +20,20 @@ export const THEMES: Option<Theme>[] = [
 	{ value: 'system', name: m.settings_theme_system },
 	{ value: 'light', name: m.settings_theme_light },
 	{ value: 'dark', name: m.settings_theme_dark }
+];
+
+export const DRAFT_DISPLAYS: Option<TextWindowDisplay>[] = [
+	{ value: 'last', name: m.settings_draft_display_last },
+	{ value: 'pointer', name: m.settings_draft_display_pointer }
+];
+
+export const CLEAR_TEXT_AFTER: Option<ClearTextAfter>[] = [
+	{ value: 'never', name: m.settings_clear_text_after_never },
+	{ value: '30s', name: m.settings_clear_text_after_30s },
+	{ value: '1m', name: m.settings_clear_text_after_1m },
+	{ value: '5m', name: m.settings_clear_text_after_5m },
+	{ value: '15m', name: m.settings_clear_text_after_15m },
+	{ value: '1h', name: m.settings_clear_text_after_1h }
 ];
 
 /** 句読点の揃え方の選択肢。記号そのものが選択肢なので、文言にはしない */

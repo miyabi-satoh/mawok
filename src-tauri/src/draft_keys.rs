@@ -18,16 +18,22 @@ pub enum DraftAction {
     HistoryOlder,
     HistoryNewer,
     HistorySearch,
+    /// 書きかけを履歴に入れ、出した直後の状態から書き始める（メモアプリの新規作成）
+    New,
+    /// 出している履歴を履歴から消す
+    Delete,
 }
 
 impl DraftAction {
-    pub const ALL: [DraftAction; 6] = [
+    pub const ALL: [DraftAction; 8] = [
         DraftAction::Copy,
         DraftAction::Settings,
         DraftAction::Snippets,
         DraftAction::HistoryOlder,
         DraftAction::HistoryNewer,
         DraftAction::HistorySearch,
+        DraftAction::New,
+        DraftAction::Delete,
     ];
 
     /// 設定のファイルでの項目名
@@ -39,6 +45,8 @@ impl DraftAction {
             DraftAction::HistoryOlder => "history_older",
             DraftAction::HistoryNewer => "history_newer",
             DraftAction::HistorySearch => "history_search",
+            DraftAction::New => "new",
+            DraftAction::Delete => "delete",
         }
     }
 
@@ -53,6 +61,10 @@ impl DraftAction {
             DraftAction::HistoryNewer => "CommandOrControl+Alt+ArrowDown",
             // シェルや Claude Code の履歴の検索（Ctrl+R）と同じ英字にする。Mac はほかの既定と同じく ⌘ を軸にする
             DraftAction::HistorySearch => "CommandOrControl+KeyR",
+            // メモアプリやエディターの新規作成と同じ英字
+            DraftAction::New => "CommandOrControl+KeyN",
+            // 確かめずに消すので、うっかり押して消さないよう、既定では割り当てない
+            DraftAction::Delete => "",
         }
     }
 }
@@ -69,6 +81,8 @@ pub struct DraftKeys {
     pub history_older: String,
     pub history_newer: String,
     pub history_search: String,
+    pub new: String,
+    pub delete: String,
 }
 
 impl Default for DraftKeys {
@@ -81,6 +95,8 @@ impl Default for DraftKeys {
             history_older: key(DraftAction::HistoryOlder),
             history_newer: key(DraftAction::HistoryNewer),
             history_search: key(DraftAction::HistorySearch),
+            new: key(DraftAction::New),
+            delete: key(DraftAction::Delete),
         }
     }
 }
@@ -94,6 +110,8 @@ impl DraftKeys {
             DraftAction::HistoryOlder => &self.history_older,
             DraftAction::HistoryNewer => &self.history_newer,
             DraftAction::HistorySearch => &self.history_search,
+            DraftAction::New => &self.new,
+            DraftAction::Delete => &self.delete,
         }
     }
 
@@ -105,6 +123,8 @@ impl DraftKeys {
             DraftAction::HistoryOlder => &mut self.history_older,
             DraftAction::HistoryNewer => &mut self.history_newer,
             DraftAction::HistorySearch => &mut self.history_search,
+            DraftAction::New => &mut self.new,
+            DraftAction::Delete => &mut self.delete,
         }
     }
 

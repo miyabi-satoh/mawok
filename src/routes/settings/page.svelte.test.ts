@@ -1335,7 +1335,8 @@ describe('設定画面のキー操作', () => {
 	it('操作ごとに今のキーを出し、割り当てのない操作は「なし」と出す', async () => {
 		settings.current = {
 			...view(),
-			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, snippets: '' }
+			// 既定で割り当てのない削除にもキーを割り当て、「なし」を定型文の行だけにする
+			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, snippets: '', delete: 'CommandOrControl+KeyD' }
 		};
 		const screen = await renderAt(m.settings_category_keys);
 
@@ -1641,7 +1642,7 @@ describe('設定画面のテキストウィンドウの「ボタンを表示」'
 	});
 });
 
-describe('設定画面のテキストウィンドウの「ほかのアプリに移ったら隠す」', () => {
+describe('設定画面のテキストウィンドウの「ほかのアプリに移ったら非表示にする」', () => {
 	it('保存されている値を出す', async () => {
 		settings.current = { ...view(), hideTextWindowOnBlur: false };
 		const screen = await render(Page);
@@ -1657,6 +1658,30 @@ describe('設定画面のテキストウィンドウの「ほかのアプリに�
 		await vi.waitFor(() =>
 			expect(invoked).toHaveBeenCalledWith('set_hide_draft_on_blur', { enabled: false })
 		);
+	});
+});
+
+describe('設定画面のテキストウィンドウの「表示するディスプレイ」と「非表示後に入力をクリア」', () => {
+	it('選ぶと、その値を保存する', async () => {
+		const screen = await render(Page);
+
+		await screen.getByRole('radio', { name: m.settings_draft_display_pointer() }).click();
+		await screen.getByLabelText(m.settings_clear_text_after()).selectOptions('5m');
+
+		await vi.waitFor(() => {
+			expect(invoked).toHaveBeenCalledWith('set_draft_display', { display: 'pointer' });
+			expect(invoked).toHaveBeenCalledWith('set_clear_draft_after', { after: '5m' });
+		});
+	});
+
+	it('Linux では、表示するディスプレイを選べない', async () => {
+		settings.current = { ...view(), platform: 'linux' };
+		const screen = await render(Page);
+
+		await expect.element(screen.getByLabelText(m.settings_clear_text_after())).toBeVisible();
+		await expect
+			.element(screen.getByRole('radio', { name: m.settings_draft_display_pointer() }))
+			.not.toBeInTheDocument();
 	});
 });
 

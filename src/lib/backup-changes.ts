@@ -35,6 +35,10 @@ function label(value: Exclude<BackupValue, { type: 'deleted' }>): string | undef
 			return draftWindowLabel(m.settings_hide_draft_on_blur());
 		case 'show_text_window_buttons':
 			return draftWindowLabel(m.settings_draft_buttons());
+		case 'text_window_display':
+			return draftWindowLabel(m.settings_draft_display());
+		case 'clear_text_after':
+			return draftWindowLabel(m.settings_clear_text_after());
 		case 'text_history_size':
 			return m.settings_draft_history_size();
 		case 'trim_trailing_whitespace':

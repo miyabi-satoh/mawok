@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 
 use crate::{
-    config::{key, Config, Language, Snippet, Theme},
+    config::{key, ClearTextAfter, Config, Language, Snippet, TextWindowDisplay, Theme},
     draft_keys::DraftKeys,
     text::{KatakanaWidth, PunctuationStyle, Replacement, WidthStyle},
 };
@@ -21,6 +21,8 @@ pub enum BackupValue {
     TextWindowAlwaysOnTop(bool),
     HideTextWindowOnBlur(bool),
     ShowTextWindowButtons(bool),
+    TextWindowDisplay(TextWindowDisplay),
+    ClearTextAfter(ClearTextAfter),
     TextHistorySize(u16),
     TrimTrailingWhitespace(bool),
     PunctuationStyle(PunctuationStyle),
@@ -124,6 +126,14 @@ fn settings(config: &Config) -> Vec<(&'static str, BackupValue)> {
         (
             key::SHOW_TEXT_WINDOW_BUTTONS,
             V::ShowTextWindowButtons(config.show_text_window_buttons),
+        ),
+        (
+            key::TEXT_WINDOW_DISPLAY,
+            V::TextWindowDisplay(config.text_window_display),
+        ),
+        (
+            key::CLEAR_TEXT_AFTER,
+            V::ClearTextAfter(config.clear_text_after),
         ),
         (
             key::TEXT_HISTORY_SIZE,
