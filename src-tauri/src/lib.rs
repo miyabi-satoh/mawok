@@ -749,9 +749,17 @@ fn move_to_pointer_display(window: &WebviewWindow) {
         placement::move_to_display_at(visible, &displays, (pointer.x as i32, pointer.y as i32))
     {
         info!("move the draft to the display with the pointer");
+        // 見えない縁も拡大率に合わせて変わるので、移した先の拡大率での縁の幅を引く
+        let ratio = window
+            .monitor_from_point(pointer.x, pointer.y)
+            .ok()
+            .flatten()
+            .zip(window.scale_factor().ok())
+            .map_or(1.0, |(target, current)| target.scale_factor() / current);
+        let border = |offset: i32| (f64::from(offset) * ratio).round() as i32;
         let _ = window.set_position(PhysicalPosition::new(
-            x - (visible.x - outer.x),
-            y - (visible.y - outer.y),
+            x - border(visible.x - outer.x),
+            y - border(visible.y - outer.y),
         ));
     }
 }

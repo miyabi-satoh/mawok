@@ -21,8 +21,8 @@ import { beginTestConfig } from '../lib/config.mjs';
 
 const monitors = await listMonitors();
 const suite = createSuite();
-/** 位置のずれの許し。拡大率の違うディスプレイの間では、窓の大きさが拡大率に合わせて変わり、端数が出る */
-const TOLERANCE = 4;
+/** 位置のずれの許し。拡大率の違うディスプレイの間では、窓の大きさと見えない縁が拡大率に合わせて変わり、端数が出る */
+const TOLERANCE = 2;
 
 const center = (rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
 const contains = (rect, { x, y }) =>
