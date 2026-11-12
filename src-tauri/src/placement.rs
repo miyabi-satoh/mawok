@@ -39,6 +39,8 @@ pub fn fit(window: Rect, areas: &[Rect]) -> (i32, i32) {
     )
 }
 
+// 窓をほかのディスプレイへ移すのは Windows と macOS だけ（Linux の Wayland ではアプリが窓の位置を決められない）
+#[cfg(any(windows, target_os = "macos", test))]
 /// ディスプレイ1枚の、全体と作業領域（タスクバーやメニューバーを除いた所）
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Display {
@@ -49,6 +51,7 @@ pub struct Display {
     pub scale: f64,
 }
 
+#[cfg(any(windows, target_os = "macos", test))]
 /// `window` を、`point`（マウスポインター）のあるディスプレイへ移した位置を返す。移す先では、作業領域の中の相対的な位置を保つ
 /// （右下に寄せていた窓は、移した先でも右下に出る）。すでにそのディスプレイに最も重なっていれば、または `point` がどのディスプレイにも
 /// 無ければ None。座標は物理ピクセルでも AppKit のポイント（y が上向き）でもよい
@@ -102,10 +105,12 @@ pub fn move_to_display_at(
     ))
 }
 
+#[cfg(any(windows, target_os = "macos", test))]
 fn contains(area: &Rect, (x, y): (i32, i32)) -> bool {
     (area.x..area.x + area.width).contains(&x) && (area.y..area.y + area.height).contains(&y)
 }
 
+#[cfg(any(windows, target_os = "macos", test))]
 /// 作業領域の空き（作業領域の長さから窓の長さを引いた分）のどこにいたかの割合を、移す先の空きに当てる。
 /// `length` は、今と移した先での窓の長さ
 fn relative_axis(
