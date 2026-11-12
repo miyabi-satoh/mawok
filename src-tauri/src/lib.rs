@@ -1625,11 +1625,14 @@ struct PendingHistory {
     /// 消した時刻。現れたときの時刻で消すと、ほかのデバイスがその間に覚えた履歴まで見せなくなる
     cleared_at: Option<u64>,
     texts: Option<Vec<String>>,
+    /// 1件ずつ消した本文と、消した時刻。現れたときの時刻で消すと、ほかのデバイスがその間に覚え直した同じ本文まで見せなくなる
+    deleted: Vec<(String, u64)>,
 }
 
 static PENDING_HISTORY: Mutex<PendingHistory> = Mutex::new(PendingHistory {
     cleared_at: None,
     texts: None,
+    deleted: Vec::new(),
 });
 
 /// 置き場のフォルダーが現れたときに、無い間に届いた履歴の消去と保存を書く
@@ -1639,7 +1642,10 @@ fn write_pending_history(app: &AppHandle) {
         warn!("couldn't clear draft history after the folder appeared: {error}");
         return;
     }
-    let texts = PENDING_HISTORY.lock().unwrap().texts.take();
+    let (texts, deleted) = {
+        let mut pending = PENDING_HISTORY.lock().unwrap();
+        (pending.texts.take(), std::mem::take(&mut pending.deleted))
+    };
     if let Some(texts) = texts {
         // 画面が持つのは、無くなる前にこのデバイスのファイルへ書いた履歴の続き。そう照らさないと、画面の一覧の全部に
         // 今の時刻を付け、無い間にほかのデバイスで消した履歴まで、消した時刻より後のものとして戻す
@@ -1650,7 +1656,7 @@ fn write_pending_history(app: &AppHandle) {
                 .unwrap()
                 .replaced_by_other_devices(before);
         }
-        if let Err(error) = save_draft_history(app.clone(), texts) {
+        if let Err(error) = save_history(app, texts, deleted) {
             warn!("couldn't save draft history after the folder appeared: {error}");
         }
     }
@@ -1672,11 +1678,32 @@ fn retry_pending_history_clear(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 画面が持つ履歴を保存する。`deleted` は、前に保存してから画面で1件ずつ消した本文（docs/config.md「履歴」）
 #[tauri::command]
-fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String> {
+fn save_draft_history(
+    app: AppHandle,
+    entries: Vec<String>,
+    deleted: Vec<String>,
+) -> Result<(), String> {
+    let now = now_millis();
+    save_history(
+        &app,
+        entries,
+        deleted.into_iter().map(|text| (text, now)).collect(),
+    )
+}
+
+fn save_history(
+    app: &AppHandle,
+    entries: Vec<String>,
+    deleted: Vec<(String, u64)>,
+) -> Result<(), String> {
+    let app = app.clone();
     if !settings_dir_ready(&app) {
         // 画面の一覧はそのまま使え、現れたときに書く（write_pending_history）
-        PENDING_HISTORY.lock().unwrap().texts = Some(entries);
+        let mut pending = PENDING_HISTORY.lock().unwrap();
+        pending.texts = Some(entries);
+        pending.deleted.extend(deleted);
         return Ok(());
     }
     retry_pending_history_clear(&app)?;
@@ -1704,7 +1731,11 @@ fn save_draft_history(app: AppHandle, entries: Vec<String>) -> Result<(), String
         }
     }
     .truncated(size);
-    let next = screen.saved(&merged, texts, size, now_millis());
+    // 消してから照らす。画面の一覧は、消した本文を除いた後のものなので
+    let file = deleted.iter().fold(merged.clone(), |history, (text, at)| {
+        history.without(text, *at)
+    });
+    let next = screen.saved(&file, texts, size, now_millis());
     // 画面は、読み込んだ履歴をそのまま保存し直すことがある。変わっていなければ書かない。置き場を同期していると、
     // 書くたびにほかのデバイスへ送られるため
     if next == merged {

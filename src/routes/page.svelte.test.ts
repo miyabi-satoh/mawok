@@ -361,6 +361,44 @@ describe('下書きの履歴', () => {
 		await expect.element(textarea).toHaveValue('書きかけ');
 	});
 
+	it('履歴を出して「履歴から削除」を押すと、その履歴を消して保存し、打っていた内容に戻る', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await copy(textarea, 'git status');
+		await copy(textarea, 'git diff');
+		await textarea.fill('書きかけ');
+		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
+		await userEvent.keyboard('{ArrowUp}');
+		await expect.element(textarea).toHaveValue('git diff');
+
+		await screen.getByRole('button', { name: m.draft_delete_from_history() }).click();
+
+		await expect.element(textarea).toHaveValue('書きかけ');
+		await vi.waitFor(() =>
+			expect(invoked).toHaveBeenCalledWith('save_draft_history', {
+				entries: ['git status'],
+				deleted: ['git diff']
+			})
+		);
+		await expect
+			.element(screen.getByRole('button', { name: m.draft_delete_from_history() }))
+			.toBeDisabled();
+	});
+
+	it('新規のキーで、書きかけを履歴に入れてから空にする', async () => {
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.fill('書きかけ');
+
+		await userEvent.keyboard('{Meta>}n{/Meta}');
+
+		await expect.element(textarea).toHaveValue('');
+		await expect.element(screen.getByRole('button', { name: m.draft_new() })).toBeDisabled();
+		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
+		await userEvent.keyboard('{ArrowUp}');
+		await expect.element(textarea).toHaveValue('書きかけ');
+	});
+
 	it('履歴を検索するキーで一覧を出し、絞り込んで選んだ履歴を入力欄に出す。下キーで打っていた内容に戻る', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
@@ -451,7 +489,8 @@ describe('下書きの履歴', () => {
 		finishReload(['git log', 'git status']);
 		await vi.waitFor(() =>
 			expect(invoked).toHaveBeenCalledWith('save_draft_history', {
-				entries: ['git log', 'git status', 'git push']
+				entries: ['git log', 'git status', 'git push'],
+				deleted: []
 			})
 		);
 		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);

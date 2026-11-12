@@ -1335,7 +1335,8 @@ describe('設定画面のキー操作', () => {
 	it('操作ごとに今のキーを出し、割り当てのない操作は「なし」と出す', async () => {
 		settings.current = {
 			...view(),
-			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, snippets: '' }
+			// 既定で割り当てのない削除にもキーを割り当て、「なし」を定型文の行だけにする
+			textWindowKeys: { ...DEFAULT_DRAFT_KEYS, snippets: '', delete: 'CommandOrControl+KeyD' }
 		};
 		const screen = await renderAt(m.settings_category_keys);
 

@@ -48,6 +48,7 @@ On other desktops, also assign a key to `mawok --toggle` in the keyboard setting
 - Pressing the hotkey while the text window is in front also copies and returns.
 - To return without copying, press `Esc`. Your unfinished text is still there the next time you bring up the text window.
 - Choose a time for “Clear text box after hiding” under “General” in Settings to start with an empty text box once that time has passed since the window was hidden. Your unfinished text goes to history, so press `↑` to get it back.
+- To start over, press {macos:`Cmd+N`}{windows:`Ctrl+N`}{linux:`Ctrl+N`} or the “New” button at the bottom left. Your unfinished text goes to history.
 - Clicking another app also hides the window without copying, and your unfinished text remains (you can turn this off under “General” in Settings).
 
 ## Use text you copied earlier
@@ -56,6 +57,7 @@ Copied text is kept in history.
 
 - Press `↑` at the start of the text box to show text you copied earlier. Each press goes further back; press `↓` at the end of the text box to go forward again. The “Previous” and “Next” buttons at the top do the same.
 - Press {macos:`Cmd+R`}{windows:`Ctrl+R`}{linux:`Ctrl+R`} or the “Search history” button to list your history. Type to filter it, select one, and press `Enter` to put it in the text box.
+- Delete the text shown from history with the trash button at the top.
 - Change how many are kept under “General” in Settings. Set it to 0 to keep no history.
 - While history is synced, selecting “Clear history” in Settings or setting the number to 0 also clears the history on your other devices (see “[Change the settings folder](#change-the-settings-folder)”).
 
@@ -94,6 +96,7 @@ If two devices change the same file at the same time, the one saved last is kept
 | Go back / forward in history (at the start / end of the text box) | `↑` / `↓` |
 | Go back / forward in history (wherever the cursor is) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`}{linux:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
 | Search history | {macos:`Cmd+R`}{windows:`Ctrl+R`}{linux:`Ctrl+R`} |
+| New (put your unfinished text in history and start over) | {macos:`Cmd+N`}{windows:`Ctrl+N`}{linux:`Ctrl+N`} |
 | Open the snippet list | {macos:`Cmd+K`}{windows:`Ctrl+K`}{linux:`Ctrl+K`} |
 | Open Settings | {macos:`Cmd+,`}{windows:`Ctrl+,`}{linux:`Ctrl+,`} |
 

@@ -54,8 +54,10 @@ export const DRAFT_ACTIONS_IN_SETTINGS = [
 	'historyOlder',
 	'historyNewer',
 	'historySearch',
-	'settings',
+	'delete',
 	'snippets',
+	'settings',
+	'new',
 	'copy'
 ] as const satisfies readonly GeneratedDraftAction[];
 
@@ -98,7 +100,9 @@ export function draftActionLabel(action: DraftAction): string {
 		snippets: m.settings_key_snippets,
 		historyOlder: m.settings_key_historyOlder,
 		historyNewer: m.settings_key_historyNewer,
-		historySearch: m.settings_key_historySearch
+		historySearch: m.settings_key_historySearch,
+		new: m.settings_key_new,
+		delete: m.settings_key_delete
 	}[action]();
 }
 

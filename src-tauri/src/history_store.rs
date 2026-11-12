@@ -32,6 +32,10 @@ pub struct History {
     pub entries: Vec<Entry>,
     /// 履歴を消した時刻。消していなければ 0
     pub cleared_at: u64,
+    /// 1件ずつ消した本文と、消した時刻。その時刻までに覚えた同じ本文を、どのデバイスの分も見せない。
+    /// 消した時刻を残さないと、ほかのデバイスのファイルから同じ本文が戻るため
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deleted: Vec<Entry>,
 }
 
 impl History {
@@ -67,7 +71,14 @@ impl History {
         // 消したはずの履歴として落ちたり、並びが入れ替わったりしないため。同じ回に覚えた本文も、1 ずつずらして順を保つ
         let mut at = now
             .max(self.cleared_at.saturating_add(1))
-            .max(entries.last().map_or(0, |entry| entry.at.saturating_add(1)));
+            .max(entries.last().map_or(0, |entry| entry.at.saturating_add(1)))
+            .max(
+                self.deleted
+                    .iter()
+                    .map(|deleted| deleted.at.saturating_add(1))
+                    .max()
+                    .unwrap_or(0),
+            );
         for text in texts.into_iter().skip(kept) {
             entries.push(Entry { text, at });
             at = at.saturating_add(1);
@@ -75,6 +86,34 @@ impl History {
         Self {
             entries,
             cleared_at: self.cleared_at,
+            deleted: self.deleted.clone(),
+        }
+    }
+
+    /// 1件を消した後の形。同じ本文はすべて消し、消した時刻を残す。消した時刻は、消す本文を覚えた時刻より前にしない
+    /// （時計が戻っていると、消した本文がほかのデバイスから戻るため）
+    pub fn without(&self, text: &str, now: u64) -> Self {
+        let newest = self
+            .entries
+            .iter()
+            .filter(|entry| entry.text == text)
+            .map(|entry| entry.at)
+            .max()
+            .unwrap_or(0);
+        let mut deleted = self.deleted.clone();
+        deleted.push(Entry {
+            text: text.to_string(),
+            at: now.max(newest),
+        });
+        Self {
+            entries: self
+                .entries
+                .iter()
+                .filter(|entry| entry.text != text)
+                .cloned()
+                .collect(),
+            cleared_at: self.cleared_at,
+            deleted: merge_deleted(&deleted, &[], self.cleared_at),
         }
     }
 
@@ -82,9 +121,11 @@ impl History {
     /// （時計が戻っていると、消した履歴がほかのデバイスから戻るため）。
     pub fn cleared(&self, now: u64) -> Self {
         let newest = self.entries.iter().map(|entry| entry.at).max().unwrap_or(0);
+        // 1件ずつ消した記録は、消した時刻より前のものしか無いので要らない
         Self {
             entries: Vec::new(),
             cleared_at: now.max(self.cleared_at).max(newest),
+            deleted: Vec::new(),
         }
     }
 }
@@ -94,6 +135,11 @@ impl History {
 /// 切り詰めで落とす履歴がデバイスごとに違う
 pub fn merge(local: &History, remote: &History) -> History {
     let cleared_at = local.cleared_at.max(remote.cleared_at);
+    let deleted = merge_deleted(&local.deleted, &remote.deleted, cleared_at);
+    let deleted_at: HashMap<&str, u64> = deleted
+        .iter()
+        .map(|entry| (entry.text.as_str(), entry.at))
+        .collect();
     let mut newest: HashMap<&str, u64> = HashMap::new();
     for entry in local.entries.iter().chain(&remote.entries) {
         let at = newest.entry(&entry.text).or_insert(entry.at);
@@ -101,7 +147,9 @@ pub fn merge(local: &History, remote: &History) -> History {
     }
     let mut entries: Vec<Entry> = newest
         .into_iter()
-        .filter(|(_, at)| *at > cleared_at)
+        .filter(|(text, at)| {
+            *at > cleared_at && deleted_at.get(text).is_none_or(|deleted| at > deleted)
+        })
         .map(|(text, at)| Entry {
             text: text.to_string(),
             at,
@@ -111,8 +159,29 @@ pub fn merge(local: &History, remote: &History) -> History {
     History {
         entries,
         cleared_at,
+        deleted,
     }
     .truncated(MAX_MERGED_ENTRIES)
+}
+
+/// 1件ずつ消した記録を合わせる。同じ本文は消した時刻の新しい方を残し、履歴を消した時刻までのものは落とす
+/// （それより前に覚えた本文は、履歴を消した時刻で見せなくなっている）。並びは本文の順で、渡す順に依らない
+fn merge_deleted(local: &[Entry], remote: &[Entry], cleared_at: u64) -> Vec<Entry> {
+    let mut newest: HashMap<&str, u64> = HashMap::new();
+    for entry in local.iter().chain(remote) {
+        let at = newest.entry(&entry.text).or_insert(entry.at);
+        *at = (*at).max(entry.at);
+    }
+    let mut deleted: Vec<Entry> = newest
+        .into_iter()
+        .filter(|(_, at)| *at > cleared_at)
+        .map(|(text, at)| Entry {
+            text: text.to_string(),
+            at,
+        })
+        .collect();
+    deleted.sort_by(|a, b| a.text.cmp(&b.text));
+    deleted
 }
 
 /// 画面が持つ履歴の写し。ほかのデバイスの履歴を混ぜてファイルを入れ替えてから、画面が読み直すまでの間だけ、ファイルと違う。
@@ -344,6 +413,7 @@ mod tests {
                 })
                 .collect(),
             cleared_at,
+            deleted: Vec::new(),
         }
     }
 
@@ -546,6 +616,51 @@ mod tests {
     }
 
     #[test]
+    fn deleting_drops_every_entry_of_the_text_and_records_when() {
+        let deleted = history(&[("a", 1), ("b", 2), ("a", 3)], 0).without("a", 10);
+        assert_eq!(deleted.texts(), texts(&["b"]));
+        assert_eq!(
+            deleted.deleted,
+            [Entry {
+                text: "a".to_string(),
+                at: 10
+            }]
+        );
+        // 時計が戻っていても、消した本文を覚えた時刻より前にはしない
+        assert_eq!(history(&[("a", 50)], 0).without("a", 10).deleted[0].at, 50);
+    }
+
+    #[test]
+    fn merging_does_not_bring_back_a_deleted_entry_from_another_device() {
+        let local = history(&[("b", 2)], 0).without("a", 10);
+        let remote = history(&[("a", 1), ("b", 2), ("c", 3)], 0);
+        let merged = merge(&local, &remote);
+        assert_eq!(merged.texts(), texts(&["b", "c"]));
+        // 消した記録も混ぜた結果に残り、さらにほかのデバイスへ渡る
+        assert_eq!(merged.deleted, local.deleted);
+        assert_eq!(merge(&remote, &local), merged);
+    }
+
+    #[test]
+    fn a_text_recorded_again_after_deleting_comes_back() {
+        let deleted = history(&[("a", 1)], 0).without("a", 10);
+        // 時計が戻っていても、消した時刻より後に覚えたことにする
+        let again = deleted.restamped(texts(&["a"]), 5);
+        assert_eq!(again.entries[0].at, 11);
+        assert_eq!(
+            merge(&again, &history(&[("a", 1)], 0)).texts(),
+            texts(&["a"])
+        );
+    }
+
+    #[test]
+    fn clearing_or_a_later_clear_forgets_the_deleted_records() {
+        let deleted = history(&[("a", 1), ("b", 2)], 0).without("a", 10);
+        assert!(deleted.cleared(20).deleted.is_empty());
+        assert!(merge(&deleted, &history(&[], 30)).deleted.is_empty());
+    }
+
+    #[test]
     fn merging_interleaves_both_sides_by_time() {
         assert_eq!(
             merge(
@@ -611,6 +726,7 @@ mod tests {
                 })
                 .collect(),
             cleared_at: 0,
+            deleted: Vec::new(),
         };
         let merged = merge(&side(1), &side(2));
         assert_eq!(merged.entries.len(), MAX_MERGED_ENTRIES);
@@ -636,6 +752,7 @@ mod tests {
                 })
                 .collect(),
             cleared_at: 0,
+            deleted: Vec::new(),
         };
         let merged = merge(&side("a"), &side("b"));
         assert_eq!(merged, merge(&side("b"), &side("a")));

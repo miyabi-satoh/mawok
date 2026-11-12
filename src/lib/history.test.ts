@@ -173,6 +173,41 @@ describe('DraftHistory', () => {
 	});
 });
 
+describe('DraftHistory の1件の削除', () => {
+	it('出している履歴を、同じ本文ごと消し、たどる前に打っていた内容を返す', () => {
+		const history = new DraftHistory();
+		history.record('git status');
+		history.record('git diff');
+		history.record('git status');
+		history.older('書きかけ');
+
+		expect(history.delete()).toBe('書きかけ');
+		expect(history.entries).toEqual(['git diff']);
+		expect(history.isBrowsing).toBe(false);
+		expect(history.takeDeleted()).toEqual(['git status']);
+		expect(history.takeDeleted()).toEqual([]);
+	});
+
+	it('たどっていなければ何も消さない', () => {
+		const history = new DraftHistory();
+		history.record('git status');
+
+		expect(history.delete()).toBeNull();
+		expect(history.entries).toEqual(['git status']);
+	});
+
+	it('消してまだ保存していない本文は、読み直した履歴からも除く', () => {
+		const history = new DraftHistory();
+		history.record('git status');
+		history.older('');
+		history.delete();
+		history.beginReload();
+		history.finishReload(['git status', 'git log']);
+
+		expect(history.entries).toEqual(['git log']);
+	});
+});
+
 describe('DraftHistory の移れるかどうか', () => {
 	it('空なら、どちらへも移れない', () => {
 		const history = new DraftHistory();

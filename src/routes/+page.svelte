@@ -5,6 +5,8 @@
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import SearchIcon from '@lucide/svelte/icons/search';
+	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import TextQuoteIcon from '@lucide/svelte/icons/text-quote';
 	import { invoke } from '@tauri-apps/api/core';
@@ -208,7 +210,10 @@
 			historySavePending = true;
 			return;
 		}
-		await invoke('save_draft_history', { entries: draftHistory.entries }).catch(() => {});
+		const deleted = draftHistory.takeDeleted();
+		await invoke('save_draft_history', { entries: draftHistory.entries, deleted }).catch(() =>
+			draftHistory.restoreDeleted(deleted)
+		);
 	});
 
 	function saveDraftHistory() {
@@ -584,7 +589,33 @@
 				return true;
 			case 'historySearch':
 				return openHistorySearch();
+			case 'new':
+				return startNew();
+			case 'delete':
+				return deleteHistoryEntry();
 		}
+	}
+
+	/** 出した直後の状態から書き始める。書きかけは履歴に入れ、「前」で戻せるようにする。もう出した直後の状態なら false */
+	function startNew(): boolean {
+		if (text === '' && !draftHistory.isBrowsing && !snippetsOpen && !historySearchOpen)
+			return false;
+		if (draftHistory.setAside(text)) saveDraftHistory();
+		text = '';
+		snippetsOpen = false;
+		historySearchOpen = false;
+		notice = '';
+		textarea?.focus();
+		return true;
+	}
+
+	/** 出している履歴を履歴から消し、たどる前に打っていた内容に戻す。履歴を出していなければ false */
+	function deleteHistoryEntry(): boolean {
+		if (!draftHistory.isBrowsing) return false;
+		text = draftHistory.delete() ?? '';
+		saveDraftHistory();
+		textarea?.focus();
+		return true;
 	}
 
 	/**
@@ -721,6 +752,18 @@
 				>
 					<SearchIcon />
 				</Button>
+				<!-- 履歴の操作なので、履歴のボタンの並びに置く。押せるのは履歴を出しているときだけ -->
+				<Button
+					tabindex={-1}
+					variant="ghost"
+					size="icon-sm"
+					disabled={!draftHistory.isBrowsing}
+					aria-label={m.draft_delete_from_history()}
+					title={keyHint(m.draft_delete_from_history(), keys.delete, platform)}
+					onclick={deleteHistoryEntry}
+				>
+					<Trash2Icon />
+				</Button>
 			{/if}
 			<div class="ml-auto flex items-center gap-1">
 				<Button
@@ -812,6 +855,18 @@
 			ほかは狭い窓に文字を詰め込まないよう、マウスを重ねたときの説明に出す（英語でコピーのキーが3つだと、はみ出していた）
 		-->
 		<div class="@container flex items-center gap-1">
+			<!-- 新規は、メモアプリと同じく左端に置き、決定の操作（コピー）と離す -->
+			<Button
+				tabindex={-1}
+				variant="ghost"
+				size="icon-sm"
+				disabled={text === '' && !draftHistory.isBrowsing}
+				aria-label={m.draft_new()}
+				title={keyHint(m.draft_new(), keys.new, platform)}
+				onclick={startNew}
+			>
+				<SquarePenIcon />
+			</Button>
 			<!-- 変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピーする -->
 			<Button tabindex={-1} size="sm" class="ml-auto" onclick={commit}>
 				{m.draft_copy()}

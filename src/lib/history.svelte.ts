@@ -25,6 +25,8 @@ export class DraftHistory {
 	#recordedWhileReloading: string[] | null = null;
 	/** たどり終えたら入れ替える、読み直した履歴。無ければ null */
 	#reloaded: string[] | null = null;
+	/** 消して、まだ保存していない本文。保存するときに Rust 側へ渡し、ほかのデバイスの履歴からも戻らないようにする */
+	#deleted: string[] = [];
 
 	constructor(size = DEFAULT_DRAFT_HISTORY_SIZE) {
 		this.#size = size;
@@ -82,6 +84,35 @@ export class DraftHistory {
 		return draft.trim() !== '' && this.record(draft);
 	}
 
+	/**
+	 * 出している履歴を消す。同じ本文はすべて消し、たどるのをやめる。たどり始める前に打っていた内容を返す
+	 * （入力欄をそれに戻す）。たどっていなければ null
+	 */
+	delete(): string | null {
+		if (this.#index === null) return null;
+		const text = this.#entries[this.#index];
+		const draft = this.#draft;
+		const without = (entries: string[]) => entries.filter((entry) => entry !== text);
+		this.#entries = without(this.#entries);
+		if (this.#reloaded) this.#reloaded = without(this.#reloaded);
+		if (this.#recordedWhileReloading)
+			this.#recordedWhileReloading = without(this.#recordedWhileReloading);
+		this.#deleted.push(text);
+		this.stopBrowsing();
+		return draft;
+	}
+
+	/** 消して、まだ保存していない本文を取り出す。保存に失敗したら restoreDeleted で戻す */
+	takeDeleted(): string[] {
+		const deleted = this.#deleted;
+		this.#deleted = [];
+		return deleted;
+	}
+
+	restoreDeleted(deleted: string[]) {
+		this.#deleted = [...deleted, ...this.#deleted];
+	}
+
 	/** ほかのデバイスの履歴を混ぜて替わった履歴を読み直している途中か。途中の一覧は古いので、保存しない */
 	get isReloading(): boolean {
 		return this.#recordedWhileReloading !== null;
@@ -105,7 +136,8 @@ export class DraftHistory {
 	finishReload(entries: string[]): boolean {
 		const recorded = this.#recordedWhileReloading ?? [];
 		this.#recordedWhileReloading = null;
-		this.#reloaded = [...entries, ...recorded];
+		// 消してまだ保存していない本文は、読み直した履歴に残っているので除く
+		this.#reloaded = [...entries, ...recorded].filter((entry) => !this.#deleted.includes(entry));
 		if (this.#index === null) this.#applyReloaded();
 		return recorded.length > 0;
 	}
