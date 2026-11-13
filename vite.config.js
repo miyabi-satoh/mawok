@@ -28,7 +28,7 @@ export default defineConfig(() => ({
 	clearScreen: false,
 
 	test: {
-		// 落ちたテストを2回まで流し直す (Playwright の CI の既定と同じ回数)。機械が詰まって時々落ちるテストで、CI や手元の検査が止まらないようにする。
+		// 落ちたテストを2回まで流し直す (Playwright のひな形が CI で使う回数)。機械が詰まって時々落ちるテストで、CI や手元の検査が止まらないようにする。
 		// 流し直して通ったテストは flakyAnnotations が最後に警告で出し (CI では github-actions の reporter が実行の概要にも書く)、埋もれずに直す相手として見える
 		retry: 2,
 		// 場所を出せば、警告から行へ飛べる
