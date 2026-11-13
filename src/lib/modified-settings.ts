@@ -1,4 +1,4 @@
-import type { SettingsView } from '$lib/settings.svelte';
+import type { SettingsView } from '#lib/settings.svelte.ts';
 
 /** 既定から変えた設定なら、その名前（行に印を付け、data-modified に出す）。変えていなければ undefined */
 export function modifiedName(

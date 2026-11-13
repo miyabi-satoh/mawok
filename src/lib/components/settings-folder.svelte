@@ -1,16 +1,16 @@
 <script lang="ts">
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import { invoke } from '@tauri-apps/api/core';
-	import type { PickedSettingsDir } from '$lib/bindings/PickedSettingsDir';
-	import type { Call } from '$lib/call';
-	import SettingsRow from '$lib/components/settings-row.svelte';
-	import * as Alert from '$lib/components/ui/alert';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog';
-	import { Button } from '$lib/components/ui/button';
-	import * as Field from '$lib/components/ui/field';
-	import { settingsFolderProblem, settingsProblemNotice } from '$lib/errors';
-	import { m } from '$lib/paraglide/messages';
-	import type { SettingsView } from '$lib/settings.svelte';
+	import type { PickedSettingsDir } from '#lib/bindings/PickedSettingsDir.ts';
+	import type { Call } from '#lib/call.ts';
+	import SettingsRow from '#lib/components/settings-row.svelte';
+	import * as Alert from '#lib/components/ui/alert/index.ts';
+	import * as AlertDialog from '#lib/components/ui/alert-dialog/index.ts';
+	import { Button } from '#lib/components/ui/button/index.ts';
+	import * as Field from '#lib/components/ui/field/index.ts';
+	import { settingsFolderProblem, settingsProblemNotice } from '#lib/errors.ts';
+	import { m } from '#lib/paraglide/messages.js';
+	import type { SettingsView } from '#lib/settings.svelte.ts';
 
 	/**
 	 * 設定の保存先の行（docs/config.md「置き場」）。替えた先に設定があれば、そちらを使うか、このデバイスの設定で上書きするかを聞く。

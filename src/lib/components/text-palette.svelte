@@ -12,10 +12,10 @@
 </script>
 
 <script lang="ts" generics="T extends NamedText">
-	import { clamp } from '$lib/clamp';
-	import PaletteFrame from '$lib/components/palette-frame.svelte';
-	import { hasNoModifiers, isImeKey, toDraftKey, type Platform } from '$lib/keys';
-	import { filterSnippets, snippetLabel, snippetPreview, type NamedText } from '$lib/snippets';
+	import { clamp } from '#lib/clamp.ts';
+	import PaletteFrame from '#lib/components/palette-frame.svelte';
+	import { hasNoModifiers, isImeKey, toDraftKey, type Platform } from '#lib/keys.ts';
+	import { filterSnippets, snippetLabel, snippetPreview, type NamedText } from '#lib/snippets.ts';
 
 	/**
 	 * 一度に描く項目の数。履歴は何千件にもなり、全部を描くと打つたびに待たされる（1万件で1文字ごとに約 0.13 秒、

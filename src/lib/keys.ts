@@ -1,9 +1,9 @@
-import { errorCode, settingsSaveProblem } from '$lib/errors';
-import { CONSTANTS, ERROR_CODES } from '$lib/bindings/constants';
-import type { DraftAction as GeneratedDraftAction } from '$lib/bindings/DraftAction';
-import type { DraftKeys as GeneratedDraftKeys } from '$lib/bindings/DraftKeys';
-import type { Platform as GeneratedPlatform } from '$lib/bindings/Platform';
-import { m } from '$lib/paraglide/messages';
+import { errorCode, settingsSaveProblem } from '#lib/errors.ts';
+import { CONSTANTS, ERROR_CODES } from '#lib/bindings/constants.ts';
+import type { DraftAction as GeneratedDraftAction } from '#lib/bindings/DraftAction.ts';
+import type { DraftKeys as GeneratedDraftKeys } from '#lib/bindings/DraftKeys.ts';
+import type { Platform as GeneratedPlatform } from '#lib/bindings/Platform.ts';
+import { m } from '#lib/paraglide/messages.js';
 
 /** IME が処理したキーか（変換中の Enter や Esc など）。変換の操作なので、アプリのキーとしては扱わない */
 export function isImeKey(event: Pick<KeyboardEvent, 'isComposing' | 'keyCode'>): boolean {

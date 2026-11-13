@@ -1,5 +1,5 @@
-import type { DraftKeys } from '$lib/keys';
-import type { SettingsView } from '$lib/settings.svelte';
+import type { DraftKeys } from '#lib/keys.ts';
+import type { SettingsView } from '#lib/settings.svelte.ts';
 
 /** Rust 側の既定のキー（src-tauri/src/draft_keys.rs）の写し */
 export const DEFAULT_DRAFT_KEYS: DraftKeys = {

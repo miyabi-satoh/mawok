@@ -1,7 +1,7 @@
-import { coalesced } from '$lib/coalesce';
-import type { ReplacementMatch } from '$lib/bindings/ReplacementMatch';
+import { coalesced } from '#lib/coalesce.ts';
+import type { ReplacementMatch } from '#lib/bindings/ReplacementMatch.ts';
 
-export type { ReplacementMatch } from '$lib/bindings/ReplacementMatch';
+export type { ReplacementMatch } from '#lib/bindings/ReplacementMatch.ts';
 
 export type PreviewCall = (text: string) => Promise<ReplacementMatch[]>;
 

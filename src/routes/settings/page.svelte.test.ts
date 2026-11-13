@@ -4,22 +4,22 @@ import { tick } from 'svelte';
 import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
-import { formatKeys } from '$lib/keys';
-import { CONSTANTS, EVENTS } from '$lib/bindings/constants';
-import { draftGuidance } from '$lib/guidance';
-import { m } from '$lib/paraglide/messages';
+import { formatKeys } from '#lib/keys.ts';
+import { CONSTANTS, EVENTS } from '#lib/bindings/constants.ts';
+import { draftGuidance } from '#lib/guidance.ts';
+import { m } from '#lib/paraglide/messages.js';
 import {
 	settings,
 	type PunctuationStyle,
 	type Replacement,
 	type SettingsView,
 	type Snippet
-} from '$lib/settings.svelte';
-import { newSnippet } from '$lib/snippets';
-import { callsOf } from '$lib/test-support/calls';
-import { emit } from '$lib/test-support/events';
-import { closeRequested } from '$lib/test-support/window';
-import { DEFAULT_DRAFT_KEYS, settingsView } from '$lib/test-support/settings-view';
+} from '#lib/settings.svelte.ts';
+import { newSnippet } from '#lib/snippets.ts';
+import { callsOf } from '#lib/test-support/calls.ts';
+import { emit } from '#lib/test-support/events.ts';
+import { closeRequested } from '#lib/test-support/window.ts';
+import { DEFAULT_DRAFT_KEYS, settingsView } from '#lib/test-support/settings-view.ts';
 import Page from './+page.svelte';
 import { renderAt } from './render-at';
 
@@ -28,7 +28,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(und
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 vi.mock(
 	'@tauri-apps/api/window',
-	async () => (await import('$lib/test-support/window')).windowModule
+	async () => (await import('#lib/test-support/window.ts')).windowModule
 );
 
 const invoked = vi.mocked(invoke);

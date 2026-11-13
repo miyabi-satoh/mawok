@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { m } from '$lib/paraglide/messages';
-import { DEFAULT_DRAFT_KEYS } from '$lib/test-support/settings-view';
+import { m } from '#lib/paraglide/messages.js';
+import { DEFAULT_DRAFT_KEYS } from '#lib/test-support/settings-view.ts';
 import {
 	DRAFT_ACTIONS,
 	DRAFT_ACTIONS_IN_SETTINGS,

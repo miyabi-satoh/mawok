@@ -1,14 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { resetMode, setMode } from 'mode-watcher';
-import type { SettingsView as GeneratedSettingsView } from '$lib/bindings/SettingsView';
-import { EVENTS } from '$lib/bindings/constants';
-import { baseLocale, overwriteGetLocale, type Locale } from '$lib/paraglide/runtime';
+import type { SettingsView as GeneratedSettingsView } from '#lib/bindings/SettingsView.ts';
+import { EVENTS } from '#lib/bindings/constants.ts';
+import { baseLocale, overwriteGetLocale, type Locale } from '#lib/paraglide/runtime.js';
 
-export type { CharWidths } from '$lib/bindings/CharWidths';
-export type { PunctuationStyle } from '$lib/bindings/PunctuationStyle';
-export type { Replacement } from '$lib/bindings/Replacement';
-export type { Snippet } from '$lib/bindings/Snippet';
+export type { CharWidths } from '#lib/bindings/CharWidths.ts';
+export type { PunctuationStyle } from '#lib/bindings/PunctuationStyle.ts';
+export type { Replacement } from '#lib/bindings/Replacement.ts';
+export type { Snippet } from '#lib/bindings/Snippet.ts';
 
 /** Rust 側の get_settings と settings-changed が返す設定。locale は表示言語の設定と OS の言語から Rust 側で決めたもの */
 export type SettingsView = Omit<GeneratedSettingsView, 'locale'> & { locale: Locale };

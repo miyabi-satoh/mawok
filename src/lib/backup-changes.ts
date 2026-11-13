@@ -1,9 +1,9 @@
-import type { BackupDifference } from '$lib/bindings/BackupDifference';
-import type { BackupValue } from '$lib/bindings/BackupValue';
-import { m } from '$lib/paraglide/messages';
-import type { Locale } from '$lib/paraglide/runtime';
-import { CHAR_WIDTH_KINDS } from '$lib/setting-options';
-import { snippetLabel } from '$lib/snippets';
+import type { BackupDifference } from '#lib/bindings/BackupDifference.ts';
+import type { BackupValue } from '#lib/bindings/BackupValue.ts';
+import { m } from '#lib/paraglide/messages.js';
+import type { Locale } from '#lib/paraglide/runtime.js';
+import { CHAR_WIDTH_KINDS } from '#lib/setting-options.ts';
+import { snippetLabel } from '#lib/snippets.ts';
 
 type Row = Extract<BackupValue, { type: 'replacement' | 'snippet' }>;
 

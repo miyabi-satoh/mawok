@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ERROR_CODES } from '$lib/bindings/constants';
-import { m } from '$lib/paraglide/messages';
+import { ERROR_CODES } from '#lib/bindings/constants.ts';
+import { m } from '#lib/paraglide/messages.js';
 import {
 	describeError,
 	errorCode,

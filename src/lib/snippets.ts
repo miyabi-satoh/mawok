@@ -1,6 +1,6 @@
-import { CONSTANTS } from '$lib/bindings/constants';
-import { matchesFilter } from '$lib/list-filter';
-import type { Snippet } from '$lib/settings.svelte';
+import { CONSTANTS } from '#lib/bindings/constants.ts';
+import { matchesFilter } from '#lib/list-filter.ts';
+import type { Snippet } from '#lib/settings.svelte.ts';
 
 /** 新しく足す定型文の1件。有効かは、Rust 側の既定と同じにする */
 export function newSnippet(name: string, body: string): Snippet {

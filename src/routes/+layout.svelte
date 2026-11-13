@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ModeWatcher } from 'mode-watcher';
-	import { allowsContextMenu } from '$lib/context-menu';
-	import { getLocale } from '$lib/paraglide/runtime';
+	import { allowsContextMenu } from '#lib/context-menu.ts';
+	import { getLocale } from '#lib/paraglide/runtime.js';
 	import './layout.css';
 
 	const { children } = $props();

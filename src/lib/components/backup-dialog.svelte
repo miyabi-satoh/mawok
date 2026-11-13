@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
-	import { restoreChangeText } from '$lib/backup-changes';
-	import type { Backup } from '$lib/bindings/Backup';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog';
-	import { ERROR_CODES } from '$lib/bindings/constants';
-	import { errorCode, settingsSaveProblem } from '$lib/errors';
-	import { OpenLoader } from '$lib/open-loader.svelte';
-	import { m } from '$lib/paraglide/messages';
-	import type { Locale } from '$lib/paraglide/runtime';
+	import { restoreChangeText } from '#lib/backup-changes.ts';
+	import type { Backup } from '#lib/bindings/Backup.ts';
+	import * as AlertDialog from '#lib/components/ui/alert-dialog/index.ts';
+	import { ERROR_CODES } from '#lib/bindings/constants.ts';
+	import { errorCode, settingsSaveProblem } from '#lib/errors.ts';
+	import { OpenLoader } from '#lib/open-loader.svelte.ts';
+	import { m } from '#lib/paraglide/messages.js';
+	import type { Locale } from '#lib/paraglide/runtime.js';
 
 	/**
 	 * バックアップから戻す（docs/config.md「バックアップ」）。新しい順に並べ、戻すと今の設定から変わる所を添える。

@@ -2,8 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
-import { m } from '$lib/paraglide/messages';
-import { callsOf } from '$lib/test-support/calls';
+import { m } from '#lib/paraglide/messages.js';
+import { callsOf } from '#lib/test-support/calls.ts';
 import type { LicenseList } from './+page';
 import Page from './+page.svelte';
 // 条文の折り返しを見るテストのために、画面と同じ CSS を当てる

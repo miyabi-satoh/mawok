@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
-	import { isCloseWindowKey } from '$lib/keys';
-	import { renderManual } from '$lib/manual';
-	import { m } from '$lib/paraglide/messages';
-	import { getLocale } from '$lib/paraglide/runtime';
+	import { isCloseWindowKey } from '#lib/keys.ts';
+	import { renderManual } from '#lib/manual.ts';
+	import { m } from '#lib/paraglide/messages.js';
+	import { getLocale } from '#lib/paraglide/runtime.js';
 	import en from '../../../docs/manual/en.md?raw';
 	import ja from '../../../docs/manual/ja.md?raw';
 	import type { PageProps } from './$types';

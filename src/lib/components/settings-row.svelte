@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
+	import SettingsModifiedMark from '#lib/components/settings-modified-mark.svelte';
 
 	let { children, modified }: { children?: Snippet; modified?: string } = $props();
 </script>

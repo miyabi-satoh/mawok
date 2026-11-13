@@ -1,6 +1,6 @@
-import { ERROR_CODES } from '$lib/bindings/constants';
-import type { SettingsProblem } from '$lib/bindings/SettingsProblem';
-import { m } from '$lib/paraglide/messages';
+import { ERROR_CODES } from '#lib/bindings/constants.ts';
+import type { SettingsProblem } from '#lib/bindings/SettingsProblem.ts';
+import { m } from '#lib/paraglide/messages.js';
 
 /** ログに残すために、エラーを1つの文字列にする。スタックトレースがあれば含める。 */
 export function describeError(error: unknown): string {

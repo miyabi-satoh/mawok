@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { initSettings, settings } from '$lib/settings.svelte';
-import { settingsView } from '$lib/test-support/settings-view';
+import { initSettings, settings } from '#lib/settings.svelte.ts';
+import { settingsView } from '#lib/test-support/settings-view.ts';
 
 const { listeners } = vi.hoisted(() => ({
 	listeners: new Set<(event: { payload: unknown }) => void>()

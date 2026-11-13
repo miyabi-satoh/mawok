@@ -5,9 +5,9 @@
 	import ArrowUpToLineIcon from '@lucide/svelte/icons/arrow-up-to-line';
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import TrashIcon from '@lucide/svelte/icons/trash';
-	import { buttonVariants } from '$lib/components/ui/button';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-	import { m } from '$lib/paraglide/messages';
+	import { buttonVariants } from '#lib/components/ui/button/index.ts';
+	import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.ts';
+	import { m } from '#lib/paraglide/messages.js';
 
 	/**
 	 * 定型文の行の「…」メニュー。移動と削除をまとめる。ドラッグ（grip）だけだと

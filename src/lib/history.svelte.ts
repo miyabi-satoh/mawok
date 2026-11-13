@@ -2,9 +2,9 @@
  * 下書きの履歴。コピーして隠した下書きを覚え、履歴の本文は Rust 側でディスクにも保存する。
  */
 
-import { hasNoModifiers, isImeKey } from '$lib/keys';
-import { CONSTANTS } from '$lib/bindings/constants';
-import { historyItems, type HistoryItem } from '$lib/history-search';
+import { hasNoModifiers, isImeKey } from '#lib/keys.ts';
+import { CONSTANTS } from '#lib/bindings/constants.ts';
+import { historyItems, type HistoryItem } from '#lib/history-search.ts';
 
 /** 件数の既定値と上限。決めるのも収めるのも Rust 側（config.rs）で、ここは入力欄の max と設定が届く前に使う */
 export const DEFAULT_DRAFT_HISTORY_SIZE: number = CONSTANTS.DEFAULT_DRAFT_HISTORY_SIZE;
