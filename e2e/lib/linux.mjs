@@ -237,11 +237,14 @@ export async function clipboardTypes() {
 	}
 }
 
-/** クリップボードに置く。`type` を省けば文字として置く。wl-copy は中身を配るために裏で残る */
+/**
+ * クリップボードに置く。`type` を省けば文字として置く。wl-copy は中身を配るために裏で残るので、標準出力も標準エラーも
+ * 渡さない (渡すと、裏の wl-copy が握ったままになり、ssh で回す linux-check-vm が閉じずに止まる)
+ */
 export async function setClipboard(data, type) {
 	await new Promise((resolve, reject) => {
 		const child = spawn('wl-copy', type ? ['-t', type] : [], {
-			stdio: ['pipe', 'ignore', 'inherit']
+			stdio: ['pipe', 'ignore', 'ignore']
 		});
 		child.once('error', reject);
 		child.once('exit', (code) => (code === 0 ? resolve() : reject(new Error(`wl-copy: ${code}`))));
