@@ -251,7 +251,7 @@ export async function setClipboard(data, type) {
 
 /**
  * 利用者のクリップボードを控える。テストは文字をコピーするので、画像など文字でないものも、1つの形式で取っておく
- * (文字があれば文字を選ぶ)。空なら null
+ * (文字があれば文字を選ぶ)。空なら null、中身はあるのに読めなければ undefined (戻すときに触らない)
  */
 async function holdClipboard() {
 	const types = (await clipboardTypes()).filter(Boolean);
@@ -267,13 +267,15 @@ async function holdClipboard() {
 			maxBuffer: Infinity
 		});
 		return { type, data: stdout.toString('base64') };
-	} catch {
-		return null;
+	} catch (error) {
+		console.warn(`[linux-check] クリップボードを控えられませんでした: ${error.message}`);
+		return undefined;
 	}
 }
 
 /** 控えたクリップボードに戻す。控えが空なら、テストがコピーした文字を残さないよう空にする */
 async function restoreClipboard(held) {
+	if (held === undefined) return;
 	if (held === null) {
 		await execFileAsync('wl-copy', ['--clear']);
 		return;
