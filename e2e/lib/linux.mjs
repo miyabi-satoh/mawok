@@ -255,7 +255,11 @@ export async function setClipboard(data, type) {
  */
 async function holdClipboard() {
 	const types = (await clipboardTypes()).filter(Boolean);
-	const type = types.find((t) => t === 'text/plain;charset=utf-8') ?? types[0];
+	const type =
+		types.find((t) => t === 'text/plain;charset=utf-8') ??
+		types.find((t) => t.startsWith('text/plain')) ??
+		types.find((t) => t === 'UTF8_STRING' || t === 'STRING') ??
+		types[0];
 	if (!type) return null;
 	try {
 		const { stdout } = await execFileAsync('wl-paste', ['-n', '-t', type], {
@@ -413,11 +417,12 @@ export async function holdUserState() {
 	}
 	await fs.mkdir(BACKUP_DIR, { recursive: true });
 	const wasRunning = await isMawokRunning();
+	// Linux ではコピーしたアプリがクリップボードの中身を配るので、常用の Mawok でコピーしたものは、止める前に取る
+	const clipboard = await holdClipboard();
 	// 控えを取り終える前に止まっても、動いていた Mawok を起動し直せるよう、先に書いておく
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'running.json'), { wasRunning });
 	await quitMawok();
 	const autostart = await fs.readFile(AUTOSTART_FILE, 'utf8').catch(() => null);
-	const clipboard = await holdClipboard();
 	const held = await desktop.hold();
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'state.json'), {
 		wasRunning,
