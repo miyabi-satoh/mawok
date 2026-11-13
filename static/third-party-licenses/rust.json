@@ -3455,7 +3455,7 @@
 		{
 			"name": "wry",
 			"versions": [
-				"0.57.2"
+				"0.57.0"
 			],
 			"license": "Apache-2.0 OR MIT",
 			"repository": "https://github.com/tauri-apps/wry",
