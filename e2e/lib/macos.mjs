@@ -1199,8 +1199,12 @@ export async function launchOtherApp() {
 `,
 			{ name: OTHER_APP }
 		);
+		// 前面が移らずに落ちたとき、クリックが下書きの上に落ちたのかを見分けられるよう、位置を添える
+		const draft = await windowFrame(DRAFT_TITLE);
 		await click(point);
-		await waitFor(frontmostApp, (front) => front === OTHER_APP, { label: `${OTHER_APP} の前面` });
+		await waitFor(frontmostApp, (front) => front === OTHER_APP, {
+			label: `${OTHER_APP} の前面 (クリック ${JSON.stringify(point)}・下書き ${JSON.stringify(draft)})`
+		});
 	};
 	return { name: OTHER_APP, activate: () => activateApp(OTHER_APP), clickWindow, close };
 }
