@@ -129,7 +129,13 @@ export const FAILURE_DIR = path.resolve(import.meta.dirname, '..', 'screenshots'
  * 窓の一覧は手前から順で、クリックがどの窓に落ちたかや、前面がどこかを後から読めるようにする
  */
 export async function captureFailure(name) {
-	await fs.mkdir(FAILURE_DIR, { recursive: true });
+	// 記録に失敗しても、テストの失敗の上にフックのエラーを重ねないよう、どれも投げずにログに出す
+	try {
+		await fs.mkdir(FAILURE_DIR, { recursive: true });
+	} catch (error) {
+		console.error(`[macos-check] 記録の置き場を作れませんでした: ${error.message}`);
+		return [];
+	}
 	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 	const base = path.join(
 		FAILURE_DIR,
@@ -137,7 +143,8 @@ export async function captureFailure(name) {
 	);
 	const saved = [];
 	try {
-		await execFileAsync('screencapture', ['-x', `${base}.png`]);
+		// 許可の確認などで止まっても、残りのテストが固まらないよう打ち切る
+		await execFileAsync('screencapture', ['-x', '-m', `${base}.png`], { timeout: 30_000 });
 		saved.push(`${base}.png`);
 	} catch (error) {
 		console.error(`[macos-check] 画面を撮れませんでした: ${error.message}`);
