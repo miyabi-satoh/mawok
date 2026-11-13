@@ -121,6 +121,43 @@ export function frontmostApp() {
 	return jxa('return front();');
 }
 
+/** 落ちたときの画面と窓の一覧の置き場 (`screenshots/` は gitignore 済み) */
+export const FAILURE_DIR = path.resolve(import.meta.dirname, '..', 'screenshots', 'macos-failures');
+
+/**
+ * 落ちた時点の画面 (主のディスプレイ) と、画面に出ている窓の一覧を `FAILURE_DIR` に置き、置いた先を返す。
+ * 窓の一覧は手前から順で、クリックがどの窓に落ちたかや、前面がどこかを後から読めるようにする
+ */
+export async function captureFailure(name) {
+	await fs.mkdir(FAILURE_DIR, { recursive: true });
+	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+	const base = path.join(
+		FAILURE_DIR,
+		`${stamp} ${name.replace(/[/\\:*?"<>|]/g, '_').slice(0, 80)}`
+	);
+	const saved = [];
+	try {
+		await execFileAsync('screencapture', ['-x', `${base}.png`]);
+		saved.push(`${base}.png`);
+	} catch (error) {
+		console.error(`[macos-check] 画面を撮れませんでした: ${error.message}`);
+	}
+	try {
+		const state = await jxa(`
+	const ref = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, $.kCGNullWindowID);
+	const windows = ObjC.deepUnwrap(ObjC.castRefToObject(ref))
+		.filter((w) => w.kCGWindowLayer === 0)
+		.map((w) => ({ app: w.kCGWindowOwnerName, title: w.kCGWindowName ?? null, bounds: w.kCGWindowBounds }));
+	return { front: front(), windows };
+`);
+		await fs.writeFile(`${base}.json`, `${JSON.stringify(state, null, '\t')}\n`);
+		saved.push(`${base}.json`);
+	} catch (error) {
+		console.error(`[macos-check] 窓の一覧を読めませんでした: ${error.message}`);
+	}
+	return saved;
+}
+
 /** 文字を打つ。`modifiers` は `['command down', 'shift down']` の形 */
 export function keystroke(text, modifiers = []) {
 	return jxa('se.keystroke(args.text, { using: args.modifiers });', { text, modifiers });
