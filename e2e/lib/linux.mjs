@@ -237,14 +237,44 @@ export async function clipboardTypes() {
 	}
 }
 
-/** クリップボードに文字を置く。wl-copy は中身を配るために裏で残る */
-export async function setClipboard(text) {
+/** クリップボードに置く。`type` を省けば文字として置く。wl-copy は中身を配るために裏で残る */
+export async function setClipboard(data, type) {
 	await new Promise((resolve, reject) => {
-		const child = spawn('wl-copy', [], { stdio: ['pipe', 'ignore', 'inherit'] });
+		const child = spawn('wl-copy', type ? ['-t', type] : [], {
+			stdio: ['pipe', 'ignore', 'inherit']
+		});
 		child.once('error', reject);
 		child.once('exit', (code) => (code === 0 ? resolve() : reject(new Error(`wl-copy: ${code}`))));
-		child.stdin.end(text);
+		child.stdin.end(data);
 	});
+}
+
+/**
+ * 利用者のクリップボードを控える。テストは文字をコピーするので、画像など文字でないものも、1つの形式で取っておく
+ * (文字があれば文字を選ぶ)。空なら null
+ */
+async function holdClipboard() {
+	const types = (await clipboardTypes()).filter(Boolean);
+	const type = types.find((t) => t === 'text/plain;charset=utf-8') ?? types[0];
+	if (!type) return null;
+	try {
+		const { stdout } = await execFileAsync('wl-paste', ['-n', '-t', type], {
+			encoding: 'buffer',
+			maxBuffer: Infinity
+		});
+		return { type, data: stdout.toString('base64') };
+	} catch {
+		return null;
+	}
+}
+
+/** 控えたクリップボードに戻す。控えが空なら、テストがコピーした文字を残さないよう空にする */
+async function restoreClipboard(held) {
+	if (held === null) {
+		await execFileAsync('wl-copy', ['--clear']);
+		return;
+	}
+	await setClipboard(Buffer.from(held.data, 'base64'), held.type);
 }
 
 // ── トレイ (StatusNotifierItem と dbusmenu) ──
@@ -387,8 +417,7 @@ export async function holdUserState() {
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'running.json'), { wasRunning });
 	await quitMawok();
 	const autostart = await fs.readFile(AUTOSTART_FILE, 'utf8').catch(() => null);
-	const types = await clipboardTypes();
-	const clipboard = types.some((t) => t.startsWith('text/plain')) ? await clipboardText() : null;
+	const clipboard = await holdClipboard();
 	const held = await desktop.hold();
 	await writeJsonAtomic(path.join(BACKUP_DIR, 'state.json'), {
 		wasRunning,
@@ -427,7 +456,9 @@ export async function restoreUserState() {
 			await fs.mkdir(path.dirname(AUTOSTART_FILE), { recursive: true });
 			await fs.writeFile(AUTOSTART_FILE, state.autostart);
 		}
-		if (state.clipboard !== null) await setClipboard(state.clipboard).catch(() => {});
+		await restoreClipboard(state.clipboard).catch((error) =>
+			console.warn(`[linux-check] クリップボードを戻せませんでした: ${error.message}`)
+		);
 	}
 	await fs.rm(BACKUP_DIR, { recursive: true, force: true });
 	if (running.wasRunning) await launchRegularMawok();
