@@ -56,16 +56,16 @@ let interrupted = false;
  * テストファイルを1つずつ順に `node` で直接回し、終了コードを返す (どれかが落ちたら 1)。
  * `node --test` を通さないのは、Ctrl+C を受けた `node --test` がテストのプロセスをすぐ強制終了し、
  * テスト側の書き戻し (config.mjs の registerCrashRecovery) が途中で打ち切られるため (Node 24 で確認)。
- * 中断されたら、残りのファイルは回さない
+ * 中断されたら、残りのファイルは回さない。`nodeArgs` は各ファイルの `node` に先に渡す引数 (`--import` など)
  */
-export async function runTests(files, cwd) {
+export async function runTests(files, cwd, nodeArgs = []) {
 	if (files.length === 0) {
 		console.error('[e2e] 選んだテストに当たるファイルがありません');
 		return 1;
 	}
 	const failed = [];
 	for (const file of files) {
-		const code = await run(process.execPath, [file], cwd);
+		const code = await run(process.execPath, [...nodeArgs, file], cwd);
 		if (code !== 0) failed.push(file);
 		if (interrupted) {
 			console.error('[e2e] 中断したので、残りのテストファイルは回しません');

@@ -3,6 +3,7 @@
 // ビルドはしない。常用の /Applications/Mawok.app で回す (別のものは環境変数 MAWOK_APP で指す)。
 // 引数でテストファイルを選べる。`draft` のように名前だけなら `macos/<名前>.test.mjs`。
 // `--restore` は、中断して残った控えから、設定・履歴・クリップボードなどを戻すだけ
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, runTests, testFiles } from './lib/runner.mjs';
@@ -21,7 +22,7 @@ try {
 	process.exit(2);
 }
 
-const { assertGuiSession, assertPermissions, assertScreenUnlocked, restoreUserState } =
+const { FAILURE_DIR, assertGuiSession, assertPermissions, assertScreenUnlocked, restoreUserState } =
 	await import('./lib/macos.mjs');
 try {
 	await assertGuiSession();
@@ -42,4 +43,9 @@ if (options.flags.has('--restore')) {
 	process.exit(0);
 }
 
-process.exitCode = await runTests(testFiles('macos', options.tests, e2eDir), e2eDir);
+// 前の実行で落ちた時点の記録と混ざらないよう、回す前に空にする
+await fs.rm(FAILURE_DIR, { recursive: true, force: true });
+process.exitCode = await runTests(testFiles('macos', options.tests, e2eDir), e2eDir, [
+	'--import',
+	'./lib/macos-failure-capture.mjs'
+]);
