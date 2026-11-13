@@ -5,7 +5,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureSessionReady, keepDisplayOn } from './lib/power.mjs';
-import { stopPowerShell } from './lib/os.mjs';
+import { clearFailures, FAILURE_CAPTURE_ARGS, stopPowerShell } from './lib/os.mjs';
 import { parseArgs, run, runTests, testFiles, waitForChildOnInterrupt } from './lib/runner.mjs';
 
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,10 @@ await stopPowerShell();
 const display = await keepDisplayOn();
 try {
 	let code = options.flags.has('--no-build') ? 0 : await run('just', ['msix'], repoRoot);
-	if (code === 0) code = await runTests(testFiles('msix', options.tests, e2eDir), e2eDir);
+	if (code === 0) {
+		await clearFailures();
+		code = await runTests(testFiles('msix', options.tests, e2eDir), e2eDir, FAILURE_CAPTURE_ARGS);
+	}
 	process.exitCode = code;
 } finally {
 	await display.release();

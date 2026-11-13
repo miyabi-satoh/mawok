@@ -787,6 +787,185 @@ $name = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
 	return stdout.trim();
 }
 
+/** 落ちた時点の記録の置き場 (gitignore 済み)。入口 (run.mjs・msix-run.mjs) が回す前に空にする */
+export const FAILURE_DIR = path.resolve(
+	import.meta.dirname,
+	'..',
+	'screenshots',
+	'windows-failures'
+);
+/**
+ * 前の実行で落ちた時点の記録と混ざらないよう、回す前に `FAILURE_DIR` を空にする。
+ * エクスプローラーで開いているなどで消せなくても、テストは止めずに警告だけ出す
+ */
+export async function clearFailures() {
+	try {
+		await fs.rm(FAILURE_DIR, { recursive: true, force: true });
+	} catch (error) {
+		console.warn(`[e2e] 前の回の、落ちた時点の記録を消せませんでした: ${error.message}`);
+	}
+}
+/** 入口が各テストファイルの `node` に渡す引数。落ちたテストに captureFailure を掛けるフックを先に読み込む */
+export const FAILURE_CAPTURE_ARGS = ['--import', './lib/windows-failure-capture.mjs'];
+
+// 画面全体 (すべてのモニターを含む仮想画面) を撮り、表示中のトップレベルウィンドウを手前から順に並べる。
+// 座標は物理ピクセルにそろえる (input.mjs のクリックの座標と同じ。しないと拡大率で割り引いた値になる)。
+// 隠れた (cloaked) ウィンドウは、IsWindowVisible でも見えるとされるが画面には無いので、印を付けて残す
+const FAILURE_CAPTURE_SCRIPT = `
+Add-Type -AssemblyName System.Drawing
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class E2EFailureCapture {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hWnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+}
+"@
+# DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2。先に DPI の扱いが決まっていて効かなければ、input.mjs と同じく古い API で物理ピクセルにする
+if (-not [E2EFailureCapture]::SetProcessDpiAwarenessContext([IntPtr](-4))) { [E2EFailureCapture]::SetProcessDPIAware() | Out-Null }
+$saved = New-Object System.Collections.Generic.List[string]
+$errors = New-Object System.Collections.Generic.List[string]
+try {
+    # SM_XVIRTUALSCREEN・SM_YVIRTUALSCREEN・SM_CXVIRTUALSCREEN・SM_CYVIRTUALSCREEN
+    $x = [E2EFailureCapture]::GetSystemMetrics(76); $y = [E2EFailureCapture]::GetSystemMetrics(77)
+    $width = [E2EFailureCapture]::GetSystemMetrics(78); $height = [E2EFailureCapture]::GetSystemMetrics(79)
+    $bitmap = New-Object System.Drawing.Bitmap $width, $height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($x, $y, 0, 0, $bitmap.Size)
+    $graphics.Dispose()
+    $bitmap.Save("$base.png", [System.Drawing.Imaging.ImageFormat]::Png)
+    $bitmap.Dispose()
+    $saved.Add("$base.png")
+} catch {
+    $errors.Add("画面を撮れませんでした: $($_.Exception.Message)")
+}
+try {
+    $fg = [E2EFailureCapture]::GetForegroundWindow()
+    $names = @{}
+    Get-Process | ForEach-Object { $names[[uint32]$_.Id] = $_.ProcessName }
+    $windows = New-Object System.Collections.Generic.List[Object]
+    $callback = {
+        param($hWnd, $lParam)
+        if ([E2EFailureCapture]::IsWindowVisible($hWnd)) {
+            $procId = 0
+            [E2EFailureCapture]::GetWindowThreadProcessId($hWnd, [ref]$procId) | Out-Null
+            $title = New-Object System.Text.StringBuilder 512
+            [E2EFailureCapture]::GetWindowText($hWnd, $title, 512) | Out-Null
+            $class = New-Object System.Text.StringBuilder 256
+            [E2EFailureCapture]::GetClassName($hWnd, $class, 256) | Out-Null
+            $rect = New-Object E2EFailureCapture+RECT
+            [E2EFailureCapture]::GetWindowRect($hWnd, [ref]$rect) | Out-Null
+            $cloaked = 0
+            # DWMWA_CLOAKED
+            [E2EFailureCapture]::DwmGetWindowAttribute($hWnd, 14, [ref]$cloaked, 4) | Out-Null
+            # GWL_EXSTYLE の WS_EX_TOPMOST
+            $topmost = ([E2EFailureCapture]::GetWindowLong($hWnd, -20) -band 0x8) -ne 0
+            $windows.Add([ordered]@{
+                hwnd = $hWnd.ToInt64()
+                process = $names[[uint32]$procId]
+                title = $title.ToString()
+                class = $class.ToString()
+                bounds = [ordered]@{ x = $rect.Left; y = $rect.Top; width = $rect.Right - $rect.Left; height = $rect.Bottom - $rect.Top }
+                topmost = $topmost
+                cloaked = $cloaked -ne 0
+                foreground = $hWnd -eq $fg
+            })
+        }
+        return $true
+    }
+    [E2EFailureCapture]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
+    $fgProcId = 0
+    [E2EFailureCapture]::GetWindowThreadProcessId($fg, [ref]$fgProcId) | Out-Null
+    $fgTitle = New-Object System.Text.StringBuilder 512
+    [E2EFailureCapture]::GetWindowText($fg, $fgTitle, 512) | Out-Null
+    $state = [ordered]@{
+        foreground = [ordered]@{ hwnd = $fg.ToInt64(); process = $names[[uint32]$fgProcId]; title = $fgTitle.ToString() }
+        windows = $windows
+    }
+} catch {
+    $state = $null
+    $errors.Add("窓の一覧を読めませんでした: $($_.Exception.Message)")
+}
+ConvertTo-Json -Compress -Depth 6 -InputObject @{ saved = @($saved); state = $state; errors = @($errors) }
+`;
+
+/** 回っているテスト (windows-failure-capture.mjs が渡す)。フックを読み込まずに回したときは null のまま */
+let currentTest = null;
+/** そのテストで、もう記録を残したか */
+let capturedCurrent = false;
+
+/** 回り始めたテストを覚える (windows-failure-capture.mjs の beforeEach から呼ぶ) */
+export function trackTest(t) {
+	currentTest = t;
+	capturedCurrent = false;
+}
+
+/**
+ * 回っているテストの本体が落ちていたら、1度だけ記録を残す。テストファイルの afterEach はアプリを閉じる
+ * (setup.mjs の closeClient) ので、全体の afterEach (外側なので、ファイルの afterEach より後に回る) だけでは
+ * Mawok の窓が写らない。閉じる前にも呼んで、窓が出ているうちに残す。
+ * 落ちたかは passed でなく error で見る。passed は本体が終わるまで false なので、本体の途中で起動し直す
+ * テストの closeClient で、通るテストまで記録してしまう
+ */
+export async function captureIfFailed() {
+	if (!currentTest?.error || capturedCurrent) return;
+	capturedCurrent = true;
+	const saved = await captureFailure(currentTest.fullName);
+	if (saved.length > 0) console.error(`[e2e] 落ちた時点の記録: ${saved.join(', ')}`);
+}
+
+/**
+ * 落ちた時点の画面 (すべてのモニター) と、表示中のトップレベルウィンドウの一覧 (手前から順に、プロセス・タイトル・
+ * クラス・位置と大きさ・前面か) を `FAILURE_DIR` に置き、置いた先を返す。クリックがどの窓に落ちたかや、
+ * 前面がどこかを後から読めるようにする
+ */
+export async function captureFailure(name) {
+	// 記録に失敗しても、テストの失敗の上にフックのエラーを重ねないよう、どれも投げずにログに出す
+	try {
+		await fs.mkdir(FAILURE_DIR, { recursive: true });
+	} catch (error) {
+		console.error(`[e2e] 記録の置き場を作れませんでした: ${error.message}`);
+		return [];
+	}
+	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+	const base = path.join(
+		FAILURE_DIR,
+		`${stamp} ${name.replace(/[/\\:*?"<>|]/g, '_').slice(0, 80)}`
+	);
+	try {
+		// 立ち上げたままの PowerShell (runPowerShell) は待ち時間の上限が無く、テストが落ちた原因で固まっていることも
+		// あるので、使い捨ての PowerShell で上限を付けて動かす。落ちたときに1回動かすだけなので、置き場のパスは埋め込む ($base)
+		const { stdout } = await promisify(execFile)(
+			'powershell',
+			powerShellArgs(`$base = '${base.replace(/'/g, "''")}'\n${FAILURE_CAPTURE_SCRIPT}`),
+			{ timeout: 30_000, windowsHide: true }
+		);
+		const { saved, state, errors } = JSON.parse(stdout.trim());
+		for (const message of errors) console.error(`[e2e] ${message}`);
+		if (state) {
+			await fs.writeFile(`${base}.json`, `${JSON.stringify(state, null, '\t')}\n`);
+			saved.push(`${base}.json`);
+		}
+		return saved;
+	} catch (error) {
+		console.error(`[e2e] 落ちた時点の記録を残せませんでした: ${error.message}`);
+		return [];
+	}
+}
+
 /** 表示中で、タイトルが `title` の Mawok のウィンドウのハンドル (10 進の文字列)。なければ null */
 export async function findVisibleMawokWindow(title) {
 	const windows = await getMawokWindowStates();

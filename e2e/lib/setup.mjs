@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { startTauriDriver } from './tauri-driver.mjs';
 import {
 	AUTOSTART_HELD_ENV,
+	captureIfFailed,
 	ensureMawokNotRunning,
 	recoverStaleAppsThemeIfAny,
 	recoverStaleAutostartBackupIfAny,
@@ -48,6 +49,8 @@ export function createSuite() {
 	let autostart;
 
 	async function closeClient(client) {
+		// テストの本体が落ちていたら、窓を閉じる前に、その時点の画面と窓の一覧を残す (windows-failure-capture.mjs)
+		await captureIfFailed();
 		try {
 			await client.deleteSession();
 		} catch {

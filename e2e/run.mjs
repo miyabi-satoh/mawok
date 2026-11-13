@@ -18,6 +18,8 @@ import {
 	restartMawok,
 	stopRunningMawok,
 	clearAutostartEntry,
+	clearFailures,
+	FAILURE_CAPTURE_ARGS,
 	recoverStaleAutostartBackupIfAny,
 	snapshotAutostartEntry,
 	stopPowerShell
@@ -132,7 +134,12 @@ try {
 			await clearAutostartEntry();
 			await stopPowerShell();
 			process.env[AUTOSTART_HELD_ENV] = '1';
-			code = await runTests(testFiles('tests', options.tests, e2eDir), e2eDir);
+			await clearFailures();
+			code = await runTests(
+				testFiles('tests', options.tests, e2eDir),
+				e2eDir,
+				FAILURE_CAPTURE_ARGS
+			);
 		} finally {
 			await autostart.restore();
 			await stopPowerShell();
