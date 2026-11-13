@@ -916,10 +916,12 @@ export function trackTest(t) {
 /**
  * 回っているテストの本体が落ちていたら、1度だけ記録を残す。テストファイルの afterEach はアプリを閉じる
  * (setup.mjs の closeClient) ので、全体の afterEach (外側なので、ファイルの afterEach より後に回る) だけでは
- * Mawok の窓が写らない。閉じる前にも呼んで、窓が出ているうちに残す
+ * Mawok の窓が写らない。閉じる前にも呼んで、窓が出ているうちに残す。
+ * 落ちたかは passed でなく error で見る。passed は本体が終わるまで false なので、本体の途中で起動し直す
+ * テストの closeClient で、通るテストまで記録してしまう
  */
 export async function captureIfFailed() {
-	if (!currentTest || currentTest.passed || capturedCurrent) return;
+	if (!currentTest?.error || capturedCurrent) return;
 	capturedCurrent = true;
 	const saved = await captureFailure(currentTest.fullName);
 	if (saved.length > 0) console.error(`[e2e] 落ちた時点の記録: ${saved.join(', ')}`);
