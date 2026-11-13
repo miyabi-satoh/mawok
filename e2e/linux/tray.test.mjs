@@ -61,10 +61,10 @@ test.describe('Linux: トレイ', () => {
 
 	test('「テキストウィンドウを表示／非表示」で下書きの窓が出て入力欄にフォーカスが入り、もう一度押すと隠れて前の窓に戻る', async () => {
 		await other.focus();
-		await waitFor(activeWindow, (w) => w?.class === other.class, { label: 'ほかの窓にフォーカス' });
+		await waitFor(activeWindow, (w) => w?.app === other.app, { label: 'ほかの窓にフォーカス' });
 		await pressTrayItem(TRAY_MENU_JA.toggleDraft);
 		await waitDraftVisible(true, 'トレイから出した下書きの窓');
-		await waitFor(activeWindow, (w) => w?.class === 'mawok', {
+		await waitFor(activeWindow, (w) => w?.app === 'mawok', {
 			label: 'トレイから出した下書きの窓にフォーカスが移る'
 		});
 		await waitFor(() => draftFocused(app.client), Boolean, {
@@ -72,7 +72,7 @@ test.describe('Linux: トレイ', () => {
 		});
 		await pressTrayItem(TRAY_MENU_JA.toggleDraft);
 		await waitDraftVisible(false, 'トレイからもう一度押して下書きの窓が隠れる');
-		await waitFor(activeWindow, (w) => w?.class === other.class, {
+		await waitFor(activeWindow, (w) => w?.app === other.app, {
 			label: 'トレイから隠した後、前の窓にフォーカスが戻る'
 		});
 	});

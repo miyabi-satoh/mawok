@@ -1,0 +1,82 @@
+#cloud-config
+# Arch に Hyprland・その portal・トレイを受ける waybar を入れ、mawok で tty1 に自動ログインして Hyprland を立ち上げる。
+# Linux の確認 (just linux-check-vm) を、手元の画面と入力を使わずに回すため。Mawok は入れず、確かめるたびに
+# linux-vm-run.mjs が今のビルドを写す (動かすのに要るライブラリだけ入れておく)
+users:
+  - name: mawok
+    groups: [wheel]
+    shell: /bin/bash
+    sudo: 'ALL=(ALL) NOPASSWD:ALL'
+    lock_passwd: false
+    plain_text_passwd: mawok
+    ssh_authorized_keys:
+      - '@SSH_KEY@'
+ssh_pwauth: true
+package_update: true
+package_upgrade: true
+packages:
+  - hyprland
+  - xdg-desktop-portal-hyprland
+  - waybar
+  - foot
+  - wl-clipboard
+  - ydotool
+  - grim
+  - mesa
+  - webkit2gtk-4.1
+  - webkitgtk-6.0
+  - libayatana-appindicator
+  - nodejs
+  - python
+  - noto-fonts-cjk
+write_files:
+  - path: /etc/systemd/system/getty@tty1.service.d/autologin.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty -o '-p -f -- \\u' --noclear --autologin mawok %I $TERM
+  # ydotool のキーを送る常駐。uinput は root が要る。ソケットはログインした mawok の /run/user/1000 に置くので、ログインを待つ
+  - path: /etc/systemd/system/ydotoold.service
+    content: |
+      [Unit]
+      Description=ydotool daemon for the Mawok checks
+      [Service]
+      ExecStartPre=/bin/sh -c "until [ -d /run/user/1000 ]; do sleep 1; done"
+      ExecStart=/usr/bin/ydotoold --socket-path=/run/user/1000/.ydotool_socket --socket-own=1000:1000
+      Restart=always
+      RestartSec=2
+      [Install]
+      WantedBy=multi-user.target
+  - path: /home/mawok/.bash_profile
+    defer: true
+    owner: mawok:mawok
+    content: |
+      [ -f ~/.bashrc ] && . ~/.bashrc
+      if [ "$(tty)" = /dev/tty1 ] && [ -z "$WAYLAND_DISPLAY" ]; then
+        exec Hyprland >~/.hyprland.log 2>&1
+      fi
+  - path: /home/mawok/.config/hypr/hyprland.lua
+    defer: true
+    owner: mawok:mawok
+    content: |
+      hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
+      hl.on("hyprland.start", function()
+        -- portal と waybar の D-Bus の起動に、この画面の環境を渡す
+        hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
+        hl.exec_cmd("waybar")
+      end)
+      -- Aero と同じく、ホットキーから mawok --toggle を呼ぶ
+      hl.bind("CTRL + SHIFT + SPACE", hl.dsp.exec_cmd("mawok --toggle"))
+# 1つのスクリプトにして、どれか1つでも失敗したら止める。最後まで通ったら MAWOK_VM_READY を出し、vm.sh はそれで出来上がりを見る
+runcmd:
+  - - bash
+    - -euxc
+    - |
+      curl -fsS --retry 5 -o /usr/local/bin/tauri-driver http://10.0.2.2:@HTTP_PORT@/tauri-driver
+      chmod 755 /usr/local/bin/tauri-driver
+      chown -R mawok:mawok /home/mawok/.config
+      systemctl enable ydotoold.service
+      echo MAWOK_VM_READY
+power_state:
+  mode: poweroff
+  condition: true

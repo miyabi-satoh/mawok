@@ -1,9 +1,10 @@
-// `just linux-check` の入口。Linux の自動の確認 (`linux/*.test.mjs`) を、Hyprland の上で回す。
+// `just linux-check` の入口。Linux の自動の確認 (`linux/*.test.mjs`) を、Hyprland か GNOME の上で回す。
+// VM の中で回すときは linux-vm-run.mjs がこれを VM の中で動かす。
 //
 // ビルドはしない。入れてある /usr/bin/mawok で回す (別のものは環境変数 MAWOK_APP で指す)。CI では回さない
 // (runner に Wayland のデスクトップと portal が無いため)。
 // 引数でテストファイルを選べる。`tray` のように名前だけなら `linux/<名前>.test.mjs`。
-// `--restore` は、中断して残った控えから、常用の Mawok・ログイン時の起動・クリップボード・Hyprland の割り当てを戻すだけ
+// `--restore` は、中断して残った控えから、常用の Mawok・ログイン時の起動・クリップボード・ホットキーの割り当てを戻すだけ
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -1,7 +1,8 @@
-// Linux の確認 (`just linux-check`) で使う、Hyprland の上で Mawok を動かして読む道具。
+// Linux の確認 (`just linux-check`) で使う、Hyprland・GNOME の上で Mawok を動かして読む道具。
 //
 // 画面の中は WebDriver (tauri-driver + WebKitWebDriver)、キーは ydotool (uinput)、トレイは D-Bus (dbusmenu)、
-// 窓とフォーカスは hyprctl、クリップボードは wl-clipboard で扱う。入れ方は e2e/README.md「Linux の確認」
+// クリップボードは wl-clipboard で扱う。窓とフォーカス・ホットキーの割り当てはデスクトップごとに違うので、
+// linux-hyprland.mjs (hyprctl) と linux-gnome.mjs (AT-SPI と gsettings) に分けてある。入れ方は e2e/README.md「Linux の確認」
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
@@ -11,6 +12,8 @@ import { promisify } from 'node:util';
 import { remote } from 'webdriverio';
 import { PROFILE, PROFILE_ENV, PROFILE_IDENTIFIER } from './app-conf.mjs';
 import { fileExists, markLog, readLogSince, recordPath, writeJsonAtomic } from './files.mjs';
+import * as gnome from './linux-gnome.mjs';
+import * as hyprland from './linux-hyprland.mjs';
 import { writeSettings } from './settings-files.mjs';
 import { waitFor } from './wait.mjs';
 
@@ -31,8 +34,6 @@ export const AUTOSTART_FILE = path.join(CONFIG_HOME, 'autostart', 'Mawok.desktop
 // portal は、名乗ったアプリ ID の .desktop が無いと登録を断る (`App info not found`)。常用の版はパッケージが入れるが、
 // プロファイルを分けた ID には無いので、回している間だけ置く
 const PORTAL_DESKTOP_FILE = path.join(DATA_HOME, 'applications', `${PROFILE_IDENTIFIER}.desktop`);
-/** portal に登録したホットキーの、Hyprland での名前 (`hyprctl globalshortcuts`)。portal_hotkey.rs の SHORTCUT_ID */
-export const PORTAL_SHORTCUT = `${PROFILE_IDENTIFIER}:toggle`;
 
 const BACKUP_DIR = recordPath('.linux-backup');
 /** 落ちたときの画面と窓の一覧の置き場 (`screenshots/` は gitignore 済み) */
@@ -40,12 +41,6 @@ export const FAILURE_DIR = path.resolve(import.meta.dirname, '..', 'screenshots'
 
 const YDOTOOL_SOCKET =
 	process.env.YDOTOOL_SOCKET ?? `/run/user/${process.getuid()}/.ydotool_socket`;
-// ydotoold が作る仮想の装置。keyd が掴むと、送ったキーが Hyprland に届かない
-const YDOTOOL_DEVICE_ID = '2333:6666';
-
-/** 既定のホットキー (Aero の Hyprland の割り当てと同じ) */
-const HOTKEY = 'CTRL + SHIFT + SPACE';
-const OTHER_CLASS = 'mawok-e2e-other';
 
 /** Linux の入力のキーコード (linux/input-event-codes.h) */
 export const KEY = {
@@ -53,39 +48,64 @@ export const KEY = {
 	enter: 28,
 	ctrl: 29,
 	shift: 42,
+	alt: 56,
 	space: 57,
-	j: 36,
-	comma: 51
+	m: 50
 };
 
 // ── 環境 ──
 
+/** 回しているデスクトップの扱い (linux-hyprland.mjs・linux-gnome.mjs)。ensureSessionEnv で決まる */
+let desktop;
+
 /**
- * エージェントやほかの端末から回すと、Wayland と Hyprland の環境変数が無いことがある。ログインした画面のものを探して足す。
- * 見つからなければ投げる
+ * 回しているデスクトップを見分け、その扱いを選ぶ。エージェントや ssh から回すと、Wayland などの環境変数が無いことがあるので、
+ * ログインした画面のものを足す。どちらでもなければ投げる
  */
 export async function ensureSessionEnv() {
+	if (desktop) return desktop;
 	const runtime = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid()}`;
-	if (!process.env.HYPRLAND_INSTANCE_SIGNATURE) {
-		const instances = await fs.readdir(path.join(runtime, 'hypr')).catch(() => []);
-		if (instances.length !== 1) {
-			throw new Error(
-				instances.length === 0
-					? 'Hyprland が動いていません (この確認は Hyprland の上で回します)'
-					: `Hyprland が ${instances.length} つ動いています。HYPRLAND_INSTANCE_SIGNATURE で選んでください`
-			);
+	process.env.XDG_RUNTIME_DIR = runtime;
+	await importSessionEnv();
+	for (const candidate of [hyprland, gnome]) {
+		if (await candidate.detect(runtime)) {
+			desktop = candidate;
+			break;
 		}
-		process.env.HYPRLAND_INSTANCE_SIGNATURE = instances[0];
 	}
-	if (!process.env.WAYLAND_DISPLAY) {
-		const instance = await hyprctlJson('instances');
-		const socket = instance.find(
-			(i) => i.instance === process.env.HYPRLAND_INSTANCE_SIGNATURE
-		)?.wl_socket;
-		if (!socket) throw new Error('Hyprland の Wayland のソケットが分かりません');
-		process.env.WAYLAND_DISPLAY = socket;
-	}
+	if (!desktop) throw new Error('Hyprland か GNOME の上で回してください (どちらも動いていません)');
 	process.env.YDOTOOL_SOCKET = YDOTOOL_SOCKET;
+	return desktop;
+}
+
+// ログインした画面のセッションが systemd に渡している環境変数のうち、Mawok が要るもの。DISPLAY が無いと、
+// data-control の無いデスクトップ (GNOME) で arboard が X11 (Xwayland) のクリップボードに切り替えられず、コピーが失敗する
+const SESSION_ENV = [
+	'WAYLAND_DISPLAY',
+	'DISPLAY',
+	'XAUTHORITY',
+	'XDG_CURRENT_DESKTOP',
+	'XDG_SESSION_TYPE',
+	'DBUS_SESSION_BUS_ADDRESS'
+];
+
+/** ssh などから回すときに、無い環境変数をセッションのものから足す */
+async function importSessionEnv() {
+	const { stdout } = await execFileAsync('systemctl', ['--user', 'show-environment']).catch(() => ({
+		stdout: ''
+	}));
+	for (const line of stdout.split('\n')) {
+		const eq = line.indexOf('=');
+		const name = line.slice(0, eq);
+		if (eq > 0 && SESSION_ENV.includes(name) && !process.env[name]) {
+			process.env[name] = line.slice(eq + 1);
+		}
+	}
+}
+
+/** 回しているデスクトップの名前 (`hyprland`・`gnome`) */
+export function desktopName() {
+	return desktop?.name;
 }
 
 /** 回す前に、要る道具と状態を確かめる。足りなければ、直し方を書いて投げる */
@@ -93,12 +113,12 @@ export async function preflight() {
 	await ensureSessionEnv();
 	const missing = [];
 	for (const [command, how] of [
-		['ydotool', 'sudo pacman -S ydotool'],
-		['wl-paste', 'sudo pacman -S wl-clipboard'],
-		['grim', 'sudo pacman -S grim'],
+		['ydotool', 'ydotool のパッケージを入れる'],
+		['wl-paste', 'wl-clipboard のパッケージを入れる'],
 		['busctl', 'systemd に含まれる'],
 		['tauri-driver', 'cargo install tauri-driver --locked'],
-		['WebKitWebDriver', 'sudo pacman -S webkitgtk-6.0']
+		['WebKitWebDriver', 'Arch は webkitgtk-6.0、Ubuntu は webkitgtk-webdriver のパッケージ'],
+		...desktop.tools
 	]) {
 		if (!(await which(command))) missing.push(`${command} (${how})`);
 	}
@@ -110,129 +130,57 @@ export async function preflight() {
 				`sudo ydotoold --socket-path=${YDOTOOL_SOCKET} --socket-own=$(id -u):$(id -g) を動かしてください`
 		);
 	}
-	await assertKeydIgnoresYdotool();
-	await assertPointerOnThisScreen();
+	await desktop.preflight({ ydotool, sleep });
 }
 
+/** PATH から実行ファイルを探す (`which` が入っていない環境があるので自分で探す)。無ければ null */
 async function which(command) {
-	try {
-		await execFileAsync('which', [command]);
-		return true;
-	} catch {
-		return false;
+	for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+		const file = path.join(dir, command);
+		if (
+			await fs.access(file, fs.constants.X_OK).then(
+				() => true,
+				() => false
+			)
+		)
+			return file;
 	}
-}
-
-/** keyd が動いていて ydotool の装置も掴むと、送ったキーが消える (マウスは届く) */
-async function assertKeydIgnoresYdotool() {
-	const active = await execFileAsync('systemctl', ['is-active', 'keyd']).then(
-		() => true,
-		() => false
-	);
-	if (!active) return;
-	const configs = await fs.readdir('/etc/keyd').catch(() => []);
-	for (const name of configs.filter((n) => n.endsWith('.conf'))) {
-		const text = await fs.readFile(path.join('/etc/keyd', name), 'utf8').catch(() => '');
-		const ids = text.split(/^\[/m).find((section) => section.startsWith('ids]')) ?? '';
-		const lines = ids.split('\n').map((line) => line.trim());
-		if (lines.includes('*') && !lines.includes(`-${YDOTOOL_DEVICE_ID}`)) {
-			throw new Error(
-				`keyd が ydotool の装置を掴みます。/etc/keyd/${name} の [ids] に -${YDOTOOL_DEVICE_ID} を足し、` +
-					'sudo systemctl restart keyd してください (keyd reload は落ちることがある)'
-			);
-		}
-	}
-}
-
-/**
- * ポインターがこの画面にあるか。Deskflow のサーバーでポインターがほかの機に移っていると、ydotool のキーもポインターも
- * そちらへ送られる。ydotool でポインターを少し動かし、Hyprland のポインターが動くかで見る
- */
-async function assertPointerOnThisScreen() {
-	const before = await cursorPosition();
-	await ydotool(['mousemove', '-x', '5', '-y', '5']);
-	await sleep(200);
-	const after = await cursorPosition();
-	await ydotool(['mousemove', '-x', '-5', '-y', '-5']);
-	if (before.x === after.x && before.y === after.y) {
-		throw new Error(
-			'ydotool でポインターが動きません。Deskflow でポインターがほかの機に移っていれば、この機の画面に戻してください'
-		);
-	}
+	return null;
 }
 
 export function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ── hyprctl ──
-
-async function hyprctl(args) {
-	const { stdout } = await execFileAsync('hyprctl', args);
-	return stdout;
-}
-
-async function hyprctlJson(what) {
-	return JSON.parse(await hyprctl(['-j', what]));
-}
-
-/** Hyprland の Lua の設定に式を渡して動かす */
-async function hyprEval(code) {
-	const out = (await hyprctl(['eval', code])).trim();
-	if (out !== 'ok') throw new Error(`hyprctl eval が失敗しました: ${code}: ${out}`);
-}
-
-export async function cursorPosition() {
-	const [x, y] = (await hyprctl(['cursorpos'])).trim().split(/,\s*/).map(Number);
-	return { x, y };
-}
+// ── 窓とフォーカス・ホットキーの割り当て (デスクトップごと) ──
 
 /** Mawok の窓 (見えているもの)。`title` で絞れる */
 export async function mawokWindows(title) {
-	return (await hyprctlJson('clients')).filter(
-		(c) => c.class === 'mawok' && !c.hidden && (title === undefined || c.title === title)
+	return (await desktop.windows()).filter(
+		(w) => w.app === 'mawok' && (title === undefined || w.title === title)
 	);
 }
 
-/** フォーカスのある窓。無ければ null */
-export async function activeWindow() {
-	const active = await hyprctlJson('activewindow');
-	return active?.address
-		? { class: active.class, title: active.title, address: active.address }
-		: null;
+/** フォーカスのある窓 (`{ app, title }`)。無ければ null */
+export function activeWindow() {
+	return desktop.activeWindow();
 }
 
-/** ポインターを画面の座標へ動かす (ydotool の相対移動は加速が掛かって狙えないので Hyprland に頼む) */
-export async function moveCursor({ x, y }) {
-	await hyprEval(`hl.dispatch(hl.dsp.cursor.move({ x = ${Math.round(x)}, y = ${Math.round(y)} }))`);
+/** portal に登録できたホットキーがデスクトップの一覧にあるか。読めないデスクトップでは null */
+export function portalShortcutRegistered() {
+	return desktop.portalShortcutRegistered();
 }
 
-/** Hyprland のホットキーの割り当てを、確かめる道に替える。`portal` は portal の登録へ、`toggle` は `mawok --toggle` へ */
+/** 押すと下書きを出し入れするキーの組み合わせ (bindHotkey で決まる) */
+let hotkeyChord = ['ctrl', 'shift', 'space'];
+
+/** ホットキーを、確かめる道に向ける。`portal` は portal の登録へ、`toggle` は `mawok --toggle` へ */
 export async function bindHotkey(mode) {
-	await unbindHotkey();
-	const action =
-		mode === 'portal'
-			? `hl.dsp.global("${PORTAL_SHORTCUT}")`
-			: `hl.dsp.exec_cmd("env ${PROFILE_ENV}=${PROFILE} ${APP_PATH} --toggle")`;
-	await hyprEval(`hl.bind("${HOTKEY}", ${action})`);
+	hotkeyChord = await desktop.bindHotkey(mode, APP_PATH);
 }
 
-export async function unbindHotkey() {
-	await hyprEval(`hl.unbind("${HOTKEY}")`);
-}
-
-/** Hyprland の設定を読み直して、割り当てを利用者のものに戻す */
-async function reloadHyprland() {
-	await hyprctl(['reload']);
-}
-
-/** portal に登録されたホットキーの名前の一覧 (`<アプリ ID>:<id>`) */
-export async function globalShortcuts() {
-	const out = await hyprctl(['globalshortcuts']);
-	return out
-		.split('\n')
-		.map((line) => line.split(' -> ')[0].trim())
-		.filter(Boolean);
+export function unbindHotkey() {
+	return desktop.unbindHotkey();
 }
 
 // ── ydotool ──
@@ -249,19 +197,12 @@ export async function pressKeys(...codes) {
 }
 
 export async function pressHotkey() {
-	await pressKeys(KEY.ctrl, KEY.shift, KEY.space);
+	await pressKeys(...hotkeyChord.map((name) => KEY[name]));
 }
 
 /** ASCII の文字を打つ */
 export async function typeText(text) {
 	await ydotool(['type', '--key-delay', '20', text]);
-}
-
-/** 画面の座標を左クリックする */
-export async function clickAt(point) {
-	await moveCursor(point);
-	await sleep(150);
-	await ydotool(['click', '0xC0']);
 }
 
 // ── クリップボード ──
@@ -312,9 +253,12 @@ export async function trayItem() {
 		])
 	).data;
 	for (const item of items) {
-		const slash = item.indexOf('/');
+		// `<バス名>/<パス>` (Hyprland のパネル) と `<バス名>@<パス>` (GNOME の AppIndicator の拡張) がある
+		const split = item.search(/[@/]/);
 		const [bus, object] =
-			slash < 0 ? [item, '/StatusNotifierItem'] : [item.slice(0, slash), item.slice(slash)];
+			split < 0
+				? [item, '/StatusNotifierItem']
+				: [item.slice(0, split), item.slice(item[split] === '@' ? split + 1 : split)];
 		const pid = await busctl([
 			'call',
 			'org.freedesktop.DBus',
@@ -405,13 +349,9 @@ export async function quitMawok() {
 	await waitFor(isMawokRunning, (running) => !running, { timeout: 10_000, label: 'Mawok の終了' });
 }
 
-/** 常用の Mawok を、ログインしたときと同じく uwsm の下で起動する */
+/** 常用の Mawok を、ログインしたときと同じように起動する */
 async function launchRegularMawok() {
-	const child = spawn('setsid', ['-f', 'uwsm-app', '--', APP_PATH], {
-		stdio: 'ignore',
-		detached: true
-	});
-	child.unref();
+	desktop.launchRegular(APP_PATH);
 	await waitFor(isMawokRunning, Boolean, { timeout: 10_000, label: '常用の Mawok の起動' });
 }
 
@@ -435,7 +375,13 @@ export async function holdUserState() {
 	const autostart = await fs.readFile(AUTOSTART_FILE, 'utf8').catch(() => null);
 	const types = await clipboardTypes();
 	const clipboard = types.some((t) => t.startsWith('text/plain')) ? await clipboardText() : null;
-	await writeJsonAtomic(path.join(BACKUP_DIR, 'state.json'), { wasRunning, autostart, clipboard });
+	const held = await desktop.hold();
+	await writeJsonAtomic(path.join(BACKUP_DIR, 'state.json'), {
+		wasRunning,
+		autostart,
+		clipboard,
+		desktop: held
+	});
 	await fs.rm(AUTOSTART_FILE, { force: true });
 	await fs.mkdir(path.dirname(PORTAL_DESKTOP_FILE), { recursive: true });
 	await fs.writeFile(
@@ -448,12 +394,14 @@ export async function holdUserState() {
 export async function restoreUserState() {
 	if (!(await fileExists(BACKUP_DIR))) return null;
 	await quitMawok();
-	await reloadHyprland().catch((error) =>
-		console.warn(`[linux-check] Hyprland の設定を読み直せませんでした: ${error.message}`)
-	);
 	await fs.rm(PORTAL_DESKTOP_FILE, { force: true });
 	const stateFile = path.join(BACKUP_DIR, 'state.json');
 	const state = await fs.readFile(stateFile, 'utf8').then(JSON.parse, () => null);
+	await desktop
+		.restore(state?.desktop)
+		.catch((error) =>
+			console.warn(`[linux-check] ホットキーの割り当てを戻せませんでした: ${error.message}`)
+		);
 	const running =
 		state ??
 		(await fs.readFile(path.join(BACKUP_DIR, 'running.json'), 'utf8').then(JSON.parse, () => ({
@@ -498,7 +446,7 @@ export async function startDriver({ port = 4444, nativePort = 4445 } = {}) {
 		}
 	}
 	// tauri-driver は名前では探さないので、パスで渡す
-	const nativeDriver = (await execFileAsync('which', ['WebKitWebDriver'])).stdout.trim();
+	const nativeDriver = await which('WebKitWebDriver');
 	const child = spawn(
 		'tauri-driver',
 		['--port', String(port), '--native-port', String(nativePort), '--native-driver', nativeDriver],
@@ -543,6 +491,17 @@ export async function launchApp(driver, settings = {}) {
 		}
 	});
 	try {
+		// portal への登録の結果 (できた・できなかった) が出るまで待つ。GNOME は初めてのアプリ ID に確かめの画面を出し、
+		// 出たままだとフォーカスを取ってほかのテストを乱すので、出ていれば足すほうを押す
+		await waitFor(
+			async () => {
+				if (readLogSince(LOG_PATH, mark).includes('with the desktop portal')) return true;
+				await desktop.approvePortalShortcut();
+				return false;
+			},
+			Boolean,
+			{ timeout: 20_000, interval: 500, label: 'portal への登録の結果' }
+		);
 		await waitFor(
 			() => readLogSince(LOG_PATH, mark),
 			(log) => log.includes('page ready (main '),
@@ -595,32 +554,12 @@ export function invoke(client, command, args = {}) {
 	return client.execute((c, a) => window.__TAURI_INTERNALS__.invoke(c, a), command, args);
 }
 
-/** WebDriver の今の窓を、題で選ぶ */
-export async function switchToWindow(client, title) {
-	await waitFor(
-		async () => {
-			for (const handle of await client.getWindowHandles()) {
-				await client.switchToWindow(handle);
-				if ((await client.getTitle()) === title) return true;
-			}
-			return false;
-		},
-		Boolean,
-		{ timeout: 10_000, interval: 300, label: `「${title}」の窓` }
-	);
-}
-
-/** 下書きの入力欄の中身 */
-export async function draftValue(client) {
-	return client.execute(() => document.querySelector('textarea').value);
-}
-
 /** 下書きの入力欄にフォーカスがあるか */
 export async function draftFocused(client) {
 	return client.execute(() => document.activeElement === document.querySelector('textarea'));
 }
 
-/** 下書きの窓が見えているか (Hyprland で) */
+/** 下書きの窓が見えているか (デスクトップの窓の一覧で) */
 export async function isDraftVisible() {
 	return (await mawokWindows('Mawok')).length > 0;
 }
@@ -632,58 +571,14 @@ export function waitDraftVisible(visible, label) {
 	});
 }
 
-/**
- * 画面の中の要素の、画面の座標での中心。窓の位置は Hyprland から、窓の中の位置は WebDriver から読む。
- * 窓の中の CSS ピクセルと、Hyprland の論理ピクセルの比は、窓の幅で合わせる
- */
-export async function elementScreenCenter(client, selector, title = 'Mawok') {
-	const [win] = await mawokWindows(title);
-	if (!win) throw new Error(`「${title}」の窓が見えていません`);
-	const box = await client.execute((sel) => {
-		const rect = document.querySelector(sel).getBoundingClientRect();
-		return {
-			x: rect.x + rect.width / 2,
-			y: rect.y + rect.height / 2,
-			width: innerWidth,
-			height: innerHeight
-		};
-	}, selector);
-	const scale = win.size[0] / box.width;
-	return { x: win.at[0] + box.x * scale, y: win.at[1] + box.y * scale };
-}
-
 // ── ほかの窓 ──
 
 /**
- * 下書きを隠した後にフォーカスが戻る先として、端末を1つ開いてフォーカスを渡す。`close` で閉じる
+ * 下書きを隠した後にフォーカスが戻る先として、ほかのアプリの窓を1つ開いて前面にする。返すものの `app` は
+ * activeWindow の `app` と比べる名前、`focus` で前面に戻し、`close` で閉じる
  */
-export async function launchOtherWindow() {
-	const child = spawn('foot', ['--app-id', OTHER_CLASS, 'sleep', '600'], {
-		stdio: 'ignore',
-		detached: true
-	});
-	child.unref();
-	const win = await waitFor(
-		async () => (await hyprctlJson('clients')).find((c) => c.class === OTHER_CLASS) ?? null,
-		Boolean,
-		{ timeout: 10_000, label: 'ほかの窓が開く' }
-	);
-	await hyprEval(`hl.dispatch(hl.dsp.focus({ window = "address:${win.address}" }))`).catch(
-		() => {}
-	);
-	return {
-		class: OTHER_CLASS,
-		async focus() {
-			await hyprEval(`hl.dispatch(hl.dsp.focus({ window = "address:${win.address}" }))`);
-		},
-		async close() {
-			try {
-				process.kill(child.pid);
-			} catch {
-				// 閉じていてもよい
-			}
-		}
-	};
+export function launchOtherWindow() {
+	return desktop.launchOtherWindow();
 }
 
 // ── 落ちたときの記録 ──
@@ -724,16 +619,13 @@ async function captureFailure(name) {
 	);
 	const saved = [];
 	try {
-		await execFileAsync('grim', [`${base}.png`], { timeout: 30_000 });
+		await desktop.screenshot(`${base}.png`);
 		saved.push(`${base}.png`);
 	} catch (error) {
 		console.error(`[linux-check] 画面を撮れませんでした: ${error.message}`);
 	}
 	try {
-		const state = {
-			active: await hyprctlJson('activewindow'),
-			clients: await hyprctlJson('clients')
-		};
+		const state = await desktop.state();
 		await fs.writeFile(`${base}.json`, `${JSON.stringify(state, null, '\t')}\n`);
 		saved.push(`${base}.json`);
 	} catch (error) {

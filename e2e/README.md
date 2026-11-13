@@ -196,6 +196,40 @@ just macos-check --restore  # 中断して残った控えから戻すだけ
 - **落ちたときの記録**: テストの本体が落ちると、その時点の画面（主のディスプレイ）と、画面に出ている窓の一覧（手前から順に、アプリ・窓の名前・位置と大きさ、前面のアプリ）を `e2e/screenshots/macos-failures/` に置く（gitignore 済み。回すたびに消す）。ファイルの後始末（`test.after`）の前に残すので、クリックがどの窓に落ちたか・前面がどこだったかを後から読める。テストの本体の `finally` で閉じた窓は写らず、`test.before` の準備で落ちたときは残らない。`lib/macos-failure-capture.mjs` を各テストファイルの前に読み込んで、全部のテストに掛けている。
 - **前面のアプリの読み方**: キー入力が Mawok に入るなら、Mawok を前面とみなす。テキストウィンドウはアプリを前面にしないパネルで出すので、`NSWorkspace` でも System Events の `frontmost` でも前のアプリのままになるが、Mawok のプロセスのアクセシビリティの `AXFrontmost` は true になる（2026-10 に macOS 26 で確かめた）。設定を開いたときのようにアプリごと前面になったときは、`NSWorkspace` の `frontmostApplication` で読む（こちらはアプリを終了した後などに古い値を返すことがあるので、ほかのアプリは System Events で読む）。`lib/macos.mjs` の `front()`。
 
+## Linux の確認
+
+Linux だけの作り（`#[cfg(target_os = "linux")]`。portal と `mawok --toggle` のホットキー、トレイ、コピーした中身を持ち続けるクリップボード、XDG autostart の .desktop、WebKitGTK の描画プロセスが落ちたときの読み込み直し）を、Wayland のデスクトップの上で見る。画面の中は WebDriver（`tauri-driver` + WebKitWebDriver）、キーは ydotool（uinput の本物の入力）、トレイは D-Bus（StatusNotifierItem と dbusmenu）、クリップボードは wl-clipboard で扱う。窓とフォーカスとホットキーの割り当てはデスクトップで違うので、Hyprland は hyprctl（`lib/linux-hyprland.mjs`）、GNOME はアクセシビリティの AT-SPI と gsettings（`lib/linux-gnome.mjs`・`lib/atspi.py`）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。CI の runner には Wayland のデスクトップと portal が無いので、CI では回さない。
+
+```
+just linux-check-vm arch-hyprland        # VM の Hyprland で linux/*.test.mjs を全部
+just linux-check-vm ubuntu-2604 tray     # VM の GNOME 50 で linux/tray.test.mjs だけ
+just linux-check                         # 手元の Hyprland (Aero) で回す
+just linux-check --restore               # 中断して残った控えから戻すだけ
+```
+
+- **ふだんは VM で回す**。手元の画面・キーボード・フォーカスを使わず、keyd や Deskflow の条件も要らない。VM は `e2e/vm/vm.sh` が Ubuntu・Arch の cloud image から作る（`vm.sh <名前> create`。ディスクは `~/VMs/<名前>`、cloud-init で道具まで入れる）。
+  - `arch-hyprland`: Arch と Hyprland（portal は xdph、トレイは waybar）。Hyprland は 3D 描画が要るので、virgl を `egl-headless` で使う。
+  - `ubuntu-2604`: GNOME 50。GlobalShortcuts の portal があり、初めてのアプリ ID には確かめの画面（「Add Keyboard Shortcuts」）を出すので、起動のたびに出ていれば AT-SPI で「Add」を押す。
+  - `ubuntu-2404`: GNOME 46。GlobalShortcuts の portal が無く、portal のテストは飛ばす。
+  - `linux-check-vm` は、VM が止まっていれば画面なしで起動し、今のビルド（`src-tauri/target/release/mawok`。無ければ VM に入っている版）と `e2e/` を写して回し、落ちた時点の記録を `e2e/screenshots/linux-failures/<VM>/` に持ち帰って止める（`--keep` で動かしたまま）。画面つきで見るときは `vm.sh <名前> start`。
+- **ビルドしない**。`linux-check` は入れてある `/usr/bin/mawok` を動かす（ほかのものは環境変数 `MAWOK_APP` で指す）。
+- **設定・履歴は常用のものと分ける**。プロファイル `e2e` で起動する（→ docs/platform.md「プロファイル」）。portal は名乗ったアプリ ID の .desktop が無いと登録を断るので、回している間だけ `~/.local/share/applications/com.amiiby.mawok.e2e.desktop` を置く。
+- **後始末**: 常用の Mawok を終了し、ログイン時の起動の .desktop（`~/.config/autostart/Mawok.desktop`。プロファイルでは分かれない）とクリップボードの文字、GNOME のカスタムショートカットの一覧を `e2e/.linux-backup/` に控えてから始める。終わったら戻し、Hyprland は設定を読み直して割り当てを戻し、動いていた Mawok を起動し直す。中断したときは `just linux-check --restore` で戻す。
+- **ホットキーの道**: Hyprland の portal は登録を受けても自分ではキーを付けないので、確かめる間だけ Hyprland の割り当てを替える（portal の道は `global` で登録へ、`mawok --toggle` の道は `exec` で）。GNOME は portal が付けたキーをそのまま押し、`mawok --toggle` はカスタムショートカット（Ctrl+Alt+M）に割り当てる。
+- **ssh から回す**: Wayland・Hyprland・D-Bus・`DISPLAY` の環境変数は、ログインしたセッションのもの（`systemctl --user show-environment`）を足す。GNOME には外から使える Wayland のクリップボードの仕組み（data-control）が無く、Mawok（arboard）は X11（Xwayland）のクリップボードを使うので、`DISPLAY` が無いとコピーが失敗する。
+- **WebDriver で見えるのは下書きの窓だけ**。WebKitWebDriver に出る窓のハンドルは最初の窓の1つだけなので、設定や使い方の窓は、デスクトップの窓の一覧で開いたことだけを見る。描画プロセスを落とすと WebDriver のセッションも切れるので、そのテストはファイルの最後に置く。
+- **落ちたときの記録**: テストの本体が落ちると、その時点の画面（Hyprland は grim。GNOME は確かめなしに撮れないので撮らない）と、窓の一覧とフォーカスを `e2e/screenshots/linux-failures/` に置く（回すたびに消す）。`lib/linux-failure-capture.mjs` を各テストファイルの前に読み込み、Mawok を閉じる所（`closeApp`）でも残す。
+
+### 手元の Hyprland で回すとき (`just linux-check`)
+
+VM で回せない事情（VM に無い手元の設定で起きる不具合など）があるときだけ使う。
+
+- **道具**: `ydotool`・`grim`・`wl-clipboard`・`webkitgtk-6.0`（WebKitWebDriver が入っている。`webkit2gtk-4.1` には無い）を pacman で、`tauri-driver` を `cargo install tauri-driver --locked` で入れる。
+- **ydotoold**: uinput は root が要るので、別の端末で `sudo ydotoold --socket-path=/run/user/$(id -u)/.ydotool_socket --socket-own=$(id -u):$(id -g)` を動かしておく。
+- **keyd**: すべてのキーボード（`[ids]` の `*`）を掴む設定だと、ydotool の装置も掴まれてキーが届かない（マウスは届く）。`[ids]` に `-2333:6666` を足して `sudo systemctl restart keyd` する（`keyd reload` は落ちることがある）。足りなければ、始める前に止まる。
+- **Deskflow**: サーバーのポインターがほかの機に移っていると、ydotool の入力もそちらへ送られる。始める前に ydotool でポインターを少し動かして確かめ、動かなければ止まる。
+- **キーボードとフォーカスを使う**。回している間（全部で1分ほど）は、キーボードとマウスに触らない。
+
 ## 育て方
 
 手で確かめる項目に、技術的に自動で見られないものだけが残るよう、E2E を広げていく。

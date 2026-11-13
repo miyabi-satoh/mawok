@@ -4,9 +4,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
 	closeApp,
+	desktopName,
 	ensureSessionEnv,
 	invoke,
 	launchApp,
+	logSince,
 	LOG_PATH,
 	mawokPids,
 	startDriver,
@@ -49,13 +51,20 @@ test.describe('Linux: デスクトップ', () => {
 		await driver?.stop();
 	});
 
-	test('ホットキーはデスクトップが割り当て、Hyprland の portal はキーを付けない (設定は mawok --toggle の案内になる)', async () => {
+	test('ホットキーはデスクトップが割り当て、設定にはデスクトップが付けたキーか mawok --toggle の案内が出る', async () => {
 		const view = await invoke(app.client, 'get_settings');
 		assert.equal(view.platform, 'linux');
 		assert.equal(view.hotkeyByDesktop, true);
-		// desktopHotkey が無いと、設定の「キー操作」は mawok --toggle の案内を出す (settings/+page.svelte)。
+		// 設定の「キー操作」は、desktopHotkey があればそのキーを、無ければ mawok --toggle の案内を出す (settings/+page.svelte)。
 		// 設定の窓の中は WebDriver から読めない (WebKitWebDriver に出るのは最初の窓だけ) ので、画面が受け取る値で見る
-		assert.equal(view.desktopHotkey, null, 'Hyprland の portal はキーを付けない');
+		const registered = logSince(app.mark).includes('hotkey registered with the desktop portal');
+		if (desktopName() === 'hyprland' || !registered) {
+			// Hyprland の portal は登録を受けてもキーを付けない。portal が無ければ登録できない
+			assert.equal(view.desktopHotkey, null);
+		} else {
+			// GNOME 48 以降は、Mawok が希望した Ctrl+Shift+Space を付ける
+			assert.equal(view.desktopHotkeyKeys, 'CommandOrControl+Shift+Space');
+		}
 	});
 
 	// 描画プロセスを落とすと WebDriver のセッションも切れるので、落とすテストは最後に置く
