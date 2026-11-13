@@ -100,3 +100,11 @@ jobs:
       - name: Run CI checks
         if: steps.scope.outputs.run == 'true'
         run: just ci
+
+      # 画面のテストが落ちたときの画面。流し直して通ったテストの分も残るので、落ちた時点の画面を後から見られる
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.scope.outputs.run == 'true'
+        with:
+          name: test-failure-screenshots-${{ matrix.os }}
+          path: .vitest/attachments/
+          if-no-files-found: ignore

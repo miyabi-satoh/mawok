@@ -2,8 +2,10 @@ import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { playwright } from '@vitest/browser-playwright';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
+import { configDefaults } from 'vitest/config';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { thirdPartyLicenses } from './scripts/third-party-licenses.ts';
+import { flakyAnnotations } from './scripts/vitest-flaky-annotations.ts';
 
 import process from 'node:process';
 
@@ -26,6 +28,13 @@ export default defineConfig(() => ({
 	clearScreen: false,
 
 	test: {
+		// 落ちたテストを2回まで流し直す (Playwright の CI の既定と同じ回数)。機械が詰まって時々落ちるテストで、CI や手元の検査が止まらないようにする。
+		// 流し直して通ったテストは flakyAnnotations が最後に警告で出し (CI では github-actions の reporter が実行の概要にも書く)、埋もれずに直す相手として見える
+		retry: 2,
+		// 場所を出せば、警告から行へ飛べる
+		includeTaskLocation: true,
+		// reporters を書くと既定が置き換わるので、既定 (エージェントでは minimal、GitHub Actions では github-actions も) に足す
+		reporters: [...configDefaults.reporters, flakyAnnotations()],
 		projects: [
 			// 画面の部品のテスト。Chromium（Playwright）で実際に描いて操作する。
 			// ResizeObserver や IME の扱いなど、実物に近いところを見たいので jsdom にはしない
@@ -46,7 +55,7 @@ export default defineConfig(() => ({
 						enabled: true,
 						provider: playwright(),
 						headless: true,
-						instances: [{ browser: 'chromium' }]
+						instances: [{ browser: /** @type {const} */ ('chromium') }]
 					}
 				}
 			},
