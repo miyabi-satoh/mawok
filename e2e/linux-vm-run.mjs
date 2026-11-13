@@ -57,13 +57,13 @@ const wasRunning = await execFileAsync(VM_SH, [vm, 'ssh', 'true']).then(
 	() => true,
 	() => false
 );
-// 起動に失敗しても qemu は裏で動き出していることがあるので止める
+// Ctrl+C は子 (vm.sh・ssh) にも届いて終わらせるので、こちらは終わらずに後始末 (記録の持ち帰りと VM の停止) まで進む
+waitForChildOnInterrupt();
+// 起動に失敗しても (中断も含む) qemu は裏で動き出していることがあるので止める
 if (!wasRunning && (await vmSh('start', '--headless')) !== 0) {
 	await vmSh('stop');
 	process.exit(1);
 }
-// Ctrl+C は ssh にも届いて VM の中の確認が終わるので、こちらは終わらずに後始末 (記録の持ち帰りと VM の停止) まで進む
-waitForChildOnInterrupt();
 
 let code = 1;
 try {

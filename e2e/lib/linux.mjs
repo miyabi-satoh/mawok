@@ -166,7 +166,6 @@ export function activeWindow() {
 	return desktop.activeWindow();
 }
 
-/** portal に登録できたホットキーがデスクトップの一覧にあるか。読めないデスクトップでは null */
 /**
  * デスクトップの portal に GlobalShortcuts があるか (GNOME 47 までは無い)。Mawok のログの「登録できなかった」は、
  * portal が無いときにも登録が失敗したときにも出るので、こちらで見分ける
@@ -181,6 +180,7 @@ export async function hasGlobalShortcutsPortal() {
 	).includes('org.freedesktop.portal.GlobalShortcuts');
 }
 
+/** portal に登録できたホットキーがデスクトップの一覧にあるか。読めないデスクトップでは null */
 export function portalShortcutRegistered() {
 	return desktop.portalShortcutRegistered();
 }
