@@ -3504,6 +3504,16 @@ fn show_tray_menu(app: &AppHandle) {
     // tray-icon の show_menu は、メニューを閉じるまでトレイを借りたまま戻らない。その間にメニューを差し替えると
     // 二重に借りて落ちるので、作り直しは閉じてから行う (refresh_tray)
     TRAY_MENU_PRESSED.store(true, Ordering::Relaxed);
+    // 前面にいないまま押されると、macOS がメニューを開きながらアプリを前面に出し、その知らせでメニューが閉じる。
+    // 先に前面にしておく (Mawok は隠した窓を作るだけで、起動しても前面にならない)
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        let ns_app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+        if !ns_app.isActive() {
+            // 代わりの activate は macOS 14 からで、動作環境の 13 に無い
+            #[allow(deprecated)]
+            ns_app.activateIgnoringOtherApps(true);
+        }
+    }
     if let Err(error) = tray.with_inner_tray_icon(|inner| inner.show_menu()) {
         error!("couldn't show the tray menu: {error}");
     }

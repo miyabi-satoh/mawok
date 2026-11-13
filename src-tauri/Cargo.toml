@@ -19,9 +19,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2.12.5", features = ["tray-icon"] }
-# FIX: 0.57.1 から後の wry では、macOS でメニューバーのアイコンをアクセシビリティ (VoiceOver の押す操作) から押してもメニューが開かない
-# (just macos-check の、メニューから設定・使い方・ライセンスを開く確かめが落ちる)。tauri が使う wry をこの版に留める
-wry = "=0.57.0"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 tauri-plugin-global-shortcut = "2.4.1"
