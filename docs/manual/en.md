@@ -136,8 +136,17 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 ::: linux
 ## Installing and updating
 
-- Ubuntu: Add Mawok's apt repository by following the steps on mawok.amiiby.com, then install it with `sudo apt install mawok`. Updates arrive with your other apps through “Software Updater” or `sudo apt upgrade`.
-- Arch Linux: Install `mawok-bin` from the AUR with an AUR helper (such as `yay`). Update it with the same helper.
+On Ubuntu, run the following commands to add Mawok's apt repository and install it. Updates arrive with your other apps through “Software Updater” or `sudo apt upgrade`.
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+wget -qO- https://miyabi-satoh.github.io/mawok/mawok.gpg | sudo tee /etc/apt/keyrings/mawok.gpg > /dev/null
+printf 'Types: deb\nURIs: https://miyabi-satoh.github.io/mawok\nSuites: stable\nComponents: main\nArchitectures: amd64\nSigned-By: /etc/apt/keyrings/mawok.gpg\n' | sudo tee /etc/apt/sources.list.d/mawok.sources > /dev/null
+sudo apt update
+sudo apt install mawok
+```
+
+On Arch Linux, install `mawok-bin` from the AUR with an AUR helper (such as `yay`). Update it with the same helper.
 :::
 
 ## Uninstalling
@@ -154,6 +163,6 @@ When reporting a problem, attach the log. It does not contain your text. Open it
 
 ::: linux
 1. Turn off “Launch at login” under “General”.
-2. Choose “Quit” in the tray menu, then run `sudo apt remove mawok` on Ubuntu or `sudo pacman -R mawok-bin` on Arch Linux. To also remove the apt repository, follow the steps on mawok.amiiby.com.
+2. Choose “Quit” in the tray menu, then run `sudo apt remove mawok` on Ubuntu or `sudo pacman -R mawok-bin` on Arch Linux. To also remove the apt repository on Ubuntu, run `sudo rm /etc/apt/sources.list.d/mawok.sources /etc/apt/keyrings/mawok.gpg`.
 3. To also remove settings and history, delete `~/.config/com.amiiby.mawok/` and `~/.local/share/com.amiiby.mawok/`. If you changed the settings folder, also delete the settings files and the `history` folder there.
 :::

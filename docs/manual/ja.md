@@ -136,8 +136,17 @@ bind = CTRL SHIFT, SPACE, exec, mawok --toggle
 ::: linux
 ## 入れ方と更新
 
-- Ubuntu: mawok.amiiby.com の手順で Mawok の apt リポジトリを足し、`sudo apt install mawok` で入れます。更新は、ほかのアプリと一緒に「ソフトウェアの更新」か `sudo apt upgrade` で届きます。
-- Arch Linux: AUR の `mawok-bin` を、AUR のヘルパー (`yay` など) で入れます。更新も、同じヘルパーで行います。
+Ubuntu では、次のコマンドで Mawok の apt リポジトリを足して入れます。更新は、ほかのアプリと一緒に「ソフトウェアの更新」か `sudo apt upgrade` で届きます。
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+wget -qO- https://miyabi-satoh.github.io/mawok/mawok.gpg | sudo tee /etc/apt/keyrings/mawok.gpg > /dev/null
+printf 'Types: deb\nURIs: https://miyabi-satoh.github.io/mawok\nSuites: stable\nComponents: main\nArchitectures: amd64\nSigned-By: /etc/apt/keyrings/mawok.gpg\n' | sudo tee /etc/apt/sources.list.d/mawok.sources > /dev/null
+sudo apt update
+sudo apt install mawok
+```
+
+Arch Linux では、AUR の `mawok-bin` を、AUR のヘルパー (`yay` など) で入れます。更新も、同じヘルパーで行います。
 :::
 
 ## アンインストール
@@ -154,6 +163,6 @@ bind = CTRL SHIFT, SPACE, exec, mawok --toggle
 
 ::: linux
 1. 設定の「一般」で「ログイン時に起動」をオフにします。
-2. トレイのメニューの「終了」で終了し、Ubuntu では `sudo apt remove mawok`、Arch Linux では `sudo pacman -R mawok-bin` を実行します。apt リポジトリも外すなら、mawok.amiiby.com の手順で外します。
+2. トレイのメニューの「終了」で終了し、Ubuntu では `sudo apt remove mawok`、Arch Linux では `sudo pacman -R mawok-bin` を実行します。Ubuntu で apt リポジトリも外すなら、`sudo rm /etc/apt/sources.list.d/mawok.sources /etc/apt/keyrings/mawok.gpg` を実行します。
 3. 設定と履歴も消すなら、`~/.config/com.amiiby.mawok/` と `~/.local/share/com.amiiby.mawok/` を消します。設定の保存先を変えていたら、そのフォルダーの設定のファイルと `history` フォルダーも消します。
 :::

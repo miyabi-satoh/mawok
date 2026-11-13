@@ -94,6 +94,16 @@
 - ログイン時の起動は、XDG autostart の `~/.config/autostart/Mawok.desktop` を自分で読み書きする。デスクトップの設定で切ると `Hidden=true` や `X-GNOME-Autostart-enabled=false` が書かれ、tauri-plugin-autostart はそれを読まずに有効に戻してしまうため（上の「常駐」の決まり）。
 - トレイは StatusNotifierItem で出し、`libayatana-appindicator3` を実行時に読み込む（無いと起動できない）。押すとメニューが出るだけで、押したことは受け取れない。メニューの項目にホットキーは添わない（muda はウィンドウに付かないメニューにキーを付けない）。GNOME は AppIndicator の拡張が要る（Ubuntu には最初から入っている）。
 
+## Linux の配る版
+
+- 配るのは amd64 の .deb だけ。Ubuntu には自前の apt リポジトリで、Arch Linux には .deb を展開するだけの AUR の `mawok-bin` で届ける。どちらも、更新は OS のふつうの更新で届く。
+- `.github/workflows/release-linux.yml` が、版のタグの push で .deb を作り、GitHub Releases に上げ、apt リポジトリと AUR を新しい版にする。PR でこの workflow か `packaging/` を変えたときは、使い捨ての鍵で公開の手前まで流し、apt と pacman で実際に入れて確かめる。
+- .deb は、支える中でいちばん古い Ubuntu（24.04）で作る。glibc などのライブラリは、古い版に合わせて作れば新しい版でも動くため。依存（WebKitGTK・GTK・トレイの `libayatana-appindicator3-1`）は Tauri が control に書く。
+- apt リポジトリは GitHub Pages（`https://miyabi-satoh.github.io/mawok`）に置く（`packaging/apt/build-repo.sh`）。apt は Packages の `Filename` をリポジトリの URL からの相対で引くので、GitHub Releases の .deb は指せず、.deb も Pages に置く。置くのは今の版だけにし、前の版は GitHub Releases に残す。apt が更新に使うのは最新の版だけで、版を重ねると Pages の容量の上限（1 GB）に近づくため。
+- 初めてタグを打つ前に、Pages の公開元を GitHub Actions にし、`github-pages` の環境の配備の決まりに `v*` のタグを足す（既定では main からしか配備できず、タグの push からの配備が止められる）。
+- apt リポジトリの署名の鍵は GitHub の secret（`APT_SIGNING_KEY`）に置く。公開鍵は workflow がその鍵から書き出して `mawok.gpg` として Pages に置き、利用者は `signed-by` でこのリポジトリにだけ結ぶ。
+- AUR へは、`packaging/aur/PKGBUILD.in` に版とハッシュを埋め、`.SRCINFO` を作って、secret（`AUR_SSH_PRIVATE_KEY`）の鍵で push する。配るアプリはソースの `LICENSE` でなく利用規約で扱うので、ライセンスには利用規約の URL を書いたファイルを入れる。
+
 ## macOS の窓の位置と大きさ
 
 - 窓（テキストウィンドウ・設定・ライセンス・使い方）の位置と大きさは、window-state プラグインでなく、AppKit の frame autosave（`setFrameUsingName`・`setFrameAutosaveName`。`window_frame.rs`）で記録して戻す。Mac のふつうのアプリと同じ仕組みで、記録はアプリの defaults に置かれる。
