@@ -901,6 +901,29 @@ try {
 ConvertTo-Json -Compress -Depth 6 -InputObject @{ saved = @($saved); state = $state; errors = @($errors) }
 `;
 
+/** 回っているテスト (windows-failure-capture.mjs が渡す)。フックを読み込まずに回したときは null のまま */
+let currentTest = null;
+/** そのテストで、もう記録を残したか */
+let capturedCurrent = false;
+
+/** 回り始めたテストを覚える (windows-failure-capture.mjs の beforeEach から呼ぶ) */
+export function trackTest(t) {
+	currentTest = t;
+	capturedCurrent = false;
+}
+
+/**
+ * 回っているテストの本体が落ちていたら、1度だけ記録を残す。テストファイルの afterEach はアプリを閉じる
+ * (setup.mjs の closeClient) ので、全体の afterEach (外側なので、ファイルの afterEach より後に回る) だけでは
+ * Mawok の窓が写らない。閉じる前にも呼んで、窓が出ているうちに残す
+ */
+export async function captureIfFailed() {
+	if (!currentTest || currentTest.passed || capturedCurrent) return;
+	capturedCurrent = true;
+	const saved = await captureFailure(currentTest.fullName);
+	if (saved.length > 0) console.error(`[e2e] 落ちた時点の記録: ${saved.join(', ')}`);
+}
+
 /**
  * 落ちた時点の画面 (すべてのモニター) と、表示中のトップレベルウィンドウの一覧 (手前から順に、プロセス・タイトル・
  * クラス・位置と大きさ・前面か) を `FAILURE_DIR` に置き、置いた先を返す。クリックがどの窓に落ちたかや、
