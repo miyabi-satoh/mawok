@@ -1,9 +1,9 @@
 import { SvelteSet } from 'svelte/reactivity';
-import { okValue, type Call } from '$lib/call';
-import { isBlankSnippet } from '$lib/blank-rows';
-import { RowList } from '$lib/row-list.svelte';
-import type { SettingsView, Snippet } from '$lib/settings.svelte';
-import { newSnippet } from '$lib/snippets';
+import { okValue, type Call } from '#lib/call.ts';
+import { isBlankSnippet } from '#lib/blank-rows.ts';
+import { RowList } from '#lib/row-list.svelte.ts';
+import type { SettingsView, Snippet } from '#lib/settings.svelte.ts';
+import { newSnippet } from '#lib/snippets.ts';
 
 /**
  * 設定画面の「定型文」で編集している定型文。

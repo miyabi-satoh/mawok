@@ -1,8 +1,8 @@
 <script lang="ts">
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import { invoke } from '@tauri-apps/api/core';
-	import { isCloseWindowKey } from '$lib/keys';
-	import { m } from '$lib/paraglide/messages';
+	import { isCloseWindowKey } from '#lib/keys.ts';
+	import { m } from '#lib/paraglide/messages.js';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { LicenseList, LicensePackage } from './+page';
 	import type { PageProps } from './$types';

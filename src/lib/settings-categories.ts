@@ -4,7 +4,7 @@ import SettingsIcon from '@lucide/svelte/icons/settings';
 import TextQuoteIcon from '@lucide/svelte/icons/text-quote';
 import TypeIcon from '@lucide/svelte/icons/type';
 import WandSparklesIcon from '@lucide/svelte/icons/wand-sparkles';
-import { m } from '$lib/paraglide/messages';
+import { m } from '#lib/paraglide/messages.js';
 
 /** 設定画面のサイドバーの分類 */
 export function settingsCategories() {

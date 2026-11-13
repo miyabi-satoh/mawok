@@ -1,6 +1,6 @@
 <script lang="ts">
-	import * as Kbd from '$lib/components/ui/kbd';
-	import { keyLabels, type Platform } from '$lib/keys';
+	import * as Kbd from '#lib/components/ui/kbd/index.ts';
+	import { keyLabels, type Platform } from '#lib/keys.ts';
 
 	/** 割り当てたキーを、押すキーごとに分けて出す */
 	let { key, platform }: { key: string; platform: Platform } = $props();

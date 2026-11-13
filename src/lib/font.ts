@@ -5,7 +5,7 @@
  * 入っていないフォントを書いても黙って次の候補に落ちるので、どちらの実例も警告は出していない。
  */
 
-import { CONSTANTS } from '$lib/bindings/constants';
+import { CONSTANTS } from '#lib/bindings/constants.ts';
 
 /** 文字の大きさの既定値と、入力欄で受け付ける範囲。決めるのも収めるのも Rust 側（config.rs）で、ここは入力欄の min/max と設定が届く前の表示に使う */
 export const DEFAULT_DRAFT_FONT_SIZE: number = CONSTANTS.DEFAULT_DRAFT_FONT_SIZE;

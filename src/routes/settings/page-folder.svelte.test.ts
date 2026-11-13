@@ -1,18 +1,18 @@
 import { invoke } from '@tauri-apps/api/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ERROR_CODES } from '$lib/bindings/constants';
-import type { PickedSettingsDir } from '$lib/bindings/PickedSettingsDir';
-import { m } from '$lib/paraglide/messages';
-import { settings } from '$lib/settings.svelte';
-import { callsOf } from '$lib/test-support/calls';
-import { settingsView } from '$lib/test-support/settings-view';
+import { ERROR_CODES } from '#lib/bindings/constants.ts';
+import type { PickedSettingsDir } from '#lib/bindings/PickedSettingsDir.ts';
+import { m } from '#lib/paraglide/messages.js';
+import { settings } from '#lib/settings.svelte.ts';
+import { callsOf } from '#lib/test-support/calls.ts';
+import { settingsView } from '#lib/test-support/settings-view.ts';
 import { renderAt } from './render-at';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(undefined)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 vi.mock(
 	'@tauri-apps/api/window',
-	async () => (await import('$lib/test-support/window')).windowModule
+	async () => (await import('#lib/test-support/window.ts')).windowModule
 );
 
 const invoked = vi.mocked(invoke);

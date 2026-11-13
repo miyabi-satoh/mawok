@@ -1,7 +1,7 @@
-import type { ClientInit, HandleClientError } from '@sveltejs/kit';
+import type { ClientInit, HandleClientError } from '@sveltejs/kit/hooks';
 import { error as logError } from '@tauri-apps/plugin-log';
-import { describeError } from '$lib/errors';
-import { initSettings } from '$lib/settings.svelte';
+import { describeError } from '#lib/errors.ts';
+import { initSettings } from '#lib/settings.svelte.ts';
 
 // 画面側で起きた想定外のエラーも、Rust 側と同じログファイルに残す
 function report(context: string, error: unknown) {
@@ -25,7 +25,7 @@ export const init: ClientInit = async () => {
 	await initSettings();
 };
 
-export const handleError: HandleClientError = ({ error, message }) => {
+// 返さなければ、利用者に見せる状態と文言は SvelteKit の既定のまま
+export const handleError: HandleClientError = ({ error }) => {
 	report('SvelteKit error', error);
-	return { message };
 };

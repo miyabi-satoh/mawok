@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { BackupDifference } from '$lib/bindings/BackupDifference';
-import { m } from '$lib/paraglide/messages';
-import type { Replacement, Snippet } from '$lib/settings.svelte';
-import { newSnippet } from '$lib/snippets';
+import type { BackupDifference } from '#lib/bindings/BackupDifference.ts';
+import { m } from '#lib/paraglide/messages.js';
+import type { Replacement, Snippet } from '#lib/settings.svelte.ts';
+import { newSnippet } from '#lib/snippets.ts';
 import { restoreChangeText } from './backup-changes';
 
 const replacement: Replacement = { from: '濃度', to: 'Node.js', enabled: true };

@@ -1,5 +1,6 @@
 import { asset } from '$app/paths';
-import { platformFromUrl } from '$lib/keys';
+import { platformFromUrl } from '#lib/keys.ts';
+import type { AssetPath } from '$app/types';
 import type { PageLoad } from './$types';
 
 /** 条文。同じ条文は一覧の中で1つにまとめてあり、パッケージからは添え字で指す。 */
@@ -34,8 +35,9 @@ export interface LicenseList {
 // Rust の分はリポジトリに入れてあり（`just licenses`）、画面の分はビルドのたびに作る
 // （scripts/third-party-licenses.ts）。どちらも配布物に入る静的なファイルなので、そのまま取る。
 const FILES = {
-	rust: asset('/third-party-licenses/rust.json'),
-	npm: asset('/third-party-licenses/npm.json')
+	rust: asset('third-party-licenses/rust.json'),
+	// 型は static/ にあるファイルだけを数えるので、ビルドで足す分は名前を言い切る
+	npm: asset('third-party-licenses/npm.json' as AssetPath)
 } as const;
 
 export const load: PageLoad = async ({ fetch, url }) => {

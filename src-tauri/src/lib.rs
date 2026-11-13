@@ -2879,7 +2879,7 @@ fn open_page(app: &AppHandle, url: &str) -> Result<(), String> {
 }
 
 /// 設定と一緒に OS を受け取らないウィンドウ（ライセンス・使い方）の画面の URL。画面が閉じるキー（Cmd+W / Ctrl+W）や
-/// 本文の書き分けを OS で変えるので、OS の名前を `?platform=` で渡す（画面は `$lib/keys` の `platformFromUrl` で読む）
+/// 本文の書き分けを OS で変えるので、OS の名前を `?platform=` で渡す（画面は `src/lib/keys.ts` の `platformFromUrl` で読む）
 fn url_with_platform(page: &str) -> WebviewUrl {
     let platform = config::choice_name(&Platform::current());
     WebviewUrl::App(format!("{page}?platform={platform}").into())

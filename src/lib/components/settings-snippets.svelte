@@ -1,17 +1,17 @@
 <script lang="ts">
 	import PlusIcon from '@lucide/svelte/icons/plus';
-	import ReorderableRows from '$lib/components/reorderable-rows.svelte';
-	import SettingsRow from '$lib/components/settings-row.svelte';
-	import SettingsSection from '$lib/components/settings-section.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import { Textarea } from '$lib/components/ui/textarea';
-	import { m } from '$lib/paraglide/messages';
-	import type { SnippetsEditor } from '$lib/snippets-editor.svelte';
-	import { firstLine, snippetLabel } from '$lib/snippets';
-	import ListFilter from '$lib/components/list-filter.svelte';
-	import { Switch } from '$lib/components/ui/switch';
-	import { focusFirstField } from '$lib/focus-field';
-	import { showsFilter } from '$lib/list-filter';
+	import ReorderableRows from '#lib/components/reorderable-rows.svelte';
+	import SettingsRow from '#lib/components/settings-row.svelte';
+	import SettingsSection from '#lib/components/settings-section.svelte';
+	import { Button } from '#lib/components/ui/button/index.ts';
+	import { Textarea } from '#lib/components/ui/textarea/index.ts';
+	import { m } from '#lib/paraglide/messages.js';
+	import type { SnippetsEditor } from '#lib/snippets-editor.svelte.ts';
+	import { firstLine, snippetLabel } from '#lib/snippets.ts';
+	import ListFilter from '#lib/components/list-filter.svelte';
+	import { Switch } from '#lib/components/ui/switch/index.ts';
+	import { focusFirstField } from '#lib/focus-field.ts';
+	import { showsFilter } from '#lib/list-filter.ts';
 
 	/**
 	 * 設定画面の「定型文」の分類。定型文の並び。

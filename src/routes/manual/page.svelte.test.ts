@@ -2,10 +2,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { render } from 'vitest-browser-svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
-import { m } from '$lib/paraglide/messages';
-import { overwriteGetLocale } from '$lib/paraglide/runtime';
-import { settings } from '$lib/settings.svelte';
-import { settingsView } from '$lib/test-support/settings-view';
+import { m } from '#lib/paraglide/messages.js';
+import { overwriteGetLocale } from '#lib/paraglide/runtime.js';
+import { settings } from '#lib/settings.svelte.ts';
+import { settingsView } from '#lib/test-support/settings-view.ts';
 import Page from './+page.svelte';
 
 // ウィンドウの操作は Rust 側にあるので、呼ばれた内容だけを見る

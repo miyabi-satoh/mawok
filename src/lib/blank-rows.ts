@@ -1,6 +1,6 @@
-import type { Replacement, Snippet } from '$lib/settings.svelte';
+import type { Replacement, Snippet } from '#lib/settings.svelte.ts';
 
-// 設定の一覧で、欄がすべて空の行（足したまま書かなかった行）か。こうした行は使うときにも出ないので、溜めない（$lib/row-list.svelte.ts）
+// 設定の一覧で、欄がすべて空の行（足したまま書かなかった行）か。こうした行は使うときにも出ないので、溜めない（src/lib/row-list.svelte.ts）
 
 export function isBlankSnippet({ name, body }: Pick<Snippet, 'name' | 'body'>): boolean {
 	return name.trim() === '' && body.trim() === '';

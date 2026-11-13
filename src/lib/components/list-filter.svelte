@@ -1,6 +1,6 @@
 <script lang="ts">
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import { Input } from '$lib/components/ui/input';
+	import { Input } from '#lib/components/ui/input/index.ts';
 
 	/** 設定の一覧を絞り込む欄。欄の意味は虫眼鏡と aria-label で示し、placeholder は置かない */
 	let { value = $bindable(''), label }: { value?: string; label: string } = $props();

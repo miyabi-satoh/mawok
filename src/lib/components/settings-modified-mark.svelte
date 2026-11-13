@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { m } from '$lib/paraglide/messages';
+	import { m } from '#lib/paraglide/messages.js';
 
 	let { class: className = 'inset-y-2 left-0' }: { class?: string } = $props();
 </script>

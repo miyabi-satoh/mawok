@@ -14,13 +14,13 @@
 	import { prefersReducedMotion } from 'svelte/motion';
 	import type { SvelteSet } from 'svelte/reactivity';
 	import { tick, type Snippet } from 'svelte';
-	import { m } from '$lib/paraglide/messages';
-	import RowMenu from '$lib/components/row-menu.svelte';
-	import { buttonVariants } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { matchedKeys, shownRows } from '$lib/list-filter';
-	import { REORDER_FLIP_DURATION } from '$lib/reorder';
-	import type { Row, RowList } from '$lib/row-list.svelte';
+	import { m } from '#lib/paraglide/messages.js';
+	import RowMenu from '#lib/components/row-menu.svelte';
+	import { buttonVariants } from '#lib/components/ui/button/index.ts';
+	import { Input } from '#lib/components/ui/input/index.ts';
+	import { matchedKeys, shownRows } from '#lib/list-filter.ts';
+	import { REORDER_FLIP_DURATION } from '#lib/reorder.ts';
+	import type { Row, RowList } from '#lib/row-list.svelte.ts';
 
 	/**
 	 * 名前と本文の組を並べて編集する一覧（定型文）。ふだんは1件1行（grip・名前と本文の頭・「…」メニュー）で見せ、

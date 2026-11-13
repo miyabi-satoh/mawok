@@ -1,5 +1,5 @@
 import { marked, Renderer, type Tokens } from 'marked';
-import type { Platform } from '$lib/keys';
+import type { Platform } from '#lib/keys.ts';
 
 /** 目次に載せる節 (見出し2)。 */
 interface ManualSection {

@@ -1,6 +1,6 @@
 import { untrack } from 'svelte';
-import { reorder } from '$lib/reorder';
-import { coalesced } from '$lib/coalesce';
+import { reorder } from '#lib/reorder.ts';
+import { coalesced } from '#lib/coalesce.ts';
 
 /** 一覧の1行。key は画面の要素（開いた状態・フォーカス・ドラッグ）を保つためだけに使い、Rust 側へは渡さない。 */
 export type Row<T> = T & { key: string };

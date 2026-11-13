@@ -12,24 +12,24 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { onMount, tick } from 'svelte';
-	import KeyCaps from '$lib/components/key-caps.svelte';
-	import TextPalette, { type PaletteAction } from '$lib/components/text-palette.svelte';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Button } from '$lib/components/ui/button';
-	import { Textarea } from '$lib/components/ui/textarea';
-	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '$lib/font';
-	import { draftGuidance, guidanceHotkey } from '$lib/guidance';
-	import { errorCode, settingsSaveProblem } from '$lib/errors';
-	import { insertAsTyped } from '$lib/insert-text';
+	import KeyCaps from '#lib/components/key-caps.svelte';
+	import TextPalette, { type PaletteAction } from '#lib/components/text-palette.svelte';
+	import * as Alert from '#lib/components/ui/alert/index.ts';
+	import { Button } from '#lib/components/ui/button/index.ts';
+	import { Textarea } from '#lib/components/ui/textarea/index.ts';
+	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '#lib/font.ts';
+	import { draftGuidance, guidanceHotkey } from '#lib/guidance.ts';
+	import { errorCode, settingsSaveProblem } from '#lib/errors.ts';
+	import { insertAsTyped } from '#lib/insert-text.ts';
 	import {
 		DEFAULT_DRAFT_HISTORY_SIZE,
 		DraftHistory,
 		historyDirection,
 		type HistoryDirection
-	} from '$lib/history.svelte';
-	import { historyPreview, type HistoryItem } from '$lib/history-search';
-	import { caretLine } from '$lib/caret-line';
-	import { clamp } from '$lib/clamp';
+	} from '#lib/history.svelte.ts';
+	import { historyPreview, type HistoryItem } from '#lib/history-search.ts';
+	import { caretLine } from '#lib/caret-line.ts';
+	import { clamp } from '#lib/clamp.ts';
 	import {
 		draftActionFor,
 		formatKeys,
@@ -37,19 +37,19 @@
 		isTabKey,
 		keyHint,
 		type DraftAction
-	} from '$lib/keys';
-	import { keepsDraftFocus } from '$lib/draft-focus';
-	import { m } from '$lib/paraglide/messages';
-	import { EVENTS } from '$lib/bindings/constants';
-	import type { Shown } from '$lib/bindings/Shown';
-	import { coalesced } from '$lib/coalesce';
+	} from '#lib/keys.ts';
+	import { keepsDraftFocus } from '#lib/draft-focus.ts';
+	import { m } from '#lib/paraglide/messages.js';
+	import { EVENTS } from '#lib/bindings/constants.ts';
+	import type { Shown } from '#lib/bindings/Shown.ts';
+	import { coalesced } from '#lib/coalesce.ts';
 	import {
 		previewSegments,
 		ReplacementPreview,
 		type ReplacementMatch
-	} from '$lib/replacement-preview.svelte';
-	import { settings, type Snippet } from '$lib/settings.svelte';
-	import { firstLine, newSnippet } from '$lib/snippets';
+	} from '#lib/replacement-preview.svelte.ts';
+	import { settings, type Snippet } from '#lib/settings.svelte.ts';
+	import { firstLine, newSnippet } from '#lib/snippets.ts';
 
 	// 設定は画面が出る前に読み終わっている（src/hooks.client.ts）が、届く前に描かれても既定で表示できるようにする
 	const fontFamily = $derived(draftFontFamily(settings.current?.textFontFamily ?? ''));

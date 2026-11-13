@@ -1,6 +1,6 @@
-import { formatKeys, type DraftKeys, type Platform } from '$lib/keys';
-import { m } from '$lib/paraglide/messages';
-import type { SettingsView } from '$lib/settings.svelte';
+import { formatKeys, type DraftKeys, type Platform } from '#lib/keys.ts';
+import { m } from '#lib/paraglide/messages.js';
+import type { SettingsView } from '#lib/settings.svelte.ts';
 
 /**
  * 下書きの入力欄に出す案内の文。設定が null なら既定の案内を、今の表示言語とキーで作る。

@@ -1,10 +1,10 @@
-import type { ClearTextAfter } from '$lib/bindings/ClearTextAfter';
-import type { Language } from '$lib/bindings/Language';
-import type { TextWindowDisplay } from '$lib/bindings/TextWindowDisplay';
-import type { Theme } from '$lib/bindings/Theme';
-import type { WidthStyle } from '$lib/bindings/WidthStyle';
-import { m } from '$lib/paraglide/messages';
-import type { CharWidths, PunctuationStyle } from '$lib/settings.svelte';
+import type { ClearTextAfter } from '#lib/bindings/ClearTextAfter.ts';
+import type { Language } from '#lib/bindings/Language.ts';
+import type { TextWindowDisplay } from '#lib/bindings/TextWindowDisplay.ts';
+import type { Theme } from '#lib/bindings/Theme.ts';
+import type { WidthStyle } from '#lib/bindings/WidthStyle.ts';
+import { m } from '#lib/paraglide/messages.js';
+import type { CharWidths, PunctuationStyle } from '#lib/settings.svelte.ts';
 
 /** 設定の選択肢の1つ。lang は、名前が表示言語と違う言語のとき（読み上げと字形を合わせる） */
 type Option<V extends string> = { value: V; name: () => string; lang?: 'ja' | 'en' };

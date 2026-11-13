@@ -1,3 +1,5 @@
+import adapter from '@sveltejs/adapter-static';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { playwright } from '@vitest/browser-playwright';
 import tailwindcss from '@tailwindcss/vite';
@@ -17,7 +19,11 @@ export default defineConfig(() => ({
 		tailwindcss(),
 		// 画面に同梱した npm のパッケージのライセンス表示を、ビルドのたびに書き出す
 		thirdPartyLicenses(),
-		sveltekit(),
+		sveltekit({
+			preprocess: vitePreprocess(),
+			// Tauri には SSR をするサーバーが無いので、index.html に戻す SPA にする (https://v2.tauri.app/start/frontend/sveltekit/)
+			adapter: adapter({ fallback: 'index.html' })
+		}),
 		// 出力先や strategy は project.inlang/paraglide.config.js に書いてある（CLI と共通）
 		paraglideVitePlugin({ project: './project.inlang' })
 	],

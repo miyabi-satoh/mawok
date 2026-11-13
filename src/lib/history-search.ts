@@ -1,5 +1,5 @@
-import { matchesFilter } from '$lib/list-filter';
-import { firstLine } from '$lib/snippets';
+import { matchesFilter } from '#lib/list-filter.ts';
+import { firstLine } from '#lib/snippets.ts';
 
 /** 検索の一覧の1件。名前の無い定型文と同じ形にして、定型文の一覧と同じ部品で出す（index は DraftHistory.jump に渡す位置） */
 export type HistoryItem = { name: ''; body: string; index: number };

@@ -8,40 +8,40 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { tick } from 'svelte';
-	import type { SettingsCategory } from '$lib/bindings/SettingsCategory';
-	import { commandCaller, okValue } from '$lib/call';
-	import { clamp } from '$lib/clamp';
-	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '$lib/color';
-	import { EVENTS } from '$lib/bindings/constants';
-	import { errorCode, settingsSaveProblem } from '$lib/errors';
-	import BackupDialog from '$lib/components/backup-dialog.svelte';
-	import SettingsSnippets from '$lib/components/settings-snippets.svelte';
-	import SettingsFolder from '$lib/components/settings-folder.svelte';
-	import SettingsModifiedMark from '$lib/components/settings-modified-mark.svelte';
-	import SettingsRow from '$lib/components/settings-row.svelte';
-	import SettingsSection from '$lib/components/settings-section.svelte';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Button } from '$lib/components/ui/button';
-	import * as Field from '$lib/components/ui/field';
-	import { Input } from '$lib/components/ui/input';
-	import * as NativeSelect from '$lib/components/ui/native-select';
-	import { Switch } from '$lib/components/ui/switch';
-	import * as Tabs from '$lib/components/ui/tabs';
-	import { Textarea } from '$lib/components/ui/textarea';
-	import * as ToggleGroup from '$lib/components/ui/toggle-group';
-	import { DEFAULT_DRAFT_FONT_SIZE, MAX_DRAFT_FONT_SIZE, MIN_DRAFT_FONT_SIZE } from '$lib/font';
-	import { draftGuidance, guidanceHotkey } from '$lib/guidance';
-	import { focusFirstField } from '$lib/focus-field';
-	import { isBlankReplacement } from '$lib/blank-rows';
-	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '$lib/history.svelte';
-	import { modifiedName } from '$lib/modified-settings';
-	import { onEvent } from '$lib/on-event';
-	import { SnippetsEditor } from '$lib/snippets-editor.svelte';
-	import KeyCaps from '$lib/components/key-caps.svelte';
-	import ListFilter from '$lib/components/list-filter.svelte';
-	import { matchedKeys, showsFilter, shownRows } from '$lib/list-filter';
-	import { RowList } from '$lib/row-list.svelte';
-	import { coalesced } from '$lib/coalesce';
+	import type { SettingsCategory } from '#lib/bindings/SettingsCategory.ts';
+	import { commandCaller, okValue } from '#lib/call.ts';
+	import { clamp } from '#lib/clamp.ts';
+	import { DEFAULT_TEXT_COLORS, normalizeTextColor, type TextColorTheme } from '#lib/color.ts';
+	import { EVENTS } from '#lib/bindings/constants.ts';
+	import { errorCode, settingsSaveProblem } from '#lib/errors.ts';
+	import BackupDialog from '#lib/components/backup-dialog.svelte';
+	import SettingsSnippets from '#lib/components/settings-snippets.svelte';
+	import SettingsFolder from '#lib/components/settings-folder.svelte';
+	import SettingsModifiedMark from '#lib/components/settings-modified-mark.svelte';
+	import SettingsRow from '#lib/components/settings-row.svelte';
+	import SettingsSection from '#lib/components/settings-section.svelte';
+	import * as Alert from '#lib/components/ui/alert/index.ts';
+	import { Button } from '#lib/components/ui/button/index.ts';
+	import * as Field from '#lib/components/ui/field/index.ts';
+	import { Input } from '#lib/components/ui/input/index.ts';
+	import * as NativeSelect from '#lib/components/ui/native-select/index.ts';
+	import { Switch } from '#lib/components/ui/switch/index.ts';
+	import * as Tabs from '#lib/components/ui/tabs/index.ts';
+	import { Textarea } from '#lib/components/ui/textarea/index.ts';
+	import * as ToggleGroup from '#lib/components/ui/toggle-group/index.ts';
+	import { DEFAULT_DRAFT_FONT_SIZE, MAX_DRAFT_FONT_SIZE, MIN_DRAFT_FONT_SIZE } from '#lib/font.ts';
+	import { draftGuidance, guidanceHotkey } from '#lib/guidance.ts';
+	import { focusFirstField } from '#lib/focus-field.ts';
+	import { isBlankReplacement } from '#lib/blank-rows.ts';
+	import { DEFAULT_DRAFT_HISTORY_SIZE, MAX_DRAFT_HISTORY_SIZE } from '#lib/history.svelte.ts';
+	import { modifiedName } from '#lib/modified-settings.ts';
+	import { onEvent } from '#lib/on-event.ts';
+	import { SnippetsEditor } from '#lib/snippets-editor.svelte.ts';
+	import KeyCaps from '#lib/components/key-caps.svelte';
+	import ListFilter from '#lib/components/list-filter.svelte';
+	import { matchedKeys, showsFilter, shownRows } from '#lib/list-filter.ts';
+	import { RowList } from '#lib/row-list.svelte.ts';
+	import { coalesced } from '#lib/coalesce.ts';
 	import {
 		CHAR_WIDTH_KINDS,
 		CLEAR_TEXT_AFTER,
@@ -49,8 +49,8 @@
 		LANGUAGES,
 		PUNCTUATION_STYLES,
 		THEMES
-	} from '$lib/setting-options';
-	import { settingsCategories } from '$lib/settings-categories';
+	} from '#lib/setting-options.ts';
+	import { settingsCategories } from '#lib/settings-categories.ts';
 	import {
 		DRAFT_ACTIONS_IN_SETTINGS,
 		draftActionLabel,
@@ -64,14 +64,14 @@
 		toAccelerator,
 		toDraftKey,
 		type DraftAction
-	} from '$lib/keys';
-	import { m } from '$lib/paraglide/messages';
+	} from '#lib/keys.ts';
+	import { m } from '#lib/paraglide/messages.js';
 	import {
 		settings,
 		type Replacement,
 		type SettingsView,
 		type Snippet
-	} from '$lib/settings.svelte';
+	} from '#lib/settings.svelte.ts';
 
 	/** サイドバーの分類。選んだ分類は覚えず、開くたびに先頭の「一般」から始める */
 	const categories = settingsCategories();
