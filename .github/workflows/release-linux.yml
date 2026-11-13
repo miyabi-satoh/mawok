@@ -1,0 +1,215 @@
+name: Release (Linux)
+
+# 版のタグ (v<版>) を push すると、.deb を作って GitHub Releases に上げ、apt リポジトリ (GitHub Pages) と AUR の mawok-bin を新しい版にする (docs/platform.md「Linux の配る版」)。
+# PR でこのファイルか packaging/ を変えたときは、使い捨ての鍵で公開の手前まで流し、apt と pacman で入れられるかを確かめる。
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release-linux.yml
+      - packaging/**
+
+permissions:
+  contents: read
+
+# 同じ版を2回並べて公開しない
+concurrency:
+  group: release-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PUBLISH: ${{ github.event_name == 'push' }}
+
+jobs:
+  deb:
+    # glibc などは古い版に合わせて作れば新しい版でも動くので、支える中でいちばん古い Ubuntu で作る
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the version
+        id: version
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match the version $version in tauri.conf.json"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # WebKitGTK とトレイの部品の開発用の包み (Tauri の前提環境。ci.yml と同じ)
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # 配る版は、キャッシュを使わずに作り直す (前のビルドの残りが紛れ込まないように)
+      - run: pnpm tauri build --bundles deb
+
+      - name: Show the package
+        run: |
+          deb=src-tauri/target/release/bundle/deb/Mawok_${{ steps.version.outputs.version }}_amd64.deb
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb
+          path: src-tauri/target/release/bundle/deb/Mawok_${{ steps.version.outputs.version }}_amd64.deb
+          if-no-files-found: error
+
+  release:
+    needs: deb
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: deb
+          path: dist
+
+      # 流し直したときは、同じ版の .deb を上書きする
+      - name: Upload to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.deb --verify-tag --title "Mawok ${{ needs.deb.outputs.version }}" --generate-notes
+          fi
+
+  apt:
+    needs: deb
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: deb
+          path: dist
+
+      - name: Install the repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Import the signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          if [[ "$PUBLISH" == true ]]; then
+            gpg --batch --import <<< "$APT_SIGNING_KEY"
+          else
+            gpg --batch --passphrase '' --quick-gen-key 'Mawok test key' ed25519 sign never
+          fi
+
+      - run: packaging/apt/build-repo.sh dist/*.deb site
+
+      # 利用者と同じく、鍵を signed-by で結んだ apt から入れる
+      - name: Install from the repository
+        run: |
+          sudo install -m 644 site/mawok.gpg /usr/share/keyrings/mawok-test.gpg
+          printf 'Types: deb\nURIs: file://%s\nSuites: stable\nComponents: main\nArchitectures: amd64\nSigned-By: /usr/share/keyrings/mawok-test.gpg\n' "$PWD/site" \
+            | sudo tee /etc/apt/sources.list.d/mawok.sources
+          sudo apt-get update
+          sudo apt-get install -y mawok
+          dpkg-query --show mawok
+
+      - uses: actions/upload-pages-artifact@v5
+        if: env.PUBLISH == 'true'
+        with:
+          path: site
+
+  pages:
+    needs: [apt, release]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
+
+  aur:
+    needs: [deb, release]
+    # PR では release が飛ぶので、飛んだときも流す
+    if: ${{ !cancelled() && needs.deb.result == 'success' && needs.release.result != 'failure' }}
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: deb
+          path: dist
+
+      - run: pacman -Syu --noconfirm --needed git openssh
+
+      # makepkg は、source の名前のファイルが PKGBUILD の隣にあれば落とさずに使う。PR ではまだ Releases に無いので、作った .deb を置く
+      - name: Write the PKGBUILD
+        run: |
+          version=${{ needs.deb.outputs.version }}
+          mkdir aur
+          cp "dist/Mawok_${version}_amd64.deb" aur/
+          cp LICENSE "aur/LICENSE-${version}"
+          sed -e "s/@VERSION@/${version}/" \
+            -e "s/@SHA256_DEB@/$(sha256sum "aur/Mawok_${version}_amd64.deb" | cut -d' ' -f1)/" \
+            -e "s/@SHA256_LICENSE@/$(sha256sum "aur/LICENSE-${version}" | cut -d' ' -f1)/" \
+            packaging/aur/PKGBUILD.in > aur/PKGBUILD
+          cat aur/PKGBUILD
+
+      # makepkg は root では動かない
+      - name: Build and install the package
+        run: |
+          useradd --create-home builder
+          chown -R builder aur
+          su builder -c 'cd aur && makepkg --printsrcinfo > .SRCINFO && makepkg --force --nodeps'
+          pacman -U --noconfirm aur/mawok-bin-*.pkg.tar.zst
+          pacman -Qi mawok-bin
+
+      - name: Push to the AUR
+        if: env.PUBLISH == 'true'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/aur'
+          git clone ssh://aur@aur.archlinux.org/mawok-bin.git aur-repo
+          cp aur/PKGBUILD aur/.SRCINFO aur-repo/
+          cd aur-repo
+          git add PKGBUILD .SRCINFO
+          # 流し直して中身が同じなら、積むものが無い
+          git diff --cached --quiet && exit 0
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "Update to ${{ needs.deb.outputs.version }}"
+          git push origin HEAD:master

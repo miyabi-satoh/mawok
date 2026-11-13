@@ -79,6 +79,8 @@ just msix
 just release-mac
 ```
 
+Linux 版は、`tauri.conf.json` の版と同じ `v<版>` のタグを push すると、GitHub Actions（`.github/workflows/release-linux.yml`）が .deb を作り、GitHub Releases・apt リポジトリ（GitHub Pages）・AUR の `mawok-bin` に出します（→ docs/platform.md「Linux の配る版」）。
+
 ## 設定とデータの置き場所
 
 設定の置き場の形と場所は [設定の置き場](docs/config.md)、Microsoft Store（MSIX）版の置き場所は [OS ごとの作り](docs/platform.md)「Windows の MSIX 版」にあります。
