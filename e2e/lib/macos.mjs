@@ -899,6 +899,12 @@ export async function launchMawok({ regular = false } = {}) {
 			`${APP_BUNDLE} が ${PROFILE_ENV} を見ていません。just bundle した版を入れ直すか、MAWOK_APP で指してください`
 		);
 	}
+	// 下書きの画面を読み込み終えるまで待つ。メニューバーのアイコンは読み込みの前に出て、その間に開いたメニューは読み込みが終わる所で閉じる
+	await waitFor(() => readLogSince(LOG_PATH, mark).includes('page ready (main '), Boolean, {
+		timeout: 15_000,
+		interval: 200,
+		label: '下書きの画面の読み込み'
+	});
 }
 
 /**
