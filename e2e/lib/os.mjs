@@ -830,11 +830,12 @@ public static class E2EFailureCapture {
     [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hWnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 }
 "@
-# DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
-[E2EFailureCapture]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
+# DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2。先に DPI の扱いが決まっていて効かなければ、input.mjs と同じく古い API で物理ピクセルにする
+if (-not [E2EFailureCapture]::SetProcessDpiAwarenessContext([IntPtr](-4))) { [E2EFailureCapture]::SetProcessDPIAware() | Out-Null }
 $saved = New-Object System.Collections.Generic.List[string]
 $errors = New-Object System.Collections.Generic.List[string]
 try {
@@ -953,11 +954,7 @@ export async function captureFailure(name) {
 		const { saved, state, errors } = JSON.parse(stdout.trim());
 		for (const message of errors) console.error(`[e2e] ${message}`);
 		if (state) {
-			await fs.writeFile(
-				`${base}.json`,
-				`${JSON.stringify(state, null, '	')}
-`
-			);
+			await fs.writeFile(`${base}.json`, `${JSON.stringify(state, null, '\t')}\n`);
 			saved.push(`${base}.json`);
 		}
 		return saved;
