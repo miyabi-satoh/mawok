@@ -204,6 +204,11 @@ jobs:
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
+          # AUR のアカウントが無い (登録を止めている時期がある) 間も、ほかの配り先へは出せるようにする
+          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
+            echo "::warning::AUR_SSH_PRIVATE_KEY is not set, so mawok-bin was not updated on the AUR"
+            exit 0
+          fi
           install -d -m 700 ~/.ssh
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
