@@ -87,16 +87,23 @@ jobs:
           name: deb
           path: dist
 
-      # 流し直したときは、同じ版の .deb を上書きする
+      # .deb は作るたびに中身のバイトが変わる。上げた後に差し替えると、AUR のハッシュや apt の手元の索引と食い違うので、上げてある .deb とは同じものしか通さない。
+      # 途中で落ちたときは「Re-run failed jobs」で流し直す (作った .deb を使い回す)。
       - name: Upload to GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber
+          deb=$(basename dist/*.deb)
+          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" "dist/$deb" --verify-tag --title "Mawok ${{ needs.deb.outputs.version }}" --generate-notes
+          elif gh release download "$GITHUB_REF_NAME" --pattern "$deb" --dir uploaded; then
+            if ! cmp -s "dist/$deb" "uploaded/$deb"; then
+              echo "::error::$deb on the release differs from this build. Use “Re-run failed jobs” to reuse the original build, or release a new version."
+              exit 1
+            fi
           else
-            gh release create "$GITHUB_REF_NAME" dist/*.deb --verify-tag --title "Mawok ${{ needs.deb.outputs.version }}" --generate-notes
+            gh release upload "$GITHUB_REF_NAME" "dist/$deb"
           fi
 
   apt:
@@ -178,10 +185,8 @@ jobs:
           version=${{ needs.deb.outputs.version }}
           mkdir aur
           cp "dist/Mawok_${version}_amd64.deb" aur/
-          cp LICENSE "aur/LICENSE-${version}"
           sed -e "s/@VERSION@/${version}/" \
             -e "s/@SHA256_DEB@/$(sha256sum "aur/Mawok_${version}_amd64.deb" | cut -d' ' -f1)/" \
-            -e "s/@SHA256_LICENSE@/$(sha256sum "aur/LICENSE-${version}" | cut -d' ' -f1)/" \
             packaging/aur/PKGBUILD.in > aur/PKGBUILD
           cat aur/PKGBUILD
 
@@ -203,7 +208,8 @@ jobs:
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
-          export GIT_SSH_COMMAND='ssh -i ~/.ssh/aur'
+          # コンテナの中では HOME が /github/home で、ssh は既定の置き場を HOME でなく root のホームから引くので、どちらも指す
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
           git clone ssh://aur@aur.archlinux.org/mawok-bin.git aur-repo
           cp aur/PKGBUILD aur/.SRCINFO aur-repo/
           cd aur-repo

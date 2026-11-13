@@ -1,22 +1,22 @@
 # Maintainer: amiiby
-# AUR の mawok-bin の元。@VERSION@ と @SHA256_DEB@・@SHA256_LICENSE@ は .github/workflows/release-linux.yml が埋める。
+# AUR の mawok-bin の元。@VERSION@ と @SHA256_DEB@ は .github/workflows/release-linux.yml が埋める。
 pkgname=mawok-bin
 pkgver=@VERSION@
 pkgrel=1
 pkgdesc='A place to write text before sending it to a terminal or other apps'
 arch=('x86_64')
 url='https://amiiby.com/apps/mawok/'
-license=('LicenseRef-PolyForm-Strict-1.0.0')
+# 配るアプリは、ソースの LICENSE (PolyForm Strict) でなく利用規約で扱う (README.md「ライセンス」)
+license=('LicenseRef-Mawok-Terms')
 depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
 provides=('mawok')
 conflicts=('mawok')
-source=("https://github.com/miyabi-satoh/mawok/releases/download/v${pkgver}/Mawok_${pkgver}_amd64.deb"
-        "LICENSE-${pkgver}::https://raw.githubusercontent.com/miyabi-satoh/mawok/v${pkgver}/LICENSE")
-sha256sums=('@SHA256_DEB@'
-            '@SHA256_LICENSE@')
+source=("https://github.com/miyabi-satoh/mawok/releases/download/v${pkgver}/Mawok_${pkgver}_amd64.deb")
+sha256sums=('@SHA256_DEB@')
 
 package() {
   # makepkg が .deb を展開した data.tar.gz の中身が、そのまま入れる先の形になっている
   bsdtar -xf data.tar.gz -C "$pkgdir"
-  install -Dm644 "LICENSE-${pkgver}" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  echo 'Mawok is provided under the Terms of Use: https://amiiby.com/apps/mawok/terms/' > "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

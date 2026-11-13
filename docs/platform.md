@@ -100,8 +100,9 @@
 - `.github/workflows/release-linux.yml` が、版のタグの push で .deb を作り、GitHub Releases に上げ、apt リポジトリと AUR を新しい版にする。PR でこの workflow か `packaging/` を変えたときは、使い捨ての鍵で公開の手前まで流し、apt と pacman で実際に入れて確かめる。
 - .deb は、支える中でいちばん古い Ubuntu（24.04）で作る。glibc などのライブラリは、古い版に合わせて作れば新しい版でも動くため。依存（WebKitGTK・GTK・トレイの `libayatana-appindicator3-1`）は Tauri が control に書く。
 - apt リポジトリは GitHub Pages（`https://miyabi-satoh.github.io/mawok`）に置く（`packaging/apt/build-repo.sh`）。apt は Packages の `Filename` をリポジトリの URL からの相対で引くので、GitHub Releases の .deb は指せず、.deb も Pages に置く。置くのは今の版だけにし、前の版は GitHub Releases に残す。apt が更新に使うのは最新の版だけで、版を重ねると Pages の容量の上限（1 GB）に近づくため。
+- 初めてタグを打つ前に、Pages の公開元を GitHub Actions にし、`github-pages` の環境の配備の決まりに `v*` のタグを足す（既定では main からしか配備できず、タグの push からの配備が止められる）。
 - apt リポジトリの署名の鍵は GitHub の secret（`APT_SIGNING_KEY`）に置く。公開鍵は workflow がその鍵から書き出して `mawok.gpg` として Pages に置き、利用者は `signed-by` でこのリポジトリにだけ結ぶ。
-- AUR へは、`packaging/aur/PKGBUILD.in` に版とハッシュを埋め、`.SRCINFO` を作って、secret（`AUR_SSH_PRIVATE_KEY`）の鍵で push する。ライセンスの文はタグの `LICENSE` を取って入れる（.deb には入っていない）。
+- AUR へは、`packaging/aur/PKGBUILD.in` に版とハッシュを埋め、`.SRCINFO` を作って、secret（`AUR_SSH_PRIVATE_KEY`）の鍵で push する。配るアプリはソースの `LICENSE` でなく利用規約で扱うので、ライセンスには利用規約の URL を書いたファイルを入れる。
 
 ## macOS の窓の位置と大きさ
 
