@@ -2211,6 +2211,7 @@ dependencies = [
  "webview2-com",
  "windows",
  "windows-core",
+ "wry",
  "zbus",
 ]
 

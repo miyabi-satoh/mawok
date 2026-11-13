@@ -24,6 +24,8 @@ updates:
       - dependency-name: 'objc2'
       - dependency-name: 'objc2-foundation'
       - dependency-name: 'objc2-app-kit'
+      # src-tauri/Cargo.toml の FIX: のとおり、直すまで留めている
+      - dependency-name: 'wry'
     groups:
       cargo-minor-patch:
         patterns: ['*']

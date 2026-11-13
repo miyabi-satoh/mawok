@@ -7,7 +7,11 @@ import globals from 'globals';
 import ts from 'typescript-eslint';
 import { loadConfig } from '@sveltejs/load-config';
 
-const svelteConfig = (await loadConfig('./', { traverse: false }))?.config;
+// 読めなくても loadConfig は投げずに error を返すので、黙って前処理なしで lint しないよう止める
+const loaded = await loadConfig('./', { traverse: false });
+if (!loaded?.config)
+	throw new Error(`couldn't load the Svelte config: ${loaded?.error ?? 'not found'}`);
+const svelteConfig = loaded.config;
 
 const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
