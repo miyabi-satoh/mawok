@@ -3,6 +3,7 @@ node_modules/
 .autostart-backup.json
 .e2e.lock
 .macos-backup/
+.linux-backup/
 screenshots/
 .apps-theme-backup.json
 .msix-held.json

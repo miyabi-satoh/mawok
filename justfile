@@ -105,6 +105,14 @@ msix-check *args:
 macos-check *tests:
     cd e2e && node macos-run.mjs {{ tests }}
 
+# 引数でテストファイルを選べる (例: just linux-check tray)。キーボードとフォーカスを使い、常用の Mawok・
+# ログイン時の起動・クリップボード・Hyprland の割り当てを控えて戻す。詳細は e2e/README.md の「Linux の確認」を参照
+[doc('Linux (Hyprland) の自動の確認を流す (入れてある /usr/bin/mawok を動かす)')]
+[group('実機の確認')]
+[linux]
+linux-check *tests:
+    cd e2e && node linux-run.mjs {{ tests }}
+
 # DMG を開いたときのアイコンの並びを整えるには AppleScript で Finder を操作し、
 # ターミナルに Finder のオートメーション許可が要る (ないと DMG の作成が失敗する)。Tauri は CI=true のときにこの操作を飛ばす。
 [doc('配布用にビルドする')]
