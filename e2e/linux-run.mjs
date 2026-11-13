@@ -48,8 +48,9 @@ waitForChildOnInterrupt();
 // 前の実行で落ちた時点の記録と混ざらないよう、回す前に空にする
 await fs.rm(FAILURE_DIR, { recursive: true, force: true });
 // 常用の Mawok と同時には動かせない (単一起動とホットキーが OS の上で1つ) ので、全体の前後で1度だけ止めて戻す
-await holdUserState();
 try {
+	// 控えの途中で落ちても、取れた分は finally で戻す
+	await holdUserState();
 	process.exitCode = await runTests(testFiles('linux', options.tests, e2eDir), e2eDir, [
 		'--import',
 		'./lib/linux-failure-capture.mjs'

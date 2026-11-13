@@ -167,6 +167,20 @@ export function activeWindow() {
 }
 
 /** portal に登録できたホットキーがデスクトップの一覧にあるか。読めないデスクトップでは null */
+/**
+ * デスクトップの portal に GlobalShortcuts があるか (GNOME 47 までは無い)。Mawok のログの「登録できなかった」は、
+ * portal が無いときにも登録が失敗したときにも出るので、こちらで見分ける
+ */
+export async function hasGlobalShortcutsPortal() {
+	return (
+		await busctl([
+			'introspect',
+			'org.freedesktop.portal.Desktop',
+			'/org/freedesktop/portal/desktop'
+		])
+	).includes('org.freedesktop.portal.GlobalShortcuts');
+}
+
 export function portalShortcutRegistered() {
 	return desktop.portalShortcutRegistered();
 }
@@ -453,23 +467,27 @@ export async function startDriver({ port = 4444, nativePort = 4445 } = {}) {
 		{ stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, [PROFILE_ENV]: PROFILE } }
 	);
 	const exited = new Promise((resolve) => child.once('exit', resolve));
-	await waitFor(
-		async () => {
-			if (child.exitCode !== null)
-				throw new Error(`tauri-driver が起動前に終了しました (code=${child.exitCode})`);
-			return (await isListening(port)) && (await isListening(nativePort));
-		},
-		Boolean,
-		{ timeout: 15_000, interval: 200, label: 'tauri-driver の起動' }
-	);
-	return {
-		port,
-		async stop() {
-			if (child.exitCode === null && child.signalCode === null) child.kill();
-			await exited;
-			await execFileAsync('pkill', ['-x', 'WebKitWebDriver']).catch(() => {});
-		}
+	const stop = async () => {
+		if (child.exitCode === null && child.signalCode === null) child.kill();
+		await exited;
+		await execFileAsync('pkill', ['-x', 'WebKitWebDriver']).catch(() => {});
 	};
+	try {
+		await waitFor(
+			async () => {
+				if (child.exitCode !== null)
+					throw new Error(`tauri-driver が起動前に終了しました (code=${child.exitCode})`);
+				return (await isListening(port)) && (await isListening(nativePort));
+			},
+			Boolean,
+			{ timeout: 15_000, interval: 200, label: 'tauri-driver の起動' }
+		);
+	} catch (error) {
+		// 残すとポートを塞ぎ、後のテストファイルがどれも起動できなくなる
+		await stop();
+		throw error;
+	}
+	return { port, stop };
 }
 
 /**
@@ -526,7 +544,6 @@ export async function launchApp(driver, settings = {}) {
 
 /** WebDriver のセッションを閉じ、Mawok が残っていれば終了する */
 export async function closeApp(client) {
-	await captureIfFailed();
 	await client?.deleteSession().catch(() => {});
 	await quitMawok();
 }
@@ -583,29 +600,8 @@ export function launchOtherWindow() {
 
 // ── 落ちたときの記録 ──
 
-let currentTest;
-let capturedCurrent = false;
-
-/** 回り始めたテストを覚える (linux-failure-capture.mjs の beforeEach から呼ぶ) */
-export function trackTest(t) {
-	currentTest = t;
-	capturedCurrent = false;
-}
-
-/**
- * 回っているテストの本体が落ちていたら、1度だけ記録を残す。テストファイルの後始末は Mawok を閉じる (closeApp) ので、
- * 全体の afterEach だけでは Mawok の窓が写らない。閉じる前にも呼ぶ。落ちたかは passed でなく error で見る
- * (passed は本体が終わるまで false なので、本体の途中で起動し直すテストで、通るテストまで記録してしまう)
- */
-export async function captureIfFailed() {
-	if (!currentTest?.error || capturedCurrent) return;
-	capturedCurrent = true;
-	const saved = await captureFailure(currentTest.fullName);
-	if (saved.length > 0) console.error(`[linux-check] 落ちた時点の記録: ${saved.join(', ')}`);
-}
-
 /** 落ちた時点の画面と、窓の一覧とフォーカスを `FAILURE_DIR` に置き、置いた先を返す。どれも投げない */
-async function captureFailure(name) {
+export async function captureFailure(name) {
 	try {
 		await fs.mkdir(FAILURE_DIR, { recursive: true });
 	} catch (error) {

@@ -7,9 +7,9 @@ import {
 	desktopName,
 	draftFocused,
 	ensureSessionEnv,
+	hasGlobalShortcutsPortal,
 	launchApp,
 	launchOtherWindow,
-	logSince,
 	portalShortcutRegistered,
 	pressHotkey,
 	startDriver,
@@ -63,7 +63,7 @@ test.describe('Linux: ホットキー', () => {
 
 	test('portal にホットキーを登録し、デスクトップがそのキーを押したと知らせると、下書きの窓を出し入れする', async (t) => {
 		// GlobalShortcuts の portal が無いデスクトップ (GNOME 47 まで) では登録できず、mawok --toggle の案内に落ちる
-		if (logSince(app.mark).includes('hotkey not registered with the desktop portal')) {
+		if (!(await hasGlobalShortcutsPortal())) {
 			t.skip(`${desktopName()} には GlobalShortcuts の portal が無い`);
 			return;
 		}

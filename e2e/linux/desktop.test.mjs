@@ -5,10 +5,10 @@ import { promisify } from 'node:util';
 import {
 	closeApp,
 	desktopName,
+	hasGlobalShortcutsPortal,
 	ensureSessionEnv,
 	invoke,
 	launchApp,
-	logSince,
 	LOG_PATH,
 	mawokPids,
 	startDriver,
@@ -57,8 +57,7 @@ test.describe('Linux: デスクトップ', () => {
 		assert.equal(view.hotkeyByDesktop, true);
 		// 設定の「キー操作」は、desktopHotkey があればそのキーを、無ければ mawok --toggle の案内を出す (settings/+page.svelte)。
 		// 設定の窓の中は WebDriver から読めない (WebKitWebDriver に出るのは最初の窓だけ) ので、画面が受け取る値で見る
-		const registered = logSince(app.mark).includes('hotkey registered with the desktop portal');
-		if (desktopName() === 'hyprland' || !registered) {
+		if (desktopName() === 'hyprland' || !(await hasGlobalShortcutsPortal())) {
 			// Hyprland の portal は登録を受けてもキーを付けない。portal が無ければ登録できない
 			assert.equal(view.desktopHotkey, null);
 		} else {

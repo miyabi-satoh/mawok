@@ -218,13 +218,13 @@ just linux-check --restore               # 中断して残った控えから戻�
 - **ホットキーの道**: Hyprland の portal は登録を受けても自分ではキーを付けないので、確かめる間だけ Hyprland の割り当てを替える（portal の道は `global` で登録へ、`mawok --toggle` の道は `exec` で）。GNOME は portal が付けたキーをそのまま押し、`mawok --toggle` はカスタムショートカット（Ctrl+Alt+M）に割り当てる。
 - **ssh から回す**: Wayland・Hyprland・D-Bus・`DISPLAY` の環境変数は、ログインしたセッションのもの（`systemctl --user show-environment`）を足す。GNOME には外から使える Wayland のクリップボードの仕組み（data-control）が無く、Mawok（arboard）は X11（Xwayland）のクリップボードを使うので、`DISPLAY` が無いとコピーが失敗する。
 - **WebDriver で見えるのは下書きの窓だけ**。WebKitWebDriver に出る窓のハンドルは最初の窓の1つだけなので、設定や使い方の窓は、デスクトップの窓の一覧で開いたことだけを見る。描画プロセスを落とすと WebDriver のセッションも切れるので、そのテストはファイルの最後に置く。
-- **落ちたときの記録**: テストの本体が落ちると、その時点の画面（Hyprland は grim。GNOME は確かめなしに撮れないので撮らない）と、窓の一覧とフォーカスを `e2e/screenshots/linux-failures/` に置く（回すたびに消す）。`lib/linux-failure-capture.mjs` を各テストファイルの前に読み込み、Mawok を閉じる所（`closeApp`）でも残す。
+- **落ちたときの記録**: テストの本体が落ちると、その時点の画面（Hyprland は grim。GNOME は確かめなしに撮れないので撮らない）と、窓の一覧とフォーカスを `e2e/screenshots/linux-failures/` に置く（回すたびに消す）。`lib/linux-failure-capture.mjs` を各テストファイルの前に読み込む。
 
 ### 手元の Hyprland で回すとき (`just linux-check`)
 
 VM で回せない事情（VM に無い手元の設定で起きる不具合など）があるときだけ使う。
 
-- **道具**: `ydotool`・`grim`・`wl-clipboard`・`webkitgtk-6.0`（WebKitWebDriver が入っている。`webkit2gtk-4.1` には無い）を pacman で、`tauri-driver` を `cargo install tauri-driver --locked` で入れる。
+- **道具**: `ydotool`・`grim`・`foot`・`wl-clipboard`・`webkitgtk-6.0`（WebKitWebDriver が入っている。`webkit2gtk-4.1` には無い）を pacman で、`tauri-driver` を `cargo install tauri-driver --locked` で入れる。
 - **ydotoold**: uinput は root が要るので、別の端末で `sudo ydotoold --socket-path=/run/user/$(id -u)/.ydotool_socket --socket-own=$(id -u):$(id -g)` を動かしておく。
 - **keyd**: すべてのキーボード（`[ids]` の `*`）を掴む設定だと、ydotool の装置も掴まれてキーが届かない（マウスは届く）。`[ids]` に `-2333:6666` を足して `sudo systemctl restart keyd` する（`keyd reload` は落ちることがある）。足りなければ、始める前に止まる。
 - **Deskflow**: サーバーのポインターがほかの機に移っていると、ydotool の入力もそちらへ送られる。始める前に ydotool でポインターを少し動かして確かめ、動かなければ止まる。

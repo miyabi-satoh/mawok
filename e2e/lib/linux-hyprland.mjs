@@ -58,7 +58,10 @@ export async function detect(runtime) {
 }
 
 export const name = 'hyprland';
-export const tools = [['grim', 'sudo pacman -S grim']];
+export const tools = [
+	['grim', 'sudo pacman -S grim'],
+	['foot', 'sudo pacman -S foot']
+];
 
 /** keyd が ydotool の装置を掴まないこと、ポインターがこの機の画面にあること */
 export async function preflight({ ydotool, sleep }) {

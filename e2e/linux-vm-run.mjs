@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { parseArgs } from './lib/runner.mjs';
+import { parseArgs, waitForChildOnInterrupt } from './lib/runner.mjs';
 
 const execFileAsync = promisify(execFile);
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
@@ -57,7 +57,13 @@ const wasRunning = await execFileAsync(VM_SH, [vm, 'ssh', 'true']).then(
 	() => true,
 	() => false
 );
-if (!wasRunning && (await vmSh('start', '--headless')) !== 0) process.exit(1);
+// 起動に失敗しても qemu は裏で動き出していることがあるので止める
+if (!wasRunning && (await vmSh('start', '--headless')) !== 0) {
+	await vmSh('stop');
+	process.exit(1);
+}
+// Ctrl+C は ssh にも届いて VM の中の確認が終わるので、こちらは終わらずに後始末 (記録の持ち帰りと VM の停止) まで進む
+waitForChildOnInterrupt();
 
 let code = 1;
 try {
