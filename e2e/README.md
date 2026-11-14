@@ -47,7 +47,7 @@ pnpm install
 
 ## 描かれ方と画面の撮影
 
-`tests/rendering.test.mjs` は、画面の状態ごとに、テーマ・言語・大きさを変えながら `lib/rendering.mjs` で描かれ方の崩れ（重なり・はみ出し・省略・潰れ）を調べ、WebView の中を `e2e/screenshots/<状態>-<言語>-<テーマ>[-min].png` に撮る（gitignore 済み。実行のたびに消して撮り直す）。
+`tests/rendering.test.mjs` は、画面の状態ごとに、テーマ・言語・大きさを変えながら `lib/rendering.mjs` で描かれ方の崩れ（重なり・はみ出し・省略・潰れ）を調べ、WebView の中を `e2e/screenshots/<状態>-<言語>-<テーマ>[-min].png` に撮る（gitignore 済み。実行のたびに消して撮り直す。消すのは `e2e/screenshots/` の直下の画面だけで、フォルダーは残す）。`tests/draft-file.test.mjs` は、ファイルの窓がテキストウィンドウより前に出ている見た目を `e2e/screenshots/file-dialog/` に撮る。
 
 - 撮った画面は人かエージェントが目で見る。気づいたものは直すか、直さない理由を残す。
 - 直す前の崩れがあるテストは `todo` にしてある（落ちても全体は通り、`todo` の数に出る）。直したら外す。
