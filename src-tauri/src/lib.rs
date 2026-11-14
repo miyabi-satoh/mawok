@@ -57,8 +57,9 @@ use tauri::{
     include_image,
     menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalRect, RunEvent, Theme as WindowTheme,
-    Webview, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalRect, PhysicalSize, RunEvent,
+    Theme as WindowTheme, Webview, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    Wry,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
@@ -75,7 +76,7 @@ use crate::{
 };
 
 const MAIN_WINDOW: &str = "main";
-pub(crate) const APP_NAME: &str = "Mawok";
+const APP_NAME: &str = "Mawok";
 /// ログファイルの名前（tauri-plugin-log が既定で使うアプリ名）
 const LOG_FILE_STEM: &str = APP_NAME;
 const TERMS_URL: &str = "https://amiiby.com/apps/mawok/terms/";
@@ -540,6 +541,23 @@ fn show_again(app: &AppHandle) -> bool {
     show_draft(app, false)
 }
 
+/// 出すときに入力欄を空から始めるか。`hidden_at` は隠した時刻、`now` は今（どちらもミリ秒）。
+/// 設定のために隠したときは時刻を残さないので、設定を開いている間・閉じた後の出し直しでは空にしない。
+/// 設定を見ている間も、書きかけから離れたわけではないため。時計が戻っていれば、たっていないとみる
+fn should_clear_on_show(
+    capture_return_target: bool,
+    visible: bool,
+    hidden_at: Option<u64>,
+    clear_after: Option<Duration>,
+    now: u64,
+) -> bool {
+    capture_return_target
+        && !visible
+        && hidden_at
+            .zip(clear_after)
+            .is_some_and(|(at, after)| now.saturating_sub(at) >= after.as_millis() as u64)
+}
+
 /// 下書きウィンドウを出す。出せたかどうかを返す
 fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
     let Some(window) = main_window(app) else {
@@ -555,13 +573,13 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
         let config = app_state.config.lock().unwrap();
         (config.text_window_display, config.clear_text_after)
     };
-    // 設定のために隠したときは時刻を残さないので、設定を開いている間・閉じた後の出し直しでは空にしない。
-    // 設定を見ている間も、書きかけから離れたわけではないため。時計が戻っていれば、たっていないとみる
-    let clear_text = capture_return_target
-        && !window.is_visible().unwrap_or(true)
-        && hidden_at
-            .zip(clear_after.duration())
-            .is_some_and(|(at, after)| now_millis().saturating_sub(at) >= after.as_millis() as u64);
+    let clear_text = should_clear_on_show(
+        capture_return_target,
+        window.is_visible().unwrap_or(true),
+        hidden_at,
+        clear_after.duration(),
+        now_millis(),
+    );
     if capture_return_target {
         *state.return_target.lock().unwrap() = focus::capture(&window);
         // 設定を閉じた後の出し直しは、設定を開く前の位置に戻す
@@ -571,9 +589,7 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
     }
     fit_to_screen(&window);
     // 出した後にフォーカスが入ったかを、ここから数え直す
-    app.state::<DraftState>()
-        .focused_since_shown
-        .store(false, Ordering::Relaxed);
+    state.focused_since_shown.store(false, Ordering::Relaxed);
     if let Err(error) = focus::show_draft(app, &window) {
         error!("show: couldn't show the window: {error}");
         // 出せていないのに記録を寝かせると、隠れたまま戻せなくなる
@@ -581,11 +597,9 @@ fn show_draft(app: &AppHandle, capture_return_target: bool) -> bool {
     }
     if capture_return_target {
         // 自分で出したものは、設定を閉じたときに出し直す対象ではない
-        app.state::<DraftState>()
-            .hidden_for_settings
-            .store(false, Ordering::Relaxed);
+        state.hidden_for_settings.store(false, Ordering::Relaxed);
     }
-    *app.state::<DraftState>().hidden_at.lock().unwrap() = None;
+    *state.hidden_at.lock().unwrap() = None;
     let _ = app.emit(events::SHOWN, Shown { clear_text });
     true
 }
@@ -730,22 +744,12 @@ fn move_to_pointer_display(window: &WebviewWindow) {
     let displays: Vec<placement::Display> = monitors
         .iter()
         .map(|monitor| placement::Display {
-            bounds: placement::Rect {
-                x: monitor.position().x,
-                y: monitor.position().y,
-                width: monitor.size().width as i32,
-                height: monitor.size().height as i32,
-            },
+            bounds: rect_at(*monitor.position(), *monitor.size()),
             work_area: to_rect(monitor.work_area()),
             scale: monitor.scale_factor(),
         })
         .collect();
-    let outer = placement::Rect {
-        x: position.x,
-        y: position.y,
-        width: size.width as i32,
-        height: size.height as i32,
-    };
+    let outer = rect_at(position, size);
     // fit_to_screen と同じく、見えている枠で置く
     let visible = visible_frame(window).unwrap_or(outer);
     if let Some((x, y)) =
@@ -759,11 +763,7 @@ fn move_to_pointer_display(window: &WebviewWindow) {
             .flatten()
             .zip(window.scale_factor().ok())
             .map_or(1.0, |(target, current)| target.scale_factor() / current);
-        let border = |offset: i32| (f64::from(offset) * ratio).round() as i32;
-        let _ = window.set_position(PhysicalPosition::new(
-            x - border(visible.x - outer.x),
-            y - border(visible.y - outer.y),
-        ));
+        let _ = window.set_position(outer_origin((x, y), visible, outer, ratio));
     }
 }
 
@@ -831,21 +831,13 @@ fn fit_to_screen(window: &WebviewWindow) {
         areas.retain(|area| *area != primary);
         areas.insert(0, primary);
     }
-    let outer = placement::Rect {
-        x: position.x,
-        y: position.y,
-        width: size.width as i32,
-        height: size.height as i32,
-    };
+    let outer = rect_at(position, size);
     // 見えている枠で収める。Windows の外枠には見えないリサイズの枠（左右と下に数 px）が含まれ、
     // 外枠で収めると、画面の端に寄せた窓が出すたびに内側へ動くため
     let visible = visible_frame(window).unwrap_or(outer);
     let (x, y) = placement::fit(visible, &areas);
     if (x, y) != (visible.x, visible.y) {
-        let _ = window.set_position(PhysicalPosition::new(
-            x - (visible.x - outer.x),
-            y - (visible.y - outer.y),
-        ));
+        let _ = window.set_position(outer_origin((x, y), visible, outer, 1.0));
     }
 }
 
@@ -882,12 +874,30 @@ fn visible_frame(_window: &WebviewWindow) -> Option<placement::Rect> {
 }
 
 fn to_rect(area: &PhysicalRect<i32, u32>) -> placement::Rect {
+    rect_at(area.position, area.size)
+}
+
+fn rect_at(position: PhysicalPosition<i32>, size: PhysicalSize<u32>) -> placement::Rect {
     placement::Rect {
-        x: area.position.x,
-        y: area.position.y,
-        width: area.size.width as i32,
-        height: area.size.height as i32,
+        x: position.x,
+        y: position.y,
+        width: size.width as i32,
+        height: size.height as i32,
     }
+}
+
+/// 見えている枠の左上を `(x, y)` に置くときの、外枠の左上。見えない縁の幅は `ratio`（移した先と今の拡大率の比）倍にする
+fn outer_origin(
+    (x, y): (i32, i32),
+    visible: placement::Rect,
+    outer: placement::Rect,
+    ratio: f64,
+) -> PhysicalPosition<i32> {
+    let border = |offset: i32| (f64::from(offset) * ratio).round() as i32;
+    PhysicalPosition::new(
+        x - border(visible.x - outer.x),
+        y - border(visible.y - outer.y),
+    )
 }
 
 /// 入力内容をクリップボードへコピーし、直前のアプリへフォーカスを戻してウィンドウを隠す。
@@ -954,7 +964,7 @@ fn dismiss(app: AppHandle, state: tauri::State<'_, DraftState>) -> Result<(), St
 
 /// フォーカスが外れた知らせから、隠すかを確かめるまで待つ時間。Windows の WebView2 はウィンドウの中のクリックでも
 /// 知らせが外れて戻ることがあり（tauri#10767）、隠す操作そのものも知らせを起こすため、すぐには決めない
-const HIDE_ON_BLUR_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+const HIDE_ON_BLUR_DELAY: Duration = Duration::from_millis(150);
 
 /// フォーカスが外れた後に、下書きを隠すかを決める材料
 #[derive(Debug, Clone, Copy)]
@@ -975,15 +985,23 @@ struct BlurCheck {
     file_dialog_open: bool,
 }
 
-/// 隠すのは、出ていて、一度フォーカスが入った後に外れたままで、それが設定ウィンドウやファイルの窓のためではないときだけ
-fn should_hide_on_blur(check: BlurCheck) -> bool {
-    check.enabled
-        && check.visible
-        && check.focused_since_shown
+/// 出ていて、フォーカスが外れたままで、それが設定ウィンドウやファイルの窓のためではない
+fn left_for_elsewhere(check: BlurCheck) -> bool {
+    check.visible
         && !check.focused
         && !check.settings_focused
         && !check.settings_opening
         && !check.file_dialog_open
+}
+
+/// 隠すのは、出ていて、一度フォーカスが入った後に外れたままで、それが設定ウィンドウやファイルの窓のためではないときだけ
+fn should_hide_on_blur(check: BlurCheck) -> bool {
+    check.enabled && check.focused_since_shown && left_for_elsewhere(check)
+}
+
+/// 隠さない設定で、ほかへ移ったか。自分のほかの窓へ移ったかどうかは見ない（呼ぶ側が確かめる）
+fn kept_while_elsewhere(check: BlurCheck) -> bool {
+    !check.enabled && left_for_elsewhere(check)
 }
 
 /// 初めての起動として下書きを出すか。このデバイスの設定のファイルがなかったうえで、作れたときだけ。
@@ -1014,40 +1032,30 @@ fn hide_on_blur(app: &AppHandle) {
         return;
     };
     let state = app.state::<AppState>();
+    let draft = app.state::<DraftState>();
     let check = BlurCheck {
         enabled: state.config.lock().unwrap().hide_text_window_on_blur,
         visible: window.is_visible().unwrap_or(false),
-        focused_since_shown: app
-            .state::<DraftState>()
-            .focused_since_shown
-            .load(Ordering::Relaxed),
+        focused_since_shown: draft.focused_since_shown.load(Ordering::Relaxed),
         // 確かめられなければ、隠さない側に倒す
         focused: window.is_focused().unwrap_or(true),
         settings_focused: is_settings_focused(app),
         settings_opening: state.settings_opening.load(Ordering::Relaxed),
-        file_dialog_open: app
-            .state::<DraftState>()
-            .file_dialog_open
-            .load(Ordering::Relaxed),
+        file_dialog_open: draft.file_dialog_open.load(Ordering::Relaxed),
     };
     if !should_hide_on_blur(check) {
         // 隠さない設定で、ほかのアプリへ移ったなら、戻り先をそのアプリにする。出したときのアプリのままだと、
         // 別のアプリを経由して戻ってきてコピーしたときに、最初のアプリへ戻ってしまう（Windows）。
         // macOS と Linux は、戻り先を OS が決める前面の扱いに任せているので触らない
         if cfg!(windows)
-            && !check.enabled
-            && check.visible
-            && !check.focused
-            && !check.settings_focused
-            && !check.settings_opening
-            && !check.file_dialog_open
+            && kept_while_elsewhere(check)
             // 自分のほかの窓（ライセンス・使い方）へ移ったときは、戻り先にしない
             && !app
                 .webview_windows()
                 .values()
                 .any(|other| other.is_focused().unwrap_or(false))
         {
-            *app.state::<DraftState>().return_target.lock().unwrap() = focus::capture(&window);
+            *draft.return_target.lock().unwrap() = focus::capture(&window);
         }
         return;
     }
@@ -1101,11 +1109,7 @@ fn hide_draft_and_return(app: &AppHandle, state: &DraftState) -> Result<(), Stri
 /// Tauri のクリップボードのプラグインは印を付けて書けないので、arboard を直接使う
 fn write_clipboard(text: &str, conceal: bool) -> Result<(), arboard::Error> {
     // Windows では行末を CR+LF にする（text::crlf_line_endings）。履歴と入力欄は LF のまま持つ
-    let text = if cfg!(windows) {
-        text::crlf_line_endings(text)
-    } else {
-        std::borrow::Cow::Borrowed(text)
-    };
+    let text = text::os_line_endings(text);
     with_clipboard(|clipboard| write_text(clipboard, &text, conceal))
 }
 
@@ -2017,7 +2021,7 @@ fn add_snippet(app: AppHandle, snippet: Snippet) -> Result<bool, String> {
     Ok(true)
 }
 
-/// 待つことのある処理（バックアップのファイルの読み書き）を、メインスレッドを止めずに別のスレッドで走らせる。
+/// 待つことのある処理（ファイルの読み書きや、閉じるまで戻らない OS の窓）を、メインスレッドを止めずに別のスレッドで走らせる。
 /// 走らせたスレッドが落ちたら、その理由を返す
 async fn run_blocking<T: Send + 'static>(
     task: impl FnOnce() -> T + Send + 'static,
@@ -2229,15 +2233,10 @@ async fn ask_access(app: &AppHandle, target: &Path) -> Result<bool, String> {
     let lang = app.state::<AppState>().lang();
     let shown = target.display().to_string();
     loop {
-        let mut picker = app
-            .dialog()
-            .file()
+        // 設定の窓に結び付ける。結び付けないと、窓を開いたままボタンをもう一度押せて、2つ目が開く
+        let picker = file_dialog(app, SETTINGS_WINDOW)
             .set_directory(folder_access::grant_start(target))
             .set_title(lang.grant_access_prompt());
-        // 設定の窓に結び付ける。結び付けないと、窓を開いたままボタンをもう一度押せて、2つ目が開く
-        if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
-            picker = picker.set_parent(&window);
-        }
         let Some(picked) = run_blocking(move || picker.blocking_pick_folder()).await? else {
             return Ok(false);
         };
@@ -2338,17 +2337,11 @@ struct PickedSettingsDir {
 /// 中の設定のファイルの symlink の先をサンドボックスが読ませなければ、続けて許可を求め、取り消されたら None
 #[tauri::command]
 async fn pick_settings_dir(app: AppHandle) -> Result<Option<PickedSettingsDir>, String> {
-    use tauri_plugin_dialog::DialogExt as _;
     let state = app.state::<AppState>();
-    let mut picker = app
-        .dialog()
-        .file()
+    // 設定の窓に結び付ける。結び付けないと、窓を開いたまま「変更...」をもう一度押せて、2つ目が開く
+    let picker = file_dialog(&app, SETTINGS_WINDOW)
         .set_directory(state.settings_dir())
         .set_title(state.lang().pick_settings_folder());
-    // 設定の窓に結び付ける。結び付けないと、窓を開いたまま「変更...」をもう一度押せて、2つ目が開く
-    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW) {
-        picker = picker.set_parent(&window);
-    }
     let picked = run_blocking(move || picker.blocking_pick_folder()).await?;
     let Some(picked) = picked else {
         return Ok(None);
@@ -2708,9 +2701,14 @@ impl Drop for FileDialogGuard {
 /// ファイルの窓を、テキストウィンドウに結び付けて作る。結び付けないと、常に手前に出すテキストウィンドウの裏に窓が隠れたり、
 /// 窓を開いたままキーをもう一度押せて2つ目が開いたりする
 fn draft_file_dialog(app: &AppHandle) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    file_dialog(app, MAIN_WINDOW)
+}
+
+/// ファイル・フォルダーの窓を、`label` の窓があればそれに結び付けて作る
+fn file_dialog(app: &AppHandle, label: &str) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
     use tauri_plugin_dialog::DialogExt as _;
     let mut dialog = app.dialog().file();
-    if let Some(window) = main_window(app) {
+    if let Some(window) = app.get_webview_window(label) {
         dialog = dialog.set_parent(&window);
     }
     dialog
@@ -4229,5 +4227,97 @@ mod tests {
             file_dialog_open: true,
             ..blurred()
         }));
+    }
+
+    #[test]
+    fn counts_a_kept_draft_as_elsewhere_only_when_the_setting_is_off_and_focus_moved_away() {
+        let kept = BlurCheck {
+            enabled: false,
+            ..blurred()
+        };
+        assert!(kept_while_elsewhere(kept));
+        // 一度もフォーカスが入っていなくても、ほかへ移ったとみる
+        assert!(kept_while_elsewhere(BlurCheck {
+            focused_since_shown: false,
+            ..kept
+        }));
+        assert!(!kept_while_elsewhere(blurred()));
+        for check in [
+            BlurCheck {
+                visible: false,
+                ..kept
+            },
+            BlurCheck {
+                focused: true,
+                ..kept
+            },
+            BlurCheck {
+                settings_focused: true,
+                ..kept
+            },
+            BlurCheck {
+                settings_opening: true,
+                ..kept
+            },
+            BlurCheck {
+                file_dialog_open: true,
+                ..kept
+            },
+        ] {
+            assert!(!kept_while_elsewhere(check));
+        }
+    }
+
+    #[test]
+    fn clears_on_show_only_when_shown_by_the_user_after_the_set_time() {
+        let minute = Some(Duration::from_secs(60));
+        assert!(should_clear_on_show(
+            true,
+            false,
+            Some(1_000),
+            minute,
+            61_000
+        ));
+        assert!(!should_clear_on_show(
+            true,
+            false,
+            Some(1_000),
+            minute,
+            60_999
+        ));
+        // 設定を閉じた後の出し直し
+        assert!(!should_clear_on_show(
+            false,
+            false,
+            Some(1_000),
+            minute,
+            61_000
+        ));
+        // 出ている
+        assert!(!should_clear_on_show(
+            true,
+            true,
+            Some(1_000),
+            minute,
+            61_000
+        ));
+        // 設定のために隠した（時刻を残さない）
+        assert!(!should_clear_on_show(true, false, None, minute, 61_000));
+        // 空にしない設定
+        assert!(!should_clear_on_show(
+            true,
+            false,
+            Some(1_000),
+            None,
+            61_000
+        ));
+        // 時計が戻った
+        assert!(!should_clear_on_show(
+            true,
+            false,
+            Some(61_000),
+            minute,
+            1_000
+        ));
     }
 }

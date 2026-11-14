@@ -39,7 +39,7 @@ tokio = { version = "1.53.1", features = ["time", "macros", "rt", "sync"] }
 toml_edit = "0.25.15"
 # 設定の置き場のファイルが、ほかのデバイスやエディターで変わったのを知る（settings_watch.rs）
 notify = "8.2.1"
-# 設定の置き場を選ぶフォルダーの窓（lib.rs の choose_settings_dir）
+# 設定の置き場を選ぶ・symlink の先を読む許可を求めるフォルダーの窓と、テキストウィンドウのファイルを開く・保存の窓（lib.rs の pick_settings_dir・ask_access・open_draft_file・save_draft_file）
 tauri-plugin-dialog = "2.8.4"
 
 
@@ -56,7 +56,7 @@ opt-level = 3
 panic = "abort"
 strip = true
 
-# トレイのメニューを開いている間を知るため（menu_tracking.rs）と、テキストウィンドウの見た目と Space の扱いを読み書きするため（focus.rs）、サンドボックスでフォルダーを読む許可をブックマークに残すため（folder_access.rs）。Tauri（tray-icon）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
+# トレイのメニューを開いている間を知るため（menu_tracking.rs）と、テキストウィンドウの見た目と Space の扱いを読み書きするため（focus.rs）、サンドボックスでフォルダーを読む許可をブックマークに残すため（folder_access.rs）、テキストウィンドウをポインターのあるディスプレイへ動かすため（lib.rs の move_to_pointer_display）、VoiceOver などから押されたメニューバーのアイコンのメニューを開く前にアプリを前面にするため（lib.rs の show_tray_menu）、窓の位置と大きさを AppKit に記録させるため（window_frame.rs）。Tauri（tray-icon）が使うのと同じ版に揃える（scripts/check-pinned-deps.mjs が見る）
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
 objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSData", "NSError", "NSGeometry", "NSNotification", "NSOperation", "NSString", "NSURL", "block2"] }

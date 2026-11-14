@@ -471,7 +471,7 @@ pub fn stored_entries(config: &Config) -> BTreeMap<String, Value> {
     entries
 }
 
-pub(crate) fn json<T: Serialize>(value: T) -> Value {
+fn json<T: Serialize>(value: T) -> Value {
     serde_json::to_value(value).expect("settings serialize")
 }
 
@@ -781,5 +781,18 @@ mod tests {
         config.text_window_keys.copy = "CommandOrControl+KeyJ".to_string();
         config.hotkey = copy;
         assert_eq!(round_trip(&config), config);
+    }
+
+    /// 変えた印の一覧は手で並べているので、キー操作を足したときに書き漏らさない
+    #[test]
+    fn modified_settings_list_every_draft_action_in_order() {
+        let actions: Vec<DraftAction> = MODIFIED_SETTINGS
+            .iter()
+            .filter_map(|setting| match setting {
+                ModifiedSetting::DraftKey(action) => Some(*action),
+                ModifiedSetting::Value { .. } => None,
+            })
+            .collect();
+        assert_eq!(actions, DraftAction::ALL);
     }
 }

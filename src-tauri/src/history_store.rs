@@ -140,21 +140,15 @@ pub fn merge(local: &History, remote: &History) -> History {
         .iter()
         .map(|entry| (entry.text.as_str(), entry.at))
         .collect();
-    let mut newest: HashMap<&str, u64> = HashMap::new();
-    for entry in local.entries.iter().chain(&remote.entries) {
-        let at = newest.entry(&entry.text).or_insert(entry.at);
-        *at = (*at).max(entry.at);
-    }
-    let mut entries: Vec<Entry> = newest
-        .into_iter()
-        .filter(|(text, at)| {
-            *at > cleared_at && deleted_at.get(text).is_none_or(|deleted| at > deleted)
-        })
-        .map(|(text, at)| Entry {
-            text: text.to_string(),
-            at,
-        })
-        .collect();
+    let mut entries: Vec<Entry> =
+        newest_per_text(local.entries.iter().chain(&remote.entries), cleared_at)
+            .into_iter()
+            .filter(|entry| {
+                deleted_at
+                    .get(entry.text.as_str())
+                    .is_none_or(|deleted| entry.at > *deleted)
+            })
+            .collect();
     entries.sort_by(|a, b| (a.at, &a.text).cmp(&(b.at, &b.text)));
     History {
         entries,
@@ -167,21 +161,26 @@ pub fn merge(local: &History, remote: &History) -> History {
 /// 1件ずつ消した記録を合わせる。同じ本文は消した時刻の新しい方を残し、履歴を消した時刻までのものは落とす
 /// （それより前に覚えた本文は、履歴を消した時刻で見せなくなっている）。並びは本文の順で、渡す順に依らない
 fn merge_deleted(local: &[Entry], remote: &[Entry], cleared_at: u64) -> Vec<Entry> {
+    let mut deleted = newest_per_text(local.iter().chain(remote), cleared_at);
+    deleted.sort_by(|a, b| a.text.cmp(&b.text));
+    deleted
+}
+
+/// 同じ本文は時刻の新しい方を残し、`cleared_at` までのものは落とす。並びは決まらないので、呼ぶ側で並べる
+fn newest_per_text<'a>(entries: impl Iterator<Item = &'a Entry>, cleared_at: u64) -> Vec<Entry> {
     let mut newest: HashMap<&str, u64> = HashMap::new();
-    for entry in local.iter().chain(remote) {
+    for entry in entries {
         let at = newest.entry(&entry.text).or_insert(entry.at);
         *at = (*at).max(entry.at);
     }
-    let mut deleted: Vec<Entry> = newest
+    newest
         .into_iter()
         .filter(|(_, at)| *at > cleared_at)
         .map(|(text, at)| Entry {
             text: text.to_string(),
             at,
         })
-        .collect();
-    deleted.sort_by(|a, b| a.text.cmp(&b.text));
-    deleted
+        .collect()
 }
 
 /// 画面が持つ履歴の写し。ほかのデバイスの履歴を混ぜてファイルを入れ替えてから、画面が読み直すまでの間だけ、ファイルと違う。
@@ -415,7 +414,7 @@ mod tests {
                 })
                 .collect(),
             cleared_at,
-            deleted: Vec::new(),
+            ..History::default()
         }
     }
 
@@ -727,8 +726,7 @@ mod tests {
                     at: index * 2 + offset,
                 })
                 .collect(),
-            cleared_at: 0,
-            deleted: Vec::new(),
+            ..History::default()
         };
         let merged = merge(&side(1), &side(2));
         assert_eq!(merged.entries.len(), MAX_MERGED_ENTRIES);
@@ -753,8 +751,7 @@ mod tests {
                     at,
                 })
                 .collect(),
-            cleared_at: 0,
-            deleted: Vec::new(),
+            ..History::default()
         };
         let merged = merge(&side("a"), &side("b"));
         assert_eq!(merged, merge(&side("b"), &side("a")));
