@@ -198,7 +198,7 @@ just macos-check --restore  # 中断して残った控えから戻すだけ
 
 ## Linux の確認
 
-Linux だけの作り（`#[cfg(target_os = "linux")]`。portal と `mawok --toggle` のホットキー、トレイ、コピーした中身を持ち続けるクリップボード、XDG autostart の .desktop、WebKitGTK の描画プロセスが落ちたときの読み込み直し）を、Wayland のデスクトップの上で見る。画面の中は WebDriver（`tauri-driver` + WebKitWebDriver）、キーは ydotool（uinput の本物の入力）、トレイは D-Bus（StatusNotifierItem と dbusmenu）、クリップボードは wl-clipboard で扱う。窓とフォーカスとホットキーの割り当てはデスクトップで違うので、Hyprland は hyprctl（`lib/linux-hyprland.mjs`）、GNOME はアクセシビリティの AT-SPI と gsettings（`lib/linux-gnome.mjs`・`lib/atspi.py`）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。CI の runner には Wayland のデスクトップと portal が無いので、CI では回さない。
+Linux だけの作り（`#[cfg(target_os = "linux")]`。portal と `mawok --toggle` のホットキー、トレイ、コピーした中身を持ち続けるクリップボード、XDG autostart の .desktop、WebKitGTK の描画プロセスが落ちたときの読み込み直し）と、デスクトップの窓の扱いで決まる、テキストウィンドウに結び付けたファイルの窓（開く・保存。手前に出るか・出ている間テキストウィンドウが隠れないか・閉じた後に入力欄へフォーカスが戻るか）を、Wayland のデスクトップの上で見る。画面の中は WebDriver（`tauri-driver` + WebKitWebDriver）、キーは ydotool（uinput の本物の入力）、トレイは D-Bus（StatusNotifierItem と dbusmenu）、クリップボードは wl-clipboard で扱う。窓とフォーカスとホットキーの割り当てはデスクトップで違うので、Hyprland は hyprctl（`lib/linux-hyprland.mjs`）、GNOME はアクセシビリティの AT-SPI と gsettings（`lib/linux-gnome.mjs`・`lib/atspi.py`）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。CI の runner には Wayland のデスクトップと portal が無いので、CI では回さない。
 
 ```
 just linux-check-vm arch-hyprland        # VM の Hyprland で linux/*.test.mjs を全部

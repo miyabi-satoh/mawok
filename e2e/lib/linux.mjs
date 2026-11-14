@@ -50,7 +50,11 @@ export const KEY = {
 	shift: 42,
 	alt: 56,
 	space: 57,
-	m: 50
+	a: 30,
+	l: 38,
+	m: 50,
+	o: 24,
+	s: 31
 };
 
 // ── 環境 ──

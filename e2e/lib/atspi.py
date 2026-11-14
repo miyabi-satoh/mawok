@@ -11,7 +11,8 @@ import gi
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402
 
-WINDOW_ROLES = {Atspi.Role.FRAME, Atspi.Role.WINDOW, Atspi.Role.DIALOG}
+# GTK のファイル選択の窓は DIALOG でなく FILE_CHOOSER の役割で出る
+WINDOW_ROLES = {Atspi.Role.FRAME, Atspi.Role.WINDOW, Atspi.Role.DIALOG, Atspi.Role.FILE_CHOOSER}
 
 
 def top_windows():
