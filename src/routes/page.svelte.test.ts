@@ -361,7 +361,7 @@ describe('下書きの履歴', () => {
 		await expect.element(textarea).toHaveValue('書きかけ');
 	});
 
-	it('履歴を出して「履歴から削除」を押すと、その履歴を消して保存し、打っていた内容に戻る', async () => {
+	it('履歴を出して「履歴から削除する」を押すと、その履歴を消して保存し、打っていた内容に戻る', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
 		await copy(textarea, 'git status');
