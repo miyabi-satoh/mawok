@@ -113,7 +113,7 @@
 
 ## macOS のサンドボックス
 
-Mac 版は Mac App Store で配るので、どのビルドもサンドボックスで動かす。権限は `src-tauri/Entitlements.plist` に置き、`tauri.conf.json` の `bundle.macOS.entitlements` で、Tauri が署名するときに付ける（`just bundle` の ad-hoc 署名と `just release-mac` の Developer ID の署名の両方）。`pnpm tauri dev` の開発版は署名しないので、サンドボックスの外で動く。
+Mac 版は Mac App Store で配るので、どのビルドもサンドボックスで動かす。権限は `src-tauri/Entitlements.plist` に置き、`tauri.conf.json` の `bundle.macOS.entitlements` で、Tauri が署名するときに付ける（`just bundle` の ad-hoc 署名・`just release-mac` の Developer ID の署名・`just release-mas` の Store の署名のどれも。Store の版に足す権限は「Mac 版の配る版」）。`pnpm tauri dev` の開発版は署名しないので、サンドボックスの外で動く。
 
 - `com.apple.security.app-sandbox`: サンドボックスで動かす。`~/Library` はコンテナ（`~/Library/Containers/com.amiiby.mawok/Data/Library/`）に回され、設定・ログ・バックアップ・ロックファイルはその中に置かれる。コンテナは署名の識別子で決まるので、プロファイル（「プロファイル」）を付けても同じコンテナの中で、フォルダー名だけが分かれる。
 - `com.apple.security.files.user-selected.read-write`: 窓で選んだ設定の保存先・symlink の先のフォルダーと、テキストウィンドウで開く・保存するファイルを読み書きする。
@@ -130,11 +130,17 @@ Mac 版は Mac App Store で配るので、どのビルドもサンドボック�
 
 ## Mac 版の配る版
 
-- Intel と Apple Silicon の両方で動くユニバーサル版（`universal-apple-darwin`）を、Developer ID で署名・公証する。手元の Mac で `just release-mac` を流す（`scripts/release-mac.mjs`）。
-- ビルドし、`.app` が両方の CPU 向けを含み、公証の結果が綴じてあり Gatekeeper が通すことを確かめて、DMG を `src-tauri/target/release-mac/<版>/` に置く。
+Mac App Store に出す版を `just release-mas` で作って上げる。審査が通らないときに Store の外で配る版は `just release-mac` で作る。どちらも手元の Mac で流し（`scripts/release-mac.mjs`）、Intel と Apple Silicon の両方で動くユニバーサル版（`universal-apple-darwin`）にし、`.app` が両方の CPU 向けを含むことを確かめる。
+
+- `just release-mas`: Apple Distribution で署名し、Mac Installer Distribution で署名した pkg にして、`altool` で App Store Connect に上げる。上げた版は、処理が済むと TestFlight に出る。
+  - Store の版だけに、プロファイルを埋め込み（`Contents/embedded.provisionprofile`）、`Entitlements.plist` にプロファイルと結ぶ権限（`com.apple.application-identifier`・`com.apple.developer.team-identifier`）を足して署名する。この権限をプロファイルの無い版に付けると起動できないので、`Entitlements.plist` には書かず、script が流すたびに足す。Store が求めるアプリの分類（`bundle.category`）も Store の版だけに付ける。
+  - pkg は `src-tauri/target/release-mas/<版>/` に置く。`just release-mas --no-upload` は、上げずに pkg までを作る（作り方を変えたときに、上げ直さずに試す）。
+  - App Store Connect は同じ版を2度受け付けないので、上げ直すときは版を上げる。
+- `just release-mac`: Developer ID で署名・公証し、公証の結果が綴じてあり Gatekeeper が通すことを確かめて、DMG を `src-tauri/target/release-mac/<版>/` に置く。
 - 要るもの:
-  - キーチェーンの Developer ID Application の証明書。作れるのは Apple Developer の Account Holder だけで、作り方は Apple の「Create Developer ID certificates」（https://developer.apple.com/help/account/certificates/create-developer-id-certificates/ ）。中間の認証局は G2 Sub-CA を選ぶ。
-  - `APPLE_ID`: 公証に使う Apple Account のメールアドレス。パスワードは、そのアカウントのアプリ用パスワード（https://account.apple.com の「サインインとセキュリティ」で作る）を流すときに聞く。Tauri は公証のとき、このパスワードを `notarytool` の引数で渡すので、公証を待つ間は同じ Mac のほかのプロセスから見える。
+  - キーチェーンの証明書。Store の版は Apple Distribution と Mac Installer Distribution（キーチェーンでは 3rd Party Mac Developer Installer と出ることがある。Xcode の「Manage Certificates…」で作れる）。Store の外の版は Developer ID Application（作れるのは Apple Developer の Account Holder だけで、作り方は Apple の「Create Developer ID certificates」 https://developer.apple.com/help/account/certificates/create-developer-id-certificates/ 。中間の認証局は G2 Sub-CA を選ぶ）。
+  - `APPLE_PROVISIONING_PROFILE`（Store の版だけ）: Mac App Store Connect のプロビジョニングプロファイル（App ID `com.amiiby.mawok`、Apple Distribution の証明書と結ぶ）のパス。App ID が違えば、ビルドの前に止める。
+  - `APPLE_ID`: 公証とアップロードに使う Apple Account のメールアドレス（`--no-upload` では要らない）。パスワードは、そのアカウントのアプリ用パスワード（https://account.apple.com の「サインインとセキュリティ」で作る）を流すときに聞く。Tauri は公証のとき、このパスワードを `notarytool` の引数で渡すので、公証を待つ間は同じ Mac のほかのプロセスから見える。アップロードでは環境変数で渡す。
 
 ## Windows の MSIX 版
 

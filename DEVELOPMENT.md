@@ -79,7 +79,12 @@ just bundle   # 配布用にビルドする（macOS と Windows だけ。macOS �
 # Windows で、Microsoft Store 向けの MSIX を作る（要: Windows SDK と、試しに入れるための証明書。→ docs/platform.md「Windows の MSIX 版」）
 just msix
 
-# macOS で、署名・公証したユニバーサル版の DMG を作る（要: Developer ID の証明書。→ docs/platform.md「Mac 版の配る版」）
+# macOS で、Mac App Store に出すユニバーサル版の pkg を作り、App Store Connect に上げる（要: 証明書とプロビジョニングプロファイル。→ docs/platform.md「Mac 版の配る版」）
+just release-mas
+# 上げずに pkg までを作る（作り方を変えたときに試す。同じ版は2度上げられない）
+just release-mas --no-upload
+
+# macOS で、Store の外で配る、署名・公証したユニバーサル版の DMG を作る（要: Developer ID の証明書）
 just release-mac
 ```
 

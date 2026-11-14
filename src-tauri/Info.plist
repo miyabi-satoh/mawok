@@ -4,6 +4,9 @@
 <dict>
 	<key>LSUIElement</key>
 	<true/>
+	<!-- 外へつながず暗号を使わないので、App Store Connect で版を上げるたびに出る輸出規制の問いを省く -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- アプリの日本語と英語を OS に伝え、OS が出す部品 (フォルダーを選ぶ画面など) を同じ言語にする。訳す文字列が無いので lproj は置かない -->
 	<key>CFBundleLocalizations</key>
 	<array>
