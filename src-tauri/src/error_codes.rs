@@ -15,5 +15,5 @@ pub const KEYS_EDITING: &str = "keys.editing";
 pub const KEYS_HOTKEY: &str = "keys.hotkey";
 /// ほかのアクションで使っているキー。後ろにそのアクションの画面での名前が付く
 pub const KEYS_ACTION_PREFIX: &str = "keys.action.";
-/// テキストウィンドウで開いたファイルが、UTF-8（または BOM の付いた UTF-16）のテキストではない
+/// テキストウィンドウで開いたファイルが、UTF-8のテキストではない
 pub const FILE_NOT_UTF8: &str = "file.not_utf8";
