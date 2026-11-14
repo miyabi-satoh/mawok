@@ -2755,8 +2755,7 @@ async fn save_draft_file(app: AppHandle, text: String) -> Result<Option<String>,
     };
     let path = picked.into_path().map_err(|error| error.to_string())?;
     info!("save draft file");
-    // 一時ファイルに書いて置き換える形にはしない。macOS のサンドボックスが許すのは窓で選んだファイルだけで、
-    // 同じフォルダーに一時ファイルを作れないため
+    // 一時ファイルに書いて置き換える形にはしない（docs/platform.md「macOS のサンドボックス」）
     let written = path.clone();
     run_blocking(move || {
         std::fs::write(&written, draft_file::encode(&text)).map_err(|error| {
