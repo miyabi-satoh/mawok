@@ -49,6 +49,8 @@ bind = CTRL SHIFT, SPACE, exec, mawok --toggle
 - コピーせずに戻るときは `Esc` を押します。書きかけは、次にテキストウィンドウを出したときもそのまま残っています。
 - 設定の「一般」の「非表示後に入力をクリア」で時間を選ぶと、非表示にしてからその時間がたった後は、空の入力欄から始まります。書きかけは履歴に残るので、`↑` で戻せます。
 - 新しく書き始めるときは、{macos:`Cmd+N`}{windows:`Ctrl+N`}{linux:`Ctrl+N`} か左下の「新規」ボタンを押します。書きかけは履歴に残ります。
+- {macos:`Cmd+O`}{windows:`Ctrl+O`}{linux:`Ctrl+O`} で選んだファイルの中身を、テキストにします。書きかけは履歴に残ります。開けるのは UTF-8 のテキストファイルです。
+- {macos:`Cmd+S`}{windows:`Ctrl+S`}{linux:`Ctrl+S`} で、テキストを選んだファイルに保存します。
 - ほかのアプリをクリックしたときも、コピーせずに非表示になり、書きかけは残ります (設定の「一般」でオフにできます)。
 
 ## 前にコピーしたテキストを使う
@@ -97,6 +99,8 @@ bind = CTRL SHIFT, SPACE, exec, mawok --toggle
 | 履歴をさかのぼる・新しい方へ戻る (カーソルの位置にかかわらず) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`}{linux:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
 | 履歴を検索 | {macos:`Cmd+R`}{windows:`Ctrl+R`}{linux:`Ctrl+R`} |
 | 新規 (書きかけを履歴に入れて空にする) | {macos:`Cmd+N`}{windows:`Ctrl+N`}{linux:`Ctrl+N`} |
+| ファイルを開く | {macos:`Cmd+O`}{windows:`Ctrl+O`}{linux:`Ctrl+O`} |
+| ファイルに保存 | {macos:`Cmd+S`}{windows:`Ctrl+S`}{linux:`Ctrl+S`} |
 | 定型文の一覧を開く | {macos:`Cmd+K`}{windows:`Ctrl+K`}{linux:`Ctrl+K`} |
 | 設定を開く | {macos:`Cmd+,`}{windows:`Ctrl+,`}{linux:`Ctrl+,`} |
 

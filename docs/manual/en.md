@@ -49,6 +49,8 @@ On other desktops, also assign a key to `mawok --toggle` in the keyboard setting
 - To return without copying, press `Esc`. Your unfinished text is still there the next time you bring up the text window.
 - Choose a time for “Clear text box after hiding” under “General” in Settings to start with an empty text box once that time has passed since the window was hidden. Your unfinished text goes to history, so press `↑` to get it back.
 - To start over, press {macos:`Cmd+N`}{windows:`Ctrl+N`}{linux:`Ctrl+N`} or the “New” button at the bottom left. Your unfinished text goes to history.
+- Press {macos:`Cmd+O`}{windows:`Ctrl+O`}{linux:`Ctrl+O`} to replace the text with the contents of a file you choose. Your unfinished text goes to history. Only UTF-8 text files can be opened.
+- Press {macos:`Cmd+S`}{windows:`Ctrl+S`}{linux:`Ctrl+S`} to save the text to a file you choose.
 - Clicking another app also hides the window without copying, and your unfinished text remains (you can turn this off under “General” in Settings).
 
 ## Use text you copied earlier
@@ -97,6 +99,8 @@ If two devices change the same file at the same time, the one saved last is kept
 | Go back / forward in history (wherever the cursor is) | {macos:`Cmd+Option+↑` / `Cmd+Option+↓`}{windows:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`}{linux:`Ctrl+Alt+↑` / `Ctrl+Alt+↓`} |
 | Search history | {macos:`Cmd+R`}{windows:`Ctrl+R`}{linux:`Ctrl+R`} |
 | New (put your unfinished text in history and start over) | {macos:`Cmd+N`}{windows:`Ctrl+N`}{linux:`Ctrl+N`} |
+| Open a file | {macos:`Cmd+O`}{windows:`Ctrl+O`}{linux:`Ctrl+O`} |
+| Save to a file | {macos:`Cmd+S`}{windows:`Ctrl+S`}{linux:`Ctrl+S`} |
 | Open the snippet list | {macos:`Cmd+K`}{windows:`Ctrl+K`}{linux:`Ctrl+K`} |
 | Open Settings | {macos:`Cmd+,`}{windows:`Ctrl+,`}{linux:`Ctrl+,`} |
 

@@ -19,7 +19,7 @@
 	import { Textarea } from '#lib/components/ui/textarea/index.ts';
 	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '#lib/font.ts';
 	import { draftGuidance, guidanceHotkey } from '#lib/guidance.ts';
-	import { errorCode, settingsSaveProblem } from '#lib/errors.ts';
+	import { draftFileProblem, errorCode, settingsSaveProblem } from '#lib/errors.ts';
 	import { insertAsTyped } from '#lib/insert-text.ts';
 	import {
 		DEFAULT_DRAFT_HISTORY_SIZE,
@@ -593,7 +593,59 @@
 				return startNew();
 			case 'delete':
 				return deleteHistoryEntry();
+			case 'open':
+				openFile();
+				return true;
+			case 'save':
+				return saveFile();
 		}
+	}
+
+	// ファイルの窓を出している間。重ねて開かない（窓はテキストウィンドウに結び付けてあるが、出るまでの間にキーが届きうる）
+	let fileDialogOpen = false;
+
+	/** 選んだファイルの中身をテキストにする。書きかけは、新規と同じく履歴に入れて「前」で戻せるようにする */
+	async function openFile() {
+		if (fileDialogOpen) return;
+		fileDialogOpen = true;
+		try {
+			const opened = await invoke<string | null>('open_draft_file');
+			if (opened === null) return;
+			if (draftHistory.setAside(text)) saveDraftHistory();
+			text = opened;
+			snippetsOpen = false;
+			historySearchOpen = false;
+			notice = '';
+			error = '';
+			// 読んだ文の頭から読めるよう、先頭に置く。入力欄に中身が入ってから置く
+			await tick();
+			textarea?.setSelectionRange(0, 0);
+			textarea?.scrollTo(0, 0);
+		} catch (e) {
+			showError(m.draft_open_failed(), draftFileProblem(e));
+		} finally {
+			fileDialogOpen = false;
+			textarea?.focus();
+		}
+	}
+
+	/** テキストを、選んだファイルに保存する。テキストが空なら false。保存してもテキストはそのまま残す */
+	function saveFile(): boolean {
+		if (text === '') return false;
+		if (fileDialogOpen) return true;
+		fileDialogOpen = true;
+		invoke<string | null>('save_draft_file', { text })
+			.then((name) => {
+				if (name === null) return;
+				error = '';
+				showNotice(m.draft_saved({ name }));
+			})
+			.catch((e) => showError(m.draft_save_failed(), errorCode(e)))
+			.finally(() => {
+				fileDialogOpen = false;
+				textarea?.focus();
+			});
+		return true;
 	}
 
 	/** 出した直後の状態から書き始める。書きかけは履歴に入れ、「前」で戻せるようにする。もう出した直後の状態なら false */

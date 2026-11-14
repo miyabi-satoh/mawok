@@ -71,3 +71,9 @@ export function settingsProblemNotice(problem: SettingsProblem, settingsDir: str
 			return m.settings_folder_access_needed({ path: problem.path });
 	}
 }
+
+/** テキストウィンドウでファイルを開けなかったときの文。UTF-8 のテキストでなければその旨、ほかは符号のまま */
+export function draftFileProblem(error: unknown): string {
+	const code = errorCode(error);
+	return code === ERROR_CODES.FILE_NOT_UTF8 ? m.draft_file_not_utf8() : code;
+}
