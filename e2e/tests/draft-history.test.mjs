@@ -187,7 +187,7 @@ test.describe('下書きの履歴', () => {
 		);
 	});
 
-	test('履歴を出して「履歴から削除」を押すと、その履歴が消えて書きかけに戻り、起動し直しても出ない', async () => {
+	test('履歴を出して「履歴から削除する」を押すと、その履歴が消えて書きかけに戻り、起動し直しても出ない', async () => {
 		await copyDraft(client, 'git status');
 		await copyDraft(client, 'git diff');
 		await waitFor(historyEntryCount, (count) => count === 2, { label: '履歴がファイルに入る' });
@@ -201,7 +201,7 @@ test.describe('下書きの履歴', () => {
 			{ label: '↑ で新しい方の履歴が出る' }
 		);
 
-		await client.$('button[aria-label="履歴から削除"]').click();
+		await client.$('button[aria-label="履歴から削除する"]').click();
 		await waitFor(
 			() => readDraft(client),
 			(d) => d.value === '書きかけ',
