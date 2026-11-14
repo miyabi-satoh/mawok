@@ -15,6 +15,8 @@
 	"draft_history_search": "Search history",
 	"draft_delete_from_history": "Delete from history",
 	"draft_new": "New",
+	"draft_open": "Open...",
+	"draft_save": "Save...",
 	"draft_guidance_write": "Write here and press {copy} to copy it and close.",
 	"draft_guidance_write_no_copy": "Write here and click “Copy” to copy it and close.",
 	"draft_guidance_summon": "Bring this back anytime with {hotkey}.",

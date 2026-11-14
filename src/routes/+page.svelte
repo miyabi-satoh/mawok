@@ -4,6 +4,8 @@
 	import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
+	import SaveIcon from '@lucide/svelte/icons/save';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -923,6 +925,28 @@
 				onclick={startNew}
 			>
 				<SquarePenIcon />
+			</Button>
+			<!-- 開く・保存は、エディターのツールバーと同じく新規の隣に並べる -->
+			<Button
+				tabindex={-1}
+				variant="ghost"
+				size="icon-sm"
+				aria-label={m.draft_open()}
+				title={keyHint(m.draft_open(), keys.open, platform)}
+				onclick={openFile}
+			>
+				<FolderOpenIcon />
+			</Button>
+			<Button
+				tabindex={-1}
+				variant="ghost"
+				size="icon-sm"
+				disabled={text === ''}
+				aria-label={m.draft_save()}
+				title={keyHint(m.draft_save(), keys.save, platform)}
+				onclick={saveFile}
+			>
+				<SaveIcon />
 			</Button>
 			<!-- 変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピーする -->
 			<Button tabindex={-1} size="sm" class="ml-auto" onclick={commit}>
