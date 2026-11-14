@@ -1,7 +1,8 @@
 // `just linux-check-vm <VM> [テスト...]` の入口。Linux の確認 (linux-run.mjs) を VM の中で回す (e2e/vm/vm.sh)。
 //
 // 手元の画面・キーボード・フォーカスを使わず、Hyprland (arch-hyprland) と GNOME (ubuntu-2404・ubuntu-2604) を回せる。
-// 回す前に、今のビルド (src-tauri/target/release/mawok) を VM の /usr/bin/mawok に写す。無ければ VM に入っている版で回す。
+// 回す前に、今のビルド (src-tauri/target/release/mawok) を VM の /usr/bin/mawok に写す。ビルドが無いか、ビルドの後に
+// アプリのソースが変わっていれば (checkout や pull で入ったものも含む)、古い版で通らないよう、VM を起動せずに止める。
 // VM が止まっていれば画面なしで起動し、回し終えたら止める (`--keep` で動かしたまま)。落ちた時点の記録は
 // screenshots/linux-failures/<VM>/ に持ち帰る
 import { execFile, spawn } from 'node:child_process';
@@ -53,6 +54,53 @@ function tar(args, cwd) {
 	return child.stdout;
 }
 
+/**
+ * ビルドに入らないファイル。変えても作り直さずに回せる。Markdown のうち docs/manual だけは、使い方の窓に入る
+ */
+function notBuilt(file) {
+	if (/^(e2e|\.github|\.claude)\//.test(file)) return true;
+	if (file === 'justfile' || file === 'lefthook.yml' || file.endsWith('.test.ts')) return true;
+	return file.endsWith('.md') && !file.startsWith('docs/manual/');
+}
+
+/**
+ * ビルドの後に変わった、ビルドに入るファイルのうち最も新しいものを返す (無ければ null)。コミットの時刻でなく
+ * ファイルの更新時刻で見るのは、checkout や pull で入った変更は、コミットの時刻がビルドより前でも、ファイルの更新時刻が
+ * 入れた時になるため
+ */
+async function changedSinceBuild(builtAt) {
+	const { stdout } = await execFileAsync(
+		'git',
+		['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+		{ cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 }
+	);
+	let newest = null;
+	for (const file of stdout.split('\0')) {
+		if (!file || notBuilt(file)) continue;
+		const stat = await fs.stat(path.join(repoRoot, file)).catch(() => null);
+		if (stat && stat.mtimeMs > builtAt && (!newest || stat.mtimeMs > newest.mtimeMs)) {
+			newest = { file, mtimeMs: stat.mtimeMs };
+		}
+	}
+	return newest;
+}
+
+const built = await fs.stat(BUILT).catch(() => null);
+if (!built) {
+	console.error(
+		`[linux-check-vm] ${BUILT} がありません。pnpm tauri build --no-bundle でビルドしてから回してください`
+	);
+	process.exit(1);
+}
+const changed = await changedSinceBuild(built.mtimeMs);
+if (changed) {
+	console.error(
+		`[linux-check-vm] ビルド (${built.mtime.toLocaleString()}) の後に ${changed.file} (${new Date(changed.mtimeMs).toLocaleString()}) が変わっています。` +
+			'古い版で回さないよう止めます。pnpm tauri build --no-bundle でビルドし直してから回してください'
+	);
+	process.exit(1);
+}
+
 const wasRunning = await execFileAsync(VM_SH, [vm, 'ssh', 'true']).then(
 	() => true,
 	() => false
@@ -67,22 +115,14 @@ if (!wasRunning && (await vmSh('start', '--headless')) !== 0) {
 
 let code = 1;
 try {
-	try {
-		const built = await fs.stat(BUILT);
-		console.log(
-			`[linux-check-vm] 今のビルドを写します: ${BUILT} (${built.mtime.toLocaleString()})`
-		);
-		if (
-			(await ssh(
-				'cat > /tmp/mawok && sudo install -m755 /tmp/mawok /usr/bin/mawok',
-				createReadStream(BUILT)
-			)) !== 0
-		) {
-			throw new Error('ビルドを VM に写せませんでした');
-		}
-	} catch (error) {
-		if (error.code !== 'ENOENT') throw error;
-		console.log(`[linux-check-vm] ${BUILT} が無いので、VM に入っている版で回します`);
+	console.log(`[linux-check-vm] 今のビルドを写します: ${BUILT} (${built.mtime.toLocaleString()})`);
+	if (
+		(await ssh(
+			'cat > /tmp/mawok && sudo install -m755 /tmp/mawok /usr/bin/mawok',
+			createReadStream(BUILT)
+		)) !== 0
+	) {
+		throw new Error('ビルドを VM に写せませんでした');
 	}
 	// 確かめの仕組み (依存も含めて) と、app-conf.mjs が読む tauri.conf.json を写す
 	const files = tar(

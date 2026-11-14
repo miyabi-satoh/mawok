@@ -22,10 +22,14 @@ pub enum DraftAction {
     New,
     /// 出している履歴を履歴から消す
     Delete,
+    /// 選んだファイルの中身をテキストにする。書きかけは履歴に入れる
+    Open,
+    /// テキストを、選んだファイルに保存する
+    Save,
 }
 
 impl DraftAction {
-    pub const ALL: [DraftAction; 8] = [
+    pub const ALL: [DraftAction; 10] = [
         DraftAction::Copy,
         DraftAction::Settings,
         DraftAction::Snippets,
@@ -34,6 +38,8 @@ impl DraftAction {
         DraftAction::HistorySearch,
         DraftAction::New,
         DraftAction::Delete,
+        DraftAction::Open,
+        DraftAction::Save,
     ];
 
     /// 設定のファイルでの項目名
@@ -47,6 +53,8 @@ impl DraftAction {
             DraftAction::HistorySearch => "history_search",
             DraftAction::New => "new",
             DraftAction::Delete => "delete",
+            DraftAction::Open => "open",
+            DraftAction::Save => "save",
         }
     }
 
@@ -65,6 +73,9 @@ impl DraftAction {
             DraftAction::New => "CommandOrControl+KeyN",
             // 確かめずに消すので、うっかり押して消さないよう、既定では割り当てない
             DraftAction::Delete => "",
+            // エディターの開く・保存と同じ英字
+            DraftAction::Open => "CommandOrControl+KeyO",
+            DraftAction::Save => "CommandOrControl+KeyS",
         }
     }
 }
@@ -83,6 +94,8 @@ pub struct DraftKeys {
     pub history_search: String,
     pub new: String,
     pub delete: String,
+    pub open: String,
+    pub save: String,
 }
 
 impl Default for DraftKeys {
@@ -97,6 +110,8 @@ impl Default for DraftKeys {
             history_search: key(DraftAction::HistorySearch),
             new: key(DraftAction::New),
             delete: key(DraftAction::Delete),
+            open: key(DraftAction::Open),
+            save: key(DraftAction::Save),
         }
     }
 }
@@ -112,6 +127,8 @@ impl DraftKeys {
             DraftAction::HistorySearch => &self.history_search,
             DraftAction::New => &self.new,
             DraftAction::Delete => &self.delete,
+            DraftAction::Open => &self.open,
+            DraftAction::Save => &self.save,
         }
     }
 
@@ -125,6 +142,8 @@ impl DraftKeys {
             DraftAction::HistorySearch => &mut self.history_search,
             DraftAction::New => &mut self.new,
             DraftAction::Delete => &mut self.delete,
+            DraftAction::Open => &mut self.open,
+            DraftAction::Save => &mut self.save,
         }
     }
 

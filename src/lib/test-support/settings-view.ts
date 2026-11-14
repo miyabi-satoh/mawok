@@ -10,7 +10,9 @@ export const DEFAULT_DRAFT_KEYS: DraftKeys = {
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
 	historySearch: 'CommandOrControl+KeyR',
 	new: 'CommandOrControl+KeyN',
-	delete: ''
+	delete: '',
+	open: 'CommandOrControl+KeyO',
+	save: 'CommandOrControl+KeyS'
 };
 
 /** テストで Rust 側から届く設定。既定の値に overrides を重ねる */

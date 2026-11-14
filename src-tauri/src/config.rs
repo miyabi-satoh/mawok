@@ -240,6 +240,8 @@ const MODIFIED_SETTINGS: &[ModifiedSetting] = &[
     ModifiedSetting::DraftKey(DraftAction::HistorySearch),
     ModifiedSetting::DraftKey(DraftAction::New),
     ModifiedSetting::DraftKey(DraftAction::Delete),
+    ModifiedSetting::DraftKey(DraftAction::Open),
+    ModifiedSetting::DraftKey(DraftAction::Save),
     ModifiedSetting::Value {
         name: key::AUTOSTART,
         differs: |config, defaults| config.autostart != defaults.autostart,

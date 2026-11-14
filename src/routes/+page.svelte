@@ -4,6 +4,8 @@
 	import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
+	import SaveIcon from '@lucide/svelte/icons/save';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -19,7 +21,7 @@
 	import { Textarea } from '#lib/components/ui/textarea/index.ts';
 	import { DEFAULT_DRAFT_FONT_SIZE, draftFontFamily } from '#lib/font.ts';
 	import { draftGuidance, guidanceHotkey } from '#lib/guidance.ts';
-	import { errorCode, settingsSaveProblem } from '#lib/errors.ts';
+	import { draftFileProblem, errorCode, settingsSaveProblem } from '#lib/errors.ts';
 	import { insertAsTyped } from '#lib/insert-text.ts';
 	import {
 		DEFAULT_DRAFT_HISTORY_SIZE,
@@ -593,7 +595,64 @@
 				return startNew();
 			case 'delete':
 				return deleteHistoryEntry();
+			case 'open':
+				openFile();
+				return true;
+			case 'save':
+				return saveFile();
 		}
+	}
+
+	// ファイルの窓を出している間。重ねて開かない（窓はテキストウィンドウに結び付けてあるが、出るまでの間にキーが届きうる）
+	let fileDialogOpen = false;
+
+	/** 選んだファイルの中身をテキストにする。書きかけは、新規と同じく履歴に入れて「前」で戻せるようにする */
+	async function openFile() {
+		if (fileDialogOpen) return;
+		fileDialogOpen = true;
+		try {
+			const opened = await invoke<string | null>('open_draft_file');
+			if (opened === null) return;
+			if (draftHistory.setAside(text)) saveDraftHistory();
+			text = opened;
+			snippetsOpen = false;
+			historySearchOpen = false;
+			notice = '';
+			error = '';
+			// 読んだ文の頭から読めるよう、先頭に置く。入力欄に中身が入ってから置く
+			await tick();
+			textarea?.setSelectionRange(0, 0);
+			textarea?.scrollTo(0, 0);
+		} catch (e) {
+			notice = '';
+			showError(m.draft_open_failed(), draftFileProblem(e));
+		} finally {
+			fileDialogOpen = false;
+			textarea?.focus();
+		}
+	}
+
+	/** テキストを、選んだファイルに保存する。テキストが空なら false。保存してもテキストはそのまま残す */
+	function saveFile(): boolean {
+		if (text === '') return false;
+		if (fileDialogOpen) return true;
+		fileDialogOpen = true;
+		invoke<string | null>('save_draft_file', { text })
+			.then((name) => {
+				if (name === null) return;
+				error = '';
+				showNotice(m.draft_saved({ name }));
+			})
+			.catch((e) => {
+				// 前の知らせ（保存しました など）を、失敗のエラーと並べて残さない
+				notice = '';
+				showError(m.draft_save_failed(), errorCode(e));
+			})
+			.finally(() => {
+				fileDialogOpen = false;
+				textarea?.focus();
+			});
+		return true;
 	}
 
 	/** 出した直後の状態から書き始める。書きかけは履歴に入れ、「前」で戻せるようにする。もう出した直後の状態なら false */
@@ -866,6 +925,28 @@
 				onclick={startNew}
 			>
 				<SquarePenIcon />
+			</Button>
+			<!-- 開く・保存は、エディターのツールバーと同じく新規の隣に並べる -->
+			<Button
+				tabindex={-1}
+				variant="ghost"
+				size="icon-sm"
+				aria-label={m.draft_open()}
+				title={keyHint(m.draft_open(), keys.open, platform)}
+				onclick={openFile}
+			>
+				<FolderOpenIcon />
+			</Button>
+			<Button
+				tabindex={-1}
+				variant="ghost"
+				size="icon-sm"
+				disabled={text === ''}
+				aria-label={m.draft_save()}
+				title={keyHint(m.draft_save(), keys.save, platform)}
+				onclick={saveFile}
+			>
+				<SaveIcon />
 			</Button>
 			<!-- 変換中に押すと、入力欄からフォーカスが外れて未確定の文字が確定し、その内容でコピーする -->
 			<Button tabindex={-1} size="sm" class="ml-auto" onclick={commit}>

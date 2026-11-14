@@ -64,6 +64,8 @@ export const KEY = {
 	g: 5,
 	j: 38,
 	k: 40,
+	o: 31,
+	s: 1,
 	w: 13,
 	left: 123,
 	right: 124,
@@ -562,6 +564,26 @@ function openSettingsCategory(category, ready) {
 		},
 		Boolean,
 		{ timeout: 15_000, interval: 500, label: `「${category}」の分類が出る` }
+	);
+}
+
+/**
+ * 「開く」「保存」のファイルの窓が出ているか。テキストウィンドウに結び付けるので、テキストウィンドウのシートとして出る。
+ * シートにならずに別の窓で出ても拾えるよう、テキストウィンドウでない Mawok の窓も見る
+ */
+export function isFileDialogOpen() {
+	return jxa(
+		`const p = mawok();
+	if (!p.exists()) return false;
+	// 閉じている最中の窓を読むと投げる (-1728・-1719)。まだ出ているとして、呼ぶ側に読み直させる
+	try {
+		const w = win(args.title);
+		if (w !== undefined && w.sheets().length > 0) return true;
+		return p.windows.name().some((name) => name !== args.title);
+	} catch (e) {
+		return true;
+	}`,
+		{ title: DRAFT_TITLE }
 	);
 }
 

@@ -8,6 +8,7 @@ mod config;
 mod debounce;
 mod device;
 mod diagnostics;
+mod draft_file;
 mod draft_keys;
 mod error_codes;
 mod events;
@@ -118,6 +119,8 @@ struct DraftState {
     /// 下書きを最後に隠した時刻（UNIX のミリ秒）。次に出すときに、入力欄を空から始めるか（設定の clear_text_after）を決める。
     /// Instant でなく時計の時刻にする。macOS と Linux の Instant はスリープの間に進まず、蓋を閉じて離れた時間が数えられないため
     hidden_at: Mutex<Option<u64>>,
+    /// 「開く」「保存」のファイルの窓を出しているか。窓にフォーカスが移っても、ほかのアプリへ移ったとして隠さない
+    file_dialog_open: AtomicBool,
 }
 
 impl DraftState {
@@ -968,9 +971,11 @@ struct BlurCheck {
     settings_focused: bool,
     /// 設定ウィンドウを作っている最中か
     settings_opening: bool,
+    /// 「開く」「保存」のファイルの窓を出しているか
+    file_dialog_open: bool,
 }
 
-/// 隠すのは、出ていて、一度フォーカスが入った後に外れたままで、それが設定ウィンドウのためではないときだけ
+/// 隠すのは、出ていて、一度フォーカスが入った後に外れたままで、それが設定ウィンドウやファイルの窓のためではないときだけ
 fn should_hide_on_blur(check: BlurCheck) -> bool {
     check.enabled
         && check.visible
@@ -978,6 +983,7 @@ fn should_hide_on_blur(check: BlurCheck) -> bool {
         && !check.focused
         && !check.settings_focused
         && !check.settings_opening
+        && !check.file_dialog_open
 }
 
 /// 初めての起動として下書きを出すか。このデバイスの設定のファイルがなかったうえで、作れたときだけ。
@@ -1019,6 +1025,10 @@ fn hide_on_blur(app: &AppHandle) {
         focused: window.is_focused().unwrap_or(true),
         settings_focused: is_settings_focused(app),
         settings_opening: state.settings_opening.load(Ordering::Relaxed),
+        file_dialog_open: app
+            .state::<DraftState>()
+            .file_dialog_open
+            .load(Ordering::Relaxed),
     };
     if !should_hide_on_blur(check) {
         // 隠さない設定で、ほかのアプリへ移ったなら、戻り先をそのアプリにする。出したときのアプリのままだと、
@@ -1030,6 +1040,7 @@ fn hide_on_blur(app: &AppHandle) {
             && !check.focused
             && !check.settings_focused
             && !check.settings_opening
+            && !check.file_dialog_open
             // 自分のほかの窓（ライセンス・使い方）へ移ったときは、戻り先にしない
             && !app
                 .webview_windows()
@@ -2673,6 +2684,93 @@ fn reset_draft_key(app: AppHandle, action: DraftAction) -> Result<(), String> {
     set_draft_key(app, action, key)
 }
 
+/// 「開く」「保存」のファイルの窓を出す間、フォーカスが外れても隠さない印を立てておく。窓を閉じたら（途中で失敗しても）下ろす
+struct FileDialogGuard(AppHandle);
+
+impl FileDialogGuard {
+    fn new(app: &AppHandle) -> Self {
+        app.state::<DraftState>()
+            .file_dialog_open
+            .store(true, Ordering::Relaxed);
+        Self(app.clone())
+    }
+}
+
+impl Drop for FileDialogGuard {
+    fn drop(&mut self) {
+        self.0
+            .state::<DraftState>()
+            .file_dialog_open
+            .store(false, Ordering::Relaxed);
+    }
+}
+
+/// ファイルの窓を、テキストウィンドウに結び付けて作る。結び付けないと、常に手前に出すテキストウィンドウの裏に窓が隠れたり、
+/// 窓を開いたままキーをもう一度押せて2つ目が開いたりする
+fn draft_file_dialog(app: &AppHandle) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    use tauri_plugin_dialog::DialogExt as _;
+    let mut dialog = app.dialog().file();
+    if let Some(window) = main_window(app) {
+        dialog = dialog.set_parent(&window);
+    }
+    dialog
+}
+
+/// テキストウィンドウの「開く」。選んだファイルの中身を返す。取り消したら None。
+/// UTF-8 のテキストでなければ error_codes::FILE_NOT_UTF8 を返す（draft_file::decode）
+#[tauri::command]
+async fn open_draft_file(app: AppHandle) -> Result<Option<String>, String> {
+    let picked = {
+        let _guard = FileDialogGuard::new(&app);
+        let dialog = draft_file_dialog(&app);
+        run_blocking(move || dialog.blocking_pick_file()).await?
+    };
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|error| error.to_string())?;
+    info!("open draft file");
+    // 大きなファイルでも非同期のスレッドを塞がないよう、読み書きは別のスレッドで行う
+    run_blocking(move || {
+        let bytes = std::fs::read(&path).map_err(|error| {
+            error!("couldn't read {}: {error}", path.display());
+            error.to_string()
+        })?;
+        draft_file::decode(&bytes).map(Some)
+    })
+    .await?
+}
+
+/// テキストウィンドウの「保存」。選んだファイルにテキストを書き、ファイルの名前を返す。取り消したら None。
+/// 既にあるファイルを選んだときの上書きの確認は、OS の窓が出す
+#[tauri::command]
+async fn save_draft_file(app: AppHandle, text: String) -> Result<Option<String>, String> {
+    let picked = {
+        let _guard = FileDialogGuard::new(&app);
+        let dialog = draft_file_dialog(&app);
+        run_blocking(move || dialog.blocking_save_file()).await?
+    };
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|error| error.to_string())?;
+    info!("save draft file");
+    // 一時ファイルに書いて置き換える形にはしない（docs/platform.md「macOS のサンドボックス」）
+    let written = path.clone();
+    run_blocking(move || {
+        std::fs::write(&written, draft_file::encode(&text)).map_err(|error| {
+            error!("couldn't write {}: {error}", written.display());
+            error.to_string()
+        })
+    })
+    .await??;
+    Ok(Some(
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string()),
+    ))
+}
+
 /// ホットキーを変える。空文字でホットキーを外す（下書きウィンドウはトレイのメニューから出せる）
 #[tauri::command]
 fn set_hotkey(app: AppHandle, accelerator: String) -> Result<(), String> {
@@ -3653,6 +3751,8 @@ pub fn run() {
             set_theme,
             set_draft_always_on_top,
             set_hide_draft_on_blur,
+            open_draft_file,
+            save_draft_file,
             set_show_draft_buttons,
             set_draft_display,
             set_clear_draft_after,
@@ -4032,6 +4132,7 @@ mod tests {
             focused: false,
             settings_focused: false,
             settings_opening: false,
+            file_dialog_open: false,
         }
     }
 
@@ -4118,6 +4219,14 @@ mod tests {
         }));
         assert!(!should_hide_on_blur(BlurCheck {
             settings_opening: true,
+            ..blurred()
+        }));
+    }
+
+    #[test]
+    fn keeps_draft_while_the_file_dialog_is_open() {
+        assert!(!should_hide_on_blur(BlurCheck {
+            file_dialog_open: true,
             ..blurred()
         }));
     }

@@ -116,7 +116,8 @@
 Mac 版は Mac App Store で配るので、どのビルドもサンドボックスで動かす。権限は `src-tauri/Entitlements.plist` に置き、`tauri.conf.json` の `bundle.macOS.entitlements` で、Tauri が署名するときに付ける（`just bundle` の ad-hoc 署名と `just release-mac` の Developer ID の署名の両方）。`pnpm tauri dev` の開発版は署名しないので、サンドボックスの外で動く。
 
 - `com.apple.security.app-sandbox`: サンドボックスで動かす。`~/Library` はコンテナ（`~/Library/Containers/com.amiiby.mawok/Data/Library/`）に回され、設定・ログ・バックアップ・ロックファイルはその中に置かれる。コンテナは署名の識別子で決まるので、プロファイル（「プロファイル」）を付けても同じコンテナの中で、フォルダー名だけが分かれる。
-- `com.apple.security.files.user-selected.read-write`: フォルダーの窓で選んだ設定の保存先と、symlink の先のフォルダーを読み書きする。
+- `com.apple.security.files.user-selected.read-write`: 窓で選んだ設定の保存先・symlink の先のフォルダーと、テキストウィンドウで開く・保存するファイルを読み書きする。
+  - 許されるのは選んだファイルだけで、同じフォルダーに一時ファイルを作れない。そのため保存は、一時ファイルに書いて置き換えず、選んだファイルへ直に書く。
 - `com.apple.security.files.bookmarks.app-scope`: 選んだフォルダーの許可を、起動し直しても戻せるようにブックマークに残す（docs/config.md「macOS のサンドボックス」）。
 - `com.apple.security.network.client` を付ける。アプリは外へつながないが、無いと WKWebView の中身のプロセスが起動のたびに落ち、画面が出ない（サンドボックスの版で確かめた）。
 - ホットキー（`RegisterEventHotKey`）・ログイン項目（`SMAppService`）・クリップボード・パネルの窓は、サンドボックスでも権限が要らない。

@@ -45,7 +45,8 @@ export const ERROR_CODES = {{\n\
 \tKEYS_INVALID: {:?},\n\
 \tKEYS_EDITING: {:?},\n\
 \tKEYS_HOTKEY: {:?},\n\
-\tKEYS_ACTION_PREFIX: {:?}\n\
+\tKEYS_ACTION_PREFIX: {:?},\n\
+\tFILE_NOT_UTF8: {:?}\n\
 }} as const;\n",
         config::DEFAULT_DRAFT_FONT_SIZE,
         config::MIN_DRAFT_FONT_SIZE,
@@ -72,6 +73,7 @@ export const ERROR_CODES = {{\n\
         error_codes::KEYS_EDITING,
         error_codes::KEYS_HOTKEY,
         error_codes::KEYS_ACTION_PREFIX,
+        error_codes::FILE_NOT_UTF8,
     );
     fs::write(export_dir.join("constants.ts"), contents).expect("could not write constants.ts");
 }

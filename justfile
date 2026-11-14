@@ -114,6 +114,7 @@ linux-check *tests:
     cd e2e && node linux-run.mjs {{ tests }}
 
 # VM (e2e/vm/vm.sh) の中で回すので、手元の画面と入力を使わない。今のビルド (src-tauri/target/release/mawok) を写して回す。
+# ビルドの後にソースが変わっていれば止まるので、pnpm tauri build --no-bundle で作り直してから回す。
 # 例: just linux-check-vm arch-hyprland tray。詳細は e2e/README.md の「Linux の確認」を参照
 [doc('Linux の自動の確認を VM の中で流す (arch-hyprland・ubuntu-2404・ubuntu-2604)')]
 [group('実機の確認')]

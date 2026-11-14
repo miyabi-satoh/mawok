@@ -399,6 +399,53 @@ describe('下書きの履歴', () => {
 		await expect.element(textarea).toHaveValue('書きかけ');
 	});
 
+	it('開くキーで、選んだファイルの中身をテキストにし、書きかけは履歴に入れる', async () => {
+		invoked.mockImplementation((command) =>
+			Promise.resolve(command === 'open_draft_file' ? 'ファイルの中身' : undefined)
+		);
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.fill('書きかけ');
+
+		await userEvent.keyboard('{Meta>}o{/Meta}');
+
+		await expect.element(textarea).toHaveValue('ファイルの中身');
+		await expect.element(textarea).toHaveFocus();
+		(textarea.element() as HTMLTextAreaElement).setSelectionRange(0, 0);
+		await userEvent.keyboard('{ArrowUp}');
+		await expect.element(textarea).toHaveValue('書きかけ');
+	});
+
+	it('保存のキーで、テキストを渡して保存し、保存したファイルの名前を知らせる。テキストは残す', async () => {
+		invoked.mockImplementation((command) =>
+			Promise.resolve(command === 'save_draft_file' ? 'memo.txt' : undefined)
+		);
+		const screen = await render(Page);
+		const textarea = draftField(screen);
+		await textarea.fill('書いた文');
+
+		await userEvent.keyboard('{Meta>}s{/Meta}');
+
+		await expect
+			.element(screen.getByRole('status'))
+			.toHaveTextContent(m.draft_saved({ name: 'memo.txt' }));
+		expect(invoked).toHaveBeenCalledWith('save_draft_file', { text: '書いた文' });
+		await expect.element(textarea).toHaveValue('書いた文');
+	});
+
+	it('開く・保存のボタンは、キーと同じ操作を呼ぶ。テキストが空なら保存は押せない', async () => {
+		const screen = await render(Page);
+		const save = screen.getByRole('button', { name: m.draft_save() });
+		await expect.element(save).toBeDisabled();
+
+		await screen.getByRole('button', { name: m.draft_open() }).click();
+		expect(invoked).toHaveBeenCalledWith('open_draft_file');
+
+		await draftField(screen).fill('書いた文');
+		await save.click();
+		expect(invoked).toHaveBeenCalledWith('save_draft_file', { text: '書いた文' });
+	});
+
 	it('履歴を検索するキーで一覧を出し、絞り込んで選んだ履歴を入力欄に出す。下キーで打っていた内容に戻る', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);

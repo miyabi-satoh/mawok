@@ -177,7 +177,7 @@ just msix-check msix        # msix/msix.test.mjs だけ
 
 ## macOS の確認
 
-macOS の WKWebView には WebDriver がないので、macOS だけの作り（フォーカスの戻し方・クリップボードへの書き込み・隠し方など、OS ごとに作りが分かれているところの macOS の側）は、`osascript` の JXA で動かして見る。キーとウィンドウは System Events、画面の中の要素はアクセシビリティの API（AXUIElement）、マウスは CGEvent、ウィンドウの重なりの層はウィンドウサーバーの一覧（CGWindowList）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。
+macOS の WKWebView には WebDriver がないので、macOS だけの作り（フォーカスの戻し方・クリップボードへの書き込み・隠し方など、OS ごとに作りが分かれているところの macOS の側）と、OS の窓の扱いで決まる、テキストウィンドウに結び付けたファイルの窓（開く・保存。出ている間テキストウィンドウが隠れないか・閉じた後に入力欄へフォーカスが戻るか）は、`osascript` の JXA で動かして見る。キーとウィンドウは System Events、画面の中の要素はアクセシビリティの API（AXUIElement）、マウスは CGEvent、ウィンドウの重なりの層はウィンドウサーバーの一覧（CGWindowList）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。
 
 ```
 just macos-check          # macos/*.test.mjs を全部
@@ -198,7 +198,7 @@ just macos-check --restore  # 中断して残った控えから戻すだけ
 
 ## Linux の確認
 
-Linux だけの作り（`#[cfg(target_os = "linux")]`。portal と `mawok --toggle` のホットキー、トレイ、コピーした中身を持ち続けるクリップボード、XDG autostart の .desktop、WebKitGTK の描画プロセスが落ちたときの読み込み直し）を、Wayland のデスクトップの上で見る。画面の中は WebDriver（`tauri-driver` + WebKitWebDriver）、キーは ydotool（uinput の本物の入力）、トレイは D-Bus（StatusNotifierItem と dbusmenu）、クリップボードは wl-clipboard で扱う。窓とフォーカスとホットキーの割り当てはデスクトップで違うので、Hyprland は hyprctl（`lib/linux-hyprland.mjs`）、GNOME はアクセシビリティの AT-SPI と gsettings（`lib/linux-gnome.mjs`・`lib/atspi.py`）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。CI の runner には Wayland のデスクトップと portal が無いので、CI では回さない。
+Linux だけの作り（`#[cfg(target_os = "linux")]`。portal と `mawok --toggle` のホットキー、トレイ、コピーした中身を持ち続けるクリップボード、XDG autostart の .desktop、WebKitGTK の描画プロセスが落ちたときの読み込み直し）と、デスクトップの窓の扱いで決まる、テキストウィンドウに結び付けたファイルの窓（開く・保存。手前に出るか・出ている間テキストウィンドウが隠れないか・閉じた後に入力欄へフォーカスが戻るか）を、Wayland のデスクトップの上で見る。画面の中は WebDriver（`tauri-driver` + WebKitWebDriver）、キーは ydotool（uinput の本物の入力）、トレイは D-Bus（StatusNotifierItem と dbusmenu）、クリップボードは wl-clipboard で扱う。窓とフォーカスとホットキーの割り当てはデスクトップで違うので、Hyprland は hyprctl（`lib/linux-hyprland.mjs`）、GNOME はアクセシビリティの AT-SPI と gsettings（`lib/linux-gnome.mjs`・`lib/atspi.py`）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。CI の runner には Wayland のデスクトップと portal が無いので、CI では回さない。
 
 ```
 just linux-check-vm arch-hyprland        # VM の Hyprland で linux/*.test.mjs を全部
@@ -211,7 +211,7 @@ just linux-check --restore               # 中断して残った控えから戻�
   - `arch-hyprland`: Arch と Hyprland（portal は xdph、トレイは waybar）。Hyprland は 3D 描画が要るので、virgl を `egl-headless` で使う。
   - `ubuntu-2604`: GNOME 50。GlobalShortcuts の portal があり、初めてのアプリ ID には確かめの画面（「Add Keyboard Shortcuts」）を出すので、起動のたびに出ていれば AT-SPI で「Add」を押す。
   - `ubuntu-2404`: GNOME 46。GlobalShortcuts の portal が無く、portal のテストは飛ばす。
-  - `linux-check-vm` は、VM が止まっていれば画面なしで起動し、今のビルド（`src-tauri/target/release/mawok`。無ければ VM に入っている版）と `e2e/` を写して回し、落ちた時点の記録を `e2e/screenshots/linux-failures/<VM>/` に持ち帰って止める（`--keep` で動かしたまま）。画面つきで見るときは `vm.sh <名前> start`。
+  - `linux-check-vm` は、VM が止まっていれば画面なしで起動し、今のビルド（`src-tauri/target/release/mawok`）と `e2e/` を写して回し、落ちた時点の記録を `e2e/screenshots/linux-failures/<VM>/` に持ち帰って止める（`--keep` で動かしたまま）。ビルドが無いときと、ビルドの後にアプリのソース（`e2e/`・テスト・文書を除く。checkout や pull で入ったものも含む）が変わっているときは、古い版で通らないよう、VM を起動せずに止まるので、`pnpm tauri build --no-bundle` でビルドし直してから回す。画面つきで見るときは `vm.sh <名前> start`。
 - **ビルドしない**。`linux-check` は入れてある `/usr/bin/mawok` を動かす（ほかのものは環境変数 `MAWOK_APP` で指す）。
 - **設定・履歴は常用のものと分ける**。プロファイル `e2e` で起動する（→ docs/platform.md「プロファイル」）。portal は名乗ったアプリ ID の .desktop が無いと登録を断るので、回している間だけ `~/.local/share/applications/com.amiiby.mawok.e2e.desktop` を置く。
 - **後始末**: 常用の Mawok を終了し、ログイン時の起動の .desktop（`~/.config/autostart/Mawok.desktop`。プロファイルでは分かれない）とクリップボードの文字、GNOME のカスタムショートカットの一覧を `e2e/.linux-backup/` に控えてから始める。終わったら戻し、Hyprland は設定を読み直して割り当てを戻し、動いていた Mawok を起動し直す。中断したときは `just linux-check --restore` で戻す。
