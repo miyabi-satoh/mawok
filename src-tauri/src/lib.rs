@@ -2730,11 +2730,15 @@ async fn open_draft_file(app: AppHandle) -> Result<Option<String>, String> {
     };
     let path = picked.into_path().map_err(|error| error.to_string())?;
     info!("open draft file");
-    let bytes = std::fs::read(&path).map_err(|error| {
-        error!("couldn't read {}: {error}", path.display());
-        error.to_string()
-    })?;
-    draft_file::decode(&bytes).map(Some)
+    // 大きなファイルでも非同期のスレッドを塞がないよう、読み書きは別のスレッドで行う
+    run_blocking(move || {
+        let bytes = std::fs::read(&path).map_err(|error| {
+            error!("couldn't read {}: {error}", path.display());
+            error.to_string()
+        })?;
+        draft_file::decode(&bytes).map(Some)
+    })
+    .await?
 }
 
 /// テキストウィンドウの「保存」。選んだファイルにテキストを書き、ファイルの名前を返す。取り消したら None。
@@ -2751,10 +2755,16 @@ async fn save_draft_file(app: AppHandle, text: String) -> Result<Option<String>,
     };
     let path = picked.into_path().map_err(|error| error.to_string())?;
     info!("save draft file");
-    std::fs::write(&path, draft_file::encode(&text)).map_err(|error| {
-        error!("couldn't write {}: {error}", path.display());
-        error.to_string()
-    })?;
+    // 一時ファイルに書いて置き換える形にはしない。macOS のサンドボックスが許すのは窓で選んだファイルだけで、
+    // 同じフォルダーに一時ファイルを作れないため
+    let written = path.clone();
+    run_blocking(move || {
+        std::fs::write(&written, draft_file::encode(&text)).map_err(|error| {
+            error!("couldn't write {}: {error}", written.display());
+            error.to_string()
+        })
+    })
+    .await??;
     Ok(Some(
         path.file_name()
             .map(|name| name.to_string_lossy().into_owned())
