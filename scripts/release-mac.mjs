@@ -151,6 +151,8 @@ async function buildAppStore() {
 			'APPLE_PROVISIONING_PROFILE に、Mac App Store Connect のプロビジョニングプロファイルのパスを入れてください'
 		);
 	}
+	// ビルドの後でなく前に聞く。端末が無いと分かるのが、数分のビルドの後にならないため
+	const password = await askSecret('アップロードのアプリ用パスワード');
 	addRustTargets();
 	const outDir = freshOutDir(version);
 
@@ -190,7 +192,6 @@ async function buildAppStore() {
 	run('xcrun', ['productbuild', '--sign', installer, '--component', app, '/Applications', pkg]);
 	run('pkgutil', ['--check-signature', pkg]);
 
-	const password = await askSecret('アップロードのアプリ用パスワード');
 	run(
 		'xcrun',
 		[
