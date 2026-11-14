@@ -49,8 +49,8 @@ On other desktops, also assign a key to `mawok --toggle` in the keyboard setting
 - To return without copying, press `Esc`. Your unfinished text is still there the next time you bring up the text window.
 - Choose a time for “Clear text box after hiding” under “General” in Settings to start with an empty text box once that time has passed since the window was hidden. Your unfinished text goes to history, so press `↑` to get it back.
 - To start over, press {macos:`Cmd+N`}{windows:`Ctrl+N`}{linux:`Ctrl+N`} or the “New” button at the bottom left. Your unfinished text goes to history.
-- Press {macos:`Cmd+O`}{windows:`Ctrl+O`}{linux:`Ctrl+O`} or the “Open” button next to “New” to replace the text with the contents of a file you choose. Your unfinished text goes to history. Only UTF-8 text files can be opened.
-- Press {macos:`Cmd+S`}{windows:`Ctrl+S`}{linux:`Ctrl+S`} or the “Save” button to save the text to a file you choose.
+- Press {macos:`Cmd+O`}{windows:`Ctrl+O`}{linux:`Ctrl+O`} or the “Open...” button next to “New” to replace the text with the contents of a file you choose. Your unfinished text goes to history. Only UTF-8 text files can be opened.
+- Press {macos:`Cmd+S`}{windows:`Ctrl+S`}{linux:`Ctrl+S`} or the “Save...” button to save the text to a file you choose.
 - Clicking another app also hides the window without copying, and your unfinished text remains (you can turn this off under “General” in Settings).
 
 ## Use text you copied earlier

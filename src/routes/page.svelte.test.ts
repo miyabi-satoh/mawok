@@ -433,6 +433,19 @@ describe('下書きの履歴', () => {
 		await expect.element(textarea).toHaveValue('書いた文');
 	});
 
+	it('開く・保存のボタンは、キーと同じ操作を呼ぶ。テキストが空なら保存は押せない', async () => {
+		const screen = await render(Page);
+		const save = screen.getByRole('button', { name: m.draft_save() });
+		await expect.element(save).toBeDisabled();
+
+		await screen.getByRole('button', { name: m.draft_open() }).click();
+		expect(invoked).toHaveBeenCalledWith('open_draft_file');
+
+		await draftField(screen).fill('書いた文');
+		await save.click();
+		expect(invoked).toHaveBeenCalledWith('save_draft_file', { text: '書いた文' });
+	});
+
 	it('履歴を検索するキーで一覧を出し、絞り込んで選んだ履歴を入力欄に出す。下キーで打っていた内容に戻る', async () => {
 		const screen = await render(Page);
 		const textarea = draftField(screen);
