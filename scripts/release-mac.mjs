@@ -5,6 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 
 // 証明書とプロファイルの Team ID (developer.apple.com/account の Membership details)
 const TEAM_ID = 'V6W6CVP93A';
@@ -145,13 +146,28 @@ async function buildDeveloperId() {
 	console.log(`\n${join(outDir, dmg)} に置きました。`);
 }
 
-async function buildAppStore() {
+// 別の App ID やチームのプロファイルだと、上げた後に断られて版番号を1つ無駄にするので、ビルドの前に確かめる
+function checkProfile(profile, bundleId) {
+	const plist = execFileSync('security', ['cms', '-D', '-i', profile]);
+	const appId = execFileSync(
+		'/usr/libexec/PlistBuddy',
+		['-c', 'Print :Entitlements:com.apple.application-identifier', '/dev/stdin'],
+		{ input: plist, encoding: 'utf8' }
+	).trim();
+	if (appId !== `${TEAM_ID}.${bundleId}`) {
+		fail(
+			`プロビジョニングプロファイルの App ID が ${appId} です (${TEAM_ID}.${bundleId} のものが要ります)`
+		);
+	}
+}
+
+// upload: false は上げずに pkg までを作る (同じ版は2度上げられないので、作り方を変えたときに上げ直さずに試す)
+async function buildAppStore({ upload }) {
 	const version = appVersion();
 	const bundleId = tauriConfig().identifier;
 	const signing = identity(['Apple Distribution'], 'codesigning');
 	// Mac Installer Distribution は、キーチェーンでは古い名前で出ることがある
 	const installer = identity(['Mac Installer Distribution', '3rd Party Mac Developer Installer']);
-	const appleId = requireAppleId('アップロード');
 	const profile = process.env.APPLE_PROVISIONING_PROFILE;
 	if (!profile || !existsSync(profile)) {
 		fail(
@@ -159,8 +175,8 @@ async function buildAppStore() {
 		);
 	}
 	// ビルドの後でなく前に聞く。端末が無いと分かるのが、数分のビルドの後にならないため
-	// 上げずに pkg までを確かめるとき (同じ版は2度上げられないので、上げ直さずに作り方を試す)
-	const upload = !process.argv.includes('--no-upload');
+	checkProfile(profile, bundleId);
+	const appleId = upload ? requireAppleId('アップロード') : '';
 	const password = upload ? await askSecret('アップロードのアプリ用パスワード') : '';
 	addRustTargets();
 	const outDir = freshOutDir(APP_STORE_OUT_ROOT, version);
@@ -207,7 +223,10 @@ async function buildAppStore() {
 	const app = join(BUNDLE_DIR, 'macos', 'Mawok.app');
 	checkUniversal(app);
 	const signed = read('codesign', ['-d', '--entitlements', '-', '--xml', app]);
-	if (!signed.includes('com.apple.application-identifier')) {
+	if (
+		!signed.includes('com.apple.application-identifier') ||
+		!signed.includes('com.apple.developer.team-identifier')
+	) {
 		fail('App Store 向けの権限で署名されていません');
 	}
 	if (!existsSync(join(app, 'Contents/embedded.provisionprofile'))) {
@@ -242,8 +261,16 @@ async function buildAppStore() {
 	console.log(`\n${pkg} を App Store Connect に上げました。処理が済むと TestFlight に出ます。`);
 }
 
-if (process.argv.includes('--app-store')) {
-	await buildAppStore();
+// 打ち間違えた引数を黙って捨てると、試すつもりで上げてしまうので止める
+const { values: options } = parseArgs({
+	options: { 'app-store': { type: 'boolean' }, 'no-upload': { type: 'boolean' } },
+	strict: true
+});
+if (options['no-upload'] && !options['app-store']) {
+	fail('--no-upload は --app-store と一緒に使います');
+}
+if (options['app-store']) {
+	await buildAppStore({ upload: !options['no-upload'] });
 } else {
 	await buildDeveloperId();
 }
