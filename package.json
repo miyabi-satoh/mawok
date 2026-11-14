@@ -1,6 +1,6 @@
 {
 	"name": "mawok",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "",
 	"type": "module",
 	"packageManager": "pnpm@12.10.1",
