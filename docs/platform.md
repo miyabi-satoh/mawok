@@ -139,8 +139,8 @@ Mac App Store に出す版を `just release-mas` で作って上げる。審査�
 - `just release-mac`: Developer ID で署名・公証し、公証の結果が綴じてあり Gatekeeper が通すことを確かめて、DMG を `src-tauri/target/release-mac/<版>/` に置く。
 - 要るもの:
   - キーチェーンの証明書。Store の版は Apple Distribution と Mac Installer Distribution（キーチェーンでは 3rd Party Mac Developer Installer と出ることがある。Xcode の「Manage Certificates…」で作れる）。Store の外の版は Developer ID Application（作れるのは Apple Developer の Account Holder だけで、作り方は Apple の「Create Developer ID certificates」 https://developer.apple.com/help/account/certificates/create-developer-id-certificates/ 。中間の認証局は G2 Sub-CA を選ぶ）。
-  - `APPLE_PROVISIONING_PROFILE`（Store の版だけ）: Mac App Store Connect のプロビジョニングプロファイル（App ID `com.amiiby.mawok`、Apple Distribution の証明書と結ぶ）のパス。
-  - `APPLE_ID`: 公証とアップロードに使う Apple Account のメールアドレス。パスワードは、そのアカウントのアプリ用パスワード（https://account.apple.com の「サインインとセキュリティ」で作る）を流すときに聞く。Tauri は公証のとき、このパスワードを `notarytool` の引数で渡すので、公証を待つ間は同じ Mac のほかのプロセスから見える。アップロードでは環境変数で渡す。
+  - `APPLE_PROVISIONING_PROFILE`（Store の版だけ）: Mac App Store Connect のプロビジョニングプロファイル（App ID `com.amiiby.mawok`、Apple Distribution の証明書と結ぶ）のパス。App ID が違えば、ビルドの前に止める。
+  - `APPLE_ID`: 公証とアップロードに使う Apple Account のメールアドレス（`--no-upload` では要らない）。パスワードは、そのアカウントのアプリ用パスワード（https://account.apple.com の「サインインとセキュリティ」で作る）を流すときに聞く。Tauri は公証のとき、このパスワードを `notarytool` の引数で渡すので、公証を待つ間は同じ Mac のほかのプロセスから見える。アップロードでは環境変数で渡す。
 
 ## Windows の MSIX 版
 

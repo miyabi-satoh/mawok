@@ -174,10 +174,14 @@ async function buildAppStore({ upload }) {
 			'APPLE_PROVISIONING_PROFILE に、Mac App Store Connect のプロビジョニングプロファイルのパスを入れてください'
 		);
 	}
-	// ビルドの後でなく前に聞く。端末が無いと分かるのが、数分のビルドの後にならないため
 	checkProfile(profile, bundleId);
-	const appleId = upload ? requireAppleId('アップロード') : '';
-	const password = upload ? await askSecret('アップロードのアプリ用パスワード') : '';
+	// ビルドの後でなく前に聞く。端末が無いと分かるのが、数分のビルドの後にならないため
+	const credentials = upload
+		? {
+				appleId: requireAppleId('アップロード'),
+				password: await askSecret('アップロードのアプリ用パスワード')
+			}
+		: undefined;
 	addRustTargets();
 	const outDir = freshOutDir(APP_STORE_OUT_ROOT, version);
 
@@ -237,7 +241,7 @@ async function buildAppStore({ upload }) {
 	const pkg = join(outDir, `Mawok_${version}_universal.pkg`);
 	run('xcrun', ['productbuild', '--sign', installer, '--component', app, '/Applications', pkg]);
 	run('pkgutil', ['--check-signature', pkg]);
-	if (!upload) {
+	if (!credentials) {
 		console.log(`\n${pkg} に置きました (上げていません)。`);
 		return;
 	}
@@ -252,20 +256,25 @@ async function buildAppStore({ upload }) {
 			'-t',
 			'macos',
 			'-u',
-			appleId,
+			credentials.appleId,
 			'-p',
 			'@env:APPLE_PASSWORD'
 		],
-		{ env: { ...process.env, APPLE_PASSWORD: password } }
+		{ env: { ...process.env, APPLE_PASSWORD: credentials.password } }
 	);
 	console.log(`\n${pkg} を App Store Connect に上げました。処理が済むと TestFlight に出ます。`);
 }
 
 // 打ち間違えた引数を黙って捨てると、試すつもりで上げてしまうので止める
-const { values: options } = parseArgs({
-	options: { 'app-store': { type: 'boolean' }, 'no-upload': { type: 'boolean' } },
-	strict: true
-});
+let options;
+try {
+	({ values: options } = parseArgs({
+		options: { 'app-store': { type: 'boolean' }, 'no-upload': { type: 'boolean' } },
+		strict: true
+	}));
+} catch (error) {
+	fail(error.message);
+}
 if (options['no-upload'] && !options['app-store']) {
 	fail('--no-upload は --app-store と一緒に使います');
 }

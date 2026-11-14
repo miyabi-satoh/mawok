@@ -155,7 +155,7 @@ release-mac:
     node scripts/release-mac.mjs
 
 # ユニバーサル版を Mac App Store 向けに署名して pkg にし、App Store Connect に上げる。--no-upload で上げずに pkg までにする。
-# 要: Apple Distribution と Mac Installer Distribution の証明書、環境変数 APPLE_ID と APPLE_PROVISIONING_PROFILE (→ docs/platform.md「Mac 版の配る版」)
+# 要: Apple Distribution と Mac Installer Distribution の証明書、環境変数 APPLE_PROVISIONING_PROFILE と (上げるとき) APPLE_ID (→ docs/platform.md「Mac 版の配る版」)
 [doc('Mac App Store に出す版を作って上げる')]
 [group('ビルド')]
 [macos]
