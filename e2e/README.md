@@ -177,7 +177,7 @@ just msix-check msix        # msix/msix.test.mjs だけ
 
 ## macOS の確認
 
-macOS の WKWebView には WebDriver がないので、macOS だけの作り（フォーカスの戻し方・クリップボードへの書き込み・隠し方など、OS ごとに作りが分かれているところの macOS の側）は、`osascript` の JXA で動かして見る。キーとウィンドウは System Events、画面の中の要素はアクセシビリティの API（AXUIElement）、マウスは CGEvent、ウィンドウの重なりの層はウィンドウサーバーの一覧（CGWindowList）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。
+macOS の WKWebView には WebDriver がないので、macOS だけの作り（フォーカスの戻し方・クリップボードへの書き込み・隠し方など、OS ごとに作りが分かれているところの macOS の側）と、OS の窓の扱いで決まる、テキストウィンドウに結び付けたファイルの窓（開く・保存。出ている間テキストウィンドウが隠れないか・閉じた後に入力欄へフォーカスが戻るか）は、`osascript` の JXA で動かして見る。キーとウィンドウは System Events、画面の中の要素はアクセシビリティの API（AXUIElement）、マウスは CGEvent、ウィンドウの重なりの層はウィンドウサーバーの一覧（CGWindowList）で扱う。両 OS に共通の振る舞いは、Windows の E2E に任せて見ない。
 
 ```
 just macos-check          # macos/*.test.mjs を全部
