@@ -154,6 +154,14 @@ msix *args:
 release-mac:
     node scripts/release-mac.mjs
 
+# ユニバーサル版を Mac App Store 向けに署名して pkg にし、App Store Connect に上げる。
+# 要: Apple Distribution と Mac Installer Distribution の証明書、環境変数 APPLE_ID と APPLE_PROVISIONING_PROFILE (→ docs/platform.md「Mac 版の配る版」)
+[doc('Mac App Store に出す版を作って上げる')]
+[group('ビルド')]
+[macos]
+release-mas:
+    node scripts/release-mac.mjs --app-store
+
 # デスクトップ専用なので Android・iOS 用は消す
 [doc('アイコンを src-tauri/assets の SVG から作り直す')]
 [group('生成')]
