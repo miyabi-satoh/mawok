@@ -39,12 +39,10 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "deb=src-tauri/target/release/bundle/deb/Mawok_${version}_amd64.deb" >> "$GITHUB_OUTPUT"
 
-      # WebKitGTK とトレイの部品の開発用の包み (Tauri の前提環境。ci.yml と同じ)
       - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+        uses: ./.github/actions/linux-deps
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -64,15 +62,16 @@ jobs:
       - run: pnpm tauri build --bundles deb
 
       - name: Show the package
+        env:
+          DEB: ${{ steps.version.outputs.deb }}
         run: |
-          deb=src-tauri/target/release/bundle/deb/Mawok_${{ steps.version.outputs.version }}_amd64.deb
-          dpkg-deb --info "$deb"
-          dpkg-deb --contents "$deb"
+          dpkg-deb --info "$DEB"
+          dpkg-deb --contents "$DEB"
 
       - uses: actions/upload-artifact@v7
         with:
           name: deb
-          path: src-tauri/target/release/bundle/deb/Mawok_${{ steps.version.outputs.version }}_amd64.deb
+          path: ${{ steps.version.outputs.deb }}
           if-no-files-found: error
 
   release:

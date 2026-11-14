@@ -11,7 +11,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, waitForChildOnInterrupt } from './lib/runner.mjs';
+import { parseArgs, run, waitForChildOnInterrupt } from './lib/runner.mjs';
 
 const execFileAsync = promisify(execFile);
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
@@ -33,20 +33,12 @@ if (!VMS.includes(vm)) {
 	process.exit(2);
 }
 
-/** 標準入出力をそのまま流して動かし、終了コードを返す。`input` は標準入力に流すストリーム */
-function run(command, args, input) {
-	return new Promise((resolve, reject) => {
-		const child = spawn(command, args, {
-			stdio: [input ? 'pipe' : 'ignore', 'inherit', 'inherit']
-		});
-		child.once('error', reject);
-		child.once('exit', (code) => resolve(code ?? 1));
-		if (input) input.pipe(child.stdin);
-	});
-}
+/** 標準出力とエラーをそのまま流して動かし、終了コードを返す。`input` は標準入力に流すストリーム (無ければ標準入力は渡さない) */
+const runWithInput = (command, args, input) =>
+	run(command, args, undefined, {}, { input, stdin: 'ignore' });
 
-const vmSh = (...args) => run(VM_SH, [vm, ...args]);
-const ssh = (command, input) => run(VM_SH, [vm, 'ssh', command], input);
+const vmSh = (...args) => runWithInput(VM_SH, [vm, ...args]);
+const ssh = (command, input) => runWithInput(VM_SH, [vm, 'ssh', command], input);
 
 /** tar の出力を VM の中で展開する */
 function tar(args, cwd) {
@@ -154,7 +146,7 @@ try {
 			stdio: ['ignore', 'pipe', 'inherit']
 		}
 	);
-	await run('tar', ['-x', '-C', local], back.stdout);
+	await runWithInput('tar', ['-x', '-C', local], back.stdout);
 	const saved = await fs.readdir(local);
 	if (saved.length > 0) console.log(`[linux-check-vm] 落ちた時点の記録: ${local}`);
 } catch (error) {

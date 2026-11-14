@@ -11,11 +11,12 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { remote } from 'webdriverio';
 import { PROFILE, PROFILE_ENV, PROFILE_IDENTIFIER } from './app-conf.mjs';
+import { recordFailure } from './failure-record.mjs';
 import { fileExists, markLog, readLogSince, recordPath, writeJsonAtomic } from './files.mjs';
 import * as gnome from './linux-gnome.mjs';
 import * as hyprland from './linux-hyprland.mjs';
 import { writeSettings } from './settings-files.mjs';
-import { waitFor } from './wait.mjs';
+import { sleep, waitFor } from './wait.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -38,6 +39,8 @@ const PORTAL_DESKTOP_FILE = path.join(DATA_HOME, 'applications', `${PROFILE_IDEN
 const BACKUP_DIR = recordPath('.linux-backup');
 /** 落ちたときの画面と窓の一覧の置き場 (`screenshots/` は gitignore 済み) */
 export const FAILURE_DIR = path.resolve(import.meta.dirname, '..', 'screenshots', 'linux-failures');
+/** 入口が各テストファイルの `node` に渡す引数。落ちたテストに captureFailure を掛けるフックを先に読み込む */
+export const FAILURE_CAPTURE_ARGS = ['--import', './lib/linux-failure-capture.mjs'];
 
 const YDOTOOL_SOCKET =
 	process.env.YDOTOOL_SOCKET ?? `/run/user/${process.getuid()}/.ydotool_socket`;
@@ -150,10 +153,6 @@ async function which(command) {
 			return file;
 	}
 	return null;
-}
-
-export function sleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ── 窓とフォーカス・ホットキーの割り当て (デスクトップごと) ──
@@ -646,31 +645,12 @@ export function launchOtherWindow() {
 // ── 落ちたときの記録 ──
 
 /** 落ちた時点の画面と、窓の一覧とフォーカスを `FAILURE_DIR` に置き、置いた先を返す。どれも投げない */
-export async function captureFailure(name) {
-	try {
-		await fs.mkdir(FAILURE_DIR, { recursive: true });
-	} catch (error) {
-		console.error(`[linux-check] 記録の置き場を作れませんでした: ${error.message}`);
-		return [];
-	}
-	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-	const base = path.join(
-		FAILURE_DIR,
-		`${stamp} ${name.replace(/[/\\:*?"<>|]/g, '_').slice(0, 80)}`
-	);
-	const saved = [];
-	try {
-		await desktop.screenshot(`${base}.png`);
-		saved.push(`${base}.png`);
-	} catch (error) {
-		console.error(`[linux-check] 画面を撮れませんでした: ${error.message}`);
-	}
-	try {
-		const state = await desktop.state();
-		await fs.writeFile(`${base}.json`, `${JSON.stringify(state, null, '\t')}\n`);
-		saved.push(`${base}.json`);
-	} catch (error) {
-		console.error(`[linux-check] 窓の一覧を読めませんでした: ${error.message}`);
-	}
-	return saved;
+export function captureFailure(name) {
+	return recordFailure({
+		dir: FAILURE_DIR,
+		name,
+		tag: 'linux-check',
+		screenshot: (file) => desktop.screenshot(file),
+		state: () => desktop.state()
+	});
 }

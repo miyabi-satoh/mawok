@@ -21,6 +21,7 @@ import {
 	snapshotConfigDir,
 	writeSettings
 } from './settings-files.mjs';
+import { sleep } from './wait.mjs';
 
 // 自動の確認は、プロファイル `e2e` で起動する (tauri-driver.mjs の startTauriDriver が MAWOK_PROFILE を渡す。src-tauri/src/profile.rs)。
 // 設定・履歴・ログのフォルダーは識別子の後ろに `.e2e` が付き、常用の Mawok のものとは別になる。
@@ -137,11 +138,6 @@ function isProcessAlive(pid) {
 	}
 }
 
-/** 短い間隔を置いて待つ (ロック取得中のプロセスが書き終わるのを待つときに使う) */
-function delay(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * 実行の排他ロックを取る。既に他の実行が持っていて、かつその pid が生きていれば失敗する。
  * ロックの所有者の pid が確認できて、それが死んでいる場合だけ、中断で解放し損ねた残骸と
@@ -193,7 +189,8 @@ export async function acquireLock() {
 					vanished = true; // 別プロセスが既に解放した
 					break;
 				}
-				await delay(100);
+				// ロック取得中のプロセスが書き終わるのを待つ
+				await sleep(100);
 			}
 		}
 		if (vanished) continue; // 無くなっているので、次のループで作成を再試行する

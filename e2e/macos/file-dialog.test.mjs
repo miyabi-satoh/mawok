@@ -20,14 +20,12 @@ import {
 	waitDraftFocused,
 	waitDraftValue
 } from '../lib/macos.mjs';
-import { expectStays, waitFor } from '../lib/wait.mjs';
+import { expectStays, sleep, waitFor } from '../lib/wait.mjs';
 
 // 「開く」「保存」のファイルの窓は、テキストウィンドウに結び付けて (macOS ではシートで) 出し、出ている間はフォーカスが
 // 外れてもテキストウィンドウを隠さない (lib.rs の draft_file_dialog と BlurCheck.file_dialog_open)。
 // 隠れないか・閉じた後に入力欄へフォーカスが戻るかは、OS の窓の扱いで決まるので macOS で見る。
 // 場所は「フォルダーへ移動」(Cmd+Shift+G) にパスを打って選ぶ。打つ文字は ASCII にする (System Events の keystroke のため)
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test.describe('macOS: ファイルを開く・保存', () => {
 	let dir;

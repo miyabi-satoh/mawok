@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { DRAFT_TITLE } from './app-conf.mjs';
+import { failureBase, writeFailureState } from './failure-record.mjs';
 import { readBackupRecord, recordPath, writeJsonAtomic } from './files.mjs';
 
 /**
@@ -933,18 +934,8 @@ export async function captureIfFailed() {
  * 前面がどこかを後から読めるようにする
  */
 export async function captureFailure(name) {
-	// 記録に失敗しても、テストの失敗の上にフックのエラーを重ねないよう、どれも投げずにログに出す
-	try {
-		await fs.mkdir(FAILURE_DIR, { recursive: true });
-	} catch (error) {
-		console.error(`[e2e] 記録の置き場を作れませんでした: ${error.message}`);
-		return [];
-	}
-	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-	const base = path.join(
-		FAILURE_DIR,
-		`${stamp} ${name.replace(/[/\\:*?"<>|]/g, '_').slice(0, 80)}`
-	);
+	const base = await failureBase(FAILURE_DIR, name, 'e2e');
+	if (base === null) return [];
 	try {
 		// 立ち上げたままの PowerShell (runPowerShell) は待ち時間の上限が無く、テストが落ちた原因で固まっていることも
 		// あるので、使い捨ての PowerShell で上限を付けて動かす。落ちたときに1回動かすだけなので、置き場のパスは埋め込む ($base)
@@ -955,10 +946,7 @@ export async function captureFailure(name) {
 		);
 		const { saved, state, errors } = JSON.parse(stdout.trim());
 		for (const message of errors) console.error(`[e2e] ${message}`);
-		if (state) {
-			await fs.writeFile(`${base}.json`, `${JSON.stringify(state, null, '\t')}\n`);
-			saved.push(`${base}.json`);
-		}
+		if (state) saved.push(await writeFailureState(base, state));
 		return saved;
 	} catch (error) {
 		console.error(`[e2e] 落ちた時点の記録を残せませんでした: ${error.message}`);

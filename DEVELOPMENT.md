@@ -63,14 +63,14 @@ Windows では、これらに加えて E2E テスト（`just e2e`）がありま
 
 MSIX 版だけの作り（StartupTask でのログイン時の起動、タスクバーのアイコンの下地、設定とログの置き場所とアンインストールでの消え方）は、`just msix-check` で見ます。`just msix` で作り直した MSIX を常用版と入れ替えて入れ、パッケージの中から起動して、画面と同じコマンドを送り、結果をレジストリ・エクスプローラー・タスクバーの画素などで読みます。ビルドし直す分を入れて5分ほどです。元から MSIX 版が入っていれば、終わると試した版が常用版として残ります（入っていなければ外します）。詳しくは [e2e/README.md](e2e/README.md) の「MSIX 版の確認」にあります。
 
-Linux では、Linux だけの作り（portal と `mawok --toggle` のホットキー、トレイ、クリップボード、XDG autostart、描画プロセスが落ちたときの読み込み直し）と、ファイルを開く・保存の窓を、`just linux-check-vm <VM>` が VM の中の Hyprland（`arch-hyprland`）と GNOME（`ubuntu-2604`・`ubuntu-2404`）で確かめます。VM は `e2e/vm/vm.sh <VM> create` で作り、今のビルド（`src-tauri/target/release/mawok`）を写して回すので、手元の画面と入力は使いません。手元の Hyprland で回すときは `just linux-check` です。CI では回しません。詳しくは [e2e/README.md](e2e/README.md) の「Linux の確認」にあります。
+Linux では、Linux だけの作り（portal と `mawok --toggle` のホットキー、トレイ、クリップボード、XDG autostart、描画プロセスが落ちたときの読み込み直し）と、ファイルを開く・保存の窓を、`just linux-check-vm <VM>` が VM の中の Hyprland（`arch-hyprland`）と GNOME（`ubuntu-2604`・`ubuntu-2404`）で確かめます。VM は `e2e/vm/vm.sh <VM> create` で作り、今のビルド（`src-tauri/target/release/mawok`）を写して回すので、手元の画面と入力は使いません。手元のデスクトップ（Hyprland か GNOME）で回すときは `just linux-check` です。CI では回しません。詳しくは [e2e/README.md](e2e/README.md) の「Linux の確認」にあります。
 
 macOS では、OS ごとに作りが分かれているところの macOS の側（フォーカスの戻り、クリップボードへの書き込み、ほかのアプリのクリックで隠れること、初めての起動など）と、ファイルを開く・保存の窓を、`just macos-check` がアクセシビリティで確かめます。ビルドはせず、入れてある `/Applications/Mawok.app` を動かします。キーボードとフォーカスを使い、設定・履歴・クリップボードは控えて戻します。回す端末にアクセシビリティの許可が要ります。詳しくは [e2e/README.md](e2e/README.md) の「macOS の確認」にあります。
 
 ## ビルド
 
 ```sh
-just bundle   # 配布用にビルドする（macOS の DMG は、開いたときのアイコンの並びを整えない）
+just bundle   # 配布用にビルドする（macOS と Windows だけ。macOS の DMG は、開いたときのアイコンの並びを整えない）
 ```
 
 ## 配布
