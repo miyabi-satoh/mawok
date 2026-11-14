@@ -575,9 +575,14 @@ export function isFileDialogOpen() {
 	return jxa(
 		`const p = mawok();
 	if (!p.exists()) return false;
-	const w = win(args.title);
-	if (w !== undefined && w.sheets().length > 0) return true;
-	return p.windows.name().some((name) => name !== args.title);`,
+	// 閉じている最中の窓を読むと投げる (-1728・-1719)。まだ出ているとして、呼ぶ側に読み直させる
+	try {
+		const w = win(args.title);
+		if (w !== undefined && w.sheets().length > 0) return true;
+		return p.windows.name().some((name) => name !== args.title);
+	} catch (e) {
+		return true;
+	}`,
 		{ title: DRAFT_TITLE }
 	);
 }
