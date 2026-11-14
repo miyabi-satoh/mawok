@@ -149,8 +149,6 @@ printf 'Types: deb\nURIs: https://miyabi-satoh.github.io/mawok\nSuites: stable\n
 sudo apt update
 sudo apt install mawok
 ```
-
-On Arch Linux, install `mawok-bin` from the AUR with an AUR helper (such as `yay`). Update it with the same helper.
 :::
 
 ## Uninstalling
@@ -167,6 +165,6 @@ On Arch Linux, install `mawok-bin` from the AUR with an AUR helper (such as `yay
 
 ::: linux
 1. Turn off “Launch at login” under “General”.
-2. Choose “Quit” in the tray menu, then run `sudo apt remove mawok` on Ubuntu or `sudo pacman -R mawok-bin` on Arch Linux. To also remove the apt repository on Ubuntu, run `sudo rm /etc/apt/sources.list.d/mawok.sources /etc/apt/keyrings/mawok.gpg`.
+2. Choose “Quit” in the tray menu, then run `sudo apt remove mawok`. To also remove the apt repository, run `sudo rm /etc/apt/sources.list.d/mawok.sources /etc/apt/keyrings/mawok.gpg`.
 3. To also remove settings and history, delete `~/.config/com.amiiby.mawok/` and `~/.local/share/com.amiiby.mawok/`. If you changed the settings folder, also delete the settings files and the `history` folder there.
 :::
