@@ -4,7 +4,7 @@
 // 回す前に、今のビルド (src-tauri/target/release/mawok) を VM の /usr/bin/mawok に写す。ビルドが無いか、ビルドの後に
 // アプリのソースが変わっていれば (checkout や pull で入ったものも含む)、古い版で通らないよう、VM を起動せずに止める。
 // VM が止まっていれば画面なしで起動し、回し終えたら止める (`--keep` で動かしたまま)。落ちた時点の記録は
-// screenshots/linux-failures/<VM>/ に持ち帰る
+// screenshots/linux-vm-failures/<VM>/ に持ち帰る
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -140,7 +140,7 @@ try {
 	}
 	code = await ssh(`cd ~/mawok/e2e && node linux-run.mjs ${tests.join(' ')}`);
 	// 落ちた時点の記録を持ち帰る
-	const local = path.join(e2eDir, 'screenshots', 'linux-failures', vm);
+	const local = path.join(e2eDir, 'screenshots', 'linux-vm-failures', vm);
 	await fs.rm(local, { recursive: true, force: true });
 	await fs.mkdir(local, { recursive: true });
 	const back = spawn(

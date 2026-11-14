@@ -31,8 +31,8 @@ import { waitFor } from '../lib/wait.mjs';
 // キーとボタンは本物の入力で押す (WebDriver の入力は OS から見たフォーカスの移り方が本物と違う)
 
 const suite = createSuite();
-// 描かれ方のテストと同じ、撮った画面の置き場 (gitignore 済み)
-const SCREENSHOT_DIR = path.resolve(import.meta.dirname, '..', 'screenshots');
+// 撮った画面の置き場 (gitignore 済み)。描かれ方のテストが撮り直す前に消すのは `screenshots/` の直下の画面だけなので、フォルダーを分けて残す
+const SCREENSHOT_DIR = path.resolve(import.meta.dirname, '..', 'screenshots', 'file-dialog');
 
 test.describe('テキストウィンドウの開く・保存', () => {
 	let testConfig;
