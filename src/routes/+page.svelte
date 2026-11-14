@@ -622,6 +622,7 @@
 			textarea?.setSelectionRange(0, 0);
 			textarea?.scrollTo(0, 0);
 		} catch (e) {
+			notice = '';
 			showError(m.draft_open_failed(), draftFileProblem(e));
 		} finally {
 			fileDialogOpen = false;
@@ -640,7 +641,11 @@
 				error = '';
 				showNotice(m.draft_saved({ name }));
 			})
-			.catch((e) => showError(m.draft_save_failed(), errorCode(e)))
+			.catch((e) => {
+				// 前の知らせ（保存しました など）を、失敗のエラーと並べて残さない
+				notice = '';
+				showError(m.draft_save_failed(), errorCode(e));
+			})
 			.finally(() => {
 				fileDialogOpen = false;
 				textarea?.focus();
