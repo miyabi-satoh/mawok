@@ -96,7 +96,9 @@ const DEFAULT_DRAFT_KEYS = {
 	historyNewer: 'CommandOrControl+Alt+ArrowDown',
 	historySearch: 'CommandOrControl+KeyR',
 	new: 'CommandOrControl+KeyN',
-	delete: ''
+	delete: '',
+	open: 'CommandOrControl+KeyO',
+	save: 'CommandOrControl+KeyS'
 };
 
 /**
