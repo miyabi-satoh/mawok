@@ -144,6 +144,17 @@ describe('下書きウィンドウ', () => {
 		await vi.waitFor(() => expect(previewLayer(screen).textContent).toBe(placeholderOf(screen)));
 		await draftField(screen).fill('abc');
 		await vi.waitFor(() => expect(previewLayer(screen).textContent).toBe('abc'));
+		// ハイライトする範囲があるときも同じ。b を置き換える範囲として返す
+		invoked.mockImplementation((command) =>
+			Promise.resolve(
+				command === 'preview_replacement_matches' ? [{ start: 1, len: 1, to: 'B' }] : undefined
+			)
+		);
+		await draftField(screen).fill('abcd');
+		await vi.waitFor(() =>
+			expect(previewLayer(screen).querySelector('mark')?.textContent).toBe('b')
+		);
+		expect(previewLayer(screen).textContent).toBe('abcd');
 	});
 
 	it('設定のフォントと大きさを入力欄に当てる', async () => {
