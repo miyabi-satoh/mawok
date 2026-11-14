@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchedKeys, matchesFilter, shownRows, showsFilter } from './list-filter';
+import { matchedKeys, matchesFilter, shownRows, showsFilter } from '#lib/list-filter.ts';
 
 describe('matchesFilter', () => {
 	it('どれかの文字列が語を含めば当たり、英字の大文字と小文字は区別しない', () => {

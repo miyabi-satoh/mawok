@@ -34,7 +34,7 @@ const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
-export type CaretLine = { first: boolean; last: boolean };
+type CaretLine = { first: boolean; last: boolean };
 
 /** 入力欄と同じ幅と書式で折り返す、見えない要素。中身を入れて body に足し、測ったら外す */
 function mirrorOf(element: HTMLTextAreaElement): HTMLDivElement {

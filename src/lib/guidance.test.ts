@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { baseLocale, overwriteGetLocale, type Locale } from '#lib/paraglide/runtime.js';
-import { draftGuidance } from './guidance';
+import { draftGuidance } from '#lib/guidance.ts';
 import { DEFAULT_DRAFT_KEYS } from '#lib/test-support/settings-view.ts';
 
 const HOTKEY = 'CommandOrControl+Shift+Space';

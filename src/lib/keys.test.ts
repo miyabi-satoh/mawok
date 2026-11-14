@@ -15,7 +15,7 @@ import {
 	keyRejectionMessage,
 	platformFromUrl,
 	toAccelerator
-} from './keys';
+} from '#lib/keys.ts';
 
 describe('DRAFT_ACTIONS_IN_SETTINGS', () => {
 	it('設定画面に、どの操作も1回ずつ並ぶ', () => {

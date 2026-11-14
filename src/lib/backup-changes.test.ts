@@ -3,7 +3,7 @@ import type { BackupDifference } from '#lib/bindings/BackupDifference.ts';
 import { m } from '#lib/paraglide/messages.js';
 import type { Replacement, Snippet } from '#lib/settings.svelte.ts';
 import { newSnippet } from '#lib/snippets.ts';
-import { restoreChangeText } from './backup-changes';
+import { restoreChangeText } from '#lib/backup-changes.ts';
 
 const replacement: Replacement = { from: '濃度', to: 'Node.js', enabled: true };
 const snippet: Snippet = newSnippet('挨拶', 'お世話になっております。\n佐藤です。');

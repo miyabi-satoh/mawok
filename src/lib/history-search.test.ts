@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { historyItems, historyPreview } from './history-search';
+import { historyItems, historyPreview } from '#lib/history-search.ts';
 
 describe('historyItems', () => {
 	it('新しいものから並べ、同じ本文は新しい方だけを残す', () => {

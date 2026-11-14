@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowsContextMenu } from './context-menu';
+import { allowsContextMenu } from '#lib/context-menu.ts';
 
 function element(html: string) {
 	const host = document.createElement('div');

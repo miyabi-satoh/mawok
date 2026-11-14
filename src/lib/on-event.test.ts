@@ -1,6 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { describe, expect, it, vi } from 'vitest';
-import { onEvent } from './on-event';
+import { onEvent } from '#lib/on-event.ts';
 
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 

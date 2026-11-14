@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeTextColor } from './color';
+import { normalizeTextColor } from '#lib/color.ts';
 
 describe('normalizeTextColor', () => {
 	it('#rrggbb を小文字に揃える', () => {

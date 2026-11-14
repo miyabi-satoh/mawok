@@ -1,6 +1,6 @@
 import { flushSync } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import { OpenLoader } from './open-loader.svelte';
+import { OpenLoader } from '#lib/open-loader.svelte.ts';
 
 /** 開け閉めできる OpenLoader。load は、始めた読み込みの「まだ使ってよいか」を current に積む */
 function setup() {

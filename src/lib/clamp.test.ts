@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clamp } from './clamp';
+import { clamp } from '#lib/clamp.ts';
 
 describe('clamp', () => {
 	it('範囲の中ならそのまま返す', () => {

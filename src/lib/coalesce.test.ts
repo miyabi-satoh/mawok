@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coalesced } from './coalesce';
+import { coalesced } from '#lib/coalesce.ts';
 
 /** 呼ばれた回数を数え、1回ずつ手で終わらせられる処理 */
 function controlled() {

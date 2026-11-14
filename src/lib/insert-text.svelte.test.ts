@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { insertAsTyped } from './insert-text';
+import { insertAsTyped } from '#lib/insert-text.ts';
 
 // insertText は実際の入力欄でしか効かないので、Chromium で入力欄を置いて見る
 
