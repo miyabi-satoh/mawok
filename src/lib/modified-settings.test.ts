@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { modifiedName } from './modified-settings';
+import { modifiedName } from '#lib/modified-settings.ts';
 
 describe('modifiedName', () => {
 	it('既定から変えた設定なら名前を、変えていなければ undefined を返す', () => {

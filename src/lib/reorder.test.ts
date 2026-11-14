@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reorder } from './reorder';
+import { reorder } from '#lib/reorder.ts';
 
 describe('reorder', () => {
 	it('要素を後ろへ動かす', () => {

@@ -24,8 +24,14 @@ try {
 	process.exit(2);
 }
 
-const { FAILURE_DIR, ensureSessionEnv, holdUserState, preflight, restoreUserState } =
-	await import('./lib/linux.mjs');
+const {
+	FAILURE_CAPTURE_ARGS,
+	FAILURE_DIR,
+	ensureSessionEnv,
+	holdUserState,
+	preflight,
+	restoreUserState
+} = await import('./lib/linux.mjs');
 
 if (options.flags.has('--restore')) {
 	await ensureSessionEnv();
@@ -51,10 +57,11 @@ await fs.rm(FAILURE_DIR, { recursive: true, force: true });
 try {
 	// 控えの途中で落ちても、取れた分は finally で戻す
 	await holdUserState();
-	process.exitCode = await runTests(testFiles('linux', options.tests, e2eDir), e2eDir, [
-		'--import',
-		'./lib/linux-failure-capture.mjs'
-	]);
+	process.exitCode = await runTests(
+		testFiles('linux', options.tests, e2eDir),
+		e2eDir,
+		FAILURE_CAPTURE_ARGS
+	);
 } finally {
 	try {
 		await restoreUserState();

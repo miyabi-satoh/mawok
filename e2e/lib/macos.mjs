@@ -20,6 +20,7 @@ import {
 	SETTINGS_TITLES,
 	TRAY_MENU_JA
 } from './app-conf.mjs';
+import { recordFailure } from './failure-record.mjs';
 import { fileExists, markLog, readLogSince, recordPath, writeJsonAtomic } from './files.mjs';
 import {
 	DEVICE_FILE,
@@ -125,46 +126,29 @@ export function frontmostApp() {
 
 /** 落ちたときの画面と窓の一覧の置き場 (`screenshots/` は gitignore 済み) */
 export const FAILURE_DIR = path.resolve(import.meta.dirname, '..', 'screenshots', 'macos-failures');
+/** 入口が各テストファイルの `node` に渡す引数。落ちたテストに captureFailure を掛けるフックを先に読み込む */
+export const FAILURE_CAPTURE_ARGS = ['--import', './lib/macos-failure-capture.mjs'];
 
 /**
  * 落ちた時点の画面 (主のディスプレイ) と、画面に出ている窓の一覧を `FAILURE_DIR` に置き、置いた先を返す。
  * 窓の一覧は手前から順で、クリックがどの窓に落ちたかや、前面がどこかを後から読めるようにする
  */
-export async function captureFailure(name) {
-	// 記録に失敗しても、テストの失敗の上にフックのエラーを重ねないよう、どれも投げずにログに出す
-	try {
-		await fs.mkdir(FAILURE_DIR, { recursive: true });
-	} catch (error) {
-		console.error(`[macos-check] 記録の置き場を作れませんでした: ${error.message}`);
-		return [];
-	}
-	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-	const base = path.join(
-		FAILURE_DIR,
-		`${stamp} ${name.replace(/[/\\:*?"<>|]/g, '_').slice(0, 80)}`
-	);
-	const saved = [];
-	try {
+export function captureFailure(name) {
+	return recordFailure({
+		dir: FAILURE_DIR,
+		name,
+		tag: 'macos-check',
 		// 許可の確認などで止まっても、残りのテストが固まらないよう打ち切る
-		await execFileAsync('screencapture', ['-x', '-m', `${base}.png`], { timeout: 30_000 });
-		saved.push(`${base}.png`);
-	} catch (error) {
-		console.error(`[macos-check] 画面を撮れませんでした: ${error.message}`);
-	}
-	try {
-		const state = await jxa(`
+		screenshot: (file) => execFileAsync('screencapture', ['-x', '-m', file], { timeout: 30_000 }),
+		state: () =>
+			jxa(`
 	const ref = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, $.kCGNullWindowID);
 	const windows = ObjC.deepUnwrap(ObjC.castRefToObject(ref))
 		.filter((w) => w.kCGWindowLayer === 0)
 		.map((w) => ({ app: w.kCGWindowOwnerName, title: w.kCGWindowName ?? null, bounds: w.kCGWindowBounds }));
 	return { front: front(), windows };
-`);
-		await fs.writeFile(`${base}.json`, `${JSON.stringify(state, null, '\t')}\n`);
-		saved.push(`${base}.json`);
-	} catch (error) {
-		console.error(`[macos-check] 窓の一覧を読めませんでした: ${error.message}`);
-	}
-	return saved;
+`)
+	});
 }
 
 /** 文字を打つ。`modifiers` は `['command down', 'shift down']` の形 */

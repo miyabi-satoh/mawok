@@ -60,7 +60,7 @@ pub fn load(path: &Path) -> Result<Device, String> {
     }
 }
 
-/// 読む。読めなければ、上書きする前に `device.broken-….json` へ写し、読める項目だけを拾う。
+/// 読む。読めなければ、上書きする前に `device.broken-….json` へ写し、読める項目だけを拾う。写せたら、拾った項目で書き直す。
 /// 拾わないと、選んだ設定の保存先を忘れ、既定の保存先・既定の設定のまま黙って動き続けるため
 pub fn load_or_recover(path: &Path) -> Device {
     let error = match load(path) {
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn recovers_the_readable_items_and_keeps_a_copy_of_an_unreadable_file() {
-        let dir = crate::test_support::TempDir::new("device-recover");
+        let dir = TempDir::new("device-recover");
         let path = dir.join(FILE_NAME);
         fs::write(
             &path,

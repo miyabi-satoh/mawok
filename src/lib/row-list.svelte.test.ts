@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { RowList } from './row-list.svelte';
+import { RowList } from '#lib/row-list.svelte.ts';
 
 type Item = { name: string; body: string };
 const isBlank = (item: Item) => item.name === '' && item.body === '';

@@ -381,6 +381,20 @@ pub fn crlf_line_endings(text: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(converted)
 }
 
+/// OS の取り決めの行末にする。Windows では CR+LF（crlf_line_endings）、ほかは LF のまま
+pub fn os_line_endings(text: &str) -> std::borrow::Cow<'_, str> {
+    if cfg!(windows) {
+        crlf_line_endings(text)
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// 行末を LF にする（CR+LF も CR だけのものも）
+pub fn lf_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -789,5 +803,10 @@ mod tests {
             crlf_line_endings("one line"),
             std::borrow::Cow::Borrowed("one line")
         ));
+    }
+
+    #[test]
+    fn makes_line_endings_lf() {
+        assert_eq!(lf_line_endings("a\r\nb\rc\n"), "a\nb\nc\n");
     }
 }

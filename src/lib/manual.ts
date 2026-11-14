@@ -7,7 +7,7 @@ interface ManualSection {
 	title: string;
 }
 
-export interface Manual {
+interface Manual {
 	/** 見出し1。目次より上に出すので、本文の HTML には含めない */
 	title: string;
 	html: string;

@@ -9,5 +9,6 @@ pub const SNIPPET_ADDED: &str = "snippet-added";
 pub const CONFIG_REPLACED: &str = "config-replaced";
 /// トレイの ⚠ の項目で、設定画面に出す分類を頼んだ。設定画面は take_settings_category で受け取る。
 pub const SETTINGS_CATEGORY_REQUESTED: &str = "settings-category-requested";
+/// 下書きを出した。中身は `Shown`（`clear_text`: 入力欄を空から始めるか）。
 pub const SHOWN: &str = "shown";
 pub const HIDE_REQUESTED: &str = "hide-requested";

@@ -1,19 +1,9 @@
+import { CONSTANTS } from '#lib/bindings/constants.ts';
 import type { DraftKeys } from '#lib/keys.ts';
 import type { SettingsView } from '#lib/settings.svelte.ts';
 
-/** Rust 側の既定のキー（src-tauri/src/draft_keys.rs）の写し */
-export const DEFAULT_DRAFT_KEYS: DraftKeys = {
-	copy: 'CommandOrControl+Enter',
-	settings: 'CommandOrControl+Comma',
-	snippets: 'CommandOrControl+KeyK',
-	historyOlder: 'CommandOrControl+Alt+ArrowUp',
-	historyNewer: 'CommandOrControl+Alt+ArrowDown',
-	historySearch: 'CommandOrControl+KeyR',
-	new: 'CommandOrControl+KeyN',
-	delete: '',
-	open: 'CommandOrControl+KeyO',
-	save: 'CommandOrControl+KeyS'
-};
+/** Rust 側の既定のキー（src-tauri/src/draft_keys.rs） */
+export const DEFAULT_DRAFT_KEYS: DraftKeys = CONSTANTS.DEFAULT_DRAFT_KEYS;
 
 /** テストで Rust 側から届く設定。既定の値に overrides を重ねる */
 export function settingsView(overrides: Partial<SettingsView> = {}): SettingsView {

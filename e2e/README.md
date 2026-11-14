@@ -1,9 +1,11 @@
-# E2E テスト (Windows 専用)
+# E2E テスト
 
-`tauri-driver` + WebdriverIO で、実際にビルドしたリリース版を操作して確認する。
+Windows の E2E テスト (「前提 (Windows)」から「注意点」まで) と、「macOS の確認」「Linux の確認」を置く。
+
+Windows では、`tauri-driver` + WebdriverIO で、実際にビルドしたリリース版を操作して確認する。
 配る物と同じコードを試すのが目的なので、テスト専用のプラグインなどは埋め込まない。ビルドは組み直しを縮めるため、インストーラーを作らず、LTO を切る (最適化だけが配る版と違う)。LTO ありで作る配る形 (MSIX) は `just msix-check` が見る。
 
-## 前提
+## 前提 (Windows)
 
 - Windows。macOS は WKWebView に外部ドライバーがなく tauri-driver を直接使えないため対象外。
   - macOS でも、アプリに WebDriver のサーバーを埋め込む `tauri-plugin-wdio-webdriver` (webdriverio/desktop-mobile、MIT。2026-09-25 時点で v1.4.0) を使えば回せる。採らないのは次のため。
@@ -17,7 +19,7 @@
 - 常用の Mawok が起動していると、グローバルホットキーと、`mawok.exe` を数える後始末の確認がかち合う。
   `run.mjs` が始めに終了し、終わったら起動し直す (下の「常用版が動いていても、頼まずに終了して回す」)。
 
-## 実行
+## 実行 (Windows)
 
 ```
 just e2e
@@ -203,7 +205,7 @@ Linux だけの作り（`#[cfg(target_os = "linux")]`。portal と `mawok --togg
 ```
 just linux-check-vm arch-hyprland        # VM の Hyprland で linux/*.test.mjs を全部
 just linux-check-vm ubuntu-2604 tray     # VM の GNOME 50 で linux/tray.test.mjs だけ
-just linux-check                         # 手元の Hyprland (Aero) で回す
+just linux-check                         # 手元のデスクトップ (Hyprland か GNOME) で回す
 just linux-check --restore               # 中断して残った控えから戻すだけ
 ```
 
@@ -220,9 +222,9 @@ just linux-check --restore               # 中断して残った控えから戻�
 - **WebDriver で見えるのは下書きの窓だけ**。WebKitWebDriver に出る窓のハンドルは最初の窓の1つだけなので、設定や使い方の窓は、デスクトップの窓の一覧で開いたことだけを見る。描画プロセスを落とすと WebDriver のセッションも切れるので、そのテストはファイルの最後に置く。
 - **落ちたときの記録**: テストの本体が落ちると、その時点の画面（Hyprland は grim。GNOME は確かめなしに撮れないので撮らない）と、窓の一覧とフォーカスを `e2e/screenshots/linux-failures/` に置く（回すたびに消す）。`lib/linux-failure-capture.mjs` を各テストファイルの前に読み込む。
 
-### 手元の Hyprland で回すとき (`just linux-check`)
+### 手元で回すとき (`just linux-check`)
 
-VM で回せない事情（VM に無い手元の設定で起きる不具合など）があるときだけ使う。
+VM で回せない事情（VM に無い手元の設定で起きる不具合など）があるときだけ使う。手元の Hyprland か GNOME の上で回す。下の道具と条件は、手元の Hyprland (Aero) のもの。
 
 - **道具**: `ydotool`・`grim`・`foot`・`wl-clipboard`・`webkitgtk-6.0`（WebKitWebDriver が入っている。`webkit2gtk-4.1` には無い）を pacman で、`tauri-driver` を `cargo install tauri-driver --locked` で入れる。
 - **ydotoold**: uinput は root が要るので、別の端末で `sudo ydotoold --socket-path=/run/user/$(id -u)/.ydotool_socket --socket-own=$(id -u):$(id -g)` を動かしておく。

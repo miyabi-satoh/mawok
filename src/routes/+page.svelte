@@ -1,16 +1,16 @@
 <script lang="ts">
+	import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-	import BookmarkPlusIcon from '@lucide/svelte/icons/bookmark-plus';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
 	import SaveIcon from '@lucide/svelte/icons/save';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
-	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
 	import TextQuoteIcon from '@lucide/svelte/icons/text-quote';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { onMount, tick } from 'svelte';
@@ -413,13 +413,17 @@
 		noticeTimer = setTimeout(() => (notice = ''), NOTICE_MS);
 	}
 
+	function clearNotice() {
+		clearTimeout(noticeTimer);
+		notice = '';
+	}
+
 	// 知らせとエラーは出した時点の文言で持つので、表示言語が変わったら消す。前の言語のまま残さない
 	let shownLocale: string | undefined;
 	$effect(() => {
 		const locale = settings.locale;
 		if (shownLocale !== undefined && shownLocale !== locale) {
-			clearTimeout(noticeTimer);
-			notice = '';
+			clearNotice();
 			error = '';
 		}
 		shownLocale = locale;
@@ -470,7 +474,7 @@
 		snippetsOpen = false;
 		historySearchOpen = false;
 		// 前に出していたときの知らせは、出し直したら要らない
-		notice = '';
+		clearNotice();
 		// 変換中に隠れて compositionend が届かなかった場合に備え、出し直すたびに変換中の扱いを解く
 		composing = false;
 		if (clearOnShow) {
@@ -617,14 +621,14 @@
 			text = opened;
 			snippetsOpen = false;
 			historySearchOpen = false;
-			notice = '';
+			clearNotice();
 			error = '';
 			// 読んだ文の頭から読めるよう、先頭に置く。入力欄に中身が入ってから置く
 			await tick();
 			textarea?.setSelectionRange(0, 0);
 			textarea?.scrollTo(0, 0);
 		} catch (e) {
-			notice = '';
+			clearNotice();
 			showError(m.draft_open_failed(), draftFileProblem(e));
 		} finally {
 			fileDialogOpen = false;
@@ -636,23 +640,26 @@
 	function saveFile(): boolean {
 		if (text === '') return false;
 		if (fileDialogOpen) return true;
-		fileDialogOpen = true;
-		invoke<string | null>('save_draft_file', { text })
-			.then((name) => {
-				if (name === null) return;
-				error = '';
-				showNotice(m.draft_saved({ name }));
-			})
-			.catch((e) => {
-				// 前の知らせ（保存しました など）を、失敗のエラーと並べて残さない
-				notice = '';
-				showError(m.draft_save_failed(), errorCode(e));
-			})
-			.finally(() => {
-				fileDialogOpen = false;
-				textarea?.focus();
-			});
+		void writeFile(text);
 		return true;
+	}
+
+	/** saveFile の中身。キーやボタンの処理は保存したかを待たずに結果を返すので、分けて走らせる */
+	async function writeFile(content: string) {
+		fileDialogOpen = true;
+		try {
+			const name = await invoke<string | null>('save_draft_file', { text: content });
+			if (name === null) return;
+			error = '';
+			showNotice(m.draft_saved({ name }));
+		} catch (e) {
+			// 前の知らせ（保存しました など）を、失敗のエラーと並べて残さない
+			clearNotice();
+			showError(m.draft_save_failed(), errorCode(e));
+		} finally {
+			fileDialogOpen = false;
+			textarea?.focus();
+		}
 	}
 
 	/** 出した直後の状態から書き始める。書きかけは履歴に入れ、「前」で戻せるようにする。もう出した直後の状態なら false */
@@ -663,7 +670,7 @@
 		text = '';
 		snippetsOpen = false;
 		historySearchOpen = false;
-		notice = '';
+		clearNotice();
 		textarea?.focus();
 		return true;
 	}

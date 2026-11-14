@@ -91,8 +91,12 @@ function label(value: Exclude<BackupValue, { type: 'deleted' }>): string | undef
 						snippets: m.settings_category_snippets()
 					}[value.value] ?? value.value
 			});
-		default:
+		default: {
+			// 種類を足したら、ここで型の検査が落ちる。新しい版のバックアップから届いた知らない種類は、名前を出さない
+			const unhandled: never = value;
+			void unhandled;
 			return undefined;
+		}
 	}
 }
 

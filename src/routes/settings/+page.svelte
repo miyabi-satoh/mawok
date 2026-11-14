@@ -110,10 +110,10 @@
 		return onEvent(EVENTS.SETTINGS_CATEGORY_REQUESTED, () => void showRequestedCategory());
 	});
 
-	/** 記録しているキー。ホットキーか、下書きウィンドウの操作か。記録していなければ null */
+	/** 記録しているキー。ホットキーか、テキストウィンドウの操作か。記録していなければ null */
 	let recording = $state<'hotkey' | DraftAction | null>(null);
 	let hotkeyError = $state('');
-	/** 下書きウィンドウの操作のキーを割り当てられなかった理由。出すのはその操作の行の下 */
+	/** テキストウィンドウの操作のキーを割り当てられなかった理由。出すのはその操作の行の下 */
 	let keyError = $state<{ action: DraftAction; message: string } | null>(null);
 	let error = $state('');
 
@@ -147,7 +147,7 @@
 		hotkeyError = '';
 		keyError = null;
 		recording = target;
-		// 押したキーで下書きウィンドウが出ないように、今のホットキーを止める。
+		// 押したキーでテキストウィンドウが出ないように、今のホットキーを止める。
 		// 下書きの操作の記録でも止め、ホットキーと同じキーを押したら重なりとして知らせる
 		await invoke('pause_hotkey');
 	}
@@ -273,7 +273,7 @@
 	);
 	const shownReplacements = $derived(shownRows(replacements.rows, replacementMatches));
 
-	// 下書きウィンドウから定型文を足したら、開いている設定画面の並びにも足す。
+	// テキストウィンドウから定型文を足したら、開いている設定画面の並びにも足す。
 	// 足さないと、次に設定画面で直したときに、足す前の並びで保存して消してしまう。
 	// add は並び全体を保存し直すので、足す前の並びの保存が遅れて届いても、その後に保存して上書きする
 	$effect(() =>
@@ -588,6 +588,7 @@
 			{/if}
 		</SettingsRow>
 	{/snippet}
+	<!-- 選択肢1組の設定の行。name は設定の項目名で、既定から変えた印に使う -->
 	{#snippet selectRow(
 		name: string,
 		id: string,
@@ -606,6 +607,41 @@
 						<NativeSelect.Option value={option.value}>{option.name()}</NativeSelect.Option>
 					{/each}
 				</NativeSelect.Root>
+			</Field.Field>
+		</SettingsRow>
+	{/snippet}
+	<!-- 並べたボタンから1つを選ぶ設定の行。name は設定の項目名で、既定から変えた印に使う -->
+	{#snippet toggleRow(
+		name: string,
+		id: string,
+		label: string,
+		value: string,
+		options: { value: string; name: () => string; lang?: 'ja' | 'en' }[],
+		select: (value: string) => void
+	)}
+		<SettingsRow modified={modifiedName(view, name)}>
+			<Field.Field orientation="horizontal" class="flex-wrap">
+				<div class="flex flex-auto items-center gap-1">
+					<Field.Title {id}>{label}</Field.Title>
+				</div>
+				<!-- 選択中の項目を押すと空になるので、空は無視して今の設定のまま表示する -->
+				<ToggleGroup.Root
+					type="single"
+					variant="outline"
+					aria-labelledby={id}
+					bind:value={
+						() => value,
+						(selected) => {
+							if (selected) select(selected);
+						}
+					}
+				>
+					{#each options as option (option.value)}
+						<ToggleGroup.Item value={option.value} lang={option.lang}
+							>{option.name()}</ToggleGroup.Item
+						>
+					{/each}
+				</ToggleGroup.Root>
 			</Field.Field>
 		</SettingsRow>
 	{/snippet}
@@ -718,28 +754,14 @@
 							)}
 							<!-- Linux では窓の位置をアプリが決められない（Wayland）ので、出すディスプレイは選べない -->
 							{#if view.platform !== 'linux'}
-								<SettingsRow modified={modifiedName(view, 'text_window_display')}>
-									<Field.Field orientation="horizontal" class="flex-wrap">
-										<div class="flex flex-auto items-center gap-1">
-											<Field.Title id="draft-display">{m.settings_draft_display()}</Field.Title>
-										</div>
-										<ToggleGroup.Root
-											type="single"
-											variant="outline"
-											aria-labelledby="draft-display"
-											bind:value={
-												() => view.textWindowDisplay,
-												(display) => {
-													if (display) run('set_draft_display', { display });
-												}
-											}
-										>
-											{#each DRAFT_DISPLAYS as { value, name } (value)}
-												<ToggleGroup.Item {value}>{name()}</ToggleGroup.Item>
-											{/each}
-										</ToggleGroup.Root>
-									</Field.Field>
-								</SettingsRow>
+								{@render toggleRow(
+									'text_window_display',
+									'draft-display',
+									m.settings_draft_display(),
+									view.textWindowDisplay,
+									DRAFT_DISPLAYS,
+									(display) => run('set_draft_display', { display })
+								)}
 							{/if}
 							{@render selectRow(
 								'clear_text_after',
@@ -772,51 +794,22 @@
 							</SettingsRow>
 						</SettingsSection>
 						<SettingsSection title={m.settings_section_appearance()}>
-							<SettingsRow modified={modifiedName(view, 'language')}>
-								<Field.Field orientation="horizontal" class="flex-wrap">
-									<div class="flex flex-auto items-center gap-1">
-										<Field.Title id="language">{m.settings_language()}</Field.Title>
-									</div>
-									<!-- 選択中の項目を押すと空になるので、空は無視して今の設定のまま表示する -->
-									<ToggleGroup.Root
-										type="single"
-										variant="outline"
-										aria-labelledby="language"
-										bind:value={
-											() => view.language,
-											(language) => {
-												if (language) run('set_language', { language });
-											}
-										}
-									>
-										{#each LANGUAGES as { value, name, lang } (value)}
-											<ToggleGroup.Item {value} {lang}>{name()}</ToggleGroup.Item>
-										{/each}
-									</ToggleGroup.Root>
-								</Field.Field>
-							</SettingsRow>
-							<SettingsRow modified={modifiedName(view, 'theme')}>
-								<Field.Field orientation="horizontal" class="flex-wrap">
-									<div class="flex flex-auto items-center gap-1">
-										<Field.Title id="theme">{m.settings_theme()}</Field.Title>
-									</div>
-									<ToggleGroup.Root
-										type="single"
-										variant="outline"
-										aria-labelledby="theme"
-										bind:value={
-											() => view.theme,
-											(theme) => {
-												if (theme) run('set_theme', { theme });
-											}
-										}
-									>
-										{#each THEMES as { value, name } (value)}
-											<ToggleGroup.Item {value}>{name()}</ToggleGroup.Item>
-										{/each}
-									</ToggleGroup.Root>
-								</Field.Field>
-							</SettingsRow>
+							{@render toggleRow(
+								'language',
+								'language',
+								m.settings_language(),
+								view.language,
+								LANGUAGES,
+								(language) => run('set_language', { language })
+							)}
+							{@render toggleRow(
+								'theme',
+								'theme',
+								m.settings_theme(),
+								view.theme,
+								THEMES,
+								(theme) => run('set_theme', { theme })
+							)}
 						</SettingsSection>
 						<SettingsSection title={m.settings_folder()}>
 							<SettingsFolder {view} call={callSettings} />

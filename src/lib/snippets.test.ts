@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterSnippets, snippetLabel, snippetPreview } from './snippets';
+import { filterSnippets, snippetLabel, snippetPreview } from '#lib/snippets.ts';
 
 const review = {
 	name: 'レビュー依頼',

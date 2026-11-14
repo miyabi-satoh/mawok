@@ -43,11 +43,11 @@ export function isTabKey(
 
 export type Platform = GeneratedPlatform;
 
-/** 下書きウィンドウでキーで呼べる操作（Rust 側の draft_keys::DraftAction）。並びは、キーが重なったときに先の操作にキーを残す順 */
+/** テキストウィンドウでキーで呼べる操作（Rust 側の draft_keys::DraftAction）。並びは、キーが重なったときに先の操作にキーを残す順 */
 export const DRAFT_ACTIONS = CONSTANTS.DRAFT_ACTIONS satisfies readonly GeneratedDraftAction[];
 
 /**
- * 設定画面に並べる順。下書きウィンドウのボタンの並び（上の行の履歴、下の列の左から右）に合わせる。
+ * 設定画面に並べる順。テキストウィンドウのボタンの並び（上の行の履歴、下の列の左から右）に合わせる。
  * 重なったときの優先の順（DRAFT_ACTIONS）とは別に持つ
  */
 export const DRAFT_ACTIONS_IN_SETTINGS = [

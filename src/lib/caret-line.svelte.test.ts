@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { caretLine } from './caret-line';
+import { caretLine } from '#lib/caret-line.ts';
 
 // 見た目の行は実際に描かないと分からないので、Chromium で描いて見る
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ReplacementPreview, previewSegments } from './replacement-preview.svelte';
+import { ReplacementPreview, previewSegments } from '#lib/replacement-preview.svelte.ts';
 
 describe('previewSegments', () => {
 	it('一致が無ければ、全体を1つの未ハイライトの区間にする', () => {

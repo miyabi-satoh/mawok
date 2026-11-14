@@ -123,11 +123,11 @@ pub fn write(
             .copied()
             .filter(|name| before.get(*name) != entries.get(*name))
             .collect(),
-        Scope::All { .. } => managed.to_vec(),
+        Scope::All => managed.to_vec(),
     };
     let before = match scope {
         Scope::Changed(before) => Some(before),
-        Scope::All { .. } => None,
+        Scope::All => None,
     };
     let mut unreadable = Vec::new();
     for name in FILE_NAMES {
@@ -159,7 +159,7 @@ pub fn write(
                     }
                     DocumentMut::new()
                 }
-                _ => {
+                Scope::Changed(_) => {
                     unreadable.push(name);
                     continue;
                 }
@@ -1024,7 +1024,7 @@ mod tests {
 
     /// 全部を書くとき（バックアップから戻す・置き場を替えて上書きする）は、読めないファイルを写して除けてから書き直す
     #[test]
-    fn sets_aside_unreadable_files_when_restoring() {
+    fn sets_aside_unreadable_files_when_writing_all() {
         let dir = TempDir::new("settings-files-restore");
         fs::write(dir.join(SNIPPETS), "[[snippets]\n").unwrap();
         let restored = entries(&[(

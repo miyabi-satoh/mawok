@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { globSync } from 'node:fs';
 
-// 入口 (run.mjs・msix-run.mjs・macos-run.mjs) で共通の、引数の読み方と子プロセスの動かし方。OS によらない
+// 入口 (run.mjs・msix-run.mjs・macos-run.mjs・linux-run.mjs・linux-vm-run.mjs) で共通の、引数の読み方と子プロセスの動かし方。OS によらない
 
 /**
  * 引数を、フラグとテストファイルに分ける。`flags` に無いフラグは落とす。`--nobuild` のような打ち間違いを
@@ -37,16 +37,20 @@ export function testFiles(dir, tests, cwd) {
 	return [...new Set(files)].sort();
 }
 
-/** 標準入出力をそのまま流して子プロセスを動かし、終了コードを返す (シグナルで終わったら 1)。`env` は今の環境変数に足す分 */
-export function run(command, args, cwd, env = {}) {
+/**
+ * 標準入出力をそのまま流して子プロセスを動かし、終了コードを返す (シグナルで終わったら 1)。`env` は今の環境変数に足す分。
+ * `input` は標準入力に流すストリームで、無ければ標準入力は `stdin` (既定はそのまま流す)
+ */
+export function run(command, args, cwd, env = {}, { input, stdin = 'inherit' } = {}) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(command, args, {
 			cwd,
-			stdio: 'inherit',
+			stdio: [input ? 'pipe' : stdin, 'inherit', 'inherit'],
 			env: { ...process.env, ...env }
 		});
 		child.once('error', reject);
 		child.once('exit', (code) => resolve(code ?? 1));
+		if (input) input.pipe(child.stdin);
 	});
 }
 

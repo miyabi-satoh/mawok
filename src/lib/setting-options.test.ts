@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHAR_WIDTH_KINDS } from './setting-options';
+import { CHAR_WIDTH_KINDS } from '#lib/setting-options.ts';
 
 describe('設定の選択肢', () => {
 	it('カタカナだけは、半角に揃える選択肢を持たない', () => {

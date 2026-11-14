@@ -3,7 +3,7 @@ import type { ReplacementMatch } from '#lib/bindings/ReplacementMatch.ts';
 
 export type { ReplacementMatch } from '#lib/bindings/ReplacementMatch.ts';
 
-export type PreviewCall = (text: string) => Promise<ReplacementMatch[]>;
+type PreviewCall = (text: string) => Promise<ReplacementMatch[]>;
 
 /**
  * 下書き入力中、コピー時に置き換え辞書で書き換わる範囲をリアルタイムに保つ。
@@ -62,7 +62,7 @@ export class ReplacementPreview {
 }
 
 /** highlighted な区間だけ to（置き換えた後の文字列）を持つ */
-export type PreviewSegment =
+type PreviewSegment =
 	{ text: string; highlighted: false } | { text: string; highlighted: true; to: string };
 
 /**

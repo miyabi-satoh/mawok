@@ -8,20 +8,12 @@ use crate::{error_codes, text};
 pub fn decode(bytes: &[u8]) -> Result<String, String> {
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     let decoded = std::str::from_utf8(bytes).map_err(|_| error_codes::FILE_NOT_UTF8.to_string())?;
-    Ok(lf_line_endings(decoded))
-}
-
-fn lf_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
+    Ok(text::lf_line_endings(decoded))
 }
 
 /// テキストをファイルに書く中身にする。UTF-8 で BOM は付けない。Windows では行末を CR+LF にする（クリップボードと同じ OS の取り決め）
 pub fn encode(text: &str) -> Vec<u8> {
-    if cfg!(windows) {
-        text::crlf_line_endings(text).into_owned().into_bytes()
-    } else {
-        text.as_bytes().to_vec()
-    }
+    text::os_line_endings(text).into_owned().into_bytes()
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ import { afterEach } from 'node:test';
 import { captureFailure } from './macos.mjs';
 
 afterEach(async (t) => {
-	if (t.passed) return;
+	if (!t.error) return;
 	const saved = await captureFailure(t.fullName);
 	if (saved.length > 0) console.error(`[macos-check] 落ちた時点の記録: ${saved.join(', ')}`);
 });

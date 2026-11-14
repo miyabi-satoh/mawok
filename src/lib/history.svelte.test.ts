@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DraftHistory, historyDirection } from './history.svelte';
+import { DraftHistory, historyDirection } from '#lib/history.svelte.ts';
 
 describe('DraftHistory', () => {
 	it('新しいものから古い方へたどり、最後まで戻ると打っていた内容を返す', () => {

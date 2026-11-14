@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DRAFT_FONT_FALLBACK, draftFontFamily } from './font';
+import { DRAFT_FONT_FALLBACK, draftFontFamily } from '#lib/font.ts';
 
 /** 指定の後ろには必ず受け皿が付く */
 function withFallback(...names: string[]) {

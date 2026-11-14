@@ -107,7 +107,7 @@ macos-check *tests:
 
 # 引数でテストファイルを選べる (例: just linux-check tray)。キーボードとフォーカスを使い、常用の Mawok・
 # ログイン時の起動・クリップボード・ホットキーの割り当てを控えて戻す。詳細は e2e/README.md の「Linux の確認」を参照
-[doc('Linux の自動の確認を手元の Hyprland で流す (入れてある /usr/bin/mawok を動かす)')]
+[doc('Linux の自動の確認を手元のデスクトップ (Hyprland か GNOME) で流す (入れてある /usr/bin/mawok を動かす)')]
 [group('実機の確認')]
 [linux]
 linux-check *tests:

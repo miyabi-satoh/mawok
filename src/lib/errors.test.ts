@@ -7,7 +7,7 @@ import {
 	settingsFolderProblem,
 	settingsProblemNotice,
 	settingsSaveProblem
-} from './errors';
+} from '#lib/errors.ts';
 
 function errorWithStack(message: string, stack: string | undefined) {
 	const error = new TypeError(message);

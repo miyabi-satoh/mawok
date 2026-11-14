@@ -15,13 +15,12 @@ import {
 	mawokWindows,
 	pressHotkey,
 	pressKeys,
-	sleep,
 	startDriver,
 	typeText,
 	unbindHotkey,
 	waitDraftVisible
 } from '../lib/linux.mjs';
-import { expectStays, waitFor } from '../lib/wait.mjs';
+import { expectStays, sleep, waitFor } from '../lib/wait.mjs';
 
 // 「開く」「保存」のファイルの窓 (GTK のファイル選択) は、テキストウィンドウに結び付けて出し、出ている間はフォーカスが
 // 外れてもテキストウィンドウを隠さない (lib.rs の draft_file_dialog と BlurCheck.file_dialog_open)。

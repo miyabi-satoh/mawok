@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { collapseCjkLineBreaks, githubSlug, renderManual, selectPlatform } from './manual';
+import { collapseCjkLineBreaks, githubSlug, renderManual, selectPlatform } from '#lib/manual.ts';
 
 const read = (locale: string) =>
 	readFileSync(new URL(`../../docs/manual/${locale}.md`, import.meta.url), 'utf8');

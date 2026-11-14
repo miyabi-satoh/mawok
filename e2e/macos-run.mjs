@@ -22,8 +22,14 @@ try {
 	process.exit(2);
 }
 
-const { FAILURE_DIR, assertGuiSession, assertPermissions, assertScreenUnlocked, restoreUserState } =
-	await import('./lib/macos.mjs');
+const {
+	FAILURE_CAPTURE_ARGS,
+	FAILURE_DIR,
+	assertGuiSession,
+	assertPermissions,
+	assertScreenUnlocked,
+	restoreUserState
+} = await import('./lib/macos.mjs');
 try {
 	await assertGuiSession();
 	await assertScreenUnlocked();
@@ -45,7 +51,8 @@ if (options.flags.has('--restore')) {
 
 // 前の実行で落ちた時点の記録と混ざらないよう、回す前に空にする
 await fs.rm(FAILURE_DIR, { recursive: true, force: true });
-process.exitCode = await runTests(testFiles('macos', options.tests, e2eDir), e2eDir, [
-	'--import',
-	'./lib/macos-failure-capture.mjs'
-]);
+process.exitCode = await runTests(
+	testFiles('macos', options.tests, e2eDir),
+	e2eDir,
+	FAILURE_CAPTURE_ARGS
+);

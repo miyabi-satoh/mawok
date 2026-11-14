@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keepsDraftFocus } from './draft-focus';
+import { keepsDraftFocus } from '#lib/draft-focus.ts';
 
 function element(html: string) {
 	const host = document.createElement('div');

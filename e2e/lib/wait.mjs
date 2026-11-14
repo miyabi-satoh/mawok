@@ -1,3 +1,8 @@
+/** `ms` ミリ秒待つ。状態の変わるのを待つときは、固定の時間でなく waitFor で待つ */
+export function sleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * 値が変わるまで待つ (クリップボードや window handle のように非同期に変化する状態を、
  * 固定の sleep 一発で読まずにポーリングする)。タイムアウトしたら最後に読んだ値を含めて失敗させる。

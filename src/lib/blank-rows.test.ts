@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isBlankReplacement, isBlankSnippet } from './blank-rows';
+import { isBlankReplacement, isBlankSnippet } from '#lib/blank-rows.ts';
 
 describe('空の行', () => {
 	it('定型文は、名前と本文が空白だけなら空', () => {
