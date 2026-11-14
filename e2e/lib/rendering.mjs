@@ -331,21 +331,21 @@ export async function saveScreen(client, name) {
 }
 
 /**
- * `e2e/screenshots/` の撮った画面を消す (前の実行の画面と混ざらないよう、撮る前に呼ぶ)。
- * 落ちた時点の記録 (`*-failures/`) は、同じ回のほかのテストファイルで残したものなので消さない (入口が回す前に消す)
+ * `e2e/screenshots/` の直下の、描かれ方のテストが撮った画面を消す (前の実行の画面と混ざらないよう、撮る前に呼ぶ)。
+ * フォルダー (落ちた時点の記録の `*-failures/` など) は、同じ回のほかのテストファイルで残したものなので消さない (入口が回す前に消す)
  */
 export async function clearScreens() {
 	let entries;
 	try {
-		entries = await fs.readdir(SCREENSHOT_DIR);
+		entries = await fs.readdir(SCREENSHOT_DIR, { withFileTypes: true });
 	} catch (error) {
 		if (error.code === 'ENOENT') return;
 		throw error;
 	}
 	await Promise.all(
 		entries
-			.filter((name) => !name.endsWith('-failures'))
-			.map((name) => fs.rm(path.join(SCREENSHOT_DIR, name), { recursive: true, force: true }))
+			.filter((entry) => entry.isFile() && entry.name.endsWith('.png'))
+			.map((entry) => fs.rm(path.join(SCREENSHOT_DIR, entry.name), { force: true }))
 	);
 }
 

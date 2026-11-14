@@ -57,9 +57,9 @@ export const DRAFT_ACTIONS_IN_SETTINGS = [
 	'delete',
 	'snippets',
 	'settings',
+	'new',
 	'open',
 	'save',
-	'new',
 	'copy'
 ] as const satisfies readonly GeneratedDraftAction[];
 
