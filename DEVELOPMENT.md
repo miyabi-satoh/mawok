@@ -59,13 +59,13 @@ Linux（Ubuntu 24.04 以上の GNOME と Hyprland を支える）でも、`just 
 
 vitest は、落ちたテストを2回まで流し直します。流し直して通ったテストは、最後に `⚠ Flaky test` の行で出ます（GitHub Actions では警告の注記と実行の概要）。テストは通っても時々落ちているので、出たら原因を調べて直します。
 
-Windows では、これらに加えて E2E テスト（`just e2e`）があります。`tauri-driver` + WebdriverIO で、インストーラー抜き・LTO なしでビルドしたリリース版（配る版と最適化だけが違う）を操作し、ホットキー・フォーカスの戻り・貼り付け・IME・トレイ・設定・画面の描かれ方などを通しで見ます。何を見ているかは `e2e/tests/` の各ファイルにあります。全部を回すと、ビルドし直す分を入れて10分ほどかかります。`just e2e draft-clipboard` のように回すテストファイルを選べ、コードを変えずに続けて回すときは `just e2e --no-build` でビルドを飛ばせます。始めるときに画面が点いていてロックされていなければ、その後は画面を点けたままにするので、離席してもかまいません（始めるときに画面が消えているかロック中なら、テストを始めずに失敗します）。`tauri-driver` と `msedgedriver` が要るので `just ci` には含めず、機能がまとまったときに手で回します。macOS は WKWebView に外部ドライバーがなく `tauri-driver` を直接使えないため対象外です。前提と注意点は [e2e/README.md](e2e/README.md) にあります。
+Windows では、これらに加えて E2E テスト（`just e2e`）があります。`tauri-driver` + WebdriverIO で、インストーラー抜き・LTO なしでビルドしたリリース版（配る版と最適化だけが違う）を操作し、ホットキー・フォーカスの戻り・貼り付け・IME・トレイ・設定・ファイルを開く・保存の窓・画面の描かれ方などを通しで見ます。何を見ているかは `e2e/tests/` の各ファイルにあります。全部を回すと、ビルドし直す分を入れて10分ほどかかります。`just e2e draft-clipboard` のように回すテストファイルを選べ、コードを変えずに続けて回すときは `just e2e --no-build` でビルドを飛ばせます。始めるときに画面が点いていてロックされていなければ、その後は画面を点けたままにするので、離席してもかまいません（始めるときに画面が消えているかロック中なら、テストを始めずに失敗します）。`tauri-driver` と `msedgedriver` が要るので `just ci` には含めず、機能がまとまったときに手で回します。macOS は WKWebView に外部ドライバーがなく `tauri-driver` を直接使えないため対象外です。前提と注意点は [e2e/README.md](e2e/README.md) にあります。
 
 MSIX 版だけの作り（StartupTask でのログイン時の起動、タスクバーのアイコンの下地、設定とログの置き場所とアンインストールでの消え方）は、`just msix-check` で見ます。`just msix` で作り直した MSIX を常用版と入れ替えて入れ、パッケージの中から起動して、画面と同じコマンドを送り、結果をレジストリ・エクスプローラー・タスクバーの画素などで読みます。ビルドし直す分を入れて5分ほどです。元から MSIX 版が入っていれば、終わると試した版が常用版として残ります（入っていなければ外します）。詳しくは [e2e/README.md](e2e/README.md) の「MSIX 版の確認」にあります。
 
-Linux では、Linux だけの作り（portal と `mawok --toggle` のホットキー、トレイ、クリップボード、XDG autostart、描画プロセスが落ちたときの読み込み直し）を、`just linux-check-vm <VM>` が VM の中の Hyprland（`arch-hyprland`）と GNOME（`ubuntu-2604`・`ubuntu-2404`）で確かめます。VM は `e2e/vm/vm.sh <VM> create` で作り、今のビルド（`src-tauri/target/release/mawok`）を写して回すので、手元の画面と入力は使いません。手元の Hyprland で回すときは `just linux-check` です。CI では回しません。詳しくは [e2e/README.md](e2e/README.md) の「Linux の確認」にあります。
+Linux では、Linux だけの作り（portal と `mawok --toggle` のホットキー、トレイ、クリップボード、XDG autostart、描画プロセスが落ちたときの読み込み直し）と、ファイルを開く・保存の窓を、`just linux-check-vm <VM>` が VM の中の Hyprland（`arch-hyprland`）と GNOME（`ubuntu-2604`・`ubuntu-2404`）で確かめます。VM は `e2e/vm/vm.sh <VM> create` で作り、今のビルド（`src-tauri/target/release/mawok`）を写して回すので、手元の画面と入力は使いません。手元の Hyprland で回すときは `just linux-check` です。CI では回しません。詳しくは [e2e/README.md](e2e/README.md) の「Linux の確認」にあります。
 
-macOS では、OS ごとに作りが分かれているところの macOS の側（フォーカスの戻り、クリップボードへの書き込み、ほかのアプリのクリックで隠れること、初めての起動など）を、`just macos-check` がアクセシビリティで確かめます。ビルドはせず、入れてある `/Applications/Mawok.app` を動かします。キーボードとフォーカスを使い、設定・履歴・クリップボードは控えて戻します。回す端末にアクセシビリティの許可が要ります。詳しくは [e2e/README.md](e2e/README.md) の「macOS の確認」にあります。
+macOS では、OS ごとに作りが分かれているところの macOS の側（フォーカスの戻り、クリップボードへの書き込み、ほかのアプリのクリックで隠れること、初めての起動など）と、ファイルを開く・保存の窓を、`just macos-check` がアクセシビリティで確かめます。ビルドはせず、入れてある `/Applications/Mawok.app` を動かします。キーボードとフォーカスを使い、設定・履歴・クリップボードは控えて戻します。回す端末にアクセシビリティの許可が要ります。詳しくは [e2e/README.md](e2e/README.md) の「macOS の確認」にあります。
 
 ## ビルド
 
