@@ -134,12 +134,16 @@ describe('下書きウィンドウ', () => {
 		await vi.waitFor(() => expect(callsOf(invoked, 'preview_replacement_matches')).toHaveLength(1));
 	});
 
+	/** 入力欄の裏に重ねたハイライト表示。入力欄の直前に置いてある */
+	const previewLayer = (screen: Screen) =>
+		draftField(screen).element().previousElementSibling as HTMLElement;
+
 	it('裏のハイライト表示は、入力欄と同じ文字だけを持つ（余計な空白で位置がずれない）', async () => {
 		const screen = await render(Page);
-		const textarea = draftField(screen);
-		await textarea.fill('abc');
-		const overlay = textarea.element().previousElementSibling;
-		await vi.waitFor(() => expect(overlay?.textContent).toBe('abc'));
+		// 空のときは案内だけ
+		await vi.waitFor(() => expect(previewLayer(screen).textContent).toBe(placeholderOf(screen)));
+		await draftField(screen).fill('abc');
+		await vi.waitFor(() => expect(previewLayer(screen).textContent).toBe('abc'));
 	});
 
 	it('設定のフォントと大きさを入力欄に当てる', async () => {
