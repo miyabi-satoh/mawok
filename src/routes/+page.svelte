@@ -93,21 +93,22 @@
 	}
 	// 入力欄のスクロールバーの幅。スクロールバーは入力欄にだけ出るので、裏のハイライトの幅をその分だけ狭めて折り返しを揃える
 	let scrollbarWidth = $state(0);
-	function measureScrollbar() {
-		if (!textarea) return;
-		const style = getComputedStyle(textarea);
-		const borders = parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
-		scrollbarWidth = Math.max(0, textarea.offsetWidth - textarea.clientWidth - borders);
-	}
+	// 中身の幅（スクロールバーを除く）が変わるたびに測る。スクロールバーが出たり消えたりすると中身の幅が変わるので、本文や文字の大きさの変化も拾える。
+	// offsetWidth・clientWidth は整数に丸められ、小数の倍率（125% など）では枠線の幅（0.8px など）と合わずに折り返しがずれるので、
+	// ResizeObserver の小数の大きさで求める
 	$effect(() => {
-		// 本文・文字の大きさ・フォントが変わると、スクロールバーが出たり消えたりする
-		void [text, fontSize, fontFamily];
-		measureScrollbar();
-	});
-	$effect(() => {
-		if (!textarea) return;
-		const observer = new ResizeObserver(measureScrollbar);
-		observer.observe(textarea);
+		const element = textarea;
+		if (!element) return;
+		const observer = new ResizeObserver(([entry]) => {
+			const style = getComputedStyle(element);
+			const edges = ['borderLeftWidth', 'borderRightWidth', 'paddingLeft', 'paddingRight'] as const;
+			const edgeWidth = edges.reduce((sum, name) => sum + parseFloat(style[name]), 0);
+			scrollbarWidth = Math.max(
+				0,
+				entry.borderBoxSize[0].inlineSize - edgeWidth - entry.contentBoxSize[0].inlineSize
+			);
+		});
+		observer.observe(element);
 		return () => observer.disconnect();
 	});
 	// previewSegmentsList と同じ添字。ハイライトの範囲だけ埋まる（ホバー判定に使う）
@@ -866,7 +867,8 @@
 			文字色を透明にし、一致箇所だけ背景色を付ける。padding・border・フォント・折り返しを textarea と揃え、
 			スクロール位置も同期させることで、実際の文字の裏にちょうど重なる。ここ自体は入力を受けない（pointer-events-none）。
 			入力欄の案内もここに出す。placeholder は、WebKitGTK が入力欄より広い幅で折り返し、右端が見切れるため。
-			placeholder の属性は読み上げのために残し、文字だけを透明にする
+			placeholder の属性は読み上げのために残し、文字だけを透明にする。
+			pre-wrap なので、中の {#if}・{#each} の間に改行を置かない。改行が空白として先頭に描かれ、ハイライトが右へずれる
 		-->
 		<div
 			class="pointer-events-none absolute inset-y-0 left-0 z-0 overflow-hidden rounded-lg border border-transparent px-2.5 py-2 text-base md:text-sm [&_*]:[word-break:inherit]"
@@ -874,8 +876,8 @@
 			aria-hidden="true"
 		>
 			<div style="transform: translate({-scrollLeft}px, {-scrollTop}px);">
-				{#if text === '' && guidance}<span class="draft-guidance">{guidance}</span>{/if}
-				{#each previewSegmentsList as segment, index (index)}{#if segment.highlighted}<mark
+				{#if text === '' && guidance}<span class="draft-guidance">{guidance}</span
+					>{/if}{#each previewSegmentsList as segment, index (index)}{#if segment.highlighted}<mark
 							bind:this={markElements[index]}
 							class="rounded-[0.1em] bg-yellow-300/60 text-transparent dark:bg-yellow-400/40"
 							>{segment.text}</mark
