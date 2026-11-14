@@ -113,7 +113,7 @@
 
 ## macOS のサンドボックス
 
-Mac 版は Mac App Store で配るので、どのビルドもサンドボックスで動かす。権限は `src-tauri/Entitlements.plist` に置き、`tauri.conf.json` の `bundle.macOS.entitlements` で、Tauri が署名するときに付ける（`just bundle` の ad-hoc 署名と `just release-mac` の Developer ID の署名の両方）。`pnpm tauri dev` の開発版は署名しないので、サンドボックスの外で動く。
+Mac 版は Mac App Store で配るので、どのビルドもサンドボックスで動かす。権限は `src-tauri/Entitlements.plist` に置き、`tauri.conf.json` の `bundle.macOS.entitlements` で、Tauri が署名するときに付ける（`just bundle` の ad-hoc 署名・`just release-mac` の Developer ID の署名・`just release-mas` の Store の署名のどれも。Store の版に足す権限は「Mac 版の配る版」）。`pnpm tauri dev` の開発版は署名しないので、サンドボックスの外で動く。
 
 - `com.apple.security.app-sandbox`: サンドボックスで動かす。`~/Library` はコンテナ（`~/Library/Containers/com.amiiby.mawok/Data/Library/`）に回され、設定・ログ・バックアップ・ロックファイルはその中に置かれる。コンテナは署名の識別子で決まるので、プロファイル（「プロファイル」）を付けても同じコンテナの中で、フォルダー名だけが分かれる。
 - `com.apple.security.files.user-selected.read-write`: 窓で選んだ設定の保存先・symlink の先のフォルダーと、テキストウィンドウで開く・保存するファイルを読み書きする。
@@ -133,7 +133,8 @@ Mac 版は Mac App Store で配るので、どのビルドもサンドボック�
 Mac App Store に出す版を `just release-mas` で作って上げる。審査が通らないときに Store の外で配る版は `just release-mac` で作る。どちらも手元の Mac で流し（`scripts/release-mac.mjs`）、Intel と Apple Silicon の両方で動くユニバーサル版（`universal-apple-darwin`）にし、`.app` が両方の CPU 向けを含むことを確かめる。
 
 - `just release-mas`: Apple Distribution で署名し、Mac Installer Distribution で署名した pkg にして、`altool` で App Store Connect に上げる。上げた版は、処理が済むと TestFlight に出る。
-  - Store の版だけに、プロファイルを埋め込み（`Contents/embedded.provisionprofile`）、プロファイルと結ぶ権限（`src-tauri/Entitlements.appstore.plist`）を付ける。この権限をプロファイルの無い版に付けると起動できないので、ほかの版の権限（`Entitlements.plist`）とファイルを分けている。
+  - Store の版だけに、プロファイルを埋め込み（`Contents/embedded.provisionprofile`）、`Entitlements.plist` にプロファイルと結ぶ権限（`com.apple.application-identifier`・`com.apple.developer.team-identifier`）を足して署名する。この権限をプロファイルの無い版に付けると起動できないので、`Entitlements.plist` には書かず、script が流すたびに足す。Store が求めるアプリの分類（`bundle.category`）も Store の版だけに付ける。
+  - pkg は `src-tauri/target/release-mas/<版>/` に置く。`just release-mas --no-upload` は、上げずに pkg までを作る（作り方を変えたときに、上げ直さずに試す）。
   - App Store Connect は同じ版を2度受け付けないので、上げ直すときは版を上げる。
 - `just release-mac`: Developer ID で署名・公証し、公証の結果が綴じてあり Gatekeeper が通すことを確かめて、DMG を `src-tauri/target/release-mac/<版>/` に置く。
 - 要るもの:

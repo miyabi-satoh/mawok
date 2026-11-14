@@ -6,11 +6,13 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-// Developer ID の証明書の Team ID (developer.apple.com/account の Membership details)
+// 証明書とプロファイルの Team ID (developer.apple.com/account の Membership details)
 const TEAM_ID = 'V6W6CVP93A';
 const TARGET = 'universal-apple-darwin';
 const BUNDLE_DIR = `src-tauri/target/${TARGET}/release/bundle`;
+// Store の外の版と Store の版を、同じ版でも互いに消さないよう分けて置く
 const OUT_ROOT = 'src-tauri/target/release-mac';
+const APP_STORE_OUT_ROOT = 'src-tauri/target/release-mas';
 
 function run(command, args, options = {}) {
 	execFileSync(command, args, { stdio: 'inherit', ...options });
@@ -25,8 +27,12 @@ function fail(message) {
 	process.exit(1);
 }
 
+function tauriConfig() {
+	return JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+}
+
 function appVersion() {
-	return JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')).version;
+	return tauriConfig().version;
 }
 
 // 端末に出さずにパスワードを読む。貼り付けは1回の data でまとめて届く
@@ -66,7 +72,7 @@ function askSecret(label) {
 function identity(prefixes, policy) {
 	const identities = read('security', ['find-identity', '-v', ...(policy ? ['-p', policy] : [])]);
 	for (const prefix of prefixes) {
-		const match = new RegExp(`"(${prefix}: [^"]+)"`).exec(identities);
+		const match = new RegExp(`"(${prefix}: [^"]+\\(${TEAM_ID}\\))"`).exec(identities);
 		if (match) {
 			return match[1];
 		}
@@ -101,8 +107,8 @@ function checkUniversal(app) {
 	}
 }
 
-function freshOutDir(version) {
-	const outDir = join(OUT_ROOT, version);
+function freshOutDir(root, version) {
+	const outDir = join(root, version);
 	rmSync(outDir, { recursive: true, force: true });
 	mkdirSync(outDir, { recursive: true });
 	return outDir;
@@ -133,7 +139,7 @@ async function buildDeveloperId() {
 	run('xcrun', ['stapler', 'validate', app]);
 	run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app]);
 
-	const outDir = freshOutDir(version);
+	const outDir = freshOutDir(OUT_ROOT, version);
 	const dmg = `Mawok_${version}_universal.dmg`;
 	copyFileSync(join(BUNDLE_DIR, 'dmg', dmg), join(outDir, dmg));
 	console.log(`\n${join(outDir, dmg)} に置きました。`);
@@ -141,6 +147,7 @@ async function buildDeveloperId() {
 
 async function buildAppStore() {
 	const version = appVersion();
+	const bundleId = tauriConfig().identifier;
 	const signing = identity(['Apple Distribution'], 'codesigning');
 	// Mac Installer Distribution は、キーチェーンでは古い名前で出ることがある
 	const installer = identity(['Mac Installer Distribution', '3rd Party Mac Developer Installer']);
@@ -152,30 +159,46 @@ async function buildAppStore() {
 		);
 	}
 	// ビルドの後でなく前に聞く。端末が無いと分かるのが、数分のビルドの後にならないため
-	const password = await askSecret('アップロードのアプリ用パスワード');
+	// 上げずに pkg までを確かめるとき (同じ版は2度上げられないので、上げ直さずに作り方を試す)
+	const upload = !process.argv.includes('--no-upload');
+	const password = upload ? await askSecret('アップロードのアプリ用パスワード') : '';
 	addRustTargets();
-	const outDir = freshOutDir(version);
+	const outDir = freshOutDir(APP_STORE_OUT_ROOT, version);
 
-	// App Store の版だけの設定。プロファイルは公開しないリポジトリの外に置くので、パスはここで埋める
+	// プロファイルと結ぶ権限は、プロファイルを埋め込まない版 (just bundle・Developer ID) に付けると起動できないので、
+	// Store の版のときだけ、ほかの版と同じ権限に足して使う
+	const entitlements = resolve(outDir, 'Entitlements.plist');
+	copyFileSync('src-tauri/Entitlements.plist', entitlements);
+	// plutil は鍵の名前の「.」を階層の区切りと読むので、「:」で区切る PlistBuddy で足す
+	run('/usr/libexec/PlistBuddy', [
+		'-c',
+		`Add :com.apple.application-identifier string ${TEAM_ID}.${bundleId}`,
+		'-c',
+		`Add :com.apple.developer.team-identifier string ${TEAM_ID}`,
+		entitlements
+	]);
+
+	// Store の版だけの設定。分類は Store が求める Info.plist の項目になる (ほかの版では Linux のメニューの分類なども変わる)。
+	// プロファイルは公開しないリポジトリの外に置くので、パスはここで埋める
 	const config = join(outDir, 'tauri.appstore.conf.json');
 	writeFileSync(
 		config,
 		JSON.stringify({
 			bundle: {
+				category: 'Productivity',
 				macOS: {
 					signingIdentity: signing,
-					entitlements: resolve('src-tauri/Entitlements.appstore.plist'),
+					entitlements,
 					files: { 'embedded.provisionprofile': resolve(profile) }
 				}
 			}
 		})
 	);
 
-	// APPLE_ID などを渡すと Tauri が公証を始めるので、ビルドには渡さない
-	const env = { ...process.env, CI: 'true' };
-	for (const key of ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID', 'APPLE_SIGNING_IDENTITY']) {
-		delete env[key];
-	}
+	// APPLE_ID・APPLE_API_KEY などで Tauri が公証を始め、APPLE_CERTIFICATE などで別の証明書を使うので、APPLE_* はビルドに渡さない
+	const env = Object.fromEntries(
+		Object.entries(process.env).filter(([key]) => !key.startsWith('APPLE_'))
+	);
 	console.log(`Mawok ${version} を ${signing} で作ります`);
 	run('pnpm', ['tauri', 'build', '--target', TARGET, '--bundles', 'app', '--config', config], {
 		env
@@ -183,14 +206,22 @@ async function buildAppStore() {
 
 	const app = join(BUNDLE_DIR, 'macos', 'Mawok.app');
 	checkUniversal(app);
-	const entitlements = read('codesign', ['-d', '--entitlements', '-', '--xml', app]);
-	if (!entitlements.includes('com.apple.application-identifier')) {
+	const signed = read('codesign', ['-d', '--entitlements', '-', '--xml', app]);
+	if (!signed.includes('com.apple.application-identifier')) {
 		fail('App Store 向けの権限で署名されていません');
 	}
+	if (!existsSync(join(app, 'Contents/embedded.provisionprofile'))) {
+		fail('プロビジョニングプロファイルが埋め込まれていません');
+	}
+	run('codesign', ['--verify', '--strict', '--deep', app]);
 
 	const pkg = join(outDir, `Mawok_${version}_universal.pkg`);
 	run('xcrun', ['productbuild', '--sign', installer, '--component', app, '/Applications', pkg]);
 	run('pkgutil', ['--check-signature', pkg]);
+	if (!upload) {
+		console.log(`\n${pkg} に置きました (上げていません)。`);
+		return;
+	}
 
 	run(
 		'xcrun',
