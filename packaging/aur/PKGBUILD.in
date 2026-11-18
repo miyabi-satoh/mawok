@@ -11,6 +11,8 @@ license=('LicenseRef-Mawok-Terms')
 depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
 provides=('mawok')
 conflicts=('mawok')
+# 中身は作り済みの .deb で、デバッグ情報を持たない。makepkg の既定 (debug) のままだと、中身の無い mawok-bin-debug ができる
+options=('!debug')
 source=("https://github.com/miyabi-satoh/mawok/releases/download/v${pkgver}/Mawok_${pkgver}_amd64.deb")
 sha256sums=('@SHA256_DEB@')
 
