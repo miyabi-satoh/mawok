@@ -1070,10 +1070,8 @@ export function draftWindowLayer() {
 async function readAutostartOn() {
 	// ログイン項目は OS の上で1つで、プロファイルでは分かれない。利用者の状態は、常用の設定と常用の起動で読む
 	const config = await readSettings(REGULAR_DATA_DIR);
-	// 設定が無いと初めての起動になり、起動すると登録してしまうので、起動せずに効いていないとみなす
-	// (戻すときに登録を外す。利用者が次に起動したときは初めての起動になり、そこで登録される)
-	if (config === null) return false;
-	if (config.autostart === false) return false;
+	// macOS の既定はオフ (src-tauri/src/config.rs の DEFAULT_AUTOSTART) なので、オンにしていなければ効いていない
+	if (config?.autostart !== true) return false;
 	const mark = markLog(REGULAR_LOG_PATH);
 	await launchMawok({ regular: true });
 	await quitMawok();
@@ -1174,16 +1172,15 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	}
 	const state = JSON.parse(await fs.readFile(stateFile, 'utf8'));
 	await quitMawok();
-	// ログイン項目の登録を、利用者の状態に戻す。初めての起動を試すと登録され、ログイン時の起動の確認は登録を外すので、
-	// オフならオフの設定で一度起動して外し、オンなら置き場の無い初めての起動で登録する
-	// (設定がオンで登録が無いと、起動しても登録せず、設定をオフにそろえるため。src-tauri/src/lib.rs の autostart_at_launch)
+	// ログイン項目の登録を、利用者の状態に戻す。ログイン時の起動の確認は登録を書き換えるので、オフの設定で一度起動して外し、
+	// オンなら設定画面のスイッチで登録し直す。登録するのは、利用者がスイッチをオンにしたときだけのため
+	// (設定がオンで登録が無いと、起動しても登録せず、設定をオフにそろえる。src-tauri/src/lib.rs の autostart_at_launch)
 	await fs.mkdir(DATA_DIR, { recursive: true });
-	if (state.autostartOn) await removeConfigFiles(DATA_DIR);
-	else await writeSettings(DATA_DIR, { autostart: false });
+	await writeSettings(DATA_DIR, { language: 'ja', autostart: false });
 	// 起動できなくても (プロファイルを見ない版を指していたなど)、控えたファイルとクリップボードは戻す
-	await launchMawok().catch((error) =>
-		console.warn(`ログイン項目を戻せませんでした: ${error.message}`)
-	);
+	await launchMawok()
+		.then(() => state.autostartOn && turnOnAutostartInSettings())
+		.catch((error) => console.warn(`ログイン項目を戻せませんでした: ${error.message}`));
 	await quitMawok();
 	const held = JSON.parse(await fs.readFile(path.join(BACKUP_DIR, 'files.json'), 'utf8'));
 	await restoreConfigDir(DATA_DIR, held);
@@ -1200,13 +1197,27 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	return state.wasRunning;
 }
 
+/** 設定画面の「ログイン時に起動」をオンにして、ログイン項目に登録させる。表示言語は日本語で起動しておく */
+async function turnOnAutostartInSettings() {
+	const name = 'ログイン時に起動';
+	const autostartSwitch = async () =>
+		((await windowElements(SETTINGS_TITLE)) ?? []).find(
+			({ role, name: label }) => role === 'AXCheckBox' && label === name
+		)?.value ?? null;
+	await openSettings();
+	await waitFor(autostartSwitch, (value) => value === 0, { label: `「${name}」がオフで出る` });
+	await raiseWindow(SETTINGS_TITLE);
+	await pressWindowElement(SETTINGS_TITLE, 'AXCheckBox', name);
+	await waitFor(autostartSwitch, (value) => value === 1, { label: `「${name}」がオンになる` });
+}
+
 /** 控えた設定から、テストで使う設定を作る。ログイン時の起動だけは、利用者の値を引き継ぐ */
 async function testConfig(extra = {}) {
 	const held = await fs
 		.readFile(path.join(BACKUP_DIR, 'files.json'), 'utf8')
 		.then(JSON.parse, () => ({}));
 	const device = held[DEVICE_FILE] ? JSON.parse(held[DEVICE_FILE]) : {};
-	// ログイン項目の登録を書き換えないよう、利用者の値のまま起動する (既定はオン)
+	// ログイン項目の登録を書き換えないよう、利用者の値のまま起動する (macOS の既定はオフ)
 	return { autostart: device.autostart ?? undefined, ...extra };
 }
 
