@@ -4095,6 +4095,8 @@ mod tests {
             (true, false, true, Register),
             (false, true, true, Unregister),
             (true, true, true, Refresh),
+            // macOS の既定（オフ）で初めて起動した。利用者がオンにするまで登録しない
+            (false, false, true, Nothing),
             // タスクマネージャーやシステム設定で切った
             (true, false, false, TurnOffSetting),
             // 設定はオフなのに登録が残っていた
