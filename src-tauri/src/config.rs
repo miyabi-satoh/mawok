@@ -186,6 +186,9 @@ pub const MAX_DRAFT_FONT_SIZE: u16 = 32;
 /// 合わせて 0.1 秒に満たない（2026-11 に Mac で測った）ので、それより絞らない
 pub const DEFAULT_DRAFT_HISTORY_SIZE: u16 = 10_000;
 pub const MAX_DRAFT_HISTORY_SIZE: u16 = u16::MAX;
+/// ログイン時の起動の既定。ADR: macOS だけオフにし、利用者が設定でオンにしたときにだけログイン項目へ登録する。
+/// Mac App Store は、利用者の同意なしにログイン時に起動する設定を認めないため（App Review Guidelines 2.4.5(iii)。docs/platform.md「常駐」）
+pub const DEFAULT_AUTOSTART: bool = !cfg!(target_os = "macos");
 
 impl Default for Config {
     fn default() -> Self {
@@ -193,7 +196,7 @@ impl Default for Config {
             hotkey: DEFAULT_HOTKEY.to_string(),
             text_window_keys: DraftKeys::default(),
             yielded_draft_keys: Vec::new(),
-            autostart: true,
+            autostart: DEFAULT_AUTOSTART,
             language: Language::default(),
             theme: Theme::default(),
             text_window_always_on_top: true,

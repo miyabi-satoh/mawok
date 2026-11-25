@@ -9,6 +9,7 @@ import {
 	raiseWindow,
 	relaunchWithConfig,
 	restoreUserState,
+	waitDraftFocused,
 	windowElements
 } from '../lib/macos.mjs';
 import { waitFor } from '../lib/wait.mjs';
@@ -61,6 +62,17 @@ test.describe('macOS: ログイン時の起動', () => {
 		assert.ok(
 			!(await loginItemsAtLogin()).includes(APP_NAME),
 			'オフに戻すと、ログイン項目から消える'
+		);
+	});
+
+	// Mac App Store は、利用者の同意なしにログイン時に起動する設定を認めない (App Review Guidelines 2.4.5(iii))
+	test('初めての起動では、ログイン項目に登録しない', async () => {
+		await relaunchWithConfig(null);
+		// 登録をそろえる処理は、初めての起動で下書きウィンドウを出すより前に済む (lib.rs の setup)
+		await waitDraftFocused('初めての起動で、下書きウィンドウが出る');
+		assert.ok(
+			!(await loginItemsAtLogin()).includes(APP_NAME),
+			'初めての起動の後も、ログイン項目に無い'
 		);
 	});
 });
