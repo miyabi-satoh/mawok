@@ -1180,7 +1180,11 @@ export async function restoreUserState({ relaunch = true } = {}) {
 	// 起動できなくても (プロファイルを見ない版を指していたなど)、控えたファイルとクリップボードは戻す
 	await launchMawok()
 		.then(() => state.autostartOn && turnOnAutostartInSettings())
-		.catch((error) => console.warn(`ログイン項目を戻せませんでした: ${error.message}`));
+		.catch((error) =>
+			console.warn(
+				`ログイン項目を戻せませんでした: ${error.message}${state.autostartOn ? '\n設定の「ログイン時に起動」をオンにし直してください' : ''}`
+			)
+		);
 	await quitMawok();
 	const held = JSON.parse(await fs.readFile(path.join(BACKUP_DIR, 'files.json'), 'utf8'));
 	await restoreConfigDir(DATA_DIR, held);
@@ -1217,7 +1221,7 @@ async function testConfig(extra = {}) {
 		.readFile(path.join(BACKUP_DIR, 'files.json'), 'utf8')
 		.then(JSON.parse, () => ({}));
 	const device = held[DEVICE_FILE] ? JSON.parse(held[DEVICE_FILE]) : {};
-	// ログイン項目の登録を書き換えないよう、利用者の値のまま起動する (macOS の既定はオフ)
+	// 控えた値のまま起動する。macOS の既定はオフで、オフで起動すると登録を外すが、終わったら restoreUserState が戻す
 	return { autostart: device.autostart ?? undefined, ...extra };
 }
 
