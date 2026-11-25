@@ -664,7 +664,7 @@ mod tests {
     fn every_stored_item_other_than_autostart_goes_to_the_files() {
         let mut config = Config {
             hotkey: "CommandOrControl+Shift+KeyM".to_string(),
-            autostart: false,
+            autostart: !DEFAULT_AUTOSTART,
             language: Language::En,
             theme: Theme::Dark,
             text_window_always_on_top: false,
@@ -701,6 +701,12 @@ mod tests {
         }
     }
 
+    // Mac App Store は、利用者の同意なしにログイン時に起動する設定を認めない（App Review Guidelines 2.4.5(iii)）
+    #[test]
+    fn launches_at_login_by_default_except_on_macos() {
+        assert_eq!(Config::default().autostart, !cfg!(target_os = "macos"));
+    }
+
     #[test]
     fn stores_nothing_for_the_defaults() {
         assert!(stored_entries(&Config::default()).is_empty());
@@ -710,7 +716,7 @@ mod tests {
     fn round_trips_every_setting_and_stores_only_the_changed_ones() {
         let config = Config {
             hotkey: "CommandOrControl+Shift+KeyM".to_string(),
-            autostart: false,
+            autostart: !DEFAULT_AUTOSTART,
             language: Language::En,
             theme: Theme::Dark,
             text_window_display: TextWindowDisplay::Pointer,
