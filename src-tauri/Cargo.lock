@@ -2235,7 +2235,7 @@ dependencies = [
 
 [[package]]
 name = "mawok"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "arboard",
  "ashpd",
