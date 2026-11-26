@@ -13,7 +13,7 @@ If your desktop asks to add a shortcut the first time Mawok starts, add it. On d
 3. Press {macos:`Cmd+Enter`}{windows:`Ctrl+Enter`}{linux:`Ctrl+Enter`}. The text is copied, the text window closes, and you return to the app you came from. Paste it there.
 
 You can also insert snippets and bring back text you copied earlier.
-Mawok stays in the {macos:menu bar}{windows:system tray}{linux:tray} and starts automatically when you log in (you can turn this off under “General” in Settings).
+Mawok stays in the {macos:menu bar}{windows:system tray}{linux:tray}. Use “Launch at login” under “General” in Settings to choose whether it starts when you log in.
 
 ::: linux
 ## Assign the hotkey

@@ -19,7 +19,7 @@ pub struct Device {
     pub id: String,
     /// 利用者が選んだ設定の置き場。None なら OS 標準のアプリ設定フォルダー
     pub settings_dir: Option<PathBuf>,
-    /// ログイン時に起動するか。None なら既定（起動する）
+    /// ログイン時に起動するか。None なら既定（`config::DEFAULT_AUTOSTART`。Windows と Linux はオン、macOS はオフ）
     pub autostart: Option<bool>,
     /// 選んだ置き場を、macOS のサンドボックスで起動し直しても読み書きできるようにするブックマーク（folder_access.rs）。
     /// 16 進の文字列。macOS 以外は作らない
